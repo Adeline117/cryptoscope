@@ -1,0 +1,1106 @@
+# On-chain data platform reports source registry
+# Comprehensive coverage of analytics platforms, institutional research, and data aggregators
+# Organized by tier: critical -> professional -> specialized -> aggregators -> institutional -> chinese
+
+# =============================================================================
+# TIER 1 - Critical On-Chain Analytics (7 sources)
+# Core platforms producing the most influential on-chain analysis
+# =============================================================================
+
+- id: glassnode_insights
+  name: "Glassnode Insights"
+  type: rss
+  url: "https://insights.glassnode.com/"
+  rss_url: "https://insights.glassnode.com/rss/"
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "The Week On-chain"
+    - "Market Pulse"
+    - "Bitcoin Supply Dynamics"
+    - "Workbench Tutorials"
+  notes: "Gold standard for Bitcoin on-chain analysis. Weekly 'The Week On-chain' is the most cited on-chain report in the industry. Partial free access, full requires Advanced/Professional tier."
+
+- id: nansen_research
+  name: "Nansen Research"
+  type: scrape
+  url: "https://www.nansen.ai/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Smart Money Analysis"
+    - "Token God Mode Reports"
+    - "NFT Analytics"
+    - "DeFi Dashboards"
+    - "Chain Analysis"
+  notes: "Leading smart money tracker. Wallet labeling and entity clustering provide unique insights into whale behavior and institutional flows. Some reports gated behind Nansen subscription."
+
+- id: chainalysis_reports
+  name: "Chainalysis Reports"
+  type: rss
+  url: "https://www.chainalysis.com/blog/"
+  rss_url: "https://www.chainalysis.com/blog/feed/"
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Crypto Crime Report"
+    - "Geography of Cryptocurrency"
+    - "Market Intel"
+    - "DeFi Risk Analysis"
+    - "Compliance Research"
+  notes: "Definitive source for illicit activity and compliance intelligence. Annual Crypto Crime Report is the most cited regulatory document. Blog posts are free; deep data requires Chainalysis Reactor access."
+
+- id: dune_community
+  name: "Dune Community"
+  type: api
+  url: "https://dune.com/browse/dashboards"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: true
+  api_key_required: true
+  language: en
+  report_types:
+    - "Community Dashboards"
+    - "Protocol Analytics"
+    - "DEX Volumes"
+    - "Stablecoin Flows"
+    - "L2 Metrics"
+    - "MEV Analysis"
+  notes: "Largest open-source on-chain analytics community. API key needed for programmatic access (DUNE_API_KEY). Free tier allows 2500 datapoints/month. Track trending dashboards for emerging narratives."
+
+- id: arkham_intelligence
+  name: "Arkham Intelligence"
+  type: scrape
+  url: "https://platform.arkhamintelligence.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Entity Identification"
+    - "Whale Tracking"
+    - "Exchange Flow Analysis"
+    - "Government Holdings"
+    - "Fund Portfolio Tracking"
+  notes: "Most comprehensive entity-labeled blockchain intelligence platform. Tracks government wallets, fund portfolios, and exchange flows. Free tier available with limited queries. Critical for real-time whale monitoring."
+
+- id: elliptic_research
+  name: "Elliptic Research"
+  type: scrape
+  url: "https://www.elliptic.co/blog"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Typologies Reports"
+    - "Sanctions Compliance"
+    - "Cross-Chain Analysis"
+    - "DeFi Risk Assessment"
+    - "State of Crypto Crime"
+  notes: "Enterprise blockchain analytics focused on compliance and risk. Pioneered cross-chain tracing technology. Blog content is free and provides early signals on regulatory enforcement trends."
+
+- id: trm_labs_insights
+  name: "TRM Labs Insights"
+  type: scrape
+  url: "https://www.trmlabs.com/resources"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier1
+  priority: critical
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Illicit Finance Typologies"
+    - "Sanctions Analysis"
+    - "On-chain Intelligence Reports"
+    - "Blockchain Threat Briefings"
+  notes: "Used by US law enforcement and major financial institutions. Reports provide early signals on sanctions actions and illicit activity patterns. Free resource library with deep compliance intelligence."
+
+# =============================================================================
+# TIER 2 - Professional Analytics (10 sources)
+# High-quality platforms with strong data coverage
+# =============================================================================
+
+- id: token_terminal
+  name: "Token Terminal"
+  type: scrape
+  url: "https://tokenterminal.com/terminal/metrics"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Protocol Revenue Metrics"
+    - "Fundamental Analysis"
+    - "Weekly Data Tables"
+    - "Token Earnings Reports"
+    - "Sector Comparisons"
+  notes: "Best source for protocol-level financial metrics (revenue, earnings, P/S ratios). Applies traditional finance valuation frameworks to crypto. Essential for fundamentals-based analysis."
+
+- id: defillama_reports
+  name: "DeFiLlama Reports"
+  type: api
+  url: "https://defillama.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "TVL Tracking"
+    - "Protocol Flows"
+    - "Yield Analytics"
+    - "Bridge Volume"
+    - "Chain Comparison"
+    - "Stablecoin Dashboard"
+  notes: "Report-specific entry complementing existing DeFiLlama API source. Focuses on aggregate protocol reports, chain-level TVL trends, and yield data. Fully open-source and free API at https://api.llama.fi."
+
+- id: cryptoquant_research
+  name: "CryptoQuant Research"
+  type: scrape
+  url: "https://cryptoquant.com/community/insights"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Exchange Flow Analysis"
+    - "Miner Metrics"
+    - "Quicktake Alerts"
+    - "Market Cycle Indicators"
+    - "Stablecoin Supply Ratio"
+  notes: "Premier exchange flow and miner analytics platform. Quicktake community insights often front-run major market moves. Exchange reserve and miner outflow data are industry-leading."
+
+- id: santiment_insights
+  name: "Santiment Insights"
+  type: rss
+  url: "https://insights.santiment.net/"
+  rss_url: "https://insights.santiment.net/rss"
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Behavioral Analytics"
+    - "Social Sentiment Analysis"
+    - "On-chain Signal Reports"
+    - "Network Activity"
+    - "Whale Transaction Alerts"
+  notes: "Unique combination of on-chain data with social/behavioral analytics. Social volume and sentiment indicators are proprietary. Community insights available via RSS; full data requires SanAPI subscription."
+
+- id: intotheblock
+  name: "IntoTheBlock"
+  type: scrape
+  url: "https://app.intotheblock.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "In/Out of the Money Analysis"
+    - "Concentration Metrics"
+    - "Network Signals"
+    - "DeFi Risk Pulse"
+    - "Institutional Pulse"
+  notes: "Accessible on-chain analytics with strong retail/institutional overlap metrics. In/Out of the Money analysis provides unique support/resistance levels based on holder cost basis."
+
+- id: coin_metrics_sotn
+  name: "Coin Metrics State of the Network"
+  type: rss
+  url: "https://coinmetrics.substack.com/"
+  rss_url: "https://coinmetrics.substack.com/feed"
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "State of the Network Weekly"
+    - "Network Data Insights"
+    - "Market Data Feed"
+    - "Stablecoin Reports"
+    - "Mining Data"
+  notes: "Institutional-grade network data provider. Weekly 'State of the Network' newsletter is a must-read for data-driven market analysis. Free Substack with deep quantitative rigor."
+
+- id: messari_research
+  name: "Messari Research"
+  type: scrape
+  url: "https://messari.io/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Quarterly Sector Reports"
+    - "Protocol Research"
+    - "Governance Analysis"
+    - "Token Economics"
+    - "Annual Theses"
+  notes: "Premium research with deep protocol-level analysis. Annual theses by Ryan Selkis set the industry narrative. Free tier includes select reports; full library requires Messari Enterprise."
+
+- id: l2beat
+  name: "L2Beat"
+  type: scrape
+  url: "https://l2beat.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Layer 2 TVL Rankings"
+    - "Risk Assessment Framework"
+    - "Bridge Analysis"
+    - "DA Layer Comparison"
+    - "Scaling Technology Review"
+  notes: "Definitive source for Layer 2 ecosystem health and risk assessment. Open-source and fully free. Risk framework is the gold standard for evaluating L2 security assumptions."
+
+- id: growthepie
+  name: "GrowThePie"
+  type: scrape
+  url: "https://www.growthepie.xyz/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "L2 Economics"
+    - "Chain Profit/Loss Analysis"
+    - "User Activity Metrics"
+    - "Fee Revenue Breakdown"
+    - "Cross-Chain Comparison"
+  notes: "Emerging L2 analytics platform focused on chain economics and profitability. Provides unique profit/loss analysis for L2s including blob costs post-EIP-4844. Fully open-source."
+
+- id: artemis_xyz
+  name: "Artemis.xyz"
+  type: scrape
+  url: "https://app.artemis.xyz/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier2
+  priority: high
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Developer Activity"
+    - "Chain Fundamentals"
+    - "Stablecoin Analytics"
+    - "Sector Dashboards"
+    - "Application Revenue"
+  notes: "Comprehensive chain fundamental data with strong developer activity metrics. Revenue and usage dashboards complement Token Terminal's financial focus. Growing institutional adoption."
+
+# =============================================================================
+# TIER 3 - Specialized Analytics (8 sources)
+# Niche platforms with deep expertise in specific domains
+# =============================================================================
+
+- id: ultrasound_money
+  name: "Ultrasound.money"
+  type: scrape
+  url: "https://ultrasound.money/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "ETH Supply Tracking"
+    - "Burn Rate Analytics"
+    - "Issuance Monitoring"
+    - "Ultra Sound Barrier"
+  notes: "Essential for tracking ETH supply dynamics post-Merge. Real-time burn rate and net issuance data. Critical during high-activity periods to gauge deflationary pressure."
+
+- id: eigenphi_mev
+  name: "EigenPhi MEV"
+  type: scrape
+  url: "https://eigenphi.io/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "MEV Transaction Analysis"
+    - "Sandwich Attack Tracking"
+    - "Arbitrage Monitoring"
+    - "Liquidation Analytics"
+    - "DeFi Attack Vectors"
+  notes: "Most granular MEV analytics platform. Tracks sandwich attacks, arbitrage, and liquidations in real-time. Essential for understanding DeFi market microstructure and hidden costs."
+
+- id: flashbots_research
+  name: "Flashbots Research"
+  type: rss
+  url: "https://writings.flashbots.net/"
+  rss_url: "https://writings.flashbots.net/rss.xml"
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "MEV Research Papers"
+    - "SUAVE Architecture"
+    - "PBS Analysis"
+    - "Order Flow Auctions"
+    - "Block Building Economics"
+  notes: "Frontier MEV research from the team building SUAVE and MEV-Boost. Technical papers shape the future of transaction ordering. Essential for understanding block builder economics and PBS."
+
+- id: rated_network
+  name: "Rated.Network"
+  type: scrape
+  url: "https://www.rated.network/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Validator Performance"
+    - "Node Operator Rankings"
+    - "Staking Yields"
+    - "Network Participation"
+    - "Slashing Events"
+  notes: "Gold standard for Ethereum validator performance analytics. Tracks operator effectiveness, slashing events, and yield distribution. Critical for staking infrastructure monitoring."
+
+- id: debank
+  name: "DeBank"
+  type: scrape
+  url: "https://debank.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Whale Portfolio Tracking"
+    - "DeFi Position Analytics"
+    - "Cross-Chain Balances"
+    - "Social Rankings"
+    - "Token Approval Management"
+  notes: "Best multi-chain portfolio tracker with social layer. Whale watching via DeBank Stream reveals positioning before market moves. Cross-chain support is industry-leading."
+
+- id: coinglass
+  name: "Coinglass"
+  type: scrape
+  url: "https://www.coinglass.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: both
+  report_types:
+    - "Funding Rates"
+    - "Open Interest"
+    - "Liquidation Data"
+    - "Long/Short Ratios"
+    - "Options Analytics"
+    - "Exchange Reserves"
+  notes: "Definitive derivatives data aggregator. Funding rates and liquidation heatmaps are essential trading tools. Tracks BTC ETF flows, exchange reserves, and options data."
+
+- id: kaiko_research
+  name: "Kaiko Research"
+  type: scrape
+  url: "https://www.kaiko.com/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Market Structure Analysis"
+    - "Liquidity Reports"
+    - "Exchange Analytics"
+    - "Derivatives Data"
+    - "Weekly Market Recap"
+  notes: "Institutional-grade market data provider. Unique focus on market microstructure, liquidity depth, and exchange-level analysis. Weekly research newsletter is free; tick-level data requires subscription."
+
+- id: the_block_data
+  name: "The Block Data Dashboard"
+  type: scrape
+  url: "https://www.theblock.co/data"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier3
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "Network Metrics Dashboard"
+    - "DeFi Dashboard"
+    - "NFT Metrics"
+    - "Stablecoin Charts"
+    - "Funding and M&A Data"
+  notes: "Comprehensive data dashboard covering on-chain, DeFi, and market metrics. Charts frequently cited by institutional analysts. Pro subscription required for full dashboard access."
+
+# =============================================================================
+# TIER 4 - Aggregators & Multi-Chain Platforms (8 sources)
+# Data aggregators providing broad market coverage
+# =============================================================================
+
+- id: coingecko_reports
+  name: "CoinGecko Reports"
+  type: scrape
+  url: "https://www.coingecko.com/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: quarterly
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Quarterly Industry Report"
+    - "Annual Crypto Report"
+    - "Exchange Trust Score"
+    - "Yield Farming Rankings"
+    - "How to DeFi Book Series"
+  notes: "Most comprehensive free crypto data aggregator. Quarterly reports provide excellent macro overviews. Exchange trust score methodology is a useful transparency metric."
+
+- id: coinmarketcap_research
+  name: "CoinMarketCap Research"
+  type: scrape
+  url: "https://coinmarketcap.com/academy/categories/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Market Analysis"
+    - "Sector Reports"
+    - "Exchange Rankings"
+    - "Token Listings Analysis"
+    - "Crypto Playbook"
+  notes: "Largest crypto market data site by traffic. Research arm produces regular market reports. Owned by Binance, which should be considered when evaluating editorial independence."
+
+- id: dappradar_reports
+  name: "DappRadar Reports"
+  type: rss
+  url: "https://dappradar.com/blog/"
+  rss_url: "https://dappradar.com/blog/feed"
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Dapp Industry Report"
+    - "DeFi Protocol Rankings"
+    - "Gaming Metrics"
+    - "NFT Market Overview"
+    - "Chain Activity Rankings"
+  notes: "Leading dApp tracking platform. Quarterly industry reports are widely cited. Strong coverage of gaming, NFTs, and cross-chain dApp activity."
+
+- id: cer_live
+  name: "CER.live"
+  type: scrape
+  url: "https://cer.live/"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: low
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Security Ratings"
+    - "Exchange Security Scores"
+    - "Smart Contract Audits"
+    - "Cybersecurity Rankings"
+  notes: "Crypto security rating platform. Provides security scores for exchanges and protocols. Useful for due diligence and risk assessment."
+
+- id: flipside_crypto
+  name: "Flipside Crypto"
+  type: scrape
+  url: "https://flipsidecrypto.xyz/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Community Dashboards"
+    - "Protocol Analytics"
+    - "Bounty Research"
+    - "On-chain SQL Queries"
+    - "Ecosystem Reports"
+  notes: "Community-driven on-chain analytics with bounty-based research model. Free SQL access to blockchain data. Strong alternative to Dune for certain chain coverage."
+
+- id: footprint_analytics
+  name: "Footprint Analytics"
+  type: scrape
+  url: "https://www.footprint.network/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: low
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: both
+  report_types:
+    - "GameFi Dashboard"
+    - "Chain Overview"
+    - "DeFi Analytics"
+    - "NFT Market Data"
+    - "Monthly Reports"
+  notes: "Multi-chain analytics with strong GameFi and cross-chain coverage. No-code dashboard builder lowers barrier to entry. Growing data coverage across EVM and non-EVM chains."
+
+- id: allium
+  name: "Allium"
+  type: scrape
+  url: "https://www.allium.so/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: true
+  language: en
+  report_types:
+    - "Blockchain Data Pipelines"
+    - "Real-time Analytics"
+    - "Custom Dashboards"
+    - "Cross-Chain Data"
+  notes: "Enterprise blockchain data infrastructure. Provides real-time decoded data across 60+ chains. Growing institutional adoption as Dune alternative for production workloads."
+
+- id: parsec_finance
+  name: "Parsec Finance"
+  type: scrape
+  url: "https://parsec.fi/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier4
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: en
+  report_types:
+    - "DeFi Analytics"
+    - "Token Flow Analysis"
+    - "Wallet Profiling"
+    - "Protocol Dashboards"
+    - "MEV Tracking"
+  notes: "Professional DeFi analytics platform favored by traders and funds. Real-time monitoring of DeFi positions, flows, and MEV. Pro features gated behind subscription."
+
+# =============================================================================
+# TIER 5 - Institutional Research (12 sources)
+# Research from asset managers, exchanges, and investment firms
+# =============================================================================
+
+- id: grayscale_research
+  name: "Grayscale Research"
+  type: scrape
+  url: "https://www.grayscale.com/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Market Commentary"
+    - "Sector Reports"
+    - "Token Screener Updates"
+    - "Top 20 Assets"
+    - "Investment Theses"
+  notes: "Largest digital asset manager. Research signals institutional sentiment and potential product launches. Top 20 token list updates move markets. GBTC/ETHE flow data is critical."
+
+- id: coinbase_institutional
+  name: "Coinbase Institutional"
+  type: scrape
+  url: "https://www.coinbase.com/institutional/research-insights"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Weekly Market Commentary"
+    - "Monthly Outlook"
+    - "State of Crypto"
+    - "Protocol Deep Dives"
+    - "Regulatory Analysis"
+  notes: "Research from the largest US exchange. David Duong's weekly reports are widely read by TradFi crossover investors. Free access to institutional-grade analysis."
+
+- id: binance_research
+  name: "Binance Research"
+  type: scrape
+  url: "https://www.binance.com/en/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: both
+  report_types:
+    - "Monthly Market Insights"
+    - "Industry Reports"
+    - "Protocol Deep Dives"
+    - "Half-Year Reports"
+    - "Sector Analysis"
+  notes: "Research from the largest global exchange. Reports often signal upcoming Binance listings or product focus. Available in English and Chinese. Consider exchange bias in editorial."
+
+- id: galaxy_digital_research
+  name: "Galaxy Digital Research"
+  type: scrape
+  url: "https://www.galaxy.com/research/"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Weekly Market Update"
+    - "Mining Reports"
+    - "Infrastructure Analysis"
+    - "Protocol Research"
+    - "Bitcoin Mining Hash Rate"
+  notes: "Mike Novogratz's firm produces high-quality institutional research. Bitcoin mining reports are industry-leading. Alex Thorn's analysis is among the most cited in institutional circles."
+
+- id: bitwise_research
+  name: "Bitwise Research"
+  type: scrape
+  url: "https://bitwiseinvestments.com/crypto-market-insights"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Weekly CIO Memo"
+    - "Monthly Market Review"
+    - "ETF Flow Analysis"
+    - "Investment Frameworks"
+    - "Index Rebalance Reports"
+  notes: "Leading crypto index fund manager. CIO Matt Hougan's memos are influential with financial advisors. ETF flow analysis is critical post-spot ETF approval."
+
+- id: vaneck_digital_assets
+  name: "VanEck Digital Assets"
+  type: scrape
+  url: "https://www.vaneck.com/us/en/blogs/digital-assets/"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Digital Assets Monthly"
+    - "Token Valuations"
+    - "Smart Contract Platform Analysis"
+    - "Layer 1 Comparisons"
+    - "Market Outlook"
+  notes: "Major TradFi asset manager with deep crypto commitment. Matthew Sigel's analysis bridges traditional finance and crypto. Token valuation frameworks are unique in the industry."
+
+- id: 21shares_research
+  name: "21Shares/21co Research"
+  type: scrape
+  url: "https://21shares.com/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Weekly State of Crypto"
+    - "Monthly Market Report"
+    - "Protocol Analysis"
+    - "Staking Economics"
+    - "DeFi Research"
+  notes: "Largest crypto ETP issuer in Europe. Partnership with ARK Invest adds credibility. Research covers both market analysis and protocol-level deep dives. Free access."
+
+- id: coinshares_research
+  name: "CoinShares Research"
+  type: scrape
+  url: "https://coinshares.com/research/"
+  rss_url: null
+  collector: platform_reports
+  frequency: weekly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: critical
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Weekly Digital Asset Fund Flows"
+    - "Monthly Mining Report"
+    - "Quarterly Trends"
+    - "Bitcoin Electricity Consumption"
+    - "Investor Sentiment"
+  notes: "CRITICAL SOURCE - Weekly fund flows report is THE definitive tracker of institutional crypto investment product flows. Most cited data in institutional media. Mining cost analysis is industry standard."
+
+- id: hashdex_research
+  name: "Hashdex Research"
+  type: scrape
+  url: "https://www.hashdex.com/en/research"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Monthly Market Review"
+    - "Crypto Index Reports"
+    - "Regulatory Outlook"
+    - "Investment Strategy"
+  notes: "Brazilian crypto asset manager with growing global presence. Manages Nasdaq Crypto Index products. Research provides Latin American market perspective often missing from US-centric coverage."
+
+- id: fidelity_digital_assets
+  name: "Fidelity Digital Assets"
+  type: scrape
+  url: "https://www.fidelitydigitalassets.com/research-and-insights"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Bitcoin Investment Thesis"
+    - "Signals Reports"
+    - "Market Outlook"
+    - "Network Fundamentals"
+    - "Institutional Survey"
+  notes: "Research from $4.5T+ AUM traditional asset manager. Institutional survey data is unique and widely cited. Conservative analytical framework appeals to traditional allocators entering crypto."
+
+- id: franklin_templeton_digital
+  name: "Franklin Templeton Digital Assets"
+  type: scrape
+  url: "https://www.franklintempleton.com/articles/digital-assets"
+  rss_url: null
+  collector: platform_reports
+  frequency: monthly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Digital Assets Newsletter"
+    - "Blockchain Technology Analysis"
+    - "Tokenization Research"
+    - "Market Perspectives"
+  notes: "Major TradFi firm pioneering on-chain fund tokenization. Research reflects conservative institutional perspective. Tokenization thesis papers are forward-looking and influential."
+
+- id: electric_capital_developer_report
+  name: "Electric Capital Developer Report"
+  type: scrape
+  url: "https://www.developerreport.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: quarterly
+  category: onchain_platform_report
+  subcategory: tier5
+  priority: high
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: en
+  report_types:
+    - "Annual Developer Report"
+    - "Ecosystem Developer Counts"
+    - "Chain-Level Activity"
+    - "Developer Growth Trends"
+    - "Open Source Contribution Analysis"
+  notes: "THE definitive crypto developer ecosystem report. Tracks 900k+ code repositories. Annual report is the most cited source for developer activity metrics. Signals long-term ecosystem health."
+
+# =============================================================================
+# TIER 6 - Chinese Language Sources (4 sources)
+# Chinese-language platforms and analytics
+# =============================================================================
+
+- id: oklink
+  name: "OKLink 欧科云链"
+  type: scrape
+  url: "https://www.oklink.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier6
+  priority: medium
+  enabled: true
+  free_content: partial
+  api_key_required: false
+  language: zh
+  report_types:
+    - "链上数据分析"
+    - "巨鲸追踪"
+    - "安全事件报告"
+    - "行业研报"
+    - "多链浏览器数据"
+  notes: "Largest Chinese on-chain data platform backed by OKX. Multi-chain explorer with whale tracking and security alerts. Reports in Chinese provide unique perspective on Asian market activity."
+
+- id: rootdata
+  name: "RootData"
+  type: scrape
+  url: "https://www.rootdata.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier6
+  priority: medium
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: zh
+  report_types:
+    - "项目融资追踪"
+    - "Web3项目数据库"
+    - "投资机构分析"
+    - "热点项目排行"
+    - "空投信息追踪"
+  notes: "Leading Chinese Web3 project database and funding tracker. Comprehensive coverage of Asian crypto funding rounds. Essential for tracking projects popular in Chinese-speaking markets."
+
+- id: defieye
+  name: "DeFiEye"
+  type: scrape
+  url: "https://www.defieye.io/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier6
+  priority: low
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: zh
+  report_types:
+    - "跨链桥监控"
+    - "DeFi收益聚合"
+    - "链上数据看板"
+    - "稳定币追踪"
+  notes: "Chinese DeFi analytics platform focused on cross-chain bridge monitoring and yield aggregation. Provides Chinese-language interface for DeFi data that is otherwise English-only."
+
+- id: kingdata
+  name: "KingData"
+  type: scrape
+  url: "https://www.kingdata.com/"
+  rss_url: null
+  collector: platform_reports
+  frequency: daily
+  category: onchain_platform_report
+  subcategory: tier6
+  priority: low
+  enabled: true
+  free_content: true
+  api_key_required: false
+  language: zh
+  report_types:
+    - "链上大户监控"
+    - "交易所数据"
+    - "DeFi项目排行"
+    - "热点预警"
+    - "指标看板"
+  notes: "Chinese crypto data aggregator with whale monitoring and exchange analytics. Popular among Chinese retail traders for real-time alerts and data dashboards."

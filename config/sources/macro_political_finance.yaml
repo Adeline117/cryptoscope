@@ -1,0 +1,1368 @@
+# =============================================================================
+# Macro, Political & Financial Source Registry
+# Comprehensive feeds for political, financial, and macro/micro economic signals
+# that influence crypto markets.
+# =============================================================================
+
+
+# =============================================================================
+# SECTION 1: Fed & Central Banks
+# =============================================================================
+
+- id: fed_fomc_statements
+  name: "FOMC Statements & Press Conferences"
+  type: scrape
+  url: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+  rss_url: "https://www.federalreserve.gov/feeds/press_monetary.xml"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: fomc_statements
+  priority: critical
+  enabled: true
+  language: en
+  notes: "FOMC rate decisions are the single most important macro catalyst for crypto. Risk-on/off regime shifts start here."
+
+- id: fed_fomc_minutes
+  name: "FOMC Meeting Minutes"
+  type: scrape
+  url: "https://www.federalreserve.gov/monetarypolicy/fomcminutes20240131.htm"
+  rss_url: "https://www.federalreserve.gov/feeds/press_monetary.xml"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: fomc_minutes
+  priority: critical
+  enabled: true
+  language: en
+  notes: "Minutes reveal internal hawkish/dovish splits. Surprise language moves BTC 3-5% within hours."
+
+- id: fed_dot_plot
+  name: "FOMC Summary of Economic Projections (Dot Plot)"
+  type: scrape
+  url: "https://www.federalreserve.gov/monetarypolicy/fomcprojtabl20240320.htm"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: dot_plot
+  priority: critical
+  enabled: true
+  language: en
+  notes: "Dot plot sets terminal rate expectations. Shifts in median dots reprice all risk assets including crypto."
+
+- id: fed_speeches_rss
+  name: "Fed Governor Speeches RSS"
+  type: rss
+  url: "https://www.federalreserve.gov/newsevents/speeches.htm"
+  rss_url: "https://www.federalreserve.gov/feeds/speeches.xml"
+  collector: macro_economic
+  frequency: daily
+  category: fed_policy
+  subcategory: fed_speeches
+  priority: high
+  enabled: true
+  language: en
+  notes: "Fed speakers (especially Chair, Vice Chair, Waller, Bowman) move rate expectations between meetings."
+
+- id: fed_balance_sheet
+  name: "Fed Balance Sheet (H.4.1 Release)"
+  type: scrape
+  url: "https://www.federalreserve.gov/releases/h41/"
+  rss_url: "https://www.federalreserve.gov/feeds/h41.xml"
+  collector: macro_economic
+  frequency: weekly
+  category: fed_policy
+  subcategory: balance_sheet
+  priority: high
+  enabled: true
+  language: en
+  notes: "QT pace directly affects net liquidity. Reverse repo and TGA drawdowns are BTC tailwinds."
+
+- id: ecb_press
+  name: "European Central Bank Press & Decisions"
+  type: rss
+  url: "https://www.ecb.europa.eu/press/pr/html/index.en.html"
+  rss_url: "https://www.ecb.europa.eu/rss/press.html"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: ecb
+  priority: high
+  enabled: true
+  language: en
+  notes: "ECB rate decisions affect EUR/USD, DXY, and global liquidity conditions that flow into crypto."
+
+- id: boj_policy
+  name: "Bank of Japan Monetary Policy"
+  type: scrape
+  url: "https://www.boj.or.jp/en/mopo/mpmdeci/index.htm"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: boj
+  priority: high
+  enabled: true
+  language: en
+  notes: "BOJ yield curve control changes trigger yen carry trade unwinds. Aug 2024 BOJ hike crashed BTC 15%."
+
+- id: pboc_policy
+  name: "People's Bank of China Policy"
+  type: scrape
+  url: "http://www.pbc.gov.cn/en/3688110/3688172/index.html"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: pboc
+  priority: high
+  enabled: true
+  language: both
+  notes: "PBOC easing/tightening affects global liquidity and CNY-denominated crypto flows (OTC premium)."
+
+- id: boe_policy
+  name: "Bank of England Monetary Policy"
+  type: rss
+  url: "https://www.bankofengland.co.uk/monetary-policy"
+  rss_url: "https://www.bankofengland.co.uk/rss/publications"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: boe
+  priority: medium
+  enabled: true
+  language: en
+  notes: "BOE decisions affect GBP and UK-based crypto firms. Gilt market stress (2022 LDI crisis) is a systemic risk signal."
+
+- id: fed_financial_stability
+  name: "Fed Financial Stability Report"
+  type: scrape
+  url: "https://www.federalreserve.gov/publications/financial-stability-report.htm"
+  collector: macro_economic
+  frequency: event_driven
+  category: fed_policy
+  subcategory: financial_stability
+  priority: high
+  enabled: true
+  language: en
+  notes: "Biannual report flags systemic risks. Mentions of crypto, stablecoins, or DeFi signal regulatory intent."
+
+
+# =============================================================================
+# SECTION 2: Economic Data
+# =============================================================================
+
+- id: fred_api
+  name: "FRED API - Key Economic Series"
+  type: api
+  url: "https://api.stlouisfed.org/fred/series/observations"
+  collector: macro_economic
+  frequency: daily
+  category: economic_data
+  subcategory: fred
+  priority: critical
+  enabled: true
+  language: en
+  notes: >
+    Core macro data feed. Key series IDs:
+    Inflation: CPIAUCSL (CPI), CPILFESL (Core CPI), PCEPI (PCE), PCEPILFE (Core PCE),
+    PPIFIS (PPI), CPIUFDSL (CPI Food), CPIENGSL (CPI Energy)
+    Labor: PAYEMS (Nonfarm Payrolls), UNRATE (Unemployment Rate), ICSA (Initial Claims),
+    CCSA (Continuing Claims), CES0500000003 (Avg Hourly Earnings), JTSJOL (JOLTS Job Openings)
+    Growth: GDP (Real GDP), GDPC1 (Real GDP Quarterly), RSAFS (Retail Sales),
+    INDPRO (Industrial Production), UMCSENT (UMich Consumer Sentiment),
+    ISM_MFG (ISM Manufacturing PMI), ISM_SVC (ISM Services PMI)
+    Rates: FEDFUNDS (Fed Funds Rate), DFF (Effective Fed Funds Daily),
+    DGS2 (2-Year Treasury), DGS10 (10-Year Treasury), DGS30 (30-Year Treasury),
+    T10Y2Y (10Y-2Y Yield Curve Spread), T10YFF (10Y-FF Spread),
+    BAMLH0A0HYM2 (HY OAS Spread)
+    Money & Liquidity: M2SL (M2 Money Supply), WALCL (Fed Total Assets),
+    RRPONTSYD (Overnight Reverse Repo), WTREGEN (TGA Balance),
+    WSHOSHO (Fed Holdings of Treasuries)
+    FX & Volatility: DTWEXBGS (Trade-Weighted Dollar/DXY proxy),
+    DEXUSEU (EUR/USD), DEXJPUS (USD/JPY), DEXCHUS (USD/CNY),
+    VIXCLS (VIX Close)
+    Commodities: GOLDAMGBD228NLBM (Gold London Fix), DCOILWTICO (WTI Crude),
+    DCOILBRENTEU (Brent Crude)
+    Housing: CSUSHPINSA (Case-Shiller Home Price), HOUST (Housing Starts),
+    MORTGAGE30US (30-Year Mortgage Rate)
+
+- id: investing_com_calendar
+  name: "Investing.com Economic Calendar"
+  type: scrape
+  url: "https://www.investing.com/economic-calendar/"
+  collector: macro_economic
+  frequency: daily
+  category: economic_data
+  subcategory: economic_calendar
+  priority: high
+  enabled: true
+  language: en
+  notes: "Real-time economic calendar with consensus estimates. Surprise vs expected drives crypto volatility."
+
+- id: forexfactory_calendar
+  name: "ForexFactory Economic Calendar"
+  type: scrape
+  url: "https://www.forexfactory.com/calendar"
+  collector: macro_economic
+  frequency: daily
+  category: economic_data
+  subcategory: economic_calendar
+  priority: high
+  enabled: true
+  language: en
+  notes: "Granular calendar with impact ratings. High-impact events (red flag) are crypto catalyst windows."
+
+- id: trading_economics_calendar
+  name: "Trading Economics Calendar & Data"
+  type: scrape
+  url: "https://tradingeconomics.com/calendar"
+  collector: macro_economic
+  frequency: daily
+  category: economic_data
+  subcategory: economic_calendar
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Global economic data with forecasts. Useful for non-US macro that affects global risk appetite."
+
+- id: us_treasury_fiscal_data
+  name: "US Treasury Fiscal Data (TGA, Debt)"
+  type: api
+  url: "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
+  collector: macro_economic
+  frequency: daily
+  category: economic_data
+  subcategory: treasury_fiscal
+  priority: high
+  enabled: true
+  language: en
+  notes: "TGA balance changes affect net liquidity. Debt ceiling dynamics and T-bill issuance directly impact crypto via liquidity channel."
+
+- id: bls_releases
+  name: "Bureau of Labor Statistics Releases"
+  type: rss
+  url: "https://www.bls.gov/"
+  rss_url: "https://www.bls.gov/feed/bls_latest.rss"
+  collector: macro_economic
+  frequency: event_driven
+  category: economic_data
+  subcategory: labor_inflation
+  priority: high
+  enabled: true
+  language: en
+  notes: "Primary source for CPI, PPI, NFP. BLS releases are the single biggest scheduled volatility events for crypto."
+
+- id: census_economic_indicators
+  name: "US Census Bureau Economic Indicators"
+  type: rss
+  url: "https://www.census.gov/economic-indicators/"
+  rss_url: "https://www.census.gov/economic-indicators/indicator.xml"
+  collector: macro_economic
+  frequency: event_driven
+  category: economic_data
+  subcategory: economic_indicators
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Retail sales, housing starts, trade balance. Second-order macro signals that shape rate expectations."
+
+
+# =============================================================================
+# SECTION 3: Financial Markets
+# =============================================================================
+
+- id: equity_indices_spx
+  name: "S&P 500 / NDX / DJI / VIX / Russell 2000"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: realtime
+  category: financial_markets
+  subcategory: equity_indices
+  priority: critical
+  enabled: true
+  language: en
+  notes: >
+    Key tickers: ^GSPC (SPX), ^IXIC (NDX), ^DJI (DJI), ^VIX (VIX), ^RUT (Russell 2000).
+    BTC 30-day correlation with SPX is ~0.6. VIX spikes above 30 trigger crypto sell-offs.
+
+- id: global_equity_indices
+  name: "Global Equity Indices"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: daily
+  category: financial_markets
+  subcategory: global_equities
+  priority: medium
+  enabled: true
+  language: en
+  notes: >
+    Key tickers: ^FTSE (London), ^GDAXI (DAX), ^N225 (Nikkei), ^HSI (Hang Seng),
+    000001.SS (Shanghai Composite), ^STOXX50E (Euro Stoxx 50), ^KOSPI (Korea).
+    Asian session moves set tone for crypto before US open.
+
+- id: commodities_gold_silver_oil
+  name: "Commodities - Gold, Silver, Oil"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: realtime
+  category: financial_markets
+  subcategory: commodities
+  priority: high
+  enabled: true
+  language: en
+  notes: >
+    Key tickers: GC=F (Gold), SI=F (Silver), CL=F (WTI Oil), BZ=F (Brent).
+    Gold-BTC correlation thesis. Oil price spikes signal inflation risk. Gold ATH often precedes BTC ATH.
+
+- id: fx_rates_dxy
+  name: "FX Rates & Dollar Index"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: realtime
+  category: financial_markets
+  subcategory: fx_rates
+  priority: critical
+  enabled: true
+  language: en
+  notes: >
+    Key tickers: DX-Y.NYB (DXY), EURUSD=X, USDJPY=X, USDCNY=X, USDMXN=X,
+    USDBRL=X, USDTRY=X, USDINR=X, USDKRW=X.
+    DXY is BTC's strongest inverse correlation. EM currency weakness signals capital flight to crypto.
+
+- id: bond_market_yields
+  name: "Bond Market & Yield Curves"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: realtime
+  category: financial_markets
+  subcategory: bonds
+  priority: critical
+  enabled: true
+  language: en
+  notes: >
+    Key tickers: ^TNX (10Y), ^TYX (30Y), ^FVX (5Y), ^IRX (13-week T-bill),
+    TLT (20+ Year Treasury ETF), HYG (High Yield Bond ETF), LQD (Investment Grade ETF).
+    Real yield (10Y minus breakeven) is BTC's key macro driver. Yield curve inversion/steepening signals regime change.
+
+- id: global_net_liquidity
+  name: "Global Net Liquidity Tracker"
+  type: api
+  url: "https://api.stlouisfed.org/fred/series/observations"
+  collector: macro_economic
+  frequency: weekly
+  category: financial_markets
+  subcategory: liquidity
+  priority: critical
+  enabled: true
+  language: en
+  notes: >
+    Net Liquidity = Fed Balance Sheet (WALCL) - TGA (WTREGEN) - Reverse Repo (RRPONTSYD).
+    BTC tracks net liquidity with ~0.85 R-squared over multi-month periods.
+    Also track global M2 aggregate for macro liquidity regime.
+
+- id: crypto_tradfi_cme_futures
+  name: "CME Bitcoin & Ethereum Futures"
+  type: api
+  url: "https://www.cmegroup.com/markets/cryptocurrencies.html"
+  collector: macro_economic
+  frequency: daily
+  category: financial_markets
+  subcategory: crypto_tradfi
+  priority: critical
+  enabled: true
+  language: en
+  notes: "CME BTC/ETH futures basis, open interest, and COT data. Institutional positioning signal. CME gap fills are a widely tracked pattern."
+
+- id: crypto_etf_flows_farside
+  name: "Farside Investors - BTC & ETH ETF Flows"
+  type: scrape
+  url: "https://farside.co.uk/btc/"
+  collector: macro_economic
+  frequency: daily
+  category: financial_markets
+  subcategory: crypto_tradfi
+  priority: critical
+  enabled: true
+  language: en
+  notes: "Daily net flows into spot BTC/ETH ETFs (IBIT, FBTC, ARKB, GBTC, etc.). Net inflows/outflows are the dominant short-term BTC price driver post-ETF approval."
+
+- id: crypto_equities
+  name: "Crypto-Adjacent Public Equities"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: daily
+  category: financial_markets
+  subcategory: crypto_equities
+  priority: high
+  enabled: true
+  language: en
+  notes: >
+    Key tickers: COIN (Coinbase), MSTR (MicroStrategy), MARA (Marathon), CLSK (CleanSpark),
+    RIOT (Riot Platforms), GLXY.TO (Galaxy Digital), HOOD (Robinhood), SQ (Block),
+    PYPL (PayPal). MSTR premium/discount to NAV is a sentiment indicator.
+    COIN earnings reveal institutional adoption trends.
+
+- id: credit_spreads
+  name: "Credit Spreads & Stress Indicators"
+  type: api
+  url: "https://api.stlouisfed.org/fred/series/observations"
+  collector: macro_economic
+  frequency: daily
+  category: financial_markets
+  subcategory: credit
+  priority: high
+  enabled: true
+  language: en
+  notes: >
+    FRED series: BAMLH0A0HYM2 (HY OAS), BAMLC0A0CM (IG OAS),
+    TEDRATE (TED Spread), T10Y3M (10Y-3M Spread).
+    Credit stress widening precedes crypto drawdowns by 1-3 days. TED spread spikes signal banking stress.
+
+
+# =============================================================================
+# SECTION 4: Political & Regulatory
+# =============================================================================
+
+# --- US Crypto Regulation ---
+
+- id: sec_crypto_enforcement
+  name: "SEC Crypto Enforcement & Guidance"
+  type: rss
+  url: "https://www.sec.gov/news/pressreleases"
+  rss_url: "https://www.sec.gov/news/pressreleases.rss"
+  collector: political_regulatory
+  frequency: daily
+  category: regulatory
+  subcategory: sec
+  priority: critical
+  enabled: true
+  language: en
+  notes: "SEC enforcement actions (Wells notices, lawsuits) are the biggest US regulatory risk for crypto. ETF approvals/denials move BTC 5-10%."
+
+- id: cftc_crypto
+  name: "CFTC Digital Assets"
+  type: rss
+  url: "https://www.cftc.gov/PressRoom/PressReleases"
+  rss_url: "https://www.cftc.gov/PressRoom/PressReleases/RSS"
+  collector: political_regulatory
+  frequency: daily
+  category: regulatory
+  subcategory: cftc
+  priority: high
+  enabled: true
+  language: en
+  notes: "CFTC jurisdiction over crypto commodities (BTC, ETH). Enforcement against offshore exchanges affects market structure."
+
+- id: fincen_crypto
+  name: "FinCEN Virtual Currency Guidance"
+  type: scrape
+  url: "https://www.fincen.gov/news-room"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: fincen
+  priority: high
+  enabled: true
+  language: en
+  notes: "FinCEN AML/KYC rules for crypto. Proposed rules on self-hosted wallets and mixer reporting are existential for DeFi privacy."
+
+- id: occ_crypto
+  name: "OCC Crypto Banking Guidance"
+  type: scrape
+  url: "https://www.occ.treas.gov/news-issuances/index-news-issuances.html"
+  rss_url: "https://www.occ.treas.gov/rss/occ-news-issuances.xml"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: occ
+  priority: high
+  enabled: true
+  language: en
+  notes: "OCC interpretive letters on bank crypto custody, stablecoin reserves. SAB 121 rescission enabled bank custody."
+
+- id: fdic_crypto
+  name: "FDIC Crypto Policy"
+  type: scrape
+  url: "https://www.fdic.gov/news/press-releases"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: fdic
+  priority: medium
+  enabled: true
+  language: en
+  notes: "FDIC pause letters (Operation Choke Point 2.0) restricted bank-crypto relationships. Reversal is a major catalyst."
+
+- id: ofac_sanctions
+  name: "OFAC Sanctions (Crypto-Related)"
+  type: scrape
+  url: "https://ofac.treasury.gov/recent-actions"
+  collector: political_regulatory
+  frequency: event_driven
+  category: regulatory
+  subcategory: ofac
+  priority: critical
+  enabled: true
+  language: en
+  notes: "OFAC sanctions on Tornado Cash, Sinbad, etc. set precedent for protocol-level censorship. Critical for DeFi and privacy coins."
+
+- id: us_congress_crypto
+  name: "US Congress Crypto Legislation Tracker"
+  type: scrape
+  url: "https://www.congress.gov/search?q=%7B%22source%22%3A%22legislation%22%2C%22search%22%3A%22cryptocurrency+OR+digital+asset%22%7D"
+  collector: political_regulatory
+  frequency: weekly
+  category: political
+  subcategory: congress
+  priority: high
+  enabled: true
+  language: en
+  notes: "FIT21, stablecoin bill, DAMS Act tracking. Bipartisan crypto legislation progress is a long-term structural catalyst."
+
+- id: white_house_crypto
+  name: "White House Executive Orders & Digital Assets"
+  type: scrape
+  url: "https://www.whitehouse.gov/briefing-room/presidential-actions/"
+  collector: political_regulatory
+  frequency: event_driven
+  category: political
+  subcategory: white_house
+  priority: critical
+  enabled: true
+  language: en
+  notes: "Executive orders on digital assets (EO 14067, strategic bitcoin reserve EO). Presidential stance sets regulatory tone for entire term."
+
+- id: doj_crypto_enforcement
+  name: "DOJ Crypto Enforcement"
+  type: scrape
+  url: "https://www.justice.gov/criminal/criminal-fraud"
+  rss_url: "https://www.justice.gov/feeds/opa-press-releases.xml"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: doj
+  priority: high
+  enabled: true
+  language: en
+  notes: "DOJ indictments of exchange operators (Binance, BitMEX), mixer operators. Criminal enforcement has chilling effect on market participants."
+
+# --- Global Regulation ---
+
+- id: eu_mica_regulation
+  name: "EU MiCA / ESMA Digital Assets"
+  type: scrape
+  url: "https://www.esma.europa.eu/press-news/esma-news"
+  rss_url: "https://www.esma.europa.eu/press-news/esma-news/feed"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: eu_mica
+  priority: high
+  enabled: true
+  language: en
+  notes: "MiCA is the world's most comprehensive crypto framework. Stablecoin reserve requirements affect USDT/USDC in EU markets."
+
+- id: uk_fca_crypto
+  name: "UK FCA Crypto Regulation"
+  type: scrape
+  url: "https://www.fca.org.uk/news/search-results?np_category=cryptoassets"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: uk_fca
+  priority: medium
+  enabled: true
+  language: en
+  notes: "FCA crypto marketing rules, registration regime. UK is a major crypto hub; restrictive rules push activity offshore."
+
+- id: hk_sfc_crypto
+  name: "Hong Kong SFC Virtual Assets"
+  type: scrape
+  url: "https://www.sfc.hk/en/What-we-do/Virtual-Assets"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: hk_sfc
+  priority: high
+  enabled: true
+  language: en
+  notes: "HK retail crypto trading regime and spot ETF approvals. HK is China's crypto gateway; policy signals mainland sentiment."
+
+- id: singapore_mas_crypto
+  name: "Singapore MAS Digital Assets"
+  type: scrape
+  url: "https://www.mas.gov.sg/news"
+  rss_url: "https://www.mas.gov.sg/rss/news"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: singapore_mas
+  priority: medium
+  enabled: true
+  language: en
+  notes: "MAS licensing framework and stablecoin rules. Singapore hosts major crypto firms (Bybit, Crypto.com)."
+
+- id: japan_fsa_crypto
+  name: "Japan FSA Crypto Policy"
+  type: scrape
+  url: "https://www.fsa.go.jp/en/news/index.html"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: japan_fsa
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Japan's progressive crypto tax reform and stablecoin framework. Yen pairs are significant crypto trading volume."
+
+- id: dubai_vara
+  name: "Dubai VARA Crypto Regulation"
+  type: scrape
+  url: "https://www.vara.ae/en/news-and-publications/"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: dubai_vara
+  priority: medium
+  enabled: true
+  language: en
+  notes: "VARA licensing attracts global crypto firms to Dubai. Binance, OKX, Bybit all establishing UAE presence."
+
+- id: fatf_virtual_assets
+  name: "FATF Virtual Assets & Travel Rule"
+  type: scrape
+  url: "https://www.fatf-gafi.org/en/topics/virtual-assets.html"
+  collector: political_regulatory
+  frequency: event_driven
+  category: regulatory
+  subcategory: fatf
+  priority: high
+  enabled: true
+  language: en
+  notes: "FATF travel rule implementation affects exchange compliance globally. Grey/black list changes impact countries' crypto access."
+
+- id: bis_crypto_cbdc
+  name: "BIS Innovation Hub & CBDC Research"
+  type: rss
+  url: "https://www.bis.org/topic/fintech.htm"
+  rss_url: "https://www.bis.org/doclist/all_published.rss"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: bis
+  priority: medium
+  enabled: true
+  language: en
+  notes: "BIS positions on crypto (often skeptical) and CBDC development. mBridge project signals CBDC cross-border competition with crypto."
+
+- id: imf_digital_money
+  name: "IMF Digital Money & Crypto Policy"
+  type: rss
+  url: "https://www.imf.org/en/Topics/fintech"
+  rss_url: "https://www.imf.org/en/Publications/RSS?type=Fintech%20Notes"
+  collector: political_regulatory
+  frequency: weekly
+  category: regulatory
+  subcategory: imf
+  priority: medium
+  enabled: true
+  language: en
+  notes: "IMF pushes back against country-level BTC adoption (El Salvador). IMF crypto risk assessments shape developing country policies."
+
+# --- Geopolitics ---
+
+- id: reuters_geopolitics
+  name: "Reuters World News (Crypto Keywords)"
+  type: rss
+  url: "https://www.reuters.com/world/"
+  rss_url: "https://www.reuters.com/arc/outboundfeeds/v3/all/rss.xml"
+  collector: political_regulatory
+  frequency: realtime
+  category: geopolitics
+  subcategory: wire_service
+  priority: high
+  enabled: true
+  language: en
+  notes: "Filter for: sanctions, SWIFT, trade war, tariffs, military conflict, central bank, dollar, reserve currency. Geopolitical shocks drive safe-haven BTC narratives."
+
+- id: ap_news_geopolitics
+  name: "Associated Press World News"
+  type: rss
+  url: "https://apnews.com/world-news"
+  rss_url: "https://apnews.com/feed"
+  collector: political_regulatory
+  frequency: realtime
+  category: geopolitics
+  subcategory: wire_service
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Wire service for geopolitical events. US-China tensions, Russia sanctions, Middle East conflicts all affect crypto risk appetite."
+
+- id: bbc_world
+  name: "BBC World News"
+  type: rss
+  url: "https://www.bbc.com/news/world"
+  rss_url: "http://feeds.bbci.co.uk/news/world/rss.xml"
+  collector: political_regulatory
+  frequency: realtime
+  category: geopolitics
+  subcategory: wire_service
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Global perspective on geopolitical events. UK/EU policy developments relevant to crypto regulation."
+
+- id: aljazeera_world
+  name: "Al Jazeera World News"
+  type: rss
+  url: "https://www.aljazeera.com/news"
+  rss_url: "https://www.aljazeera.com/xml/rss/all.xml"
+  collector: political_regulatory
+  frequency: realtime
+  category: geopolitics
+  subcategory: wire_service
+  priority: low
+  enabled: true
+  language: en
+  notes: "Middle East and Global South perspective. Useful for sanctions evasion narratives and emerging market crypto adoption signals."
+
+# --- US Politics (Crypto-Relevant) ---
+
+- id: politico_crypto
+  name: "Politico - Crypto & Tech Policy"
+  type: rss
+  url: "https://www.politico.com/technology"
+  rss_url: "https://rss.politico.com/technology.xml"
+  collector: political_regulatory
+  frequency: daily
+  category: political
+  subcategory: us_politics
+  priority: high
+  enabled: true
+  language: en
+  notes: "Inside-the-beltway crypto policy coverage. Committee markups, lobbying dynamics, and bipartisan deal-making on crypto bills."
+
+- id: the_hill_crypto
+  name: "The Hill - Finance & Technology"
+  type: rss
+  url: "https://thehill.com/finance-technology/"
+  rss_url: "https://thehill.com/feed/"
+  collector: political_regulatory
+  frequency: daily
+  category: political
+  subcategory: us_politics
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Congressional crypto policy coverage. Tracks bipartisan support and opposition dynamics on crypto legislation."
+
+- id: coindesk_policy
+  name: "CoinDesk Policy & Regulation"
+  type: rss
+  url: "https://www.coindesk.com/policy/"
+  rss_url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+  collector: political_regulatory
+  frequency: daily
+  category: political
+  subcategory: crypto_policy
+  priority: high
+  enabled: true
+  language: en
+  notes: "Dedicated crypto policy vertical. Best source for SEC/CFTC enforcement details, court rulings, and regulatory interpretation."
+
+- id: stand_with_crypto
+  name: "Stand With Crypto Alliance"
+  type: scrape
+  url: "https://www.standwithcrypto.org/"
+  collector: political_regulatory
+  frequency: weekly
+  category: political
+  subcategory: crypto_advocacy
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Coinbase-backed advocacy tracker. Congressional scorecard on crypto-friendliness. Election cycle crypto-positive candidates tracker."
+
+- id: blockworks_policy
+  name: "Blockworks Policy & Macro"
+  type: rss
+  url: "https://blockworks.co/category/policy/"
+  rss_url: "https://blockworks.co/feed"
+  collector: political_regulatory
+  frequency: daily
+  category: political
+  subcategory: crypto_policy
+  priority: high
+  enabled: true
+  language: en
+  notes: "Strong macro-crypto crossover coverage. Fed meetings, ETF flows, and institutional adoption analysis."
+
+
+# =============================================================================
+# SECTION 5: Macro Research
+# =============================================================================
+
+# --- Investment Banks & Asset Managers ---
+
+- id: goldman_sachs_research
+  name: "Goldman Sachs Global Macro Research"
+  type: scrape
+  url: "https://www.goldmansachs.com/insights/series/macro-outlook.html"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: investment_banks
+  priority: high
+  enabled: true
+  language: en
+  notes: "Goldman's macro calls set institutional consensus. Their GS Net Liquidity model and financial conditions index are widely referenced."
+
+- id: jpmorgan_research
+  name: "JPMorgan Global Markets Strategy"
+  type: scrape
+  url: "https://www.jpmorgan.com/insights/global-research"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: investment_banks
+  priority: high
+  enabled: true
+  language: en
+  notes: "JPM has a dedicated crypto research team. Their crypto market reports and BTC production cost model are institutional benchmarks."
+
+- id: morgan_stanley_research
+  name: "Morgan Stanley Research"
+  type: scrape
+  url: "https://www.morganstanley.com/ideas"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: investment_banks
+  priority: medium
+  enabled: true
+  language: en
+  notes: "MS macro outlook shapes institutional allocation. Their wealth management platform's crypto adoption signals retail-institutional bridge."
+
+- id: blackrock_investment_institute
+  name: "BlackRock Investment Institute"
+  type: scrape
+  url: "https://www.blackrock.com/corporate/insights/blackrock-investment-institute"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: asset_managers
+  priority: critical
+  enabled: true
+  language: en
+  notes: "BlackRock runs IBIT (largest BTC ETF). Their macro regime framework and public statements on crypto allocation are market-moving."
+
+- id: bridgewater_research
+  name: "Bridgewater Associates Research"
+  type: scrape
+  url: "https://www.bridgewater.com/research-and-insights"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: asset_managers
+  priority: high
+  enabled: true
+  language: en
+  notes: "Dalio's all-weather framework and debt cycle analysis. Bridgewater's macro regime calls influence how institutions view BTC as portfolio hedge."
+
+- id: pimco_economic_outlook
+  name: "PIMCO Economic & Market Commentary"
+  type: rss
+  url: "https://www.pimco.com/en-us/insights"
+  rss_url: "https://www.pimco.com/en-us/insights/rss"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: asset_managers
+  priority: medium
+  enabled: true
+  language: en
+  notes: "PIMCO's bond market expertise shapes rate expectations. Their cyclical and secular outlook frameworks define the macro backdrop for crypto."
+
+# --- Independent Macro Research ---
+
+- id: macro_hive
+  name: "Macro Hive"
+  type: rss
+  url: "https://macrohive.com/"
+  rss_url: "https://macrohive.com/feed/"
+  collector: macro_economic
+  frequency: daily
+  category: macro_research
+  subcategory: independent_macro
+  priority: high
+  enabled: true
+  language: en
+  notes: "Independent macro research with quant models. Their Fed reaction function model and macro-crypto analysis are high quality."
+
+- id: lyn_alden_research
+  name: "Lyn Alden Investment Strategy"
+  type: rss
+  url: "https://www.lynalden.com/"
+  rss_url: "https://www.lynalden.com/feed/"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: independent_macro
+  priority: high
+  enabled: true
+  language: en
+  notes: "Leading macro-BTC analyst. Her fiscal dominance thesis and net liquidity framework are the most-cited models for BTC macro valuation."
+
+- id: the_macro_compass
+  name: "The Macro Compass (Alfonso Peccatiello)"
+  type: rss
+  url: "https://themacrocompass.substack.com/"
+  rss_url: "https://themacrocompass.substack.com/feed"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: independent_macro
+  priority: high
+  enabled: true
+  language: en
+  notes: "Alf's cross-asset macro framework with clear liquidity regime analysis. His volatility-adjusted liquidity model is influential in crypto circles."
+
+# --- Think Tanks ---
+
+- id: brookings_economic_policy
+  name: "Brookings Institution - Economic Studies"
+  type: rss
+  url: "https://www.brookings.edu/topic/economic-policy/"
+  rss_url: "https://www.brookings.edu/topic/economic-policy/feed/"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: think_tanks
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Brookings shapes Washington policy consensus. Their digital currency and fintech research influences regulatory direction."
+
+- id: piie_research
+  name: "Peterson Institute for International Economics"
+  type: rss
+  url: "https://www.piie.com/research"
+  rss_url: "https://www.piie.com/rss.xml"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: think_tanks
+  priority: medium
+  enabled: true
+  language: en
+  notes: "PIIE research on trade policy, sanctions, and dollar reserve status. De-dollarization narratives are a core BTC bull thesis."
+
+- id: nber_working_papers
+  name: "NBER Working Papers"
+  type: rss
+  url: "https://www.nber.org/papers"
+  rss_url: "https://www.nber.org/rss/new.xml"
+  collector: macro_economic
+  frequency: weekly
+  category: macro_research
+  subcategory: think_tanks
+  priority: low
+  enabled: true
+  language: en
+  notes: "Academic macro research. NBER recession dating is the official arbiter. Crypto-specific NBER papers are increasingly cited by regulators."
+
+# --- International Organizations ---
+
+- id: imf_weo
+  name: "IMF World Economic Outlook"
+  type: rss
+  url: "https://www.imf.org/en/Publications/WEO"
+  rss_url: "https://www.imf.org/en/Publications/RSS?type=WEO"
+  collector: macro_economic
+  frequency: event_driven
+  category: macro_research
+  subcategory: international_orgs
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Biannual global growth forecasts. IMF downward revisions trigger risk-off sentiment. Their crypto policy recommendations shape developing country regulation."
+
+- id: world_bank_prospects
+  name: "World Bank Global Economic Prospects"
+  type: scrape
+  url: "https://www.worldbank.org/en/publication/global-economic-prospects"
+  collector: macro_economic
+  frequency: event_driven
+  category: macro_research
+  subcategory: international_orgs
+  priority: low
+  enabled: true
+  language: en
+  notes: "Global growth and developing economy outlook. Emerging market stress drives local crypto adoption (Argentina, Turkey, Nigeria)."
+
+- id: bis_quarterly_review
+  name: "BIS Quarterly Review"
+  type: rss
+  url: "https://www.bis.org/publ/quarterly.htm"
+  rss_url: "https://www.bis.org/doclist/all_published.rss"
+  collector: macro_economic
+  frequency: event_driven
+  category: macro_research
+  subcategory: international_orgs
+  priority: medium
+  enabled: true
+  language: en
+  notes: "BIS research on global financial system plumbing. Dollar funding stress, cross-border capital flows, and CBDC research."
+
+- id: oecd_economic_outlook
+  name: "OECD Economic Outlook"
+  type: rss
+  url: "https://www.oecd.org/en/publications/oecd-economic-outlook.html"
+  rss_url: "https://www.oecd.org/newsroom/rss"
+  collector: macro_economic
+  frequency: event_driven
+  category: macro_research
+  subcategory: international_orgs
+  priority: low
+  enabled: true
+  language: en
+  notes: "OECD growth forecasts and crypto tax framework (CARF). Their crypto reporting standard will affect global exchange compliance."
+
+# --- Financial News Media ---
+
+- id: bloomberg_markets
+  name: "Bloomberg Markets & Economics"
+  type: rss
+  url: "https://www.bloomberg.com/markets"
+  rss_url: "https://www.bloomberg.com/feed/podcast/bloomberg-surveillance.xml"
+  collector: news_feed
+  frequency: realtime
+  category: macro_research
+  subcategory: financial_media
+  priority: critical
+  enabled: true
+  language: en
+  notes: "Bloomberg terminal is the institutional standard. Their macro and crypto coverage (via Bloomberg Intelligence) drives institutional narrative."
+
+- id: reuters_business
+  name: "Reuters Business & Finance"
+  type: rss
+  url: "https://www.reuters.com/business/"
+  rss_url: "https://www.reuters.com/arc/outboundfeeds/v3/all/rss.xml"
+  collector: news_feed
+  frequency: realtime
+  category: macro_research
+  subcategory: financial_media
+  priority: high
+  enabled: true
+  language: en
+  notes: "Reuters financial coverage shapes global institutional view. Their crypto and central bank coverage is widely syndicated."
+
+- id: ft_markets
+  name: "Financial Times - Markets"
+  type: scrape
+  url: "https://www.ft.com/markets"
+  rss_url: "https://www.ft.com/rss/home"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: financial_media
+  priority: high
+  enabled: true
+  language: en
+  notes: "FT Alphaville and Lex column shape London/European institutional narrative. FT crypto coverage increasingly mainstream."
+
+- id: wsj_markets
+  name: "Wall Street Journal - Markets"
+  type: rss
+  url: "https://www.wsj.com/news/markets"
+  rss_url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: financial_media
+  priority: high
+  enabled: true
+  language: en
+  notes: "WSJ's Nick Timiraos is the de facto Fed whisperer. WSJ scoops on Fed policy regularly move crypto markets."
+
+- id: cnbc_markets
+  name: "CNBC Markets & Economy"
+  type: rss
+  url: "https://www.cnbc.com/markets/"
+  rss_url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"
+  collector: news_feed
+  frequency: realtime
+  category: macro_research
+  subcategory: financial_media
+  priority: medium
+  enabled: true
+  language: en
+  notes: "CNBC shapes US retail investor sentiment. Their crypto coverage (Brian Sullivan, Kate Rooney) bridges TradFi and crypto narratives."
+
+- id: marketwatch
+  name: "MarketWatch Markets"
+  type: rss
+  url: "https://www.marketwatch.com/markets"
+  rss_url: "http://feeds.marketwatch.com/marketwatch/topstories/"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: financial_media
+  priority: medium
+  enabled: true
+  language: en
+  notes: "MarketWatch retail investor coverage. Useful for tracking mainstream adoption narratives and retail sentiment."
+
+- id: zerohedge
+  name: "Zero Hedge"
+  type: rss
+  url: "https://www.zerohedge.com/"
+  rss_url: "https://feeds.feedburner.com/zerohedge/feed"
+  collector: news_feed
+  frequency: realtime
+  category: macro_research
+  subcategory: financial_media
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Contrarian macro/finance voice popular in crypto community. Often first to surface liquidity data, Fed balance sheet changes, and geopolitical risk."
+
+# --- Chinese Financial Media ---
+
+- id: wallstreetcn
+  name: "华尔街见闻 (WallStreetCN)"
+  type: scrape
+  url: "https://wallstreetcn.com/"
+  collector: news_feed
+  frequency: realtime
+  category: macro_research
+  subcategory: chinese_financial_media
+  priority: high
+  enabled: true
+  language: zh
+  notes: "China's leading financial news platform. Covers PBOC policy, Chinese macro data, and A-share/HK market moves that affect crypto sentiment in Asian session."
+
+- id: cls_cn
+  name: "财联社 (CLS/Cailianshe)"
+  type: scrape
+  url: "https://www.cls.cn/"
+  collector: news_feed
+  frequency: realtime
+  category: macro_research
+  subcategory: chinese_financial_media
+  priority: high
+  enabled: true
+  language: zh
+  notes: "Fastest Chinese financial newswire. Flash headlines on PBOC operations, regulatory changes, and macro data releases."
+
+- id: yicai_first_financial
+  name: "第一财经 (Yicai/CBN)"
+  type: scrape
+  url: "https://www.yicai.com/"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: chinese_financial_media
+  priority: medium
+  enabled: true
+  language: zh
+  notes: "Shanghai-based financial media with deep PBOC and state council sourcing. In-depth macro analysis and policy interpretation."
+
+
+# =============================================================================
+# SECTION 6: Micro / Industry
+# =============================================================================
+
+# --- Tech / AI Industry ---
+
+- id: techcrunch_rss
+  name: "TechCrunch"
+  type: rss
+  url: "https://techcrunch.com/"
+  rss_url: "https://techcrunch.com/feed/"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: tech_industry
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Tech industry coverage. AI/ML developments drive narrative for AI-crypto crossover tokens. Startup funding signals risk appetite."
+
+- id: the_information
+  name: "The Information"
+  type: scrape
+  url: "https://www.theinformation.com/"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: tech_industry
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Premium tech scoops. VC fundraising data, BigTech crypto strategy (Apple Pay, Google, Meta), and AI compute demand signals."
+
+- id: semafor_tech
+  name: "Semafor Tech & Business"
+  type: rss
+  url: "https://www.semafor.com/tech"
+  rss_url: "https://www.semafor.com/feed"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: tech_industry
+  priority: low
+  enabled: true
+  language: en
+  notes: "Global tech and business coverage with emerging market focus. Useful for crypto adoption trends in Global South."
+
+# --- Fintech / Payments ---
+
+- id: payments_journal
+  name: "PaymentsJournal"
+  type: rss
+  url: "https://www.paymentsjournal.com/"
+  rss_url: "https://www.paymentsjournal.com/feed/"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: fintech_payments
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Payments industry analysis. Stablecoin payment rails, CBDC pilots, and cross-border payment disruption signals."
+
+- id: pymnts
+  name: "PYMNTS.com"
+  type: rss
+  url: "https://www.pymnts.com/"
+  rss_url: "https://www.pymnts.com/feed/"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: fintech_payments
+  priority: medium
+  enabled: true
+  language: en
+  notes: "Digital payments and fintech coverage. Tracks stablecoin merchant adoption, crypto payment integrations, and BNPL/neobank trends."
+
+- id: finextra
+  name: "Finextra"
+  type: rss
+  url: "https://www.finextra.com/"
+  rss_url: "https://www.finextra.com/rss/headlines.aspx"
+  collector: news_feed
+  frequency: daily
+  category: macro_research
+  subcategory: fintech_payments
+  priority: low
+  enabled: true
+  language: en
+  notes: "European fintech focus. SEPA instant payments, digital euro development, and UK/EU open banking impact on crypto rails."
+
+# --- Crypto-Adjacent Earnings ---
+
+- id: crypto_adjacent_earnings
+  name: "Crypto-Adjacent Public Company Earnings"
+  type: api
+  url: "https://query1.finance.yahoo.com/v8/finance/chart/"
+  collector: macro_economic
+  frequency: event_driven
+  category: financial_markets
+  subcategory: crypto_earnings
+  priority: high
+  enabled: true
+  language: en
+  notes: >
+    Key tickers and data points:
+    COIN (Coinbase) - trading revenue, subscription revenue, custody AUM, regulatory updates
+    MSTR (MicroStrategy) - BTC holdings, avg purchase price, yield metric, convertible note details
+    MARA (Marathon Digital) - hash rate, BTC mined, operating cost per BTC, energized capacity
+    CLSK (CleanSpark) - hash rate growth, efficiency (J/TH), BTC held vs sold ratio
+    RIOT (Riot Platforms) - hash rate, hosting revenue, power credits, BTC treasury
+    NVDA (NVIDIA) - data center revenue (AI/crypto mining GPU demand proxy)
+    SQ (Block/Square) - Cash App BTC revenue, BTC gross profit, TBD/Web5 updates
+    PYPL (PayPal) - PYUSD stablecoin metrics, crypto trading volume, on/off ramp usage
+    HOOD (Robinhood) - crypto trading revenue share, new coin listings, wallet MAUs
+    GLXY.TO (Galaxy Digital) - trading revenue, mining, ventures portfolio, GDM AUM
+    Earnings dates set up volatility windows. Guidance on crypto adoption metrics is forward-looking signal.
+
+
+# =============================================================================
+# SECTION 7: China Policy
+# =============================================================================
+
+- id: xinhua_policy
+  name: "新华社 (Xinhua News Agency)"
+  type: scrape
+  url: "http://www.news.cn/"
+  rss_url: "http://www.news.cn/politics/xhll.xml"
+  collector: political_regulatory
+  frequency: daily
+  category: geopolitics
+  subcategory: china_policy
+  priority: high
+  enabled: true
+  language: both
+  notes: "Official CPC mouthpiece. State Council directives on fintech, digital yuan, and tech policy. Filter: crypto, blockchain, digital currency, CBDC, fintech, sanctions."
+
+- id: caixin_media
+  name: "财新 (Caixin Media)"
+  type: scrape
+  url: "https://www.caixin.com/"
+  collector: political_regulatory
+  frequency: daily
+  category: geopolitics
+  subcategory: china_policy
+  priority: high
+  enabled: true
+  language: zh
+  notes: "China's most credible independent financial journalism. PBOC policy scoops, financial reform coverage. Filter: cryptocurrency, blockchain, digital yuan, mining."
+
+- id: yicai_policy
+  name: "第一财经 (Yicai) - Policy Coverage"
+  type: scrape
+  url: "https://www.yicai.com/news/"
+  collector: political_regulatory
+  frequency: daily
+  category: geopolitics
+  subcategory: china_policy
+  priority: medium
+  enabled: true
+  language: zh
+  notes: "Shanghai state-affiliated financial media. Close to PBOC Shanghai HQ. Policy interpretation on digital yuan pilots and fintech regulation."
+
+- id: scmp_china
+  name: "South China Morning Post"
+  type: rss
+  url: "https://www.scmp.com/economy"
+  rss_url: "https://www.scmp.com/rss/4/feed"
+  collector: political_regulatory
+  frequency: daily
+  category: geopolitics
+  subcategory: china_policy
+  priority: high
+  enabled: true
+  language: en
+  notes: "English-language Hong Kong paper with deep mainland sourcing. Covers HK crypto hub ambitions, mainland policy shifts, and US-China tech decoupling."
+
+- id: caixin_global
+  name: "Caixin Global (English)"
+  type: rss
+  url: "https://www.caixinglobal.com/"
+  rss_url: "https://www.caixinglobal.com/rss.html"
+  collector: political_regulatory
+  frequency: daily
+  category: geopolitics
+  subcategory: china_policy
+  priority: high
+  enabled: true
+  language: en
+  notes: "English edition of Caixin. Best English-language source for China macro, PBOC policy, and regulatory shifts. Filter: crypto, blockchain, digital currency, web3."

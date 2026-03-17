@@ -1,0 +1,70 @@
+{#
+Platform Report Review Thread Template
+Used for commenting on/analyzing reports from on-chain data platforms.
+Applies to: Glassnode Week On-Chain, CoinShares Fund Flows,
+            Chainalysis reports, Messari theses, Coin Metrics SOTN, etc.
+#}
+
+{# === ENGLISH VERSION === #}
+
+{% block en_thread %}
+{# Tweet 1: Hook #}
+{{ hook_line_en }}
+
+{# Tweet 2-3: Core Findings #}
+{% for finding in top_findings[:3] %}
+{{ loop.index + 1 }}/{{ total_tweets }} {{ finding.en }}
+{% if finding.source_url %}🔗 {{ finding.source_url }}{% endif %}
+{% endfor %}
+
+{# Tweet 4: Data Visualization #}
+{{ chart_tweet_number }}/{{ total_tweets }} 📊 {{ chart_caption_en }}
+[ATTACH: {{ chart_filename }}]
+Data: {{ data_source }}
+
+{# Tweet 5: Arena Connection (only if relevant) #}
+{% if arena_angle_en %}
+{{ arena_tweet_number }}/{{ total_tweets }} {{ arena_angle_en }}
+🔍 Top trader positioning on Arena: https://arenafi.org
+{% endif %}
+
+{# Tweet 6: Implications / So What #}
+{{ implications_tweet_number }}/{{ total_tweets }} 🔑 {{ implications_en }}
+
+{# Tweet 7: Source + CTA #}
+{{ total_tweets }}/{{ total_tweets }} Full report: {{ original_report_url }}
+Our detailed analysis: {{ openclaw_url }}
+{% endblock %}
+
+---
+
+{# === CHINESE VERSION === #}
+
+{% block zh_thread %}
+{# Tweet 1: Hook #}
+{{ hook_line_zh }}
+
+{# Tweet 2-3: 核心发现 #}
+{% for finding in top_findings[:3] %}
+{{ loop.index + 1 }}/{{ total_tweets }} {{ finding.zh }}
+{% if finding.source_url %}🔗 {{ finding.source_url }}{% endif %}
+{% endfor %}
+
+{# Tweet 4: 数据可视化 #}
+{{ chart_tweet_number }}/{{ total_tweets }} 📊 {{ chart_caption_zh }}
+[附图: {{ chart_filename }}]
+数据来源：{{ data_source_zh }}
+
+{# Tweet 5: Arena 关联 (仅在相关时) #}
+{% if arena_angle_zh %}
+{{ arena_tweet_number }}/{{ total_tweets }} {{ arena_angle_zh }}
+🔍 Arena 顶级交易员持仓变化：https://arenafi.org
+{% endif %}
+
+{# Tweet 6: 解读 #}
+{{ implications_tweet_number }}/{{ total_tweets }} 🔑 {{ implications_zh }}
+
+{# Tweet 7: 来源 #}
+{{ total_tweets }}/{{ total_tweets }} 完整报告：{{ original_report_url }}
+深度解读：{{ openclaw_url }}
+{% endblock %}

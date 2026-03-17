@@ -1,0 +1,139 @@
+# Newsletters, Substacks, and individual researcher blogs
+
+- id: week_in_ethereum
+  name: Week in Ethereum News
+  type: rss
+  url: "https://weekinethereumnews.com/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  priority: high
+  enabled: true
+
+- id: bankless_newsletter
+  name: Bankless
+  type: rss
+  url: "https://www.bankless.com/rss/"
+  collector: news_feed
+  frequency: 6h
+  category: newsletter
+  priority: high
+  enabled: true
+
+- id: daily_gwei
+  name: The Daily Gwei
+  type: rss
+  url: "https://thedailygwei.substack.com/feed"
+  collector: news_feed
+  frequency: 6h
+  category: newsletter
+  priority: medium
+  enabled: true
+
+- id: deribit_insights
+  name: Deribit Insights
+  type: rss
+  url: "https://insights.deribit.com/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: derivatives
+  priority: high
+  enabled: true
+
+- id: uncommon_core
+  name: Uncommon Core
+  type: rss
+  url: "https://uncommoncore.co/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  priority: medium
+  enabled: true
+
+- id: vitalik_blog
+  name: "Vitalik Buterin's Blog"
+  type: rss
+  url: "https://vitalik.eth.limo/feed.xml"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: founder
+  priority: high
+  enabled: true
+
+- id: arthur_hayes
+  name: Arthur Hayes Blog
+  type: rss
+  url: "https://cryptohayes.substack.com/feed"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: trading
+  priority: high
+  enabled: true
+
+- id: cobie
+  name: Cobie
+  type: rss
+  url: "https://cobie.substack.com/feed"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  priority: medium
+  enabled: true
+
+- id: jon_charbonneau
+  name: Jon Charbonneau
+  type: rss
+  url: "https://joncharbonneau.substack.com/feed"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: polynya
+  name: Polynya
+  type: rss
+  url: "https://polynya.mirror.xyz/feed/atom"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: molly_white
+  name: "Web3 is Going Great (Molly White)"
+  type: rss
+  url: "https://www.web3isgoinggreat.com/feed.xml"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: contrarian
+  priority: medium
+  enabled: true
+  notes: "Contrarian signal — tracks failures and scams"
+
+- id: not_boring
+  name: Not Boring (Packy McCormick)
+  type: rss
+  url: "https://www.notboring.co/feed"
+  collector: news_feed
+  frequency: 24h
+  category: newsletter
+  priority: low
+  enabled: true
+
+- id: hasu
+  name: Hasu (Uncommon Core / Flashbots)
+  type: rss
+  url: "https://uncommoncore.co/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: newsletter
+  subcategory: mev
+  priority: high
+  enabled: true

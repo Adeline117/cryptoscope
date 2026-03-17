@@ -1,0 +1,1927 @@
+# DeFi protocol blog/announcement RSS feeds
+# Sorted by TVL/significance within each subcategory
+# Last updated: 2026-03-16
+
+###############################################################################
+# LIQUID STAKING
+###############################################################################
+
+- id: lido
+  name: Lido
+  type: rss
+  url: https://blog.lido.fi/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: high
+  enabled: true
+  twitter: LidoFinance
+  governance_forum: https://research.lido.fi
+  github_org: lidofinance
+
+- id: rocket_pool
+  name: Rocket Pool
+  type: rss
+  url: https://medium.com/feed/rocket-pool
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: high
+  enabled: true
+  twitter: Rocket_Pool
+  governance_forum: https://dao.rocketpool.net
+  github_org: rocket-pool
+
+- id: eigenlayer
+  name: EigenLayer
+  type: rss
+  url: https://www.blog.eigenlayer.xyz/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: restaking
+  priority: high
+  enabled: true
+  twitter: eigenlayer
+  governance_forum: https://forum.eigenlayer.xyz
+  github_org: Layr-Labs
+
+- id: jito
+  name: Jito
+  type: rss
+  url: https://www.jito.network/blog/rss.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: high
+  enabled: true
+  twitter: jito_sol
+  governance_forum: https://gov.jito.network
+  github_org: jito-foundation
+
+- id: marinade
+  name: Marinade Finance
+  type: rss
+  url: https://medium.com/feed/marinade-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: medium
+  enabled: true
+  twitter: MarinadeFinance
+  governance_forum: https://forum.marinade.finance
+  github_org: marinade-finance
+
+- id: ether_fi
+  name: Ether.fi
+  type: rss
+  url: https://etherfi.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: high
+  enabled: true
+  twitter: ether_fi
+  governance_forum: https://governance.ether.fi
+  github_org: etherfi-protocol
+
+- id: renzo
+  name: Renzo
+  type: rss
+  url: https://medium.com/feed/@renzoprotocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: restaking
+  priority: medium
+  enabled: true
+  twitter: RenzoProtocol
+  governance_forum: null
+  github_org: renzoprotocol
+
+- id: puffer
+  name: Puffer Finance
+  type: rss
+  url: https://medium.com/feed/@pufferfinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: restaking
+  priority: medium
+  enabled: true
+  twitter: puffer_finance
+  governance_forum: null
+  github_org: PufferFinance
+
+- id: kelp_dao
+  name: Kelp DAO
+  type: rss
+  url: https://blog.kelpdao.xyz/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: restaking
+  priority: medium
+  enabled: true
+  twitter: KelpDAO
+  governance_forum: null
+  github_org: kelp-dao
+
+- id: stader
+  name: Stader Labs
+  type: rss
+  url: https://medium.com/feed/staderlabs
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: medium
+  enabled: true
+  twitter: staderlabs
+  governance_forum: null
+  github_org: stader-labs
+
+- id: stakewise
+  name: StakeWise
+  type: rss
+  url: https://medium.com/feed/stakewise
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: medium
+  enabled: true
+  twitter: stakewise_io
+  governance_forum: https://vote.stakewise.io
+  github_org: stakewise
+
+- id: sanctum
+  name: Sanctum
+  type: rss
+  url: https://medium.com/feed/@sanctumso
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquid_staking
+  priority: medium
+  enabled: true
+  twitter: sanctumso
+  governance_forum: null
+  github_org: sanctumfi
+
+###############################################################################
+# LENDING / BORROWING
+###############################################################################
+
+- id: aave
+  name: Aave
+  type: rss
+  url: https://mirror.xyz/aaveofficial.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: high
+  enabled: true
+  twitter: AaveAave
+  governance_forum: https://governance.aave.com
+  github_org: aave
+
+- id: makerdao
+  name: MakerDAO / Sky
+  type: rss
+  url: https://blog.makerdao.com/feed/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: high
+  enabled: true
+  twitter: MakerDAO
+  governance_forum: https://forum.makerdao.com
+  github_org: makerdao
+
+- id: compound
+  name: Compound
+  type: rss
+  url: https://medium.com/feed/compound-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: high
+  enabled: true
+  twitter: compoundfinance
+  governance_forum: https://www.comp.xyz
+  github_org: compound-finance
+
+- id: morpho
+  name: Morpho
+  type: rss
+  url: https://morpho.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: high
+  enabled: true
+  twitter: MorphoLabs
+  governance_forum: https://forum.morpho.org
+  github_org: morpho-org
+
+- id: spark
+  name: Spark Protocol
+  type: rss
+  url: https://forum.makerdao.com/c/spark/30.rss
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: high
+  enabled: true
+  twitter: SparkDeFi
+  governance_forum: https://forum.makerdao.com/c/spark
+  github_org: marsfoundation
+
+- id: euler
+  name: Euler Finance
+  type: rss
+  url: https://medium.com/feed/euler-xyz
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: eulerfinance
+  governance_forum: https://forum.euler.finance
+  github_org: euler-xyz
+
+- id: radiant
+  name: Radiant Capital
+  type: rss
+  url: https://medium.com/feed/@RadiantCapital
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: RDNTCapital
+  governance_forum: https://community.radiant.capital
+  github_org: radiant-capital
+
+- id: venus
+  name: Venus Protocol
+  type: rss
+  url: https://medium.com/feed/@venus-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: VenusProtocol
+  governance_forum: https://community.venus.io
+  github_org: VenusProtocol
+
+- id: benqi
+  name: BENQI
+  type: rss
+  url: https://medium.com/feed/benqi-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: BenqiFinance
+  governance_forum: null
+  github_org: Benqi-fi
+
+- id: kamino
+  name: Kamino Finance
+  type: rss
+  url: https://medium.com/feed/@kaminofinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: KaminoFinance
+  governance_forum: null
+  github_org: kamino-finance
+
+- id: fluid
+  name: Fluid (Instadapp)
+  type: rss
+  url: https://blog.instadapp.io/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: instadapp
+  governance_forum: https://forum.instadapp.io
+  github_org: Instadapp
+
+- id: marginfi
+  name: marginfi
+  type: rss
+  url: https://medium.com/feed/@marginfi
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: marginfi
+  governance_forum: null
+  github_org: mrgnlabs
+
+- id: inverse
+  name: Inverse Finance
+  type: rss
+  url: https://medium.com/feed/inversefinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: InverseFinance
+  governance_forum: https://forum.inverse.finance
+  github_org: InverseFinance
+
+- id: alchemix
+  name: Alchemix
+  type: rss
+  url: https://medium.com/feed/alchemix-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: AlchemixFi
+  governance_forum: https://forum.alchemix.fi
+  github_org: alchemix-finance
+
+- id: abracadabra
+  name: Abracadabra Money
+  type: rss
+  url: https://medium.com/feed/@abracadabramoney
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: MIM_Spell
+  governance_forum: https://forum.abracadabra.money
+  github_org: Abracadabra-money
+
+- id: silo
+  name: Silo Finance
+  type: rss
+  url: https://medium.com/feed/silo-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: SiloFinance
+  governance_forum: https://gov.silo.finance
+  github_org: silo-finance
+
+- id: sturdy
+  name: Sturdy Finance
+  type: rss
+  url: https://medium.com/feed/sturdy-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: SturdyFinance
+  governance_forum: null
+  github_org: sturdyfi
+
+- id: exactly
+  name: Exactly Protocol
+  type: rss
+  url: https://medium.com/feed/exactly-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: lending
+  priority: medium
+  enabled: true
+  twitter: ExactlyProtocol
+  governance_forum: null
+  github_org: exactly
+
+###############################################################################
+# DEX - AMM
+###############################################################################
+
+- id: uniswap
+  name: Uniswap
+  type: rss
+  url: https://blog.uniswap.org/rss.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: high
+  enabled: true
+  twitter: Uniswap
+  governance_forum: https://gov.uniswap.org
+  github_org: Uniswap
+
+- id: curve
+  name: Curve Finance
+  type: rss
+  url: https://news.curve.fi/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: high
+  enabled: true
+  twitter: CurveFinance
+  governance_forum: https://gov.curve.fi
+  github_org: curvefi
+
+- id: balancer
+  name: Balancer
+  type: rss
+  url: https://medium.com/feed/balancer-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: high
+  enabled: true
+  twitter: Balancer
+  governance_forum: https://forum.balancer.fi
+  github_org: balancer
+
+- id: sushiswap
+  name: SushiSwap
+  type: rss
+  url: https://medium.com/feed/sushiswap-org
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: SushiSwap
+  governance_forum: https://forum.sushi.com
+  github_org: sushiswap
+
+- id: pancakeswap
+  name: PancakeSwap
+  type: rss
+  url: https://medium.com/feed/pancakeswap
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: high
+  enabled: true
+  twitter: PancakeSwap
+  governance_forum: https://forum.pancakeswap.finance
+  github_org: pancakeswap
+
+- id: raydium
+  name: Raydium
+  type: rss
+  url: https://medium.com/feed/@raydium
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: high
+  enabled: true
+  twitter: RaydiumProtocol
+  governance_forum: null
+  github_org: raydium-io
+
+- id: trader_joe
+  name: Trader Joe
+  type: rss
+  url: https://medium.com/feed/trader-joe-xyz
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: traderjoe_xyz
+  governance_forum: https://forum.traderjoexyz.com
+  github_org: traderjoe-xyz
+
+- id: camelot
+  name: Camelot
+  type: rss
+  url: https://medium.com/feed/@camelotdex
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: CamelotDEX
+  governance_forum: null
+  github_org: CamelotLabs
+
+- id: aerodrome
+  name: Aerodrome Finance
+  type: rss
+  url: https://medium.com/feed/@aerodromefinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: high
+  enabled: true
+  twitter: AerodromeFinance
+  governance_forum: null
+  github_org: aerodrome-finance
+
+- id: velodrome
+  name: Velodrome Finance
+  type: rss
+  url: https://medium.com/feed/@velodromefinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: VelodromeFi
+  governance_forum: null
+  github_org: velodrome-finance
+
+- id: orca
+  name: Orca
+  type: rss
+  url: https://medium.com/feed/orca-so
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: orca_so
+  governance_forum: null
+  github_org: orca-so
+
+- id: maverick
+  name: Maverick Protocol
+  type: rss
+  url: https://medium.com/feed/maverick-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: MaverickProtocol
+  governance_forum: null
+  github_org: maverickprotocol
+
+- id: thena
+  name: Thena
+  type: rss
+  url: https://medium.com/feed/@ThenaFi
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: ThenaFi_
+  governance_forum: null
+  github_org: ThenafiBNB
+
+- id: ambient
+  name: Ambient Finance
+  type: rss
+  url: https://medium.com/feed/@ambient_finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex
+  priority: medium
+  enabled: true
+  twitter: ambient_finance
+  governance_forum: null
+  github_org: CrocSwap
+
+###############################################################################
+# DEX AGGREGATORS
+###############################################################################
+
+- id: jupiter
+  name: Jupiter
+  type: rss
+  url: https://www.jupresear.ch/latest.rss
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex_aggregator
+  priority: high
+  enabled: true
+  twitter: JupiterExchange
+  governance_forum: https://www.jupresear.ch
+  github_org: jup-ag
+
+- id: one_inch
+  name: 1inch
+  type: rss
+  url: https://blog.1inch.io/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex_aggregator
+  priority: high
+  enabled: true
+  twitter: 1inch
+  governance_forum: https://gov.1inch.io
+  github_org: 1inch
+
+- id: paraswap
+  name: ParaSwap
+  type: rss
+  url: https://medium.com/feed/paraswap
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex_aggregator
+  priority: medium
+  enabled: true
+  twitter: paraswap
+  governance_forum: https://gov.paraswap.network
+  github_org: paraswap
+
+- id: cowswap
+  name: CoW Protocol
+  type: rss
+  url: https://medium.com/feed/cow-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: dex_aggregator
+  priority: medium
+  enabled: true
+  twitter: CoWSwap
+  governance_forum: https://forum.cow.fi
+  github_org: cowprotocol
+
+###############################################################################
+# YIELD / VAULT
+###############################################################################
+
+- id: convex
+  name: Convex Finance
+  type: rss
+  url: https://medium.com/feed/convex-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: high
+  enabled: true
+  twitter: ConvexFinance
+  governance_forum: null
+  github_org: convex-eth
+
+- id: yearn
+  name: Yearn Finance
+  type: rss
+  url: https://medium.com/feed/iearn
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: high
+  enabled: true
+  twitter: yearnfi
+  governance_forum: https://gov.yearn.fi
+  github_org: yearn
+
+- id: pendle
+  name: Pendle
+  type: rss
+  url: https://medium.com/feed/pendle
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: high
+  enabled: true
+  twitter: pendle_fi
+  governance_forum: https://gov.pendle.finance
+  github_org: pendle-finance
+
+- id: beefy
+  name: Beefy Finance
+  type: rss
+  url: https://medium.com/feed/beefyfinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: medium
+  enabled: true
+  twitter: beefyfinance
+  governance_forum: null
+  github_org: beefyfinance
+
+- id: sommelier
+  name: Sommelier Finance
+  type: rss
+  url: https://medium.com/feed/@sommelierfinance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: medium
+  enabled: true
+  twitter: sommelier_finance
+  governance_forum: https://forum.sommelier.finance
+  github_org: PeggyJV
+
+- id: concentrator
+  name: Concentrator (AladdinDAO)
+  type: rss
+  url: https://medium.com/feed/@aladdindao
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: medium
+  enabled: true
+  twitter: AladdinDAO
+  governance_forum: null
+  github_org: AladdinDAO
+
+- id: harvest
+  name: Harvest Finance
+  type: rss
+  url: https://medium.com/feed/harvest-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: medium
+  enabled: true
+  twitter: harvest_finance
+  governance_forum: null
+  github_org: harvest-finance
+
+- id: gamma
+  name: Gamma Strategies
+  type: rss
+  url: https://medium.com/feed/gamma-strategies
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: yield
+  priority: medium
+  enabled: true
+  twitter: GammaStrategies
+  governance_forum: null
+  github_org: GammaStrategies
+
+###############################################################################
+# DERIVATIVES / PERPS
+###############################################################################
+
+- id: gmx
+  name: GMX
+  type: rss
+  url: https://medium.com/feed/@gmx.io
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  twitter: GMX_IO
+  governance_forum: https://gov.gmx.io
+  github_org: gmx-io
+
+- id: dydx
+  name: dYdX
+  type: rss
+  url: https://www.dydx.foundation/blog-feed.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  twitter: dYdX
+  governance_forum: https://forums.dydx.community
+  github_org: dydxprotocol
+
+- id: hyperliquid
+  name: Hyperliquid
+  type: rss
+  url: https://hyperliquid.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  twitter: HyperliquidX
+  governance_forum: null
+  github_org: hyperliquid-dex
+
+- id: synthetix
+  name: Synthetix
+  type: rss
+  url: https://blog.synthetix.io/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  twitter: synthetix_io
+  governance_forum: https://forum.synthetix.io
+  github_org: Synthetixio
+
+- id: kwenta
+  name: Kwenta
+  type: rss
+  url: https://mirror.xyz/kwenta.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: Kwenta_io
+  governance_forum: https://gov.kwenta.eth.limo
+  github_org: Kwenta
+
+- id: drift
+  name: Drift Protocol
+  type: rss
+  url: https://driftprotocol.medium.com/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: DriftProtocol
+  governance_forum: https://forum.drift.trade
+  github_org: drift-labs
+
+- id: vertex
+  name: Vertex Protocol
+  type: rss
+  url: https://medium.com/feed/vertex-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: vertex_protocol
+  governance_forum: null
+  github_org: vertex-protocol
+
+- id: apex
+  name: ApeX Protocol
+  type: rss
+  url: https://medium.com/feed/@apex-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: ApeXProtocolDEX
+  governance_forum: null
+  github_org: ApeX-Protocol
+
+- id: gains_network
+  name: Gains Network (gTrade)
+  type: rss
+  url: https://medium.com/feed/gains-network
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: GainsNetwork_io
+  governance_forum: null
+  github_org: GainsNetwork
+
+- id: aevo
+  name: Aevo
+  type: rss
+  url: https://mirror.xyz/aevo.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: aevo_xyz
+  governance_forum: null
+  github_org: aevoxyz
+
+- id: lyra
+  name: Lyra Finance
+  type: rss
+  url: https://mirror.xyz/lyrafinance.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: lyrafinance
+  governance_forum: https://gov.lyra.finance
+  github_org: lyra-finance
+
+- id: dopex
+  name: Dopex
+  type: rss
+  url: https://medium.com/feed/@dopex-io
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: dopex_io
+  governance_forum: null
+  github_org: dopex-io
+
+- id: mux
+  name: MUX Protocol
+  type: rss
+  url: https://medium.com/feed/@mux-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: mux_protocol
+  governance_forum: null
+  github_org: mux-world
+
+- id: level_finance
+  name: Level Finance
+  type: rss
+  url: https://medium.com/feed/@level_finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  twitter: Level__Finance
+  governance_forum: null
+  github_org: level-fi
+
+###############################################################################
+# PREDICTION MARKETS
+###############################################################################
+
+- id: polymarket
+  name: Polymarket
+  type: rss
+  url: https://mirror.xyz/polymarket.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: prediction_market
+  priority: high
+  enabled: true
+  twitter: Polymarket
+  governance_forum: null
+  github_org: Polymarket
+
+- id: azuro
+  name: Azuro
+  type: rss
+  url: https://medium.com/feed/@azuroprotocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: prediction_market
+  priority: medium
+  enabled: true
+  twitter: AzuroProtocol
+  governance_forum: null
+  github_org: Azuro-protocol
+
+###############################################################################
+# BRIDGES / CROSS-CHAIN
+###############################################################################
+
+- id: stargate
+  name: Stargate Finance
+  type: rss
+  url: https://medium.com/feed/stargate-official
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: high
+  enabled: true
+  twitter: StargateFinance
+  governance_forum: null
+  github_org: stargate-protocol
+
+- id: layerzero
+  name: LayerZero
+  type: rss
+  url: https://medium.com/feed/layerzero-official
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: high
+  enabled: true
+  twitter: LayerZero_Labs
+  governance_forum: null
+  github_org: LayerZero-Labs
+
+- id: wormhole
+  name: Wormhole
+  type: rss
+  url: https://wormhole.com/blog/rss.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: high
+  enabled: true
+  twitter: wormhole
+  governance_forum: https://forum.wormhole.com
+  github_org: wormhole-foundation
+
+- id: across
+  name: Across Protocol
+  type: rss
+  url: https://medium.com/feed/across-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  twitter: AcrossProtocol
+  governance_forum: https://forum.across.to
+  github_org: across-protocol
+
+- id: synapse
+  name: Synapse Protocol
+  type: rss
+  url: https://medium.com/feed/@synapseprotocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  twitter: SynapseProtocol
+  governance_forum: https://forum.synapseprotocol.com
+  github_org: synapsecns
+
+- id: hop
+  name: Hop Protocol
+  type: rss
+  url: https://medium.com/feed/hop-protocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  twitter: HopProtocol
+  governance_forum: https://forum.hop.exchange
+  github_org: hop-protocol
+
+- id: debridge
+  name: deBridge
+  type: rss
+  url: https://medium.com/feed/debridge
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  twitter: deBridgeFinance
+  governance_forum: null
+  github_org: debridge-finance
+
+- id: celer
+  name: Celer Network
+  type: rss
+  url: https://blog.celer.network/feed/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  twitter: CelerNetwork
+  governance_forum: https://forum.celer.network
+  github_org: celer-network
+
+###############################################################################
+# LAYER 2 / ROLLUPS
+###############################################################################
+
+- id: arbitrum
+  name: Arbitrum
+  type: rss
+  url: https://medium.com/feed/offchainlabs
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: arbitrum
+  governance_forum: https://forum.arbitrum.foundation
+  github_org: OffchainLabs
+
+- id: optimism
+  name: Optimism
+  type: rss
+  url: https://blog.optimism.io/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: Optimism
+  governance_forum: https://gov.optimism.io
+  github_org: ethereum-optimism
+
+- id: base
+  name: Base
+  type: rss
+  url: https://base.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: base
+  governance_forum: null
+  github_org: base-org
+
+- id: zksync
+  name: zkSync (ZK Nation)
+  type: rss
+  url: https://blog.matter-labs.io/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: zksync
+  governance_forum: https://forum.zknation.io
+  github_org: matter-labs
+
+- id: starknet
+  name: StarkNet
+  type: rss
+  url: https://www.starknet.io/blog/feed/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: Starknet
+  governance_forum: https://community.starknet.io
+  github_org: starkware-libs
+
+- id: scroll
+  name: Scroll
+  type: rss
+  url: https://scroll.io/blog/rss.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: Scroll_ZKP
+  governance_forum: https://forum.scroll.io
+  github_org: scroll-tech
+
+- id: linea
+  name: Linea
+  type: rss
+  url: https://linea.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: LineaBuild
+  governance_forum: https://community.linea.build
+  github_org: Consensys
+
+- id: mantle
+  name: Mantle
+  type: rss
+  url: https://medium.com/feed/@mantle-official
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: 0xMantle
+  governance_forum: https://forum.mantle.xyz
+  github_org: mantlenetworkio
+
+- id: blast
+  name: Blast
+  type: rss
+  url: https://mirror.xyz/blastofficial.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: blast
+  governance_forum: null
+  github_org: blast-io
+
+- id: mode
+  name: Mode Network
+  type: rss
+  url: https://medium.com/feed/@modenetwork
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: modenetwork
+  governance_forum: null
+  github_org: mode-network
+
+- id: metis
+  name: Metis
+  type: rss
+  url: https://metisdao.medium.com/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: MetisDAO
+  governance_forum: https://forum.metis.io
+  github_org: MetisProtocol
+
+- id: polygon_zkevm
+  name: Polygon zkEVM
+  type: rss
+  url: https://polygon.technology/blog/rss.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: high
+  enabled: true
+  twitter: 0xPolygon
+  governance_forum: https://forum.polygon.technology
+  github_org: 0xPolygon
+
+- id: taiko
+  name: Taiko
+  type: rss
+  url: https://taiko.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: taikoxyz
+  governance_forum: https://community.taiko.xyz
+  github_org: taikoxyz
+
+- id: manta
+  name: Manta Network
+  type: rss
+  url: https://mantanetwork.medium.com/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: l2
+  priority: medium
+  enabled: true
+  twitter: MantaNetwork
+  governance_forum: null
+  github_org: Manta-Network
+
+###############################################################################
+# DATA AVAILABILITY
+###############################################################################
+
+- id: celestia
+  name: Celestia
+  type: rss
+  url: https://blog.celestia.org/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: data_availability
+  priority: high
+  enabled: true
+  twitter: CelestiaOrg
+  governance_forum: https://forum.celestia.org
+  github_org: celestiaorg
+
+- id: eigenda
+  name: EigenDA
+  type: rss
+  url: https://www.blog.eigenlayer.xyz/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: data_availability
+  priority: high
+  enabled: true
+  twitter: eigenlayer
+  governance_forum: https://forum.eigenlayer.xyz
+  github_org: Layr-Labs
+
+- id: avail
+  name: Avail
+  type: rss
+  url: https://blog.availproject.org/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: data_availability
+  priority: high
+  enabled: true
+  twitter: AvailProject
+  governance_forum: https://forum.availproject.org
+  github_org: availproject
+
+###############################################################################
+# ORACLES
+###############################################################################
+
+- id: chainlink
+  name: Chainlink
+  type: rss
+  url: https://blog.chain.link/feed/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: oracle
+  priority: high
+  enabled: true
+  twitter: chainlink
+  governance_forum: null
+  github_org: smartcontractkit
+
+- id: pyth
+  name: Pyth Network
+  type: rss
+  url: https://pythnetwork.medium.com/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: oracle
+  priority: high
+  enabled: true
+  twitter: PythNetwork
+  governance_forum: https://forum.pyth.network
+  github_org: pyth-network
+
+- id: api3
+  name: API3
+  type: rss
+  url: https://medium.com/feed/api3
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: oracle
+  priority: medium
+  enabled: true
+  twitter: API3DAO
+  governance_forum: https://forum.api3.org
+  github_org: api3dao
+
+- id: uma
+  name: UMA
+  type: rss
+  url: https://medium.com/feed/uma-project
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: oracle
+  priority: medium
+  enabled: true
+  twitter: UMAprotocol
+  governance_forum: https://discourse.uma.xyz
+  github_org: UMAprotocol
+
+- id: redstone
+  name: RedStone
+  type: rss
+  url: https://medium.com/feed/@redstone-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: oracle
+  priority: medium
+  enabled: true
+  twitter: redstone_defi
+  governance_forum: null
+  github_org: redstone-finance
+
+###############################################################################
+# STABLECOINS / CDP
+###############################################################################
+
+- id: ethena
+  name: Ethena
+  type: rss
+  url: https://mirror.xyz/ethena.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: high
+  enabled: true
+  twitter: ethena_labs
+  governance_forum: https://governance.ethena.fi
+  github_org: ethena-labs
+
+- id: frax
+  name: Frax Finance
+  type: rss
+  url: https://medium.com/feed/frax-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: high
+  enabled: true
+  twitter: fraxfinance
+  governance_forum: https://gov.frax.finance
+  github_org: FraxFinance
+
+- id: liquity
+  name: Liquity
+  type: rss
+  url: https://www.liquity.org/blog-feed.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: high
+  enabled: true
+  twitter: LiquityProtocol
+  governance_forum: null
+  github_org: liquity
+
+- id: prisma
+  name: Prisma Finance
+  type: rss
+  url: https://mirror.xyz/prismafinance.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: PrismaFi
+  governance_forum: null
+  github_org: prisma-fi
+
+- id: usual
+  name: Usual
+  type: rss
+  url: https://medium.com/feed/@usualprotocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: usualprotocol
+  governance_forum: null
+  github_org: usual-dao
+
+- id: mountain_protocol
+  name: Mountain Protocol
+  type: rss
+  url: https://medium.com/feed/@mountainprotocol
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: MountainProtocol
+  governance_forum: null
+  github_org: mountainprotocol
+
+- id: resolv
+  name: Resolv
+  type: rss
+  url: https://medium.com/feed/@resolvlabs
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: ResolvLabs
+  governance_forum: null
+  github_org: resolv-labs
+
+- id: angle
+  name: Angle Protocol
+  type: rss
+  url: https://blog.angle.money/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: AngleProtocol
+  governance_forum: https://gov.angle.money
+  github_org: AngleProtocol
+
+- id: crvusd
+  name: crvUSD (Curve)
+  type: rss
+  url: https://news.curve.fi/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: CurveFinance
+  governance_forum: https://gov.curve.fi
+  github_org: curvefi
+
+- id: gho
+  name: GHO (Aave)
+  type: rss
+  url: https://mirror.xyz/aaveofficial.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  twitter: GHOAave
+  governance_forum: https://governance.aave.com
+  github_org: aave
+
+###############################################################################
+# REAL WORLD ASSETS (RWA)
+###############################################################################
+
+- id: ondo
+  name: Ondo Finance
+  type: rss
+  url: https://blog.ondo.finance/rss/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: high
+  enabled: true
+  twitter: OndoFinance
+  governance_forum: https://forum.ondo.finance
+  github_org: ondoprotocol
+
+- id: centrifuge
+  name: Centrifuge
+  type: rss
+  url: https://medium.com/feed/centrifuge
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: high
+  enabled: true
+  twitter: centrifuge
+  governance_forum: https://gov.centrifuge.io
+  github_org: centrifuge
+
+- id: maple
+  name: Maple Finance
+  type: rss
+  url: https://medium.com/feed/maple-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: medium
+  enabled: true
+  twitter: maplefinance
+  governance_forum: https://community.maple.finance
+  github_org: maple-labs
+
+- id: goldfinch
+  name: Goldfinch
+  type: rss
+  url: https://medium.com/feed/goldfinch-fi
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: medium
+  enabled: true
+  twitter: goldfinch_fi
+  governance_forum: https://gov.goldfinch.finance
+  github_org: goldfinch-eng
+
+- id: backed
+  name: Backed Finance
+  type: rss
+  url: https://medium.com/feed/@backedfi
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: medium
+  enabled: true
+  twitter: backedfi
+  governance_forum: null
+  github_org: backed-fi
+
+- id: clearpool
+  name: Clearpool
+  type: rss
+  url: https://medium.com/feed/clearpool-finance
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: medium
+  enabled: true
+  twitter: ClearpoolFin
+  governance_forum: null
+  github_org: clearpool-finance
+
+- id: truefi
+  name: TrueFi
+  type: rss
+  url: https://medium.com/feed/truefi
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: rwa
+  priority: medium
+  enabled: true
+  twitter: TrueFi_DAO
+  governance_forum: https://forum.truefi.io
+  github_org: trusttoken
+
+###############################################################################
+# INSURANCE
+###############################################################################
+
+- id: nexus_mutual
+  name: Nexus Mutual
+  type: rss
+  url: https://medium.com/feed/nexus-mutual
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: insurance
+  priority: medium
+  enabled: true
+  twitter: NexusMutual
+  governance_forum: https://forum.nexusmutual.io
+  github_org: NexusMutual
+
+###############################################################################
+# GOVERNANCE / DAO TOOLING
+###############################################################################
+
+- id: safe
+  name: Safe (Gnosis Safe)
+  type: rss
+  url: https://safe.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: governance
+  priority: high
+  enabled: true
+  twitter: safe
+  governance_forum: https://forum.safe.global
+  github_org: safe-global
+
+- id: aragon
+  name: Aragon
+  type: rss
+  url: https://blog.aragon.org/feed/
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: governance
+  priority: medium
+  enabled: true
+  twitter: AragonProject
+  governance_forum: https://forum.aragon.org
+  github_org: aragon
+
+- id: snapshot
+  name: Snapshot
+  type: rss
+  url: https://snapshot.mirror.xyz/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: governance
+  priority: medium
+  enabled: true
+  twitter: SnapshotLabs
+  governance_forum: null
+  github_org: snapshot-labs
+
+###############################################################################
+# INFRASTRUCTURE
+###############################################################################
+
+- id: the_graph
+  name: The Graph
+  type: rss
+  url: https://thegraph.com/blog/rss.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: infrastructure
+  priority: high
+  enabled: true
+  twitter: graphprotocol
+  governance_forum: https://forum.thegraph.com
+  github_org: graphprotocol
+
+- id: flashbots
+  name: Flashbots
+  type: rss
+  url: https://writings.flashbots.net/feed.xml
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: infrastructure
+  priority: high
+  enabled: true
+  twitter: flashbots
+  governance_forum: https://collective.flashbots.net
+  github_org: flashbots
+
+- id: gelato
+  name: Gelato Network
+  type: rss
+  url: https://medium.com/feed/gelato-network
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: infrastructure
+  priority: medium
+  enabled: true
+  twitter: gelatonetwork
+  governance_forum: null
+  github_org: gelatodigital
+
+###############################################################################
+# NFT / MARKETPLACE
+###############################################################################
+
+- id: blur
+  name: Blur
+  type: rss
+  url: https://mirror.xyz/blurdao.eth/feed/atom
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: nft_marketplace
+  priority: medium
+  enabled: true
+  twitter: blur_io
+  governance_forum: null
+  github_org: blur-io
+
+- id: opensea
+  name: OpenSea
+  type: rss
+  url: https://opensea.io/blog/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: nft_marketplace
+  priority: medium
+  enabled: true
+  twitter: opensea
+  governance_forum: null
+  github_org: ProjectOpenSea
+
+- id: tensor
+  name: Tensor
+  type: rss
+  url: https://medium.com/feed/@tensor_hq
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: nft_marketplace
+  priority: medium
+  enabled: true
+  twitter: tensor_hq
+  governance_forum: null
+  github_org: tensor-foundation
+
+###############################################################################
+# LIQUIDITY
+###############################################################################
+
+- id: tokemak
+  name: Tokemak
+  type: rss
+  url: https://medium.com/feed/tokemak
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquidity
+  priority: medium
+  enabled: true
+  twitter: TokenReactor
+  governance_forum: null
+  github_org: Tokemak
+
+- id: merkl
+  name: Merkl
+  type: rss
+  url: https://blog.angle.money/feed
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: liquidity
+  priority: medium
+  enabled: true
+  twitter: MerklXYZ
+  governance_forum: null
+  github_org: AngleProtocol
+
+###############################################################################
+# PRIVACY
+###############################################################################
+
+- id: railgun
+  name: Railgun
+  type: rss
+  url: https://medium.com/feed/@railgun_project
+  collector: news_feed
+  frequency: 2h
+  category: defi_protocol
+  subcategory: privacy
+  priority: medium
+  enabled: true
+  twitter: RAILGUN_Project
+  governance_forum: null
+  github_org: Railgun-Community

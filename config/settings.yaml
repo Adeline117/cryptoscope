@@ -1,0 +1,64 @@
+# CryptoScope Configuration
+# API keys loaded from environment variables
+
+api_keys:
+  claude: ${ANTHROPIC_API_KEY}
+  dune: ${DUNE_API_KEY}
+  defillama: null  # No key needed
+  etherscan: ${ETHERSCAN_API_KEY}
+  github: ${GITHUB_TOKEN}
+  twitter: ${TWITTER_BEARER_TOKEN}
+  telegram_bot: ${TELEGRAM_BOT_TOKEN}
+  coingecko: ${COINGECKO_API_KEY}
+  messari: ${MESSARI_API_KEY}
+  semantic_scholar: ${SEMANTIC_SCHOLAR_API_KEY}
+
+# Arena database connection
+arena_db:
+  host: ${ARENA_DB_HOST}
+  port: 5432
+  database: arena
+  user: ${ARENA_DB_USER}
+  password: ${ARENA_DB_PASS}
+
+# Telegram distribution
+telegram:
+  review_channel_id: ${TG_REVIEW_CHANNEL}
+  bot_username: cryptoscope_bot
+
+# Content settings
+content:
+  default_languages: [en, zh]
+  thread_max_tweets: 15
+  claude_model: claude-sonnet-4-20250514
+
+# Scheduling (UTC)
+schedule:
+  daily_run: "08:00"
+  weekly_run: "sunday 10:00"
+  anomaly_check: "*/30 * * * *"
+
+# Collection intervals
+collection_intervals:
+  price_funding: 300       # 5 minutes
+  news_rss: 900            # 15 minutes
+  github: 3600             # 1 hour
+  academic: 21600          # 6 hours
+  research_reports: 7200   # 2 hours
+  governance: 3600         # 1 hour
+
+# Priority scoring thresholds
+priority:
+  auto_draft_threshold: 70
+  digest_threshold: 40
+  archive_below: 40
+
+# Chart styling
+chart_style:
+  primary_color: "#00D4AA"
+  negative_color: "#FF6B6B"
+  background_color: "#0D1117"
+  text_color: "#E6EDF3"
+  grid_color: "#21262D"
+  font_family: "Inter"
+  watermark_text: "CryptoScope / Arena"

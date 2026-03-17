@@ -1,0 +1,9 @@
+services:
+  cryptoscope:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./config:/app/config
+    restart: unless-stopped

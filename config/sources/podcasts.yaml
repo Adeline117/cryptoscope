@@ -1,0 +1,101 @@
+# Podcast RSS feeds
+
+- id: podcast_bankless
+  name: Bankless Podcast
+  type: rss
+  url: "https://feeds.banklesshq.com/bankless"
+  collector: news_feed
+  frequency: 6h
+  category: podcast
+  priority: high
+  enabled: true
+
+- id: podcast_unchained
+  name: Unchained Podcast
+  type: rss
+  url: "https://unchainedcrypto.com/feed/podcast/"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: high
+  enabled: true
+
+- id: podcast_chopping_block
+  name: The Chopping Block
+  type: rss
+  url: "https://feeds.megaphone.fm/thechopping-block"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_bell_curve
+  name: Bell Curve
+  type: rss
+  url: "https://feeds.transistor.fm/bell-curve"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_epicenter
+  name: Epicenter
+  type: rss
+  url: "https://feeds.simplecast.com/lKmQdG9v"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_zero_knowledge
+  name: Zero Knowledge Podcast
+  type: rss
+  url: "https://feeds.simplecast.com/ZKuzsiFl"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_empire
+  name: Empire (Blockworks)
+  type: rss
+  url: "https://feeds.megaphone.fm/empire"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_lightspeed
+  name: Lightspeed (Solana)
+  type: rss
+  url: "https://feeds.simplecast.com/VHa23uvj"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_scoop
+  name: "The Scoop (The Block)"
+  type: rss
+  url: "https://feeds.simplecast.com/K47rMqQa"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: medium
+  enabled: true
+
+- id: podcast_flippening
+  name: Flippening
+  type: rss
+  url: "https://feeds.simplecast.com/MN5fBnMc"
+  collector: news_feed
+  frequency: 12h
+  category: podcast
+  priority: low
+  enabled: true

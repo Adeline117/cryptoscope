@@ -1,0 +1,82 @@
+{#
+Macro Economic Event Thread Template
+Used for: FOMC decisions, CPI releases, NFP, Core PCE, etc.
+#}
+
+{# === ENGLISH VERSION === #}
+
+{% block en_thread %}
+{# Tweet 1: Hook with the data #}
+{{ hook_en }}
+{# e.g.: ⚡ CPI just came in HOT — 3.2% vs 3.0% expected. Here's what it means for crypto. #}
+
+{# Tweet 2: The Data #}
+2/{{ total_tweets }} 📊 {{ event_name }}:
+Actual: {{ actual_value }} {{ "✅ beat" if actual_vs_expected == "beat" else "❌ miss" if actual_vs_expected == "miss" else "➡️ inline" }}
+Expected: {{ expected_value }}
+Previous: {{ previous_value }}
+[ATTACH: {{ surprise_chart }}]
+
+{# Tweet 3: Immediate Market Reaction #}
+3/{{ total_tweets }} ⚡ Market reaction (first 15 min):
+BTC: {{ btc_reaction }}
+DXY: {{ dxy_reaction }}
+10Y: {{ yield_10y_reaction }}
+S&P 500: {{ spx_reaction }}
+
+{# Tweet 4: Fed Implications #}
+4/{{ total_tweets }} 🏛️ {{ fed_implications_en }}
+{# What this means for rate cut/hike expectations #}
+{# CME FedWatch probabilities #}
+
+{# Tweet 5: Historical Context #}
+5/{{ total_tweets }} {{ historical_context_en }}
+[ATTACH: {{ context_chart }}]
+
+{# Tweet 6: Crypto-Specific Impact #}
+6/{{ total_tweets }} 🔍 {{ crypto_impact_en }}
+{# ETF flows, funding rates, OI changes #}
+
+{# Tweet 7: Arena Connection (if relevant) #}
+{% if arena_angle_en %}
+7/{{ total_tweets }} {{ arena_angle_en }}
+{# Top traders' positioning after the data release #}
+{% endif %}
+
+{# Tweet 8: Takeaway #}
+{{ total_tweets }}/{{ total_tweets }} 🔑 {{ takeaway_en }}
+Full analysis: {{ openclaw_url }}
+{% endblock %}
+
+---
+
+{# === 中文版 === #}
+
+{% block zh_thread %}
+{{ hook_zh }}
+{# e.g.: ⚡ CPI 超预期 — 实际 3.2% vs 预期 3.0%。对加密市场意味着什么？ #}
+
+2/{{ total_tweets }} 📊 {{ event_name_zh }}:
+实际值: {{ actual_value }} {{ "✅ 超预期" if actual_vs_expected == "beat" else "❌ 不及预期" if actual_vs_expected == "miss" else "➡️ 符合预期" }}
+预期: {{ expected_value }}
+前值: {{ previous_value }}
+
+3/{{ total_tweets }} ⚡ 即时市场反应:
+BTC: {{ btc_reaction }}
+美元指数: {{ dxy_reaction }}
+10年期美债: {{ yield_10y_reaction }}
+标普500: {{ spx_reaction }}
+
+4/{{ total_tweets }} 🏛️ {{ fed_implications_zh }}
+
+5/{{ total_tweets }} {{ historical_context_zh }}
+
+6/{{ total_tweets }} 🔍 {{ crypto_impact_zh }}
+
+{% if arena_angle_zh %}
+7/{{ total_tweets }} {{ arena_angle_zh }}
+{% endif %}
+
+{{ total_tweets }}/{{ total_tweets }} 🔑 {{ takeaway_zh }}
+完整分析: {{ openclaw_url }}
+{% endblock %}

@@ -1,0 +1,43 @@
+name: Weekly Arena Report
+
+on:
+  schedule:
+    - cron: '0 10 * * 0'  # 10:00 UTC every Sunday
+  workflow_dispatch:
+
+jobs:
+  weekly-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weekly pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_REVIEW_CHANNEL: ${{ secrets.TG_REVIEW_CHANNEL }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          ARENA_DB_HOST: ${{ secrets.ARENA_DB_HOST }}
+          ARENA_DB_USER: ${{ secrets.ARENA_DB_USER }}
+          ARENA_DB_PASS: ${{ secrets.ARENA_DB_PASS }}
+        run: python -m src.pipeline.daily_pipeline  # TODO: switch to weekly_pipeline
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-report-${{ github.run_number }}
+          path: |
+            output/charts/
+            output/threads/
+          retention-days: 30

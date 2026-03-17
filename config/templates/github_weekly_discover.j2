@@ -1,0 +1,151 @@
+{#
+GitHub Weekly Discovery Thread Template
+Weekly thread highlighting trending repos, star velocity anomalies,
+and ecosystem growth in crypto open source.
+#}
+
+{# === ENGLISH VERSION === #}
+
+{% block en_thread %}
+{# Tweet 1: Hook — lead with the top discovery #}
+1/{{ total_tweets }} {{ hook_emoji }} {{ top_discovery.repo }} just hit {{ top_discovery.stars_per_day | round(0) | int }} stars/day — {{ top_discovery.velocity_change }}x its normal rate.
+
+{{ top_discovery.one_liner }}
+
+Weekly GitHub Alpha below:
+
+{# Tweet 2: Top project deep dive with chart #}
+2/{{ total_tweets }} {{ top_discovery.repo }}
+
+{{ top_discovery.description }}
+
+Stars: {{ top_discovery.total_stars | format_number }} (+{{ top_discovery.stars_7d | format_number }} this week)
+Forks: {{ top_discovery.forks | format_number }}
+Language: {{ top_discovery.language }}
+{% if top_discovery.latest_release %}
+Latest release: {{ top_discovery.latest_release }}{% endif %}
+
+[ATTACH: {{ star_velocity_chart_filename }}]
+
+{# Tweet 3-5: Notable repos #}
+{% for repo in notable_repos[:3] %}
+{{ loop.index + 2 }}/{{ total_tweets }} {% if repo.alert_level == "HIGH" %}🔴{% elif repo.alert_level == "MEDIUM" %}🟡{% else %}🟢{% endif %} {{ repo.repo }}
+
+{{ repo.description | truncate(120) }}
+
++{{ repo.stars_7d }} stars this week ({{ repo.stars_per_day | round(1) }}/day)
+Trend: {{ repo.trend }}{% if repo.category %} | Category: {{ repo.category | replace("_", " ") | title }}{% endif %}
+{% if repo.context_note %}
+{{ repo.context_note }}{% endif %}
+
+{% endfor %}
+
+{# Tweet 6: Ecosystem treemap #}
+{{ notable_repos | length + 3 }}/{{ total_tweets }} Ecosystem Growth Map — where the stars are flowing this week:
+
+{% for cat in ecosystem_summary %}
+{{ cat.emoji }} {{ cat.name }}: +{{ cat.weekly_stars | format_number }} stars ({{ cat.growth_pct }}%)
+{% endfor %}
+
+[ATTACH: {{ ecosystem_treemap_filename }}]
+
+{# Tweet 7: New repo discoveries #}
+{{ notable_repos | length + 4 }}/{{ total_tweets }} New repos on our radar:
+
+{% for new in new_discoveries[:5] %}
+- {{ new.repo }} ({{ new.stars }} stars, {{ new.language }}) — {{ new.source }}
+{% endfor %}
+
+{% if new_discoveries | length > 5 %}
++{{ new_discoveries | length - 5 }} more tracked in our dashboard
+{% endif %}
+
+{# Tweet 8: Arena connection (optional) #}
+{% if arena_angle %}
+{{ notable_repos | length + 5 }}/{{ total_tweets }} {{ arena_angle }}
+
+Top Arena traders are watching these protocol developments closely.
+Track their positioning: https://arenafi.org
+{% endif %}
+
+{# Tweet 9: CTA #}
+{{ total_tweets }}/{{ total_tweets }} Full analysis with charts and data:
+{{ openclaw_url }}
+
+Follow for weekly crypto GitHub intelligence.
+Methodology: Z-score anomaly detection on star velocity across {{ repos_tracked }} repos.
+{% endblock %}
+
+---
+
+{# === CHINESE VERSION === #}
+
+{% block zh_thread %}
+{# Tweet 1: Hook #}
+1/{{ total_tweets }} {{ hook_emoji }} {{ top_discovery.repo }} 的 star 增速达到 {{ top_discovery.stars_per_day | round(0) | int }}/天 — 是正常速率的 {{ top_discovery.velocity_change }}倍。
+
+{{ top_discovery.one_liner_zh }}
+
+本周 GitHub 加密 Alpha:
+
+{# Tweet 2: 重点项目详情 #}
+2/{{ total_tweets }} {{ top_discovery.repo }}
+
+{{ top_discovery.description_zh }}
+
+Stars: {{ top_discovery.total_stars | format_number }} (本周 +{{ top_discovery.stars_7d | format_number }})
+Forks: {{ top_discovery.forks | format_number }}
+语言: {{ top_discovery.language }}
+{% if top_discovery.latest_release %}
+最新版本: {{ top_discovery.latest_release }}{% endif %}
+
+[附图: {{ star_velocity_chart_filename }}]
+
+{# Tweet 3-5: 值得关注的项目 #}
+{% for repo in notable_repos[:3] %}
+{{ loop.index + 2 }}/{{ total_tweets }} {% if repo.alert_level == "HIGH" %}🔴{% elif repo.alert_level == "MEDIUM" %}🟡{% else %}🟢{% endif %} {{ repo.repo }}
+
+{{ repo.description_zh | truncate(120) }}
+
+本周 +{{ repo.stars_7d }} stars ({{ repo.stars_per_day | round(1) }}/天)
+趋势: {{ repo.trend_zh }}{% if repo.category %} | 类别: {{ repo.category_zh }}{% endif %}
+{% if repo.context_note_zh %}
+{{ repo.context_note_zh }}{% endif %}
+
+{% endfor %}
+
+{# Tweet 6: 生态系统树图 #}
+{{ notable_repos | length + 3 }}/{{ total_tweets }} 生态增长图 — 本周 stars 流向:
+
+{% for cat in ecosystem_summary %}
+{{ cat.emoji }} {{ cat.name_zh }}: +{{ cat.weekly_stars | format_number }} stars ({{ cat.growth_pct }}%)
+{% endfor %}
+
+[附图: {{ ecosystem_treemap_filename }}]
+
+{# Tweet 7: 新发现的仓库 #}
+{{ notable_repos | length + 4 }}/{{ total_tweets }} 新进入雷达的仓库:
+
+{% for new in new_discoveries[:5] %}
+- {{ new.repo }} ({{ new.stars }} stars, {{ new.language }}) — {{ new.source_zh }}
+{% endfor %}
+
+{% if new_discoveries | length > 5 %}
+另有 {{ new_discoveries | length - 5 }} 个新项目已收录
+{% endif %}
+
+{# Tweet 8: Arena 关联 #}
+{% if arena_angle_zh %}
+{{ notable_repos | length + 5 }}/{{ total_tweets }} {{ arena_angle_zh }}
+
+Arena 顶级交易员正在密切关注这些协议进展。
+追踪持仓变动: https://arenafi.org
+{% endif %}
+
+{# Tweet 9: CTA #}
+{{ total_tweets }}/{{ total_tweets }} 完整分析与图表:
+{{ openclaw_url }}
+
+关注我们获取每周加密 GitHub 情报。
+方法论: 对 {{ repos_tracked }} 个仓库的 star 增速进行 Z-score 异常检测。
+{% endblock %}

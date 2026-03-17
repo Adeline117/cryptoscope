@@ -1,0 +1,86 @@
+# Public Telegram channels to monitor
+
+- id: tg_wu_blockchain
+  name: Wu Blockchain
+  type: telegram
+  channel: WuBlockchainUpdates
+  collector: telegram_monitor
+  frequency: 15m
+  category: news
+  subcategory: chinese
+  priority: high
+  enabled: true
+
+- id: tg_the_block
+  name: The Block
+  type: telegram
+  channel: TheBlockDaily
+  collector: telegram_monitor
+  frequency: 15m
+  category: news
+  priority: high
+  enabled: true
+
+- id: tg_whale_alert
+  name: Whale Alert
+  type: telegram
+  channel: whale_alert_io
+  collector: telegram_monitor
+  frequency: 5m
+  category: onchain_data
+  subcategory: whale_tracking
+  priority: high
+  enabled: true
+
+- id: tg_lookonchain
+  name: Lookonchain
+  type: telegram
+  channel: lookonchain
+  collector: telegram_monitor
+  frequency: 15m
+  category: onchain_data
+  subcategory: whale_tracking
+  priority: high
+  enabled: true
+
+- id: tg_embercn
+  name: EmberCN
+  type: telegram
+  channel: EmberCN
+  collector: telegram_monitor
+  frequency: 15m
+  category: onchain_data
+  subcategory: chinese
+  priority: high
+  enabled: true
+
+- id: tg_defillama
+  name: DeFiLlama Updates
+  type: telegram
+  channel: defabordeaux
+  collector: telegram_monitor
+  frequency: 30m
+  category: onchain_data
+  priority: medium
+  enabled: true
+
+- id: tg_rekt
+  name: Rekt News
+  type: telegram
+  channel: RektHQ
+  collector: telegram_monitor
+  frequency: 1h
+  category: news
+  subcategory: security
+  priority: high
+  enabled: true
+
+- id: tg_delphi
+  name: Delphi Digital
+  type: telegram
+  channel: delabordeaux
+  collector: telegram_monitor
+  frequency: 2h
+  category: research
+  priority: medium
+  enabled: true

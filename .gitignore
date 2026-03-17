@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Data (raw is large, don't track)
+data/raw/
+data/processed/
+data/drafts/
+
+# Output
+output/charts/
+output/screenshots/
+output/threads/
+
+# Cache
+*.db
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Playwright
+playwright-browsers/

@@ -1,0 +1,40 @@
+name: Daily Pipeline
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # 08:00 UTC daily
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  daily-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily pipeline
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_REVIEW_CHANNEL: ${{ secrets.TG_REVIEW_CHANNEL }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+          DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+        run: python -m src.pipeline.daily_pipeline
+
+      - name: Upload charts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-charts-${{ github.run_number }}
+          path: output/charts/
+          retention-days: 7

@@ -1,0 +1,405 @@
+# CryptoScope - GitHub Star Velocity Tracking Configuration
+# Tracks star growth, detects anomalies, discovers trending crypto repos
+# Generated: 2026-03-16
+
+###############################################################################
+# WATCHED REPOSITORIES — organized by category
+###############################################################################
+
+watched_repos:
+
+  # ---------------------------------------------------------------------------
+  # INFRASTRUCTURE — L1 clients, consensus, networking
+  # ---------------------------------------------------------------------------
+  infrastructure:
+    # Ethereum Execution Clients
+    - ethereum/go-ethereum
+    - paradigmxyz/reth
+    - hyperledger/besu
+    - NethermindEth/nethermind
+    - erigontech/erigon
+    # Ethereum Consensus Clients
+    - prysmaticlabs/prysm
+    - sigp/lighthouse
+    - ChainSafe/lodestar
+    - status-im/nimbus-eth2
+    - ConsenSys/teku
+    # Ethereum Core
+    - ethereum/solidity
+    - ethereum/consensus-specs
+    - ethereum/EIPs
+    - ethereum/execution-specs
+    - ethereum/py-evm
+    - ethereum/fe
+    # Solana
+    - solana-labs/solana
+    - anza-xyz/agave
+    - jito-foundation/jito-solana
+    - firedancer-io/firedancer
+    - solana-labs/solana-program-library
+    - coral-xyz/anchor
+    # Cosmos / IBC
+    - cosmos/cosmos-sdk
+    - cometbft/cometbft
+    - cosmos/ibc-go
+    - osmosis-labs/osmosis
+    - celestiaorg/celestia-node
+    - celestiaorg/celestia-app
+    - dymensionxyz/dymension
+    # Polkadot / Substrate
+    - paritytech/polkadot-sdk
+    - paritytech/substrate
+    # Avalanche
+    - ava-labs/avalanchego
+    - ava-labs/subnet-evm
+    # NEAR
+    - near/nearcore
+    - near/near-sdk-rs
+    # Aptos / Move
+    - aptos-labs/aptos-core
+    - MystenLabs/sui
+    - movementlabsxyz/movement
+    # Bitcoin
+    - bitcoin/bitcoin
+    - lightningnetwork/lnd
+    - lightning/bolts
+    - ElementsProject/lightning
+    - fedimint/fedimint
+    - citadel-tech/coinswap
+    # Starknet / Cairo
+    - starkware-libs/cairo
+    - starknet-io/starknet-specs
+    - dojoengine/dojo
+    - keep-starknet-strange/madara
+    # Other L1
+    - ton-blockchain/ton
+    - matter-labs/era-compiler-solidity
+    - monad-labs/monad
+
+  # ---------------------------------------------------------------------------
+  # DEFI — protocols, AMMs, lending, derivatives
+  # ---------------------------------------------------------------------------
+  defi:
+    # Uniswap
+    - Uniswap/v3-core
+    - Uniswap/v4-core
+    - Uniswap/universal-router
+    - Uniswap/permit2
+    # Aave
+    - aave/aave-v3-core
+    - aave/aave-v3-periphery
+    - aave/gho-core
+    # Curve
+    - curvefi/curve-stablecoin
+    - curvefi/curve-dao-contracts
+    # Compound / Morpho
+    - compound-finance/compound-protocol
+    - compound-finance/comet
+    - morpho-org/morpho-blue
+    # MakerDAO / Sky
+    - makerdao/dss
+    - makerdao/dss-flash
+    # Lido
+    - lidofinance/lido-dao
+    - lidofinance/core
+    # EigenLayer
+    - Layr-Labs/eigenlayer-contracts
+    - Layr-Labs/eigenda
+    - Layr-Labs/incredible-squaring-avs
+    # Pendle
+    - pendle-finance/pendle-core-v2-public
+    # Hyperliquid
+    - hyperliquid-dex/contracts
+    # GMX
+    - gmx-io/gmx-contracts
+    - gmx-io/gmx-synthetics
+    # dYdX
+    - dydxprotocol/v4-chain
+    - dydxprotocol/v4-clients
+    # Drift / Solana DeFi
+    - drift-labs/protocol-v2
+    - marinade-finance/liquid-staking-program
+    - jup-ag/jupiter-core
+    - raydium-io/raydium-amm
+    - orca-so/whirlpools
+    # Ethena
+    - ethena-labs/ethena
+    # Across / Bridges
+    - across-protocol/contracts
+    - synapsecns/sanguine
+    - stargate-protocol/stargate-v2
+    # Yearn
+    - yearn/yearn-vaults-v3
+    # Balancer
+    - balancer/balancer-v2-monorepo
+
+  # ---------------------------------------------------------------------------
+  # AI + CRYPTO — AI agents, inference, decentralized AI
+  # ---------------------------------------------------------------------------
+  ai_crypto:
+    - ritual-net/infernet-sdk
+    - ritual-net/infernet-container-starter
+    - bittensor/bittensor
+    - autonolas/open-autonomy
+    - autonolas/open-aea
+    - fetchai/fetchd
+    - fetchai/uAgents
+    - galadriel-ai/contracts
+    - ora-io/keras2circom
+    - modulus-labs/remainder
+    - 0xPlaygrounds/rig
+    - elizaOS/eliza
+    - ai16z/ai16z
+    - virtuals-protocol/game-python
+    - Nous-Research/nous-psyche
+    - polywrap/evo
+    - tee-he-he/err_err_ttyl
+    - crestalnetwork/crestal-omni-orchestrator
+
+  # ---------------------------------------------------------------------------
+  # DEV TOOLS — frameworks, testing, libraries
+  # ---------------------------------------------------------------------------
+  dev_tools:
+    # Foundry
+    - foundry-rs/foundry
+    - foundry-rs/forge-std
+    # Hardhat
+    - NomicFoundation/hardhat
+    # OpenZeppelin
+    - OpenZeppelin/openzeppelin-contracts
+    - OpenZeppelin/openzeppelin-contracts-upgradeable
+    # Solmate / Solady
+    - transmissions11/solmate
+    - Vectorized/solady
+    # Alloy / Ethers
+    - alloy-rs/alloy
+    - alloy-rs/core
+    - ethers-io/ethers.js
+    # Viem / Wagmi
+    - wevm/viem
+    - wevm/wagmi
+    # Ape / Brownie / Vyper
+    - vyperlang/vyper
+    - ApeWorX/ape
+    # Thirdweb
+    - thirdweb-dev/contracts
+    - thirdweb-dev/js
+    # Scaffold
+    - scaffold-eth/scaffold-eth-2
+    # Chainlink
+    - smartcontractkit/chainlink
+    - smartcontractkit/ccip
+    # Account Abstraction
+    - eth-infinitism/account-abstraction
+    # Tenderly
+    - Tenderly/tenderly-cli
+    # Security
+    - crytic/slither
+    - crytic/echidna
+    - trailofbits/manticore
+    - Consensys/mythril
+
+  # ---------------------------------------------------------------------------
+  # MEV INFRASTRUCTURE
+  # ---------------------------------------------------------------------------
+  mev_infra:
+    - flashbots/mev-boost
+    - flashbots/builder
+    - flashbots/mev-share-node
+    - flashbots/suave-geth
+    - flashbots/mev-boost-relay
+    - skip-mev/block-sdk
+    - skip-mev/slinky
+    - FastLane-Labs/atlas
+    - paradigmxyz/artemis
+    - SorellaLabs/brontes
+    - bloxapp/ssv-network
+
+  # ---------------------------------------------------------------------------
+  # ZERO KNOWLEDGE — proof systems, zkVMs, zkRollups
+  # ---------------------------------------------------------------------------
+  zk:
+    # General ZK
+    - iden3/circom
+    - iden3/snarkjs
+    - arkworks-rs/algebra
+    - privacy-scaling-explorations/halo2
+    - microsoft/Nova
+    # ZK Rollups
+    - matter-labs/zksync-era
+    - scroll-tech/scroll
+    - taikoxyz/taiko-mono
+    - 0xPolygonHermez/zkevm-node
+    # zkVMs
+    - risc0/risc0
+    - succinctlabs/sp1
+    - a16zcrypto/jolt
+    - powdr-labs/powdr
+    - nexus-xyz/nexus-zkvm
+    # Proof Marketplaces
+    - gevulotnetwork/gevulot
+    # FHE
+    - zama-ai/tfhe-rs
+    - zama-ai/concrete
+    - sunscreen-tech/sunscreen
+
+  # ---------------------------------------------------------------------------
+  # WALLETS & ACCOUNT ABSTRACTION
+  # ---------------------------------------------------------------------------
+  wallets_aa:
+    - MetaMask/metamask-extension
+    - nichanank/safe-contracts
+    - safe-global/safe-smart-account
+    - safe-global/safe-modules
+    - WalletConnect/walletconnect-monorepo
+    - rainbow-me/rainbow
+    - phantom/phantom-wallet
+    - solflare-wallet/solflare-sdk
+    - coinbase/onchainkit
+    - coinbase/smart-wallet
+    - pimlico/permissionless.js
+    - zerodevapp/kernel
+    - biconomy/scw-contracts
+
+  # ---------------------------------------------------------------------------
+  # INTEROPERABILITY & BRIDGES
+  # ---------------------------------------------------------------------------
+  interop:
+    - LayerZero-Labs/LayerZero-v2
+    - wormhole-foundation/wormhole
+    - hyperlane-xyz/hyperlane-monorepo
+    - axelarnetwork/axelar-core
+    - connext/monorepo
+    - polynetwork/poly
+    - zetachain/node
+    - chainapsis/keplr-wallet
+
+  # ---------------------------------------------------------------------------
+  # DATA & ORACLES
+  # ---------------------------------------------------------------------------
+  data_oracles:
+    - pyth-network/pyth-crosschain
+    - pyth-network/pythnet
+    - chronicleprotocol/scribe
+    - redstone-finance/redstone-oracles-monorepo
+    - fluxprotocol/flux-oracle
+    - api3dao/airnode
+    - tellor-io/telliot
+    - UMAprotocol/protocol
+    - graphprotocol/graph-node
+    - graphprotocol/graph-client
+    - subsquid/squid-sdk
+    - duneanalytics/spellbook
+    - DefiLlama/DefiLlama-Adapters
+    - DefiLlama/dimension-adapters
+
+###############################################################################
+# DISCOVERY SETTINGS — find new trending repos
+###############################################################################
+
+discovery:
+
+  trending_languages:
+    - Solidity
+    - Rust
+    - Move
+    - Cairo
+    - Vyper
+
+  search_topics:
+    - blockchain
+    - ethereum
+    - solana
+    - defi
+    - web3
+    - smart-contracts
+    - zero-knowledge
+    - zk-snarks
+    - zk-rollup
+    - mev
+    - layer2
+    - rollup
+    - ai-agents
+    - ai-crypto
+    - account-abstraction
+    - evm
+    - cosmos-sdk
+    - move-language
+    - cairo-lang
+    - decentralized-finance
+    - nft
+    - dao
+    - liquid-staking
+    - restaking
+    - intent
+    - cross-chain
+    - bridge
+    - oracle
+    - fhe
+    - mpc
+    - threshold-cryptography
+
+  search_filters:
+    min_stars: 50
+    created_after: "2024-01-01"
+    pushed_after_days: 30          # must have a push within last N days
+    min_forks: 5
+
+  key_developers_to_track:
+    - paradigmxyz
+    - a16zcrypto
+    - flashbots
+    - banteg
+    - transmissions11
+    - Vectorized
+    - pcaversaccio
+    - gakonst
+    - samczsun
+    - libevm
+    - frangio
+    - maboroshi
+    - onbjerg
+    - danfinlay
+    - alcueca
+    - mds1
+    - 0xJuancito
+    - nascentxyz
+    - zobront
+    - PatrickAlpworker
+    - tinchoabbate
+    - 0age
+    - horsefacts
+    - dmfxyz
+    - jtriley-eth
+    - devtooligan
+    - zeroknots
+    - SorellaLabs
+    - bluealloy
+    - alloy-rs
+
+###############################################################################
+# ANOMALY DETECTION THRESHOLDS
+###############################################################################
+
+anomaly_detection:
+  z_score_thresholds:
+    high: 3.0
+    medium: 2.0
+    notable: 1.5
+
+  absolute_thresholds:
+    stars_24h_auto_analyze: 500
+    stars_7d_weekly_report: 2000
+
+  sliding_window_days: 30
+  min_data_points: 7
+
+###############################################################################
+# COLLECTION SCHEDULE
+###############################################################################
+
+schedule:
+  star_counts: "0 */6 * * *"       # every 6 hours
+  trending_scan: "0 8,20 * * *"    # twice daily
+  new_repo_search: "0 10 * * 1"    # weekly on Monday
+  developer_tracking: "0 12 * * *" # daily at noon UTC

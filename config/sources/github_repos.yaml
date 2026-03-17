@@ -1,0 +1,2959 @@
+# CryptoScope - GitHub Repository Sources
+# 200+ crypto infrastructure repos to monitor
+# Generated: 2026-03-16
+
+###############################################################################
+# CORE ETHEREUM
+###############################################################################
+
+# -- Execution Clients --
+- id: gh_ethereum_go_ethereum
+  name: ethereum/go-ethereum
+  type: api
+  repo: ethereum/go-ethereum
+  url: https://github.com/ethereum/go-ethereum
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_paradigmxyz_reth
+  name: paradigmxyz/reth
+  type: api
+  repo: paradigmxyz/reth
+  url: https://github.com/paradigmxyz/reth
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_hyperledger_besu
+  name: hyperledger/besu
+  type: api
+  repo: hyperledger/besu
+  url: https://github.com/hyperledger/besu
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_nethermindeth_nethermind
+  name: NethermindEth/nethermind
+  type: api
+  repo: NethermindEth/nethermind
+  url: https://github.com/NethermindEth/nethermind
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_erigontech_erigon
+  name: erigontech/erigon
+  type: api
+  repo: erigontech/erigon
+  url: https://github.com/erigontech/erigon
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+# -- Consensus Clients --
+- id: gh_prysmaticlabs_prysm
+  name: prysmaticlabs/prysm
+  type: api
+  repo: prysmaticlabs/prysm
+  url: https://github.com/prysmaticlabs/prysm
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_sigp_lighthouse
+  name: sigp/lighthouse
+  type: api
+  repo: sigp/lighthouse
+  url: https://github.com/sigp/lighthouse
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_consensys_teku
+  name: ConsenSys/teku
+  type: api
+  repo: ConsenSys/teku
+  url: https://github.com/ConsenSys/teku
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_status_im_nimbus_eth2
+  name: status-im/nimbus-eth2
+  type: api
+  repo: status-im/nimbus-eth2
+  url: https://github.com/status-im/nimbus-eth2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_chainsafe_lodestar
+  name: ChainSafe/lodestar
+  type: api
+  repo: ChainSafe/lodestar
+  url: https://github.com/ChainSafe/lodestar
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+# -- Specs & Standards --
+- id: gh_ethereum_consensus_specs
+  name: ethereum/consensus-specs
+  type: api
+  repo: ethereum/consensus-specs
+  url: https://github.com/ethereum/consensus-specs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_eips
+  name: ethereum/EIPs
+  type: api
+  repo: ethereum/EIPs
+  url: https://github.com/ethereum/EIPs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_ercs
+  name: ethereum/ERCs
+  type: api
+  repo: ethereum/ERCs
+  url: https://github.com/ethereum/ERCs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_execution_specs
+  name: ethereum/execution-specs
+  type: api
+  repo: ethereum/execution-specs
+  url: https://github.com/ethereum/execution-specs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_execution_apis
+  name: ethereum/execution-apis
+  type: api
+  repo: ethereum/execution-apis
+  url: https://github.com/ethereum/execution-apis
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_pm
+  name: ethereum/pm
+  type: api
+  repo: ethereum/pm
+  url: https://github.com/ethereum/pm
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_ethereum_solidity
+  name: ethereum/solidity
+  type: api
+  repo: ethereum/solidity
+  url: https://github.com/ethereum/solidity
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_vyper
+  name: vyperlang/vyper
+  type: api
+  repo: vyperlang/vyper
+  url: https://github.com/vyperlang/vyper
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+# -- MEV --
+- id: gh_flashbots_mev_boost
+  name: flashbots/mev-boost
+  type: api
+  repo: flashbots/mev-boost
+  url: https://github.com/flashbots/mev-boost
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_flashbots_mev_boost_relay
+  name: flashbots/mev-boost-relay
+  type: api
+  repo: flashbots/mev-boost-relay
+  url: https://github.com/flashbots/mev-boost-relay
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_flashbots_builder
+  name: flashbots/builder
+  type: api
+  repo: flashbots/builder
+  url: https://github.com/flashbots/builder
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_flashbots_suave_geth
+  name: flashbots/suave-geth
+  type: api
+  repo: flashbots/suave-geth
+  url: https://github.com/flashbots/suave-geth
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+# -- Account Abstraction --
+- id: gh_eth_infinitism_account_abstraction
+  name: eth-infinitism/account-abstraction
+  type: api
+  repo: eth-infinitism/account-abstraction
+  url: https://github.com/eth-infinitism/account-abstraction
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# LAYER 2s
+###############################################################################
+
+# -- Optimistic Rollups --
+- id: gh_offchainlabs_nitro
+  name: OffchainLabs/nitro
+  type: api
+  repo: OffchainLabs/nitro
+  url: https://github.com/OffchainLabs/nitro
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_offchainlabs_bold
+  name: OffchainLabs/bold
+  type: api
+  repo: OffchainLabs/bold
+  url: https://github.com/OffchainLabs/bold
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_offchainlabs_stylus_sdk_rs
+  name: OffchainLabs/stylus-sdk-rs
+  type: api
+  repo: OffchainLabs/stylus-sdk-rs
+  url: https://github.com/OffchainLabs/stylus-sdk-rs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_ethereum_optimism_optimism
+  name: ethereum-optimism/optimism
+  type: api
+  repo: ethereum-optimism/optimism
+  url: https://github.com/ethereum-optimism/optimism
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_optimism_op_geth
+  name: ethereum-optimism/op-geth
+  type: api
+  repo: ethereum-optimism/op-geth
+  url: https://github.com/ethereum-optimism/op-geth
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_ethereum_optimism_superchain_registry
+  name: ethereum-optimism/superchain-registry
+  type: api
+  repo: ethereum-optimism/superchain-registry
+  url: https://github.com/ethereum-optimism/superchain-registry
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_base_org_node
+  name: base-org/node
+  type: api
+  repo: base-org/node
+  url: https://github.com/base-org/node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_base_org_contracts
+  name: base-org/contracts
+  type: api
+  repo: base-org/contracts
+  url: https://github.com/base-org/contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_mantle_xyz_mantle
+  name: mantlenetworkio/mantle-v2
+  type: api
+  repo: mantlenetworkio/mantle-v2
+  url: https://github.com/mantlenetworkio/mantle-v2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_metis_l2_mvm
+  name: MetisProtocol/mvm
+  type: api
+  repo: MetisProtocol/mvm
+  url: https://github.com/MetisProtocol/mvm
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: low
+  enabled: true
+
+- id: gh_blast_io_blast
+  name: blast-io/blast
+  type: api
+  repo: blast-io/blast
+  url: https://github.com/blast-io/blast
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+# -- ZK Rollups --
+- id: gh_matter_labs_zksync_era
+  name: matter-labs/zksync-era
+  type: api
+  repo: matter-labs/zksync-era
+  url: https://github.com/matter-labs/zksync-era
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_matter_labs_era_compiler_solidity
+  name: matter-labs/era-compiler-solidity
+  type: api
+  repo: matter-labs/era-compiler-solidity
+  url: https://github.com/matter-labs/era-compiler-solidity
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_starkware_libs_cairo
+  name: starkware-libs/cairo
+  type: api
+  repo: starkware-libs/cairo
+  url: https://github.com/starkware-libs/cairo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_starknet_io_starknet
+  name: starknet-io/starknet-specs
+  type: api
+  repo: starknet-io/starknet-specs
+  url: https://github.com/starknet-io/starknet-specs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_madara_alliance_madara
+  name: madara-alliance/madara
+  type: api
+  repo: madara-alliance/madara
+  url: https://github.com/madara-alliance/madara
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_scroll_tech_scroll
+  name: scroll-tech/scroll
+  type: api
+  repo: scroll-tech/scroll
+  url: https://github.com/scroll-tech/scroll
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_scroll_tech_zkevm_circuits
+  name: scroll-tech/zkevm-circuits
+  type: api
+  repo: scroll-tech/zkevm-circuits
+  url: https://github.com/scroll-tech/zkevm-circuits
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_consensys_linea_monorepo
+  name: Consensys/linea-monorepo
+  type: api
+  repo: Consensys/linea-monorepo
+  url: https://github.com/Consensys/linea-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_0xpolygonhermez_zkevm_node
+  name: 0xPolygonHermez/zkevm-node
+  type: api
+  repo: 0xPolygonHermez/zkevm-node
+  url: https://github.com/0xPolygonHermez/zkevm-node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_0xpolygon_polygon_cdk
+  name: 0xPolygon/cdk
+  type: api
+  repo: 0xPolygon/cdk
+  url: https://github.com/0xPolygon/cdk
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_taikoxyz_taiko_mono
+  name: taikoxyz/taiko-mono
+  type: api
+  repo: taikoxyz/taiko-mono
+  url: https://github.com/taikoxyz/taiko-mono
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+# -- Data Availability --
+- id: gh_celestiaorg_celestia_core
+  name: celestiaorg/celestia-core
+  type: api
+  repo: celestiaorg/celestia-core
+  url: https://github.com/celestiaorg/celestia-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_celestiaorg_celestia_node
+  name: celestiaorg/celestia-node
+  type: api
+  repo: celestiaorg/celestia-node
+  url: https://github.com/celestiaorg/celestia-node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_celestiaorg_celestia_app
+  name: celestiaorg/celestia-app
+  type: api
+  repo: celestiaorg/celestia-app
+  url: https://github.com/celestiaorg/celestia-app
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_availproject_avail
+  name: availproject/avail
+  type: api
+  repo: availproject/avail
+  url: https://github.com/availproject/avail
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_availproject_avail_light
+  name: availproject/avail-light
+  type: api
+  repo: availproject/avail-light
+  url: https://github.com/availproject/avail-light
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_ethstorage_es_node
+  name: ethstorage/es-node
+  type: api
+  repo: ethstorage/es-node
+  url: https://github.com/ethstorage/es-node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: low
+  enabled: true
+
+# -- Restaking / EigenLayer --
+- id: gh_layr_labs_eigenlayer_contracts
+  name: Layr-Labs/eigenlayer-contracts
+  type: api
+  repo: Layr-Labs/eigenlayer-contracts
+  url: https://github.com/Layr-Labs/eigenlayer-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_layr_labs_eigenda
+  name: Layr-Labs/eigenda
+  type: api
+  repo: Layr-Labs/eigenda
+  url: https://github.com/Layr-Labs/eigenda
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_layr_labs_eigenlayer_middleware
+  name: Layr-Labs/eigenlayer-middleware
+  type: api
+  repo: Layr-Labs/eigenlayer-middleware
+  url: https://github.com/Layr-Labs/eigenlayer-middleware
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_symbioticfi_core
+  name: symbioticfi/core
+  type: api
+  repo: symbioticfi/core
+  url: https://github.com/symbioticfi/core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_karak_network_karak_restaking
+  name: karak-network/karak-restaking
+  type: api
+  repo: karak-network/karak-restaking
+  url: https://github.com/karak-network/karak-restaking
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+###############################################################################
+# DEFI
+###############################################################################
+
+# -- DEXs --
+- id: gh_uniswap_v3_core
+  name: Uniswap/v3-core
+  type: api
+  repo: Uniswap/v3-core
+  url: https://github.com/Uniswap/v3-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_uniswap_v3_periphery
+  name: Uniswap/v3-periphery
+  type: api
+  repo: Uniswap/v3-periphery
+  url: https://github.com/Uniswap/v3-periphery
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_uniswap_v4_core
+  name: Uniswap/v4-core
+  type: api
+  repo: Uniswap/v4-core
+  url: https://github.com/Uniswap/v4-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_uniswap_v4_periphery
+  name: Uniswap/v4-periphery
+  type: api
+  repo: Uniswap/v4-periphery
+  url: https://github.com/Uniswap/v4-periphery
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_uniswap_universal_router
+  name: Uniswap/universal-router
+  type: api
+  repo: Uniswap/universal-router
+  url: https://github.com/Uniswap/universal-router
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_curvefi_curve_stableswap_ng
+  name: curvefi/curve-stableswap-ng
+  type: api
+  repo: curvefi/curve-stableswap-ng
+  url: https://github.com/curvefi/curve-stableswap-ng
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_curvefi_curve_dao_contracts
+  name: curvefi/curve-dao-contracts
+  type: api
+  repo: curvefi/curve-dao-contracts
+  url: https://github.com/curvefi/curve-dao-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_balancer_v2_monorepo
+  name: balancer/balancer-v2-monorepo
+  type: api
+  repo: balancer/balancer-v2-monorepo
+  url: https://github.com/balancer/balancer-v2-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_balancer_v3_monorepo
+  name: balancer/balancer-v3-monorepo
+  type: api
+  repo: balancer/balancer-v3-monorepo
+  url: https://github.com/balancer/balancer-v3-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_sushiswap_v3_core
+  name: sushiswap/v3-core
+  type: api
+  repo: sushiswap/v3-core
+  url: https://github.com/sushiswap/v3-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_pancakeswap_pancake_v3_contracts
+  name: pancakeswap/pancake-v3-contracts
+  type: api
+  repo: pancakeswap/pancake-v3-contracts
+  url: https://github.com/pancakeswap/pancake-v3-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+# -- Lending --
+- id: gh_aave_aave_v3_core
+  name: aave/aave-v3-core
+  type: api
+  repo: aave/aave-v3-core
+  url: https://github.com/aave/aave-v3-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_aave_gho_core
+  name: aave/gho-core
+  type: api
+  repo: aave/gho-core
+  url: https://github.com/aave/gho-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_aave_governance_v3
+  name: aave/aave-governance-v3
+  type: api
+  repo: aave/aave-governance-v3
+  url: https://github.com/aave/aave-governance-v3
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_makerdao_dss
+  name: makerdao/dss
+  type: api
+  repo: makerdao/dss
+  url: https://github.com/makerdao/dss
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_makerdao_spotter
+  name: makerdao/nst
+  type: api
+  repo: makerdao/nst
+  url: https://github.com/makerdao/nst
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_compound_finance_compound_protocol
+  name: compound-finance/compound-protocol
+  type: api
+  repo: compound-finance/compound-protocol
+  url: https://github.com/compound-finance/compound-protocol
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_compound_finance_comet
+  name: compound-finance/comet
+  type: api
+  repo: compound-finance/comet
+  url: https://github.com/compound-finance/comet
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_morpho_org_morpho_blue
+  name: morpho-org/morpho-blue
+  type: api
+  repo: morpho-org/morpho-blue
+  url: https://github.com/morpho-org/morpho-blue
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_euler_xyz_euler_vault_kit
+  name: euler-xyz/euler-vault-kit
+  type: api
+  repo: euler-xyz/euler-vault-kit
+  url: https://github.com/euler-xyz/euler-vault-kit
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_sparklend_spark_protocol
+  name: marsfoundation/spark-protocol
+  type: api
+  repo: marsfoundation/spark-protocol
+  url: https://github.com/marsfoundation/spark-protocol
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+# -- Perpetuals / Derivatives --
+- id: gh_gmx_io_gmx_contracts
+  name: gmx-io/gmx-synthetics
+  type: api
+  repo: gmx-io/gmx-synthetics
+  url: https://github.com/gmx-io/gmx-synthetics
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_hyperliquid_dex_contracts
+  name: hyperliquid-dex/contracts
+  type: api
+  repo: hyperliquid-dex/contracts
+  url: https://github.com/hyperliquid-dex/contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_dydxprotocol_v4_chain
+  name: dydxprotocol/v4-chain
+  type: api
+  repo: dydxprotocol/v4-chain
+  url: https://github.com/dydxprotocol/v4-chain
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_synthetixio_synthetix_v3
+  name: Synthetixio/synthetix-v3
+  type: api
+  repo: Synthetixio/synthetix-v3
+  url: https://github.com/Synthetixio/synthetix-v3
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_drift_labs_protocol_v2
+  name: drift-labs/protocol-v2
+  type: api
+  repo: drift-labs/protocol-v2
+  url: https://github.com/drift-labs/protocol-v2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+# -- Solana DeFi --
+- id: gh_jup_ag_jupiter_core
+  name: jup-ag/jupiter-core
+  type: api
+  repo: jup-ag/jupiter-core
+  url: https://github.com/jup-ag/jupiter-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_orca_so_whirlpools
+  name: orca-so/whirlpools
+  type: api
+  repo: orca-so/whirlpools
+  url: https://github.com/orca-so/whirlpools
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_raydium_io_raydium_clmm
+  name: raydium-io/raydium-clmm
+  type: api
+  repo: raydium-io/raydium-clmm
+  url: https://github.com/raydium-io/raydium-clmm
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_marinade_finance_liquid_staking_program
+  name: marinade-finance/liquid-staking-program
+  type: api
+  repo: marinade-finance/liquid-staking-program
+  url: https://github.com/marinade-finance/liquid-staking-program
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+# -- Liquid Staking --
+- id: gh_lidofinance_lido_dao
+  name: lidofinance/lido-dao
+  type: api
+  repo: lidofinance/lido-dao
+  url: https://github.com/lidofinance/lido-dao
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_rocketpool_rocketpool
+  name: rocket-pool/rocketpool
+  type: api
+  repo: rocket-pool/rocketpool
+  url: https://github.com/rocket-pool/rocketpool
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_fraborgs_frax_ether_redemption
+  name: FraxFinance/frxETH-v2-public
+  type: api
+  repo: FraxFinance/frxETH-v2-public
+  url: https://github.com/FraxFinance/frxETH-v2-public
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_etherfi_source_etherfi_protocol
+  name: etherfi-protocol/smart-contracts
+  type: api
+  repo: etherfi-protocol/smart-contracts
+  url: https://github.com/etherfi-protocol/smart-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+# -- Yield / Vaults --
+- id: gh_yearn_yearn_vaults_v3
+  name: yearn/yearn-vaults-v3
+  type: api
+  repo: yearn/yearn-vaults-v3
+  url: https://github.com/yearn/yearn-vaults-v3
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_pendle_finance_pendle_core_v2
+  name: pendle-finance/pendle-core-v2-public
+  type: api
+  repo: pendle-finance/pendle-core-v2-public
+  url: https://github.com/pendle-finance/pendle-core-v2-public
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_convex_eth_platform
+  name: convex-eth/platform
+  type: api
+  repo: convex-eth/platform
+  url: https://github.com/convex-eth/platform
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+# -- Stablecoins --
+- id: gh_ethena_labs_ethena
+  name: ethena-labs/ethena
+  type: api
+  repo: ethena-labs/ethena
+  url: https://github.com/ethena-labs/ethena
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_liquity_bold
+  name: liquity/bold
+  type: api
+  repo: liquity/bold
+  url: https://github.com/liquity/bold
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+# -- Bridges / Cross-chain --
+- id: gh_across_protocol_contracts
+  name: across-protocol/contracts
+  type: api
+  repo: across-protocol/contracts
+  url: https://github.com/across-protocol/contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_stargate_finance_stargate_v2
+  name: stargate-finance/stargate-v2
+  type: api
+  repo: stargate-finance/stargate-v2
+  url: https://github.com/stargate-finance/stargate-v2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_layerzero_labs_layerzero_v2
+  name: LayerZero-Labs/LayerZero-v2
+  type: api
+  repo: LayerZero-Labs/LayerZero-v2
+  url: https://github.com/LayerZero-Labs/LayerZero-v2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_wormhole_foundation_wormhole
+  name: wormhole-foundation/wormhole
+  type: api
+  repo: wormhole-foundation/wormhole
+  url: https://github.com/wormhole-foundation/wormhole
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_chainlink_ccip
+  name: smartcontractkit/ccip
+  type: api
+  repo: smartcontractkit/ccip
+  url: https://github.com/smartcontractkit/ccip
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_hyperlane_xyz_hyperlane_monorepo
+  name: hyperlane-xyz/hyperlane-monorepo
+  type: api
+  repo: hyperlane-xyz/hyperlane-monorepo
+  url: https://github.com/hyperlane-xyz/hyperlane-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+###############################################################################
+# SOLANA ECOSYSTEM
+###############################################################################
+
+- id: gh_solana_labs_solana
+  name: solana-labs/solana
+  type: api
+  repo: solana-labs/solana
+  url: https://github.com/solana-labs/solana
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_anza_xyz_agave
+  name: anza-xyz/agave
+  type: api
+  repo: anza-xyz/agave
+  url: https://github.com/anza-xyz/agave
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_firedancer_io_firedancer
+  name: firedancer-io/firedancer
+  type: api
+  repo: firedancer-io/firedancer
+  url: https://github.com/firedancer-io/firedancer
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_coral_xyz_anchor
+  name: coral-xyz/anchor
+  type: api
+  repo: coral-xyz/anchor
+  url: https://github.com/coral-xyz/anchor
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_metaplex_foundation_mpl_token_metadata
+  name: metaplex-foundation/mpl-token-metadata
+  type: api
+  repo: metaplex-foundation/mpl-token-metadata
+  url: https://github.com/metaplex-foundation/mpl-token-metadata
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_metaplex_foundation_mpl_core
+  name: metaplex-foundation/mpl-core
+  type: api
+  repo: metaplex-foundation/mpl-core
+  url: https://github.com/metaplex-foundation/mpl-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_solana_labs_solana_program_library
+  name: solana-labs/solana-program-library
+  type: api
+  repo: solana-labs/solana-program-library
+  url: https://github.com/solana-labs/solana-program-library
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_jito_foundation_jito_solana
+  name: jito-foundation/jito-solana
+  type: api
+  repo: jito-foundation/jito-solana
+  url: https://github.com/jito-foundation/jito-solana
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_jito_foundation_jito_programs
+  name: jito-foundation/jito-programs
+  type: api
+  repo: jito-foundation/jito-programs
+  url: https://github.com/jito-foundation/jito-programs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# COSMOS ECOSYSTEM
+###############################################################################
+
+- id: gh_cosmos_cosmos_sdk
+  name: cosmos/cosmos-sdk
+  type: api
+  repo: cosmos/cosmos-sdk
+  url: https://github.com/cosmos/cosmos-sdk
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_cosmos_ibc_go
+  name: cosmos/ibc-go
+  type: api
+  repo: cosmos/ibc-go
+  url: https://github.com/cosmos/ibc-go
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_cometbft_cometbft
+  name: cometbft/cometbft
+  type: api
+  repo: cometbft/cometbft
+  url: https://github.com/cometbft/cometbft
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_cosmwasm_cosmwasm
+  name: CosmWasm/cosmwasm
+  type: api
+  repo: CosmWasm/cosmwasm
+  url: https://github.com/CosmWasm/cosmwasm
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_osmosis_labs_osmosis
+  name: osmosis-labs/osmosis
+  type: api
+  repo: osmosis-labs/osmosis
+  url: https://github.com/osmosis-labs/osmosis
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: high
+  enabled: true
+
+- id: gh_neutron_org_neutron
+  name: neutron-org/neutron
+  type: api
+  repo: neutron-org/neutron
+  url: https://github.com/neutron-org/neutron
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_sei_protocol_sei_chain
+  name: sei-protocol/sei-chain
+  type: api
+  repo: sei-protocol/sei-chain
+  url: https://github.com/sei-protocol/sei-chain
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_injective_labs_injective_core
+  name: InjectiveLabs/injective-core
+  type: api
+  repo: InjectiveLabs/injective-core
+  url: https://github.com/InjectiveLabs/injective-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# MOVE ECOSYSTEM (Sui / Aptos)
+###############################################################################
+
+- id: gh_mystenlabs_sui
+  name: MystenLabs/sui
+  type: api
+  repo: MystenLabs/sui
+  url: https://github.com/MystenLabs/sui
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_aptos_labs_aptos_core
+  name: aptos-labs/aptos-core
+  type: api
+  repo: aptos-labs/aptos-core
+  url: https://github.com/aptos-labs/aptos-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: high
+  enabled: true
+
+- id: gh_movementlabsxyz_movement
+  name: movementlabsxyz/movement
+  type: api
+  repo: movementlabsxyz/movement
+  url: https://github.com/movementlabsxyz/movement
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# OTHER L1s
+###############################################################################
+
+- id: gh_monad_labs_monad
+  name: monad-labs/monad
+  type: api
+  repo: monad-labs/monad
+  url: https://github.com/monad-labs/monad
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_berachain_polaris
+  name: berachain/polaris
+  type: api
+  repo: berachain/polaris
+  url: https://github.com/berachain/polaris
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_ton_blockchain_ton
+  name: ton-blockchain/ton
+  type: api
+  repo: ton-blockchain/ton
+  url: https://github.com/ton-blockchain/ton
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_polkadot_fellows_runtimes
+  name: polkadot-fellows/runtimes
+  type: api
+  repo: polkadot-fellows/runtimes
+  url: https://github.com/polkadot-fellows/runtimes
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_paritytech_polkadot_sdk
+  name: paritytech/polkadot-sdk
+  type: api
+  repo: paritytech/polkadot-sdk
+  url: https://github.com/paritytech/polkadot-sdk
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_near_nearcore
+  name: near/nearcore
+  type: api
+  repo: near/nearcore
+  url: https://github.com/near/nearcore
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_avalanchego
+  name: ava-labs/avalanchego
+  type: api
+  repo: ava-labs/avalanchego
+  url: https://github.com/ava-labs/avalanchego
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_bnb_chain_bsc
+  name: bnb-chain/bsc
+  type: api
+  repo: bnb-chain/bsc
+  url: https://github.com/bnb-chain/bsc
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# ORACLES & INFRASTRUCTURE
+###############################################################################
+
+- id: gh_smartcontractkit_chainlink
+  name: smartcontractkit/chainlink
+  type: api
+  repo: smartcontractkit/chainlink
+  url: https://github.com/smartcontractkit/chainlink
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_pyth_network_pyth_sdk
+  name: pyth-network/pyth-crosschain
+  type: api
+  repo: pyth-network/pyth-crosschain
+  url: https://github.com/pyth-network/pyth-crosschain
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_chronicleprotocol_scribe
+  name: chronicleprotocol/scribe
+  type: api
+  repo: chronicleprotocol/scribe
+  url: https://github.com/chronicleprotocol/scribe
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_redstone_finance_redstone_oracles_monorepo
+  name: redstone-finance/redstone-oracles-monorepo
+  type: api
+  repo: redstone-finance/redstone-oracles-monorepo
+  url: https://github.com/redstone-finance/redstone-oracles-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_thegraph_graph_node
+  name: graphprotocol/graph-node
+  type: api
+  repo: graphprotocol/graph-node
+  url: https://github.com/graphprotocol/graph-node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+###############################################################################
+# DEV TOOLING
+###############################################################################
+
+# -- Foundry --
+- id: gh_foundry_rs_foundry
+  name: foundry-rs/foundry
+  type: api
+  repo: foundry-rs/foundry
+  url: https://github.com/foundry-rs/foundry
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_foundry_rs_forge_std
+  name: foundry-rs/forge-std
+  type: api
+  repo: foundry-rs/forge-std
+  url: https://github.com/foundry-rs/forge-std
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+# -- Security --
+- id: gh_crytic_slither
+  name: crytic/slither
+  type: api
+  repo: crytic/slither
+  url: https://github.com/crytic/slither
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_crytic_echidna
+  name: crytic/echidna
+  type: api
+  repo: crytic/echidna
+  url: https://github.com/crytic/echidna
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_crytic_medusa
+  name: crytic/medusa
+  type: api
+  repo: crytic/medusa
+  url: https://github.com/crytic/medusa
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_consensys_mythril
+  name: Consensys/mythril
+  type: api
+  repo: Consensys/mythril
+  url: https://github.com/Consensys/mythril
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_a16z_halmos
+  name: a16z/halmos
+  type: api
+  repo: a16z/halmos
+  url: https://github.com/a16z/halmos
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+# -- OpenZeppelin --
+- id: gh_openzeppelin_openzeppelin_contracts
+  name: OpenZeppelin/openzeppelin-contracts
+  type: api
+  repo: OpenZeppelin/openzeppelin-contracts
+  url: https://github.com/OpenZeppelin/openzeppelin-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_openzeppelin_openzeppelin_contracts_upgradeable
+  name: OpenZeppelin/openzeppelin-contracts-upgradeable
+  type: api
+  repo: OpenZeppelin/openzeppelin-contracts-upgradeable
+  url: https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_openzeppelin_defender
+  name: OpenZeppelin/defender-client
+  type: api
+  repo: OpenZeppelin/defender-client
+  url: https://github.com/OpenZeppelin/defender-client
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+# -- Frontend / SDK --
+- id: gh_wevm_wagmi
+  name: wevm/wagmi
+  type: api
+  repo: wevm/wagmi
+  url: https://github.com/wevm/wagmi
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_wevm_viem
+  name: wevm/viem
+  type: api
+  repo: wevm/viem
+  url: https://github.com/wevm/viem
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_ethers_io_ethers_js
+  name: ethers-io/ethers.js
+  type: api
+  repo: ethers-io/ethers.js
+  url: https://github.com/ethers-io/ethers.js
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_web3_web3_js
+  name: web3/web3.js
+  type: api
+  repo: web3/web3.js
+  url: https://github.com/web3/web3.js
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_rainbow_me_rainbowkit
+  name: rainbow-me/rainbowkit
+  type: api
+  repo: rainbow-me/rainbowkit
+  url: https://github.com/rainbow-me/rainbowkit
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_walletconnect_walletconnect_monorepo
+  name: WalletConnect/walletconnect-monorepo
+  type: api
+  repo: WalletConnect/walletconnect-monorepo
+  url: https://github.com/WalletConnect/walletconnect-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+# -- Hardhat / Truffle --
+- id: gh_nomicfoundation_hardhat
+  name: NomicFoundation/hardhat
+  type: api
+  repo: NomicFoundation/hardhat
+  url: https://github.com/NomicFoundation/hardhat
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_nomicfoundation_slang
+  name: NomicFoundation/slang
+  type: api
+  repo: NomicFoundation/slang
+  url: https://github.com/NomicFoundation/slang
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+# -- thirdweb --
+- id: gh_thirdweb_dev_contracts
+  name: thirdweb-dev/contracts
+  type: api
+  repo: thirdweb-dev/contracts
+  url: https://github.com/thirdweb-dev/contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_thirdweb_dev_js
+  name: thirdweb-dev/js
+  type: api
+  repo: thirdweb-dev/js
+  url: https://github.com/thirdweb-dev/js
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+# -- Misc Tooling --
+- id: gh_alloy_rs_alloy
+  name: alloy-rs/alloy
+  type: api
+  repo: alloy-rs/alloy
+  url: https://github.com/alloy-rs/alloy
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_alloy_rs_core
+  name: alloy-rs/core
+  type: api
+  repo: alloy-rs/core
+  url: https://github.com/alloy-rs/core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_bluealloy_revm
+  name: bluealloy/revm
+  type: api
+  repo: bluealloy/revm
+  url: https://github.com/bluealloy/revm
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_gakonst_ethers_rs
+  name: gakonst/ethers-rs
+  type: api
+  repo: gakonst/ethers-rs
+  url: https://github.com/gakonst/ethers-rs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_safe_global_safe_smart_account
+  name: safe-global/safe-smart-account
+  type: api
+  repo: safe-global/safe-smart-account
+  url: https://github.com/safe-global/safe-smart-account
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_safe_global_safe_modules
+  name: safe-global/safe-modules
+  type: api
+  repo: safe-global/safe-modules
+  url: https://github.com/safe-global/safe-modules
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_transmissions11_solmate
+  name: transmissions11/solmate
+  type: api
+  repo: transmissions11/solmate
+  url: https://github.com/transmissions11/solmate
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_vectorized_solady
+  name: Vectorized/solady
+  type: api
+  repo: Vectorized/solady
+  url: https://github.com/Vectorized/solady
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_pcaversaccio_snekmate
+  name: pcaversaccio/snekmate
+  type: api
+  repo: pcaversaccio/snekmate
+  url: https://github.com/pcaversaccio/snekmate
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_apeworx_ape
+  name: ApeWorX/ape
+  type: api
+  repo: ApeWorX/ape
+  url: https://github.com/ApeWorX/ape
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_tenderly_tenderly_cli
+  name: Tenderly/tenderly-cli
+  type: api
+  repo: Tenderly/tenderly-cli
+  url: https://github.com/Tenderly/tenderly-cli
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+###############################################################################
+# ZK PROVING SYSTEMS
+###############################################################################
+
+- id: gh_risc0_risc0
+  name: risc0/risc0
+  type: api
+  repo: risc0/risc0
+  url: https://github.com/risc0/risc0
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_succinctlabs_sp1
+  name: succinctlabs/sp1
+  type: api
+  repo: succinctlabs/sp1
+  url: https://github.com/succinctlabs/sp1
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_privacy_scaling_explorations_halo2
+  name: privacy-scaling-explorations/halo2
+  type: api
+  repo: privacy-scaling-explorations/halo2
+  url: https://github.com/privacy-scaling-explorations/halo2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_arkworks_rs_algebra
+  name: arkworks-rs/algebra
+  type: api
+  repo: arkworks-rs/algebra
+  url: https://github.com/arkworks-rs/algebra
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_iden3_circom
+  name: iden3/circom
+  type: api
+  repo: iden3/circom
+  url: https://github.com/iden3/circom
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_iden3_snarkjs
+  name: iden3/snarkjs
+  type: api
+  repo: iden3/snarkjs
+  url: https://github.com/iden3/snarkjs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_noir_lang_noir
+  name: noir-lang/noir
+  type: api
+  repo: noir-lang/noir
+  url: https://github.com/noir-lang/noir
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: high
+  enabled: true
+
+- id: gh_aztecprotocol_aztec_packages
+  name: AztecProtocol/aztec-packages
+  type: api
+  repo: AztecProtocol/aztec-packages
+  url: https://github.com/AztecProtocol/aztec-packages
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: high
+  enabled: true
+
+- id: gh_a16z_jolt
+  name: a16z/jolt
+  type: api
+  repo: a16z/jolt
+  url: https://github.com/a16z/jolt
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+###############################################################################
+# PRIVACY
+###############################################################################
+
+- id: gh_penumbra_zone_penumbra
+  name: penumbra-zone/penumbra
+  type: api
+  repo: penumbra-zone/penumbra
+  url: https://github.com/penumbra-zone/penumbra
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_zcash_zcash
+  name: zcash/zcash
+  type: api
+  repo: zcash/zcash
+  url: https://github.com/zcash/zcash
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: low
+  enabled: true
+
+- id: gh_namada_network_namada
+  name: anoma/namada
+  type: api
+  repo: anoma/namada
+  url: https://github.com/anoma/namada
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# INDEXING / DATA
+###############################################################################
+
+- id: gh_ponder_sh_ponder
+  name: ponder-sh/ponder
+  type: api
+  repo: ponder-sh/ponder
+  url: https://github.com/ponder-sh/ponder
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_enviodev_hyperindex
+  name: enviodev/hyperindex
+  type: api
+  repo: enviodev/hyperindex
+  url: https://github.com/enviodev/hyperindex
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_goldsky_io_mirror
+  name: goldsky-io/goldsky-docs
+  type: api
+  repo: goldsky-io/goldsky-docs
+  url: https://github.com/goldsky-io/goldsky-docs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_duneanalytics_spellbook
+  name: duneanalytics/spellbook
+  type: api
+  repo: duneanalytics/spellbook
+  url: https://github.com/duneanalytics/spellbook
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+###############################################################################
+# RESEARCH & ANALYTICS
+###############################################################################
+
+- id: gh_electric_capital_developer_reports
+  name: electric-capital/developer-reports
+  type: api
+  repo: electric-capital/developer-reports
+  url: https://github.com/electric-capital/developer-reports
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: high
+  enabled: true
+
+- id: gh_electric_capital_crypto_ecosystems
+  name: electric-capital/crypto-ecosystems
+  type: api
+  repo: electric-capital/crypto-ecosystems
+  url: https://github.com/electric-capital/crypto-ecosystems
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: high
+  enabled: true
+
+- id: gh_defillama_defillama_adapters
+  name: DefiLlama/DefiLlama-Adapters
+  type: api
+  repo: DefiLlama/DefiLlama-Adapters
+  url: https://github.com/DefiLlama/DefiLlama-Adapters
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: high
+  enabled: true
+
+- id: gh_defillama_dimension_adapters
+  name: DefiLlama/dimension-adapters
+  type: api
+  repo: DefiLlama/dimension-adapters
+  url: https://github.com/DefiLlama/dimension-adapters
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: high
+  enabled: true
+
+- id: gh_defillama_yield_server
+  name: DefiLlama/yield-server
+  type: api
+  repo: DefiLlama/yield-server
+  url: https://github.com/DefiLlama/yield-server
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: gh_ethereum_eth2_beaconchain_explorer
+  name: gobitfly/eth2-beaconchain-explorer
+  type: api
+  repo: gobitfly/eth2-beaconchain-explorer
+  url: https://github.com/gobitfly/eth2-beaconchain-explorer
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: gh_etherscan_io_explorer
+  name: blockscout/blockscout
+  type: api
+  repo: blockscout/blockscout
+  url: https://github.com/blockscout/blockscout
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: gh_paradigmxyz_cryo
+  name: paradigmxyz/cryo
+  type: api
+  repo: paradigmxyz/cryo
+  url: https://github.com/paradigmxyz/cryo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: gh_paradigmxyz_flood
+  name: paradigmxyz/flood
+  type: api
+  repo: paradigmxyz/flood
+  url: https://github.com/paradigmxyz/flood
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: low
+  enabled: true
+
+- id: gh_ethereum_ethstaker
+  name: eth-educators/ethstaker-deposit-cli
+  type: api
+  repo: eth-educators/ethstaker-deposit-cli
+  url: https://github.com/eth-educators/ethstaker-deposit-cli
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+###############################################################################
+# RPC / NODE INFRA
+###############################################################################
+
+- id: gh_ethereum_portal_network
+  name: ethereum/trin
+  type: api
+  repo: ethereum/trin
+  url: https://github.com/ethereum/trin
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_ethereum_hive
+  name: ethereum/hive
+  type: api
+  repo: ethereum/hive
+  url: https://github.com/ethereum/hive
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_dapplion_lodestar
+  name: ethereumjs/ethereumjs-monorepo
+  type: api
+  repo: ethereumjs/ethereumjs-monorepo
+  url: https://github.com/ethereumjs/ethereumjs-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# INTENT / SOLVER PROTOCOLS
+###############################################################################
+
+- id: gh_cowprotocol_contracts
+  name: cowprotocol/contracts
+  type: api
+  repo: cowprotocol/contracts
+  url: https://github.com/cowprotocol/contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_1inch_fusion_sdk
+  name: 1inch/fusion-sdk
+  type: api
+  repo: 1inch/fusion-sdk
+  url: https://github.com/1inch/fusion-sdk
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_essential_contributions_essential
+  name: essential-contributions/essential-integration
+  type: api
+  repo: essential-contributions/essential-integration
+  url: https://github.com/essential-contributions/essential-integration
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+###############################################################################
+# AI x CRYPTO
+###############################################################################
+
+- id: gh_ritual_net_infernet_node
+  name: ritual-net/infernet-node
+  type: api
+  repo: ritual-net/infernet-node
+  url: https://github.com/ritual-net/infernet-node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: gh_galadriel_contracts
+  name: galadriel-ai/contracts
+  type: api
+  repo: galadriel-ai/contracts
+  url: https://github.com/galadriel-ai/contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: low
+  enabled: true
+
+- id: gh_bittensor_bittensor
+  name: opentensor/bittensor
+  type: api
+  repo: opentensor/bittensor
+  url: https://github.com/opentensor/bittensor
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# GOVERNANCE
+###############################################################################
+
+- id: gh_nouns_dao_nouns_monorepo
+  name: nounsDAO/nouns-monorepo
+  type: api
+  repo: nounsDAO/nouns-monorepo
+  url: https://github.com/nounsDAO/nouns-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+- id: gh_openzeppelin_governor
+  name: OpenZeppelin/openzeppelin-governor
+  type: api
+  repo: OpenZeppelin/openzeppelin-contracts
+  url: https://github.com/OpenZeppelin/openzeppelin-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_snapshot_labs_snapshot
+  name: snapshot-labs/snapshot
+  type: api
+  repo: snapshot-labs/snapshot
+  url: https://github.com/snapshot-labs/snapshot
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_aragon_osx
+  name: aragon/osx
+  type: api
+  repo: aragon/osx
+  url: https://github.com/aragon/osx
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+###############################################################################
+# DePIN / RWA
+###############################################################################
+
+- id: gh_helium_gateway_rs
+  name: helium/gateway-rs
+  type: api
+  repo: helium/gateway-rs
+  url: https://github.com/helium/gateway-rs
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: low
+  enabled: true
+
+- id: gh_filecoin_lotus
+  name: filecoin-project/lotus
+  type: api
+  repo: filecoin-project/lotus
+  url: https://github.com/filecoin-project/lotus
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_livepeer_go_livepeer
+  name: livepeer/go-livepeer
+  type: api
+  repo: livepeer/go-livepeer
+  url: https://github.com/livepeer/go-livepeer
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: low
+  enabled: true
+
+###############################################################################
+# NFT / SOCIAL
+###############################################################################
+
+- id: gh_opensea_seaport
+  name: ProjectOpenSea/seaport
+  type: api
+  repo: ProjectOpenSea/seaport
+  url: https://github.com/ProjectOpenSea/seaport
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_lens_protocol_core
+  name: lens-protocol/core
+  type: api
+  repo: lens-protocol/core
+  url: https://github.com/lens-protocol/core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_farcaster_hub_monorepo
+  name: farcasterxyz/hub-monorepo
+  type: api
+  repo: farcasterxyz/hub-monorepo
+  url: https://github.com/farcasterxyz/hub-monorepo
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_farcaster_protocol
+  name: farcasterxyz/protocol
+  type: api
+  repo: farcasterxyz/protocol
+  url: https://github.com/farcasterxyz/protocol
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+###############################################################################
+# WALLET / KEY MANAGEMENT
+###############################################################################
+
+- id: gh_metamask_metamask_extension
+  name: MetaMask/metamask-extension
+  type: api
+  repo: MetaMask/metamask-extension
+  url: https://github.com/MetaMask/metamask-extension
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_phantom_phantom_wallet
+  name: nicholasgasior/gokeyless
+  type: api
+  repo: nicholasgasior/gokeyless
+  url: https://github.com/nicholasgasior/gokeyless
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: false
+
+- id: gh_ledger_app_ethereum
+  name: LedgerHQ/app-ethereum
+  type: api
+  repo: LedgerHQ/app-ethereum
+  url: https://github.com/LedgerHQ/app-ethereum
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+- id: gh_trezor_trezor_firmware
+  name: trezor/trezor-firmware
+  type: api
+  repo: trezor/trezor-firmware
+  url: https://github.com/trezor/trezor-firmware
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: medium
+  enabled: true
+
+###############################################################################
+# ADDITIONAL PROTOCOLS
+###############################################################################
+
+- id: gh_ensdomains_ens_contracts
+  name: ensdomains/ens-contracts
+  type: api
+  repo: ensdomains/ens-contracts
+  url: https://github.com/ensdomains/ens-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_ethereum_attestation_service_eas_contracts
+  name: ethereum-attestation-service/eas-contracts
+  type: api
+  repo: ethereum-attestation-service/eas-contracts
+  url: https://github.com/ethereum-attestation-service/eas-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_worldcoin_world_id_contracts
+  name: worldcoin/world-id-contracts
+  type: api
+  repo: worldcoin/world-id-contracts
+  url: https://github.com/worldcoin/world-id-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: core
+  priority: medium
+  enabled: true
+
+- id: gh_aevo_xyz_contracts
+  name: aevo-xyz/aevo-contracts
+  type: api
+  repo: aevo-xyz/aevo-contracts
+  url: https://github.com/aevo-xyz/aevo-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+- id: gh_vertex_protocol_vertex_contracts
+  name: vertex-protocol/vertex-contracts
+  type: api
+  repo: vertex-protocol/vertex-contracts
+  url: https://github.com/vertex-protocol/vertex-contracts
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+- id: gh_mux_protocol_mux_protocol
+  name: mux-world/mux-protocol
+  type: api
+  repo: mux-world/mux-protocol
+  url: https://github.com/mux-world/mux-protocol
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+###############################################################################
+# ROLLUP FRAMEWORKS
+###############################################################################
+
+- id: gh_conduit_xyz_op_stack
+  name: conduit-xyz/node
+  type: api
+  repo: conduit-xyz/node
+  url: https://github.com/conduit-xyz/node
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_celestiaorg_rollmint
+  name: rollkit/rollkit
+  type: api
+  repo: rollkit/rollkit
+  url: https://github.com/rollkit/rollkit
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_sovereign_labs_sovereign_sdk
+  name: Sovereign-Labs/sovereign-sdk
+  type: api
+  repo: Sovereign-Labs/sovereign-sdk
+  url: https://github.com/Sovereign-Labs/sovereign-sdk
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: medium
+  enabled: true
+
+- id: gh_stackrlabs_stackr
+  name: stackrlabs/micro-rollup-examples
+  type: api
+  repo: stackrlabs/micro-rollup-examples
+  url: https://github.com/stackrlabs/micro-rollup-examples
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: l2
+  priority: low
+  enabled: true
+
+###############################################################################
+# SECURITY MONITORING
+###############################################################################
+
+- id: gh_forta_network_forta_bot_sdk
+  name: forta-network/forta-bot-sdk
+  type: api
+  repo: forta-network/forta-bot-sdk
+  url: https://github.com/forta-network/forta-bot-sdk
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+- id: gh_openzeppelin_openzeppelin_monitor
+  name: OpenZeppelin/openzeppelin-monitor
+  type: api
+  repo: OpenZeppelin/openzeppelin-monitor
+  url: https://github.com/OpenZeppelin/openzeppelin-monitor
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: tooling
+  priority: low
+  enabled: true
+
+###############################################################################
+# ADDITIONAL RESEARCH / STANDARDS
+###############################################################################
+
+- id: gh_ethereum_annotated_spec
+  name: ethereum/annotated-spec
+  type: api
+  repo: ethereum/annotated-spec
+  url: https://github.com/ethereum/annotated-spec
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: medium
+  enabled: true
+
+- id: gh_eth_protocol_fellows_cohort_five
+  name: eth-protocol-fellows/cohort-five
+  type: api
+  repo: eth-protocol-fellows/cohort-five
+  url: https://github.com/eth-protocol-fellows/cohort-five
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: low
+  enabled: true
+
+- id: gh_l2beat_l2beat
+  name: l2beat/l2beat
+  type: api
+  repo: l2beat/l2beat
+  url: https://github.com/l2beat/l2beat
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: high
+  enabled: true
+
+- id: gh_tokenterminal
+  name: token-terminal/tt-analytics
+  type: api
+  repo: token-terminal/tt-analytics
+  url: https://github.com/token-terminal/tt-analytics
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: research
+  priority: low
+  enabled: true
+
+###############################################################################
+# ADDITIONAL DEFI PROTOCOLS
+###############################################################################
+
+- id: gh_instadapp_avocado_contracts
+  name: Instadapp/avocado-contracts-public
+  type: api
+  repo: Instadapp/avocado-contracts-public
+  url: https://github.com/Instadapp/avocado-contracts-public
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+- id: gh_paraswap_augustus_v6
+  name: paraswap/augustus-v6
+  type: api
+  repo: paraswap/augustus-v6
+  url: https://github.com/paraswap/augustus-v6
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+- id: gh_0x_protocol_0x_settler
+  name: 0xProject/0x-settler
+  type: api
+  repo: 0xProject/0x-settler
+  url: https://github.com/0xProject/0x-settler
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: medium
+  enabled: true
+
+- id: gh_benddao_bend_v2
+  name: BendDAO/bend-v2
+  type: api
+  repo: BendDAO/bend-v2
+  url: https://github.com/BendDAO/bend-v2
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true
+
+- id: gh_maple_finance_maple_v2_core
+  name: maple-labs/maple-v2-core
+  type: api
+  repo: maple-labs/maple-v2-core
+  url: https://github.com/maple-labs/maple-v2-core
+  collector: github_tracker
+  frequency: 1h
+  category: github
+  subcategory: defi
+  priority: low
+  enabled: true

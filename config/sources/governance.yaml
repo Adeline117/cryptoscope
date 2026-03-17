@@ -1,0 +1,257 @@
+# Governance forums, Snapshot spaces, and Tally
+
+# Snapshot spaces (top DAOs by activity)
+- id: snapshot_uniswap
+  name: Uniswap Governance (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 1h
+  category: governance
+  subcategory: snapshot
+  priority: high
+  enabled: true
+  space_id: "uniswapgovernance.eth"
+
+- id: snapshot_aave
+  name: Aave Governance (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 1h
+  category: governance
+  subcategory: snapshot
+  priority: high
+  enabled: true
+  space_id: "aave.eth"
+
+- id: snapshot_arbitrum
+  name: Arbitrum DAO (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 1h
+  category: governance
+  subcategory: snapshot
+  priority: high
+  enabled: true
+  space_id: "arbitrumfoundation.eth"
+
+- id: snapshot_optimism
+  name: Optimism Collective (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 1h
+  category: governance
+  subcategory: snapshot
+  priority: high
+  enabled: true
+  space_id: "opcollective.eth"
+
+- id: snapshot_ens
+  name: ENS DAO (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 2h
+  category: governance
+  subcategory: snapshot
+  priority: medium
+  enabled: true
+  space_id: "ens.eth"
+
+- id: snapshot_lido
+  name: Lido DAO (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 2h
+  category: governance
+  subcategory: snapshot
+  priority: high
+  enabled: true
+  space_id: "lido-snapshot.eth"
+
+- id: snapshot_maker
+  name: MakerDAO / Sky (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 2h
+  category: governance
+  subcategory: snapshot
+  priority: high
+  enabled: true
+  space_id: "makerdao.eth"
+
+- id: snapshot_compound
+  name: Compound (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 2h
+  category: governance
+  subcategory: snapshot
+  priority: medium
+  enabled: true
+  space_id: "comp-vote.eth"
+
+- id: snapshot_balancer
+  name: Balancer (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 2h
+  category: governance
+  subcategory: snapshot
+  priority: medium
+  enabled: true
+  space_id: "balancer.eth"
+
+- id: snapshot_curve
+  name: Curve (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 2h
+  category: governance
+  subcategory: snapshot
+  priority: medium
+  enabled: true
+  space_id: "curve.eth"
+
+- id: snapshot_gitcoin
+  name: Gitcoin (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 4h
+  category: governance
+  subcategory: snapshot
+  priority: medium
+  enabled: true
+  space_id: "gitcoindao.eth"
+
+- id: snapshot_safe
+  name: Safe DAO (Snapshot)
+  type: api
+  url: "https://hub.snapshot.org/graphql"
+  collector: governance_watch
+  frequency: 4h
+  category: governance
+  subcategory: snapshot
+  priority: medium
+  enabled: true
+  space_id: "safe.eth"
+
+# Discourse governance forums
+- id: forum_ethereum_magicians
+  name: Ethereum Magicians
+  type: rss
+  url: "https://ethereum-magicians.org/latest.rss"
+  collector: news_feed
+  frequency: 2h
+  category: governance
+  subcategory: forum
+  priority: high
+  enabled: true
+
+- id: forum_ethresearch
+  name: ethresear.ch
+  type: rss
+  url: "https://ethresear.ch/latest.rss"
+  collector: news_feed
+  frequency: 2h
+  category: governance
+  subcategory: forum
+  priority: high
+  enabled: true
+
+- id: forum_uniswap
+  name: Uniswap Governance Forum
+  type: rss
+  url: "https://gov.uniswap.org/latest.rss"
+  collector: news_feed
+  frequency: 2h
+  category: governance
+  subcategory: forum
+  priority: high
+  enabled: true
+
+- id: forum_aave
+  name: Aave Governance Forum
+  type: rss
+  url: "https://governance.aave.com/latest.rss"
+  collector: news_feed
+  frequency: 2h
+  category: governance
+  subcategory: forum
+  priority: high
+  enabled: true
+
+- id: forum_arbitrum
+  name: Arbitrum DAO Forum
+  type: rss
+  url: "https://forum.arbitrum.foundation/latest.rss"
+  collector: news_feed
+  frequency: 2h
+  category: governance
+  subcategory: forum
+  priority: high
+  enabled: true
+
+- id: forum_optimism
+  name: Optimism Collective Forum
+  type: rss
+  url: "https://gov.optimism.io/latest.rss"
+  collector: news_feed
+  frequency: 2h
+  category: governance
+  subcategory: forum
+  priority: high
+  enabled: true
+
+- id: forum_lido
+  name: Lido Governance Forum
+  type: rss
+  url: "https://research.lido.fi/latest.rss"
+  collector: news_feed
+  frequency: 4h
+  category: governance
+  subcategory: forum
+  priority: medium
+  enabled: true
+
+- id: forum_maker
+  name: MakerDAO Forum
+  type: rss
+  url: "https://forum.makerdao.com/latest.rss"
+  collector: news_feed
+  frequency: 4h
+  category: governance
+  subcategory: forum
+  priority: medium
+  enabled: true
+
+- id: forum_compound
+  name: Compound Forum
+  type: rss
+  url: "https://www.comp.xyz/latest.rss"
+  collector: news_feed
+  frequency: 4h
+  category: governance
+  subcategory: forum
+  priority: medium
+  enabled: true
+
+- id: forum_ens
+  name: ENS DAO Forum
+  type: rss
+  url: "https://discuss.ens.domains/latest.rss"
+  collector: news_feed
+  frequency: 4h
+  category: governance
+  subcategory: forum
+  priority: medium
+  enabled: true

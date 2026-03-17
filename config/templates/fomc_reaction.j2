@@ -1,0 +1,68 @@
+{#
+FOMC Decision Reaction Thread Template
+Specialized for Federal Reserve rate decisions.
+#}
+
+{# === ENGLISH === #}
+
+1/8 ⚡ FOMC Decision: {{ decision_summary_en }}
+{# e.g.: Fed holds at 5.25-5.50%, signals potential cut in Q3. #}
+
+2/8 📝 Statement changes (key diff from {{ previous_date }}):
+{{ statement_diff_highlights_en }}
+{# Word-by-word comparison: what was added, removed, changed #}
+
+3/8 📊 Dot Plot Update:
+{{ dot_plot_analysis_en }}
+[ATTACH: {{ dot_plot_chart }}]
+{# Median rate projections: 2026, 2027, longer-run #}
+
+4/8 ⚡ Immediate market reaction:
+BTC: {{ btc_reaction }}
+S&P 500: {{ spx_reaction }}
+DXY: {{ dxy_reaction }}
+10Y: {{ yield_reaction }}
+2Y: {{ yield_2y_reaction }}
+
+5/8 💧 Net Liquidity implications:
+{{ net_liquidity_analysis_en }}
+[ATTACH: {{ net_liquidity_chart }}]
+
+6/8 🔍 What Arena traders are doing:
+{{ arena_trader_positioning_en }}
+{# Top trader positioning shifts in the hour after decision #}
+
+7/8 ⏭️ Forward outlook:
+{{ forward_outlook_en }}
+{# Next FOMC date, CME FedWatch probabilities #}
+
+8/8 🔑 {{ takeaway_en }}
+Full analysis: {{ openclaw_url }}
+
+---
+
+{# === 中文版 === #}
+
+1/8 ⚡ FOMC 决议: {{ decision_summary_zh }}
+
+2/8 📝 声明变化（与 {{ previous_date }} 对比）:
+{{ statement_diff_highlights_zh }}
+
+3/8 📊 点阵图更新:
+{{ dot_plot_analysis_zh }}
+
+4/8 ⚡ 即时市场反应:
+BTC: {{ btc_reaction }} | 标普: {{ spx_reaction }}
+美元指数: {{ dxy_reaction }} | 10年期: {{ yield_reaction }}
+
+5/8 💧 净流动性影响:
+{{ net_liquidity_analysis_zh }}
+
+6/8 🔍 Arena 顶级交易员动向:
+{{ arena_trader_positioning_zh }}
+
+7/8 ⏭️ 前瞻:
+{{ forward_outlook_zh }}
+
+8/8 🔑 {{ takeaway_zh }}
+完整分析: {{ openclaw_url }}

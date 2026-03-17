@@ -1,0 +1,538 @@
+# On-chain data sources
+# Block explorers, analytics platforms, stablecoin trackers, bridge data, MEV
+
+# =============================================================================
+# Block Explorers
+# =============================================================================
+
+- id: etherscan
+  name: Etherscan
+  type: api
+  url: https://api.etherscan.io/api
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: high
+  enabled: true
+  notes: Requires API key (ETHERSCAN_API_KEY). Free tier 5 calls/sec. Ethereum mainnet.
+
+- id: basescan
+  name: Basescan
+  type: api
+  url: https://api.basescan.org/api
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: high
+  enabled: true
+  notes: Requires API key (BASESCAN_API_KEY). Etherscan-compatible API for Base L2.
+
+- id: arbiscan
+  name: Arbiscan
+  type: api
+  url: https://api.arbiscan.io/api
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: high
+  enabled: true
+  notes: Requires API key (ARBISCAN_API_KEY). Etherscan-compatible API for Arbitrum.
+
+- id: optimistic_etherscan
+  name: Optimistic Etherscan
+  type: api
+  url: https://api-optimistic.etherscan.io/api
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: high
+  enabled: true
+  notes: Requires API key (OPTIMISM_ETHERSCAN_API_KEY). Etherscan-compatible API for Optimism.
+
+- id: polygonscan
+  name: Polygonscan
+  type: api
+  url: https://api.polygonscan.com/api
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: medium
+  enabled: true
+  notes: Requires API key (POLYGONSCAN_API_KEY). Etherscan-compatible API for Polygon PoS.
+
+- id: bscscan
+  name: BscScan
+  type: api
+  url: https://api.bscscan.com/api
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: medium
+  enabled: true
+  notes: Requires API key (BSCSCAN_API_KEY). Etherscan-compatible API for BNB Smart Chain.
+
+- id: snowtrace
+  name: Snowtrace
+  type: api
+  url: https://api.routescan.io/v2/network/mainnet/evm/43114/etherscan/api
+  collector: chain_data
+  frequency: 2m
+  category: onchain_data
+  subcategory: explorer
+  priority: medium
+  enabled: true
+  notes: Snowtrace migrated to Routescan. Etherscan-compatible API for Avalanche C-Chain.
+
+- id: ftmscan
+  name: FTMScan
+  type: api
+  url: https://api.ftmscan.com/api
+  collector: chain_data
+  frequency: 2m
+  category: onchain_data
+  subcategory: explorer
+  priority: low
+  enabled: true
+  notes: Requires API key (FTMSCAN_API_KEY). Etherscan-compatible API for Fantom Opera.
+
+- id: solscan
+  name: Solscan
+  type: api
+  url: https://pro-api.solscan.io/v2.0
+  collector: chain_data
+  frequency: 1m
+  category: onchain_data
+  subcategory: explorer
+  priority: high
+  enabled: true
+  notes: Requires API key (SOLSCAN_API_KEY). Pro API for Solana on-chain data.
+
+- id: solanafm
+  name: SolanaFM
+  type: api
+  url: https://api.solana.fm/v1
+  collector: chain_data
+  frequency: 2m
+  category: onchain_data
+  subcategory: explorer
+  priority: medium
+  enabled: true
+  notes: Public API with optional API key for higher rate limits. Solana indexer and explorer.
+
+- id: blockscout
+  name: Blockscout
+  type: api
+  url: https://eth.blockscout.com/api/v2
+  collector: chain_data
+  frequency: 2m
+  category: onchain_data
+  subcategory: explorer
+  priority: medium
+  enabled: true
+  notes: Open-source explorer. No API key required for public instances. Many chain deployments available.
+
+- id: routescan
+  name: Routescan
+  type: api
+  url: https://api.routescan.io/v2
+  collector: chain_data
+  frequency: 2m
+  category: onchain_data
+  subcategory: explorer
+  priority: medium
+  enabled: true
+  notes: Multi-chain explorer API. Supports EVM chains including Avalanche, Fantom, and others.
+
+# =============================================================================
+# Analytics Platforms
+# =============================================================================
+
+- id: dune_analytics
+  name: Dune Analytics
+  type: api
+  url: https://api.dune.com/api/v1
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: Requires API key (DUNE_API_KEY). Execute and fetch query results. Free tier limited credits.
+
+- id: defillama_tvl
+  name: DeFiLlama TVL
+  type: api
+  url: https://api.llama.fi/v2/protocols
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: No API key required. Protocol-level and chain-level TVL data.
+
+- id: defillama_yields
+  name: DeFiLlama Yields
+  type: api
+  url: https://yields.llama.fi/pools
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: No API key required. DeFi yield/APY data across protocols and chains.
+
+- id: defillama_stablecoins
+  name: DeFiLlama Stablecoins
+  type: api
+  url: https://stablecoins.llama.fi/stablecoins
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: No API key required. Stablecoin market caps, chain distribution, and flows.
+
+- id: defillama_bridges
+  name: DeFiLlama Bridges
+  type: api
+  url: https://bridges.llama.fi/bridges
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: No API key required. Bridge volume and TVL data across protocols.
+
+- id: defillama_fees
+  name: DeFiLlama Fees & Revenue
+  type: api
+  url: https://api.llama.fi/overview/fees
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: No API key required. Protocol fees and revenue data.
+
+- id: defillama_raises
+  name: DeFiLlama Raises
+  type: api
+  url: https://api.llama.fi/raises
+  collector: chain_data
+  frequency: 1h
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: No API key required. Crypto fundraising rounds and investor data.
+
+- id: nansen
+  name: Nansen
+  type: api
+  url: https://api.nansen.ai/v1
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: Requires API key (NANSEN_API_KEY). Paid plans only. Smart money labels, wallet profiling, token flows.
+
+- id: arkham_intelligence
+  name: Arkham Intelligence
+  type: api
+  url: https://api.arkhamintelligence.com
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: Requires API key (ARKHAM_API_KEY). Entity labels, fund flows, wallet intelligence.
+
+- id: token_terminal
+  name: Token Terminal
+  type: api
+  url: https://api.tokenterminal.com/v2
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: Requires API key (TOKEN_TERMINAL_API_KEY). Protocol financials, revenue, earnings, and valuation metrics.
+
+- id: artemis_xyz
+  name: Artemis.xyz
+  type: api
+  url: https://api.artemis.xyz/api/v1
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: Requires API key (ARTEMIS_API_KEY). Cross-chain activity metrics, developer activity, stablecoin flows.
+
+- id: debank
+  name: DeBank
+  type: api
+  url: https://pro-openapi.debank.com/v1
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: Requires API key (DEBANK_API_KEY). Portfolio tracking, wallet balances, protocol positions across EVM chains.
+
+- id: zapper
+  name: Zapper
+  type: api
+  url: https://api.zapper.xyz/v2
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: Requires API key (ZAPPER_API_KEY). Portfolio balances, DeFi positions, NFT holdings, transaction history.
+
+- id: zerion
+  name: Zerion
+  type: api
+  url: https://api.zerion.io/v1
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: Requires API key (ZERION_API_KEY). Portfolio tracking, token prices, DeFi positions.
+
+- id: l2beat
+  name: L2Beat
+  type: api
+  url: https://api.l2beat.com/api
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: high
+  enabled: true
+  notes: No API key required. L2 TVL, risk analysis, activity metrics, and stage assessments.
+
+- id: growthepie
+  name: GrowThePie
+  type: api
+  url: https://api.growthepie.xyz/v1
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: No API key required. L2 economics, fundamentals, and usage metrics.
+
+- id: ultrasound_money
+  name: Ultrasound.money
+  type: api
+  url: https://ultrasound.money/api/v2
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: analytics
+  priority: medium
+  enabled: true
+  notes: No API key required. ETH supply, burn rate, issuance tracking post-merge.
+
+# =============================================================================
+# MEV
+# =============================================================================
+
+- id: eigenphi
+  name: EigenPhi
+  type: api
+  url: https://api.eigenphi.io/v1
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: mev
+  priority: medium
+  enabled: true
+  notes: MEV transaction analysis, sandwich attacks, arbitrage, and liquidation tracking on Ethereum.
+
+- id: flashbots
+  name: Flashbots
+  type: api
+  url: https://blocks.flashbots.net/v1
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: mev
+  priority: high
+  enabled: true
+  notes: No API key required for public endpoints. MEV-Boost relay data, block builder stats, bundle data.
+
+- id: flashbots_transparency
+  name: Flashbots Transparency Dashboard
+  type: api
+  url: https://mev-boost-relay.flashbots.net
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: mev
+  priority: high
+  enabled: true
+  notes: No API key required. Relay payloads, validator registrations, builder submissions.
+
+- id: mev_blocker
+  name: MEV Blocker
+  type: api
+  url: https://mevblocker.io/api
+  collector: chain_data
+  frequency: 10m
+  category: onchain_data
+  subcategory: mev
+  priority: medium
+  enabled: true
+  notes: MEV protection statistics. RPC endpoint at https://rpc.mevblocker.io for transaction submission.
+
+# =============================================================================
+# Stablecoin Transparency
+# =============================================================================
+
+- id: defillama_stablecoin_chains
+  name: DeFiLlama Stablecoin Chains
+  type: api
+  url: https://stablecoins.llama.fi/stablecoinchains
+  collector: chain_data
+  frequency: 30m
+  category: onchain_data
+  subcategory: stablecoin
+  priority: high
+  enabled: true
+  notes: No API key required. Stablecoin distribution across all chains.
+
+- id: circle_usdc_transparency
+  name: Circle USDC Transparency
+  type: api
+  url: https://api.circle.com/v1/stablecoins
+  collector: chain_data
+  frequency: 1h
+  category: onchain_data
+  subcategory: stablecoin
+  priority: high
+  enabled: true
+  notes: Public attestation data. Additional endpoints require API key (CIRCLE_API_KEY).
+
+- id: tether_transparency
+  name: Tether Transparency
+  type: api
+  url: https://app.tether.to/transparency.json
+  collector: chain_data
+  frequency: 1h
+  category: onchain_data
+  subcategory: stablecoin
+  priority: high
+  enabled: true
+  notes: No API key required. USDT reserves, issuance per chain, and total supply data.
+
+- id: makerdao_psm
+  name: MakerDAO PSM
+  type: api
+  url: https://api.llama.fi/protocol/makerdao
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: stablecoin
+  priority: medium
+  enabled: true
+  notes: No API key required. DeFiLlama endpoint for MakerDAO/Sky protocol data including PSM metrics. Direct on-chain queries via Dune for granular PSM data.
+
+# =============================================================================
+# Bridge Data
+# =============================================================================
+
+- id: defillama_bridge_volumes
+  name: DeFiLlama Bridge Volumes
+  type: api
+  url: https://bridges.llama.fi/bridges
+  collector: chain_data
+  frequency: 15m
+  category: onchain_data
+  subcategory: bridge
+  priority: high
+  enabled: true
+  notes: No API key required. Aggregated bridge volumes, TVL, and historical flow data.
+
+- id: lifi
+  name: Li.Fi
+  type: api
+  url: https://li.quest/v1
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  notes: No API key required for public endpoints. Cross-chain bridge and DEX aggregator. Routes, tokens, chains, and quote data.
+
+- id: socket
+  name: Socket
+  type: api
+  url: https://api.socket.tech/v2
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  notes: Requires API key (SOCKET_API_KEY). Cross-chain bridge aggregator. Routes, quotes, and supported chains/bridges.
+
+- id: across
+  name: Across Protocol
+  type: api
+  url: https://across.to/api
+  collector: chain_data
+  frequency: 5m
+  category: onchain_data
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  notes: No API key required for public endpoints. Optimistic bridge with fast finality. Suggested fees, deposit limits, and fill status.
+
+- id: stargate
+  name: Stargate Finance
+  type: api
+  url: https://mainnet.stargate-api.com/v1
+  collector: chain_data
+  frequency: 10m
+  category: onchain_data
+  subcategory: bridge
+  priority: medium
+  enabled: true
+  notes: LayerZero-based omnichain bridge. Pool liquidity and cross-chain transfer data.
+
+- id: layerzero
+  name: LayerZero
+  type: api
+  url: https://scan.layerzero-api.com/v1
+  collector: chain_data
+  frequency: 10m
+  category: onchain_data
+  subcategory: bridge
+  priority: high
+  enabled: true
+  notes: No API key required for public scan API. Cross-chain messaging protocol. Message tracking, chain stats, and protocol metrics.

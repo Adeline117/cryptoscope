@@ -1,0 +1,214 @@
+# Academic paper sources
+
+# arXiv categories
+- id: arxiv_cs_cr
+  name: "arXiv cs.CR (Cryptography & Security)"
+  type: rss
+  url: "https://rss.arxiv.org/rss/cs.CR"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: cryptography
+  priority: high
+  enabled: true
+
+- id: arxiv_cs_dc
+  name: "arXiv cs.DC (Distributed Computing)"
+  type: rss
+  url: "https://rss.arxiv.org/rss/cs.DC"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: distributed_systems
+  priority: high
+  enabled: true
+
+- id: arxiv_cs_gt
+  name: "arXiv cs.GT (Game Theory)"
+  type: rss
+  url: "https://rss.arxiv.org/rss/cs.GT"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: mechanism_design
+  priority: medium
+  enabled: true
+
+- id: arxiv_cs_ai
+  name: "arXiv cs.AI (Artificial Intelligence)"
+  type: rss
+  url: "https://rss.arxiv.org/rss/cs.AI"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: ai
+  priority: low
+  enabled: true
+
+- id: arxiv_cs_lg
+  name: "arXiv cs.LG (Machine Learning)"
+  type: rss
+  url: "https://rss.arxiv.org/rss/cs.LG"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: ml
+  priority: low
+  enabled: true
+
+- id: arxiv_q_fin
+  name: "arXiv q-fin (Quantitative Finance)"
+  type: rss
+  url: "https://rss.arxiv.org/rss/q-fin"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: quant_finance
+  priority: medium
+  enabled: true
+
+# Academic search APIs
+- id: semantic_scholar
+  name: Semantic Scholar API
+  type: api
+  url: "https://api.semanticscholar.org/graph/v1"
+  collector: academic_papers
+  frequency: 6h
+  category: academic
+  subcategory: search
+  priority: high
+  enabled: true
+  notes: "API key optional but recommended. Query for: DeFi, blockchain, smart contract, MEV, AMM"
+  queries:
+    - "decentralized finance DeFi"
+    - "blockchain consensus"
+    - "smart contract security"
+    - "maximal extractable value MEV"
+    - "automated market maker"
+    - "sybil detection blockchain"
+    - "cross-chain bridge"
+
+- id: dblp
+  name: DBLP Computer Science Bibliography
+  type: api
+  url: "https://dblp.org/search/publ/api"
+  collector: academic_papers
+  frequency: 12h
+  category: academic
+  subcategory: search
+  priority: medium
+  enabled: true
+
+# Key research labs (RSS/blog feeds)
+- id: ic3_cornell
+  name: "IC3 (Cornell) Blog"
+  type: rss
+  url: "https://www.initc3.org/feed.xml"
+  collector: news_feed
+  frequency: 12h
+  category: academic
+  subcategory: research_lab
+  priority: high
+  enabled: true
+
+- id: flashbots_research
+  name: Flashbots Research
+  type: rss
+  url: "https://writings.flashbots.net/rss.xml"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: mev
+  priority: high
+  enabled: true
+
+- id: paradigm_research
+  name: Paradigm Research
+  type: rss
+  url: "https://www.paradigm.xyz/writing/feed.xml"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: research_lab
+  priority: high
+  enabled: true
+
+- id: a16z_crypto_research
+  name: a16z Crypto Research
+  type: rss
+  url: "https://a16zcrypto.com/feed/"
+  collector: news_feed
+  frequency: 6h
+  category: academic
+  subcategory: research_lab
+  priority: high
+  enabled: true
+
+- id: uniswap_research
+  name: Uniswap Labs Research
+  type: rss
+  url: "https://blog.uniswap.org/rss.xml"
+  collector: news_feed
+  frequency: 12h
+  category: academic
+  subcategory: research_lab
+  priority: high
+  enabled: true
+
+- id: gauntlet_research
+  name: Gauntlet Research
+  type: rss
+  url: "https://www.gauntlet.xyz/resources/feed"
+  collector: news_feed
+  frequency: 12h
+  category: academic
+  subcategory: research_lab
+  priority: medium
+  enabled: true
+
+- id: sorella_labs
+  name: Sorella Labs Blog
+  type: rss
+  url: "https://sorellalabs.xyz/blog/rss.xml"
+  collector: news_feed
+  frequency: 12h
+  category: academic
+  subcategory: mev
+  priority: medium
+  enabled: true
+
+- id: nethermind_research
+  name: Nethermind Research
+  type: rss
+  url: "https://www.nethermind.io/blog/feed"
+  collector: news_feed
+  frequency: 12h
+  category: academic
+  subcategory: research_lab
+  priority: medium
+  enabled: true
+
+# Conference proceedings
+- id: acm_aft
+  name: "ACM AFT (Advances in Financial Technologies)"
+  type: api
+  url: "https://api.semanticscholar.org/graph/v1"
+  collector: academic_papers
+  frequency: 24h
+  category: academic
+  subcategory: conference
+  priority: high
+  enabled: true
+  venue_id: "ACM AFT"
+
+- id: fc_conference
+  name: "Financial Cryptography (FC)"
+  type: api
+  url: "https://api.semanticscholar.org/graph/v1"
+  collector: academic_papers
+  frequency: 24h
+  category: academic
+  subcategory: conference
+  priority: high
+  enabled: true
+  venue_id: "FC"

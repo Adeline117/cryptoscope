@@ -1,0 +1,246 @@
+# Research firms and VC blogs
+
+# Tier 1 — full reports, high quality
+- id: messari
+  name: Messari Research
+  type: rss
+  url: "https://messari.io/rss"
+  collector: news_feed
+  frequency: 2h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: delphi_digital
+  name: Delphi Digital
+  type: rss
+  url: "https://members.delphidigital.io/feed"
+  collector: news_feed
+  frequency: 2h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: galaxy_research
+  name: Galaxy Digital Research
+  type: rss
+  url: "https://www.galaxy.com/research/feed/"
+  collector: news_feed
+  frequency: 2h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: coinbase_institutional
+  name: Coinbase Institutional Research
+  type: rss
+  url: "https://www.coinbase.com/institutional/research/feed"
+  collector: news_feed
+  frequency: 4h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: binance_research
+  name: Binance Research
+  type: rss
+  url: "https://research.binance.com/feed"
+  collector: news_feed
+  frequency: 4h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: okx_research
+  name: OKX Research
+  type: rss
+  url: "https://www.okx.com/academy/en/feed"
+  collector: news_feed
+  frequency: 4h
+  category: research
+  subcategory: tier1
+  priority: medium
+  enabled: true
+
+- id: bitwise_research
+  name: Bitwise Research
+  type: rss
+  url: "https://bitwiseinvestments.com/crypto-market-insights/feed"
+  collector: news_feed
+  frequency: 6h
+  category: research
+  subcategory: tier1
+  priority: medium
+  enabled: true
+
+- id: grayscale_research
+  name: Grayscale Research
+  type: rss
+  url: "https://www.grayscale.com/research/feed"
+  collector: news_feed
+  frequency: 6h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: chainalysis
+  name: Chainalysis Reports
+  type: rss
+  url: "https://www.chainalysis.com/blog/feed/"
+  collector: news_feed
+  frequency: 6h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+- id: electric_capital
+  name: Electric Capital Developer Report
+  type: rss
+  url: "https://www.electriccapital.com/blog/feed"
+  collector: news_feed
+  frequency: 24h
+  category: research
+  subcategory: tier1
+  priority: high
+  enabled: true
+
+# Tier 2 — regular content, good insights
+- id: the_block_research
+  name: The Block Research
+  type: rss
+  url: "https://www.theblock.co/research/feed"
+  collector: news_feed
+  frequency: 4h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: kaiko_research
+  name: Kaiko Research
+  type: rss
+  url: "https://www.kaiko.com/research/feed"
+  collector: news_feed
+  frequency: 6h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: glassnode_insights
+  name: Glassnode Insights
+  type: rss
+  url: "https://insights.glassnode.com/rss/"
+  collector: news_feed
+  frequency: 4h
+  category: research
+  subcategory: tier2
+  priority: high
+  enabled: true
+
+- id: coin_metrics
+  name: Coin Metrics State of the Network
+  type: rss
+  url: "https://coinmetrics.substack.com/feed"
+  collector: news_feed
+  frequency: 6h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: variant_blog
+  name: Variant Fund Blog
+  type: rss
+  url: "https://variant.fund/writing/feed"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: multicoin_blog
+  name: Multicoin Capital Blog
+  type: rss
+  url: "https://multicoin.capital/blog/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: pantera_letters
+  name: Pantera Capital Letters
+  type: rss
+  url: "https://panteracapital.com/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: dragonfly_blog
+  name: Dragonfly Blog
+  type: rss
+  url: "https://medium.com/feed/dragonfly-research"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: placeholder_blog
+  name: Placeholder VC Blog
+  type: rss
+  url: "https://www.placeholder.vc/blog?format=rss"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+- id: onekey_blog
+  name: 1kx Blog
+  type: rss
+  url: "https://medium.com/feed/1kxnetwork"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: tier2
+  priority: medium
+  enabled: true
+
+# Data aggregator reports
+- id: coingecko_reports
+  name: CoinGecko Reports
+  type: rss
+  url: "https://www.coingecko.com/research/feed"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: data_reports
+  priority: medium
+  enabled: true
+
+- id: dappradar
+  name: DappRadar Reports
+  type: rss
+  url: "https://dappradar.com/blog/feed"
+  collector: news_feed
+  frequency: 12h
+  category: research
+  subcategory: data_reports
+  priority: low
+  enabled: true

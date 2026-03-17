@@ -1,0 +1,909 @@
+# =============================================================================
+# Exchange Data Sources
+# CEX APIs, DEX Aggregators/Analytics, and Derivatives Data
+# =============================================================================
+
+# =============================================================================
+# CENTRALIZED EXCHANGES (CEX)
+# =============================================================================
+
+# --- Binance ---
+- id: binance_spot
+  name: Binance Spot
+  type: api
+  url: https://api.binance.com/api/v3
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Public market data endpoints (ticker, depth, trades). No auth required for public data.
+
+- id: binance_futures
+  name: Binance USD-M Futures
+  type: api
+  url: https://fapi.binance.com/fapi/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: USD-margined futures. Includes funding rates, open interest, liquidations.
+
+- id: binance_coin_futures
+  name: Binance COIN-M Futures
+  type: api
+  url: https://dapi.binance.com/dapi/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Coin-margined futures and delivery contracts.
+
+# --- OKX ---
+- id: okx_spot
+  name: OKX
+  type: api
+  url: https://www.okx.com/api/v5
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Unified API for spot, futures, perpetual swaps, and options. Public market data at /market/*.
+
+- id: okx_funding
+  name: OKX Funding & Open Interest
+  type: api
+  url: https://www.okx.com/api/v5/public
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Funding rate, open interest, and insurance fund data via /public/funding-rate, /public/open-interest.
+
+# --- Bybit ---
+- id: bybit_v5
+  name: Bybit
+  type: api
+  url: https://api.bybit.com/v5
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Unified v5 API for spot, linear, inverse, and option. /market/tickers, /market/orderbook, /market/funding/history.
+
+# --- Bitget ---
+- id: bitget_spot
+  name: Bitget Spot
+  type: api
+  url: https://api.bitget.com/api/v2/spot
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Spot market data. /market/tickers, /market/orderbook.
+
+- id: bitget_futures
+  name: Bitget Futures
+  type: api
+  url: https://api.bitget.com/api/v2/mix
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Futures market data including funding rates and open interest. /market/tickers, /market/funding-time.
+
+# --- dYdX ---
+- id: dydx_v4
+  name: dYdX v4
+  type: api
+  url: https://indexer.dydx.trade/v4
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: dYdX v4 indexer API (Cosmos-based). Perpetual markets, orderbook, trades, funding rates.
+
+# --- Coinbase ---
+- id: coinbase_exchange
+  name: Coinbase Exchange (Advanced Trade)
+  type: api
+  url: https://api.coinbase.com/api/v3/brokerage
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Advanced Trade API. /market/products for tickers, /market/product_book for orderbook.
+
+- id: coinbase_exchange_legacy
+  name: Coinbase Exchange (Pro Legacy)
+  type: api
+  url: https://api.exchange.coinbase.com
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Legacy Exchange/Pro public endpoints. /products, /products/{id}/ticker, /products/{id}/book.
+
+# --- Kraken ---
+- id: kraken_spot
+  name: Kraken Spot
+  type: api
+  url: https://api.kraken.com/0/public
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Public REST endpoints. /Ticker, /Depth, /Trades, /OHLC. No auth required.
+
+- id: kraken_futures
+  name: Kraken Futures
+  type: api
+  url: https://futures.kraken.com/derivatives/api/v3
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Futures/perpetuals API. /tickers, /orderbook, /history.
+
+# --- KuCoin ---
+- id: kucoin_spot
+  name: KuCoin Spot
+  type: api
+  url: https://api.kucoin.com/api/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Spot market data. /market/allTickers, /market/orderbook/level2_20.
+
+- id: kucoin_futures
+  name: KuCoin Futures
+  type: api
+  url: https://api-futures.kucoin.com/api/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Futures API. /contracts/active, /ticker, /funding-rate.
+
+# --- Gate.io ---
+- id: gateio_spot
+  name: Gate.io Spot
+  type: api
+  url: https://api.gateio.ws/api/v4/spot
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: high
+  enabled: true
+  notes: Spot market data. /tickers, /order_book, /trades.
+
+- id: gateio_futures
+  name: Gate.io Futures
+  type: api
+  url: https://api.gateio.ws/api/v4/futures/usdt
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: USDT-settled futures. /contracts, /tickers, /funding_rate.
+
+# --- MEXC ---
+- id: mexc_spot
+  name: MEXC Spot
+  type: api
+  url: https://api.mexc.com/api/v3
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Spot market data. /ticker/24hr, /depth, /trades. Binance-compatible API format.
+
+- id: mexc_futures
+  name: MEXC Futures
+  type: api
+  url: https://contract.mexc.com/api/v1/contract
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Futures contract data. /ticker, /funding_rate, /depth.
+
+# --- HTX (Huobi) ---
+- id: htx_spot
+  name: HTX Spot
+  type: api
+  url: https://api.huobi.pro/market
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Spot market data. /tickers, /depth, /trade. Formerly Huobi Global.
+
+- id: htx_futures
+  name: HTX Futures
+  type: api
+  url: https://api.hbdm.com/linear-swap-api/v1/swap
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: USDT-margined swaps. /funding_rate, /open_interest, /market/depth.
+
+# --- Crypto.com ---
+- id: crypto_com_spot
+  name: Crypto.com Exchange
+  type: api
+  url: https://api.crypto.com/exchange/v1/public
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Public market data. /get-tickers, /get-book, /get-trades.
+
+# --- Upbit ---
+- id: upbit
+  name: Upbit
+  type: api
+  url: https://api.upbit.com/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Korean exchange. /ticker, /orderbook, /trades/ticks. Key for KRW premium tracking.
+
+# --- Bithumb ---
+- id: bithumb
+  name: Bithumb
+  type: api
+  url: https://api.bithumb.com/public
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Korean exchange. /ticker/{currency}, /orderbook/{currency}. Key for KRW premium tracking.
+
+# --- Bitstamp ---
+- id: bitstamp
+  name: Bitstamp
+  type: api
+  url: https://www.bitstamp.net/api/v2
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: One of the oldest exchanges. /ticker/{pair}/, /order_book/{pair}/. EUR and USD pairs.
+
+# --- Gemini ---
+- id: gemini
+  name: Gemini
+  type: api
+  url: https://api.gemini.com/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: US-regulated exchange. /pubticker/{symbol}, /book/{symbol}. Also v2 endpoint for candles.
+
+# --- Phemex ---
+- id: phemex
+  name: Phemex
+  type: api
+  url: https://api.phemex.com
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: medium
+  enabled: true
+  notes: Derivatives-focused exchange. /md/v3/ticker/24hr, /md/v3/orderbook. Contract and spot markets.
+
+# --- BingX ---
+- id: bingx_spot
+  name: BingX Spot
+  type: api
+  url: https://open-api.bingx.com/openApi/spot/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: low
+  enabled: true
+  notes: Spot market data. /market/ticker, /market/depth.
+
+- id: bingx_futures
+  name: BingX Futures
+  type: api
+  url: https://open-api.bingx.com/openApi/swap/v2
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: low
+  enabled: true
+  notes: Perpetual swap data. /quote/ticker, /quote/depth, /quote/fundingRate.
+
+# --- WOO X ---
+- id: woo_x
+  name: WOO X
+  type: api
+  url: https://api.woo.org/v1/public
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: low
+  enabled: true
+  notes: Market data. /info, /market_trades, /orderbook/{symbol}. Also /v3/public for newer endpoints.
+
+# --- Backpack ---
+- id: backpack
+  name: Backpack Exchange
+  type: api
+  url: https://api.backpack.exchange/api/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: cex
+  priority: low
+  enabled: true
+  notes: Solana-native CEX. /tickers, /depth, /trades. Newer exchange with growing volume.
+
+
+# =============================================================================
+# DECENTRALIZED EXCHANGES (DEX) - Aggregators & Analytics
+# =============================================================================
+
+# --- DeFiLlama DEX ---
+- id: defillama_dex
+  name: DeFiLlama DEX
+  type: api
+  url: https://api.llama.fi
+  collector: chain_data
+  frequency: 15m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Aggregated DEX volumes across all chains. /overview/dexs, /summary/dexs/{protocol}. Free, no auth.
+
+- id: defillama_dex_chains
+  name: DeFiLlama DEX by Chain
+  type: api
+  url: https://api.llama.fi/overview/dexs
+  collector: chain_data
+  frequency: 15m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: DEX volume breakdown by chain. Useful for cross-chain DEX flow analysis.
+
+# --- DEX Screener ---
+- id: dexscreener
+  name: DEX Screener
+  type: api
+  url: https://api.dexscreener.com
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Real-time DEX pair data across all chains. /latest/dex/pairs/{chainId}/{pairAddress}, /latest/dex/tokens/{tokenAddress}. Free, no auth.
+
+# --- Uniswap ---
+- id: uniswap_v3_ethereum
+  name: Uniswap v3 (Ethereum)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Uniswap v3 subgraph on Ethereum. GraphQL API for pools, swaps, TVL, and volume data.
+
+- id: uniswap_v3_arbitrum
+  name: Uniswap v3 (Arbitrum)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/ianlapham/uniswap-arbitrum-one
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Uniswap v3 subgraph on Arbitrum. GraphQL for pool and swap data.
+
+- id: uniswap_v3_polygon
+  name: Uniswap v3 (Polygon)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/ianlapham/uniswap-v3-polygon
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Uniswap v3 subgraph on Polygon.
+
+- id: uniswap_v3_base
+  name: Uniswap v3 (Base)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/lynnshaoyu/uniswap-v3-base
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Uniswap v3 subgraph on Base.
+
+# --- SushiSwap ---
+- id: sushiswap
+  name: SushiSwap
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/sushi-v3/v3-ethereum
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: SushiSwap v3 subgraph. Multi-chain DEX. GraphQL for pool/swap data.
+
+- id: sushiswap_api
+  name: SushiSwap API
+  type: api
+  url: https://api.sushi.com
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: SushiSwap REST API aggregator. Pool data, token prices, and route quotes.
+
+# --- Curve ---
+- id: curve_finance
+  name: Curve Finance
+  type: api
+  url: https://api.curve.fi/v1
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Curve pool data. /getPools/{chain}, /getVolumes/{chain}. Key for stablecoin and LST swap data.
+
+# --- Balancer ---
+- id: balancer_v2
+  name: Balancer v2
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/balancer-labs/balancer-v2
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Balancer v2 subgraph on Ethereum. Weighted pools, stable pools, and boosted pools.
+
+- id: balancer_api
+  name: Balancer API
+  type: api
+  url: https://api.balancer.fi
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Balancer REST API. Pool data, token lists, and SOR routes.
+
+# --- PancakeSwap ---
+- id: pancakeswap_v3_bsc
+  name: PancakeSwap v3 (BSC)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/pancakeswap/exchange-v3-bsc
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: PancakeSwap v3 on BSC. Largest DEX by volume on BNB Chain.
+
+- id: pancakeswap_api
+  name: PancakeSwap API
+  type: api
+  url: https://api.pancakeswap.info/api/v2
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: PancakeSwap REST API. /tokens, /pairs, /summary.
+
+# --- Trader Joe ---
+- id: trader_joe_avalanche
+  name: Trader Joe (Avalanche)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/traderjoe-xyz/joe-v2-avalanche
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Trader Joe v2 (Liquidity Book) on Avalanche. GraphQL for bin-based pool data.
+
+- id: trader_joe_arbitrum
+  name: Trader Joe (Arbitrum)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/traderjoe-xyz/joe-v2-arbitrum
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: low
+  enabled: true
+  notes: Trader Joe v2 on Arbitrum.
+
+# --- Camelot ---
+- id: camelot
+  name: Camelot DEX
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/camelotlabs/camelot-amm-v3
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Camelot v3 on Arbitrum. Native Arbitrum DEX with concentrated liquidity.
+
+# --- Aerodrome ---
+- id: aerodrome
+  name: Aerodrome (Base)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/aerodrome-finance/aerodrome-base
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Aerodrome on Base. Dominant DEX on Base chain. ve(3,3) model.
+
+- id: aerodrome_api
+  name: Aerodrome API
+  type: api
+  url: https://api.aerodrome.finance
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Aerodrome REST API for pool and gauge data.
+
+# --- Velodrome ---
+- id: velodrome
+  name: Velodrome (Optimism)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/velodrome-finance/velodrome-v2
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Velodrome v2 on Optimism. Dominant DEX on Optimism. ve(3,3) model.
+
+# --- GMX ---
+- id: gmx_arbitrum
+  name: GMX (Arbitrum)
+  type: api
+  url: https://arbitrum-api.gmxinfra.io
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: GMX v2 on Arbitrum. Perpetual DEX. /prices/tickers for mark prices, /signed_prices for oracle prices.
+
+- id: gmx_subgraph
+  name: GMX Subgraph (Arbitrum)
+  type: api
+  url: https://api.thegraph.com/subgraphs/name/gmx-io/gmx-stats
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: GMX stats subgraph. Volume, fees, open interest, and trader P&L analytics.
+
+# --- Hyperliquid ---
+- id: hyperliquid
+  name: Hyperliquid
+  type: api
+  url: https://api.hyperliquid.xyz
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: On-chain perpetual DEX. POST /info for meta, funding, open interest. High-volume perps with low fees.
+
+# --- Jupiter ---
+- id: jupiter
+  name: Jupiter (Solana)
+  type: api
+  url: https://quote-api.jup.ag/v6
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Solana DEX aggregator. /quote for best swap routes, /tokens for token list. Dominant Solana swap router.
+
+- id: jupiter_stats
+  name: Jupiter Stats
+  type: api
+  url: https://stats.jup.ag/v1
+  collector: chain_data
+  frequency: 15m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Jupiter volume and fee statistics.
+
+- id: jupiter_perps
+  name: Jupiter Perpetuals
+  type: api
+  url: https://perps-api.jup.ag/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Jupiter perpetual exchange data. Markets, positions, and funding rates on Solana.
+
+# --- Raydium ---
+- id: raydium
+  name: Raydium (Solana)
+  type: api
+  url: https://api-v3.raydium.io
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Solana AMM and CLMM pools. /pools/info/list, /mint/price. Core Solana liquidity venue.
+
+# --- Orca ---
+- id: orca
+  name: Orca (Solana)
+  type: api
+  url: https://api.orca.so/v1
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Orca Whirlpool CLMM on Solana. Pool data, TVL, and volume.
+
+- id: orca_whirlpool
+  name: Orca Whirlpool Stats
+  type: api
+  url: https://stats.orca.so
+  collector: chain_data
+  frequency: 15m
+  category: exchange_data
+  subcategory: dex
+  priority: medium
+  enabled: true
+  notes: Orca aggregate volume and pool statistics.
+
+
+# =============================================================================
+# DERIVATIVES DATA PROVIDERS
+# =============================================================================
+
+# --- Coinglass ---
+- id: coinglass_oi
+  name: Coinglass Open Interest
+  type: api
+  url: https://open-api-v3.coinglass.com/api
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Aggregated open interest across exchanges. /futures/openInterest/chart, /futures/openInterest/ohlc-history. Requires API key.
+
+- id: coinglass_funding
+  name: Coinglass Funding Rates
+  type: api
+  url: https://open-api-v3.coinglass.com/api/futures/funding-rate
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Cross-exchange funding rate data. Essential for basis trade and sentiment analysis. Requires API key.
+
+- id: coinglass_liquidation
+  name: Coinglass Liquidations
+  type: api
+  url: https://open-api-v3.coinglass.com/api/futures/liquidation
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Real-time and historical liquidation data across exchanges. Requires API key.
+
+- id: coinglass_lsr
+  name: Coinglass Long/Short Ratio
+  type: api
+  url: https://open-api-v3.coinglass.com/api/futures/longShort-chart
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Aggregated long/short ratios by exchange. Key sentiment indicator. Requires API key.
+
+# --- Laevitas ---
+- id: laevitas_options
+  name: Laevitas Options Analytics
+  type: api
+  url: https://api.laevitas.ch/analytics/v2
+  collector: chain_data
+  frequency: 15m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Options analytics - IV, skew, gamma exposure, max pain. Covers Deribit, OKX, Bybit. Requires API key.
+
+- id: laevitas_futures
+  name: Laevitas Futures Analytics
+  type: api
+  url: https://api.laevitas.ch/analytics/v2/futures
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Futures basis, term structure, and cross-exchange spread data. Requires API key.
+
+- id: laevitas_flow
+  name: Laevitas Options Flow
+  type: api
+  url: https://api.laevitas.ch/analytics/v2/options/flow
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  notes: Options flow data - large trades, block trades, unusual activity. Requires API key.
+
+# --- Velo Data ---
+- id: velo_data_funding
+  name: Velo Data Funding Rates
+  type: api
+  url: https://api.velodata.app/api/v1
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Cross-exchange funding rate analytics and basis data. /funding, /oi. Requires API key.
+
+- id: velo_data_oi
+  name: Velo Data Open Interest
+  type: api
+  url: https://api.velodata.app/api/v1/oi
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: high
+  enabled: true
+  notes: Aggregated and exchange-level open interest data with historical analytics. Requires API key.
+
+- id: velo_data_liquidations
+  name: Velo Data Liquidations
+  type: api
+  url: https://api.velodata.app/api/v1/liquidations
+  collector: chain_data
+  frequency: 5m
+  category: exchange_data
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  notes: Liquidation data and heatmaps. Requires API key.
+
+- id: velo_data_basis
+  name: Velo Data Basis & Term Structure
+  type: api
+  url: https://api.velodata.app/api/v1/basis
+  collector: chain_data
+  frequency: 10m
+  category: exchange_data
+  subcategory: derivatives
+  priority: medium
+  enabled: true
+  notes: Futures basis and term structure across exchanges. Key for carry trade analysis. Requires API key.

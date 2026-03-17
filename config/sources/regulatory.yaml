@@ -1,0 +1,111 @@
+# Regulatory body feeds
+
+- id: sec_edgar
+  name: SEC EDGAR (Crypto-related filings)
+  type: rss
+  url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=&dateb=&owner=include&count=40&search_text=&action=getcompany&output=atom"
+  collector: regulatory_feed
+  frequency: 2h
+  category: regulatory
+  subcategory: sec
+  priority: high
+  enabled: true
+
+- id: sec_press
+  name: SEC Press Releases
+  type: rss
+  url: "https://www.sec.gov/news/pressreleases.rss"
+  collector: news_feed
+  frequency: 2h
+  category: regulatory
+  subcategory: sec
+  priority: high
+  enabled: true
+
+- id: cftc_press
+  name: CFTC Press Releases
+  type: rss
+  url: "https://www.cftc.gov/PressRoom/PressReleases/RSS"
+  collector: news_feed
+  frequency: 4h
+  category: regulatory
+  subcategory: cftc
+  priority: high
+  enabled: true
+
+- id: bis_publications
+  name: BIS Crypto Publications
+  type: rss
+  url: "https://www.bis.org/doclist/all_published.rss"
+  collector: news_feed
+  frequency: 12h
+  category: regulatory
+  subcategory: bis
+  priority: medium
+  enabled: true
+
+- id: imf_fintech
+  name: IMF FinTech Notes
+  type: rss
+  url: "https://www.imf.org/en/Publications/RSS?type=Fintech%20Notes"
+  collector: news_feed
+  frequency: 24h
+  category: regulatory
+  subcategory: imf
+  priority: medium
+  enabled: true
+
+- id: fatf_updates
+  name: FATF Virtual Assets
+  type: rss
+  url: "https://www.fatf-gafi.org/feed/"
+  collector: news_feed
+  frequency: 12h
+  category: regulatory
+  subcategory: fatf
+  priority: medium
+  enabled: true
+
+- id: occ_news
+  name: OCC News Releases
+  type: rss
+  url: "https://www.occ.gov/rss/occ-news.xml"
+  collector: news_feed
+  frequency: 6h
+  category: regulatory
+  subcategory: occ
+  priority: medium
+  enabled: true
+
+- id: fed_speeches
+  name: Federal Reserve Speeches
+  type: rss
+  url: "https://www.federalreserve.gov/feeds/speeches.xml"
+  collector: news_feed
+  frequency: 6h
+  category: regulatory
+  subcategory: fed
+  priority: medium
+  enabled: true
+
+- id: hk_sfc
+  name: Hong Kong SFC
+  type: rss
+  url: "https://www.sfc.hk/en/RSS"
+  collector: news_feed
+  frequency: 12h
+  category: regulatory
+  subcategory: hk
+  priority: medium
+  enabled: true
+
+- id: uk_fca
+  name: UK FCA Crypto
+  type: rss
+  url: "https://www.fca.org.uk/news/rss.xml"
+  collector: news_feed
+  frequency: 12h
+  category: regulatory
+  subcategory: uk
+  priority: medium
+  enabled: true
