@@ -501,7 +501,7 @@
   enabled: true
   notes: Requires API key (SOCKET_API_KEY). Cross-chain bridge aggregator. Routes, quotes, and supported chains/bridges.
 
-- id: across
+- id: across_onchain
   name: Across Protocol
   type: api
   url: https://across.to/api
@@ -513,7 +513,7 @@
   enabled: true
   notes: No API key required for public endpoints. Optimistic bridge with fast finality. Suggested fees, deposit limits, and fill status.
 
-- id: stargate
+- id: stargate_onchain
   name: Stargate Finance
   type: api
   url: https://mainnet.stargate-api.com/v1
@@ -525,7 +525,7 @@
   enabled: true
   notes: LayerZero-based omnichain bridge. Pool liquidity and cross-chain transfer data.
 
-- id: layerzero
+- id: layerzero_onchain
   name: LayerZero
   type: api
   url: https://scan.layerzero-api.com/v1

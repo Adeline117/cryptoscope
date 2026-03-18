@@ -14,6 +14,7 @@ Sources:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import datetime, timezone
 from time import mktime
 
@@ -141,7 +142,7 @@ class PoliticalRegulatoryCollector(BaseCollector):
 
                 items.append(
                     CollectedItem(
-                        id=f"polreg_{source_id}_{hash(item_id) & 0xFFFFFFFF:08x}",
+                        id=f"polreg_{source_id}_{hashlib.md5(item_id.encode()).hexdigest()[:8]}",
                         title=f"[{source_name}] {title}",
                         content=summary,
                         url=link,

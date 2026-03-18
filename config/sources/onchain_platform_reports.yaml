@@ -7,7 +7,7 @@
 # Core platforms producing the most influential on-chain analysis
 # =============================================================================
 
-- id: glassnode_insights
+- id: glassnode_insights_platform
   name: "Glassnode Insights"
   type: rss
   url: "https://insights.glassnode.com/"
@@ -95,7 +95,7 @@
     - "MEV Analysis"
   notes: "Largest open-source on-chain analytics community. API key needed for programmatic access (DUNE_API_KEY). Free tier allows 2500 datapoints/month. Track trending dashboards for emerging narratives."
 
-- id: arkham_intelligence
+- id: arkham_intelligence_platform
   name: "Arkham Intelligence"
   type: scrape
   url: "https://platform.arkhamintelligence.com/"
@@ -165,7 +165,7 @@
 # High-quality platforms with strong data coverage
 # =============================================================================
 
-- id: token_terminal
+- id: token_terminal_platform
   name: "Token Terminal"
   type: scrape
   url: "https://tokenterminal.com/terminal/metrics"
@@ -320,7 +320,7 @@
     - "Annual Theses"
   notes: "Premium research with deep protocol-level analysis. Annual theses by Ryan Selkis set the industry narrative. Free tier includes select reports; full library requires Messari Enterprise."
 
-- id: l2beat
+- id: l2beat_platform
   name: "L2Beat"
   type: scrape
   url: "https://l2beat.com/"
@@ -342,7 +342,7 @@
     - "Scaling Technology Review"
   notes: "Definitive source for Layer 2 ecosystem health and risk assessment. Open-source and fully free. Risk framework is the gold standard for evaluating L2 security assumptions."
 
-- id: growthepie
+- id: growthepie_platform
   name: "GrowThePie"
   type: scrape
   url: "https://www.growthepie.xyz/"
@@ -364,7 +364,7 @@
     - "Cross-Chain Comparison"
   notes: "Emerging L2 analytics platform focused on chain economics and profitability. Provides unique profit/loss analysis for L2s including blob costs post-EIP-4844. Fully open-source."
 
-- id: artemis_xyz
+- id: artemis_xyz_platform
   name: "Artemis.xyz"
   type: scrape
   url: "https://app.artemis.xyz/"
@@ -391,7 +391,7 @@
 # Niche platforms with deep expertise in specific domains
 # =============================================================================
 
-- id: ultrasound_money
+- id: ultrasound_money_platform
   name: "Ultrasound.money"
   type: scrape
   url: "https://ultrasound.money/"
@@ -434,7 +434,7 @@
     - "DeFi Attack Vectors"
   notes: "Most granular MEV analytics platform. Tracks sandwich attacks, arbitrage, and liquidations in real-time. Essential for understanding DeFi market microstructure and hidden costs."
 
-- id: flashbots_research
+- id: flashbots_research_platform
   name: "Flashbots Research"
   type: rss
   url: "https://writings.flashbots.net/"
@@ -478,7 +478,7 @@
     - "Slashing Events"
   notes: "Gold standard for Ethereum validator performance analytics. Tracks operator effectiveness, slashing events, and yield distribution. Critical for staking infrastructure monitoring."
 
-- id: debank
+- id: debank_platform
   name: "DeBank"
   type: scrape
   url: "https://debank.com/"
@@ -523,7 +523,7 @@
     - "Exchange Reserves"
   notes: "Definitive derivatives data aggregator. Funding rates and liquidation heatmaps are essential trading tools. Tracks BTC ETF flows, exchange reserves, and options data."
 
-- id: kaiko_research
+- id: kaiko_research_platform
   name: "Kaiko Research"
   type: scrape
   url: "https://www.kaiko.com/research"
@@ -572,7 +572,7 @@
 # Data aggregators providing broad market coverage
 # =============================================================================
 
-- id: coingecko_reports
+- id: coingecko_reports_platform
   name: "CoinGecko Reports"
   type: scrape
   url: "https://www.coingecko.com/research"
@@ -751,7 +751,7 @@
 # Research from asset managers, exchanges, and investment firms
 # =============================================================================
 
-- id: grayscale_research
+- id: grayscale_research_platform
   name: "Grayscale Research"
   type: scrape
   url: "https://www.grayscale.com/research"
@@ -773,7 +773,7 @@
     - "Investment Theses"
   notes: "Largest digital asset manager. Research signals institutional sentiment and potential product launches. Top 20 token list updates move markets. GBTC/ETHE flow data is critical."
 
-- id: coinbase_institutional
+- id: coinbase_institutional_platform
   name: "Coinbase Institutional"
   type: scrape
   url: "https://www.coinbase.com/institutional/research-insights"
@@ -795,7 +795,7 @@
     - "Regulatory Analysis"
   notes: "Research from the largest US exchange. David Duong's weekly reports are widely read by TradFi crossover investors. Free access to institutional-grade analysis."
 
-- id: binance_research
+- id: binance_research_platform
   name: "Binance Research"
   type: scrape
   url: "https://www.binance.com/en/research"
@@ -839,7 +839,7 @@
     - "Bitcoin Mining Hash Rate"
   notes: "Mike Novogratz's firm produces high-quality institutional research. Bitcoin mining reports are industry-leading. Alex Thorn's analysis is among the most cited in institutional circles."
 
-- id: bitwise_research
+- id: bitwise_research_platform
   name: "Bitwise Research"
   type: scrape
   url: "https://bitwiseinvestments.com/crypto-market-insights"

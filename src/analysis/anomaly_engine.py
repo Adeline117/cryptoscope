@@ -134,11 +134,151 @@ def detect_governance_anomalies(items: list[CollectedItem]) -> list[Anomaly]:
     return anomalies
 
 
+def detect_volume_anomalies(items: list[CollectedItem]) -> list[Anomaly]:
+    """Detect unusual volume spikes."""
+    anomalies = []
+    thresholds = THRESHOLDS["volume_spike_multiplier"]
+
+    for item in items:
+        meta = item.metadata
+        if meta.get("data_type") not in ("exchange_volume", "dex_volume", "volume"):
+            continue
+
+        multiplier = meta.get("volume_multiplier") or meta.get("volume_spike")
+        if multiplier is None:
+            continue
+        try:
+            multiplier = float(multiplier)
+        except (ValueError, TypeError):
+            continue
+
+        severity = None
+        if multiplier >= thresholds["critical"]:
+            severity = "critical"
+        elif multiplier >= thresholds["high"]:
+            severity = "high"
+        elif multiplier >= thresholds["medium"]:
+            severity = "medium"
+
+        if severity:
+            anomalies.append(
+                Anomaly(
+                    item=item,
+                    anomaly_type="volume_spike",
+                    severity=severity,
+                    description=(
+                        f"{meta.get('name', 'Unknown')} volume spiked "
+                        f"{multiplier:.1f}x above average"
+                    ),
+                    metric_name="volume_spike_multiplier",
+                    metric_value=multiplier,
+                    threshold=thresholds[severity],
+                )
+            )
+
+    return anomalies
+
+
+def detect_funding_rate_anomalies(items: list[CollectedItem]) -> list[Anomaly]:
+    """Detect extreme funding rates."""
+    anomalies = []
+    thresholds = THRESHOLDS["funding_rate"]
+
+    for item in items:
+        meta = item.metadata
+        if "funding" not in (meta.get("data_type") or ""):
+            continue
+
+        rate = meta.get("funding_rate") or meta.get("rate")
+        if rate is None:
+            continue
+        try:
+            rate = float(rate)
+        except (ValueError, TypeError):
+            continue
+
+        abs_rate = abs(rate)
+        severity = None
+        if abs_rate >= thresholds["critical"]:
+            severity = "critical"
+        elif abs_rate >= thresholds["high"]:
+            severity = "high"
+        elif abs_rate >= thresholds["medium"]:
+            severity = "medium"
+
+        if severity:
+            direction = "positive" if rate > 0 else "negative"
+            anomalies.append(
+                Anomaly(
+                    item=item,
+                    anomaly_type="funding_rate_extreme",
+                    severity=severity,
+                    description=(
+                        f"{meta.get('name', 'Unknown')} funding rate is "
+                        f"extremely {direction} at {rate:.4f}"
+                    ),
+                    metric_name="funding_rate",
+                    metric_value=abs_rate,
+                    threshold=thresholds[severity],
+                )
+            )
+
+    return anomalies
+
+
+def detect_github_anomalies(items: list[CollectedItem]) -> list[Anomaly]:
+    """Detect unusual spikes in GitHub commit activity."""
+    anomalies = []
+    thresholds = THRESHOLDS["github_commit_spike"]
+
+    for item in items:
+        meta = item.metadata
+        if meta.get("data_type") != "github_commit":
+            continue
+
+        count = meta.get("commit_count") or meta.get("commits")
+        if count is None:
+            continue
+        try:
+            count = float(count)
+        except (ValueError, TypeError):
+            continue
+
+        severity = None
+        if count >= thresholds["critical"]:
+            severity = "critical"
+        elif count >= thresholds["high"]:
+            severity = "high"
+        elif count >= thresholds["medium"]:
+            severity = "medium"
+
+        if severity:
+            anomalies.append(
+                Anomaly(
+                    item=item,
+                    anomaly_type="github_commit_spike",
+                    severity=severity,
+                    description=(
+                        f"{meta.get('name', 'Unknown')} had {int(count)} commits "
+                        f"(spike detected)"
+                    ),
+                    metric_name="github_commit_count",
+                    metric_value=count,
+                    threshold=thresholds[severity],
+                )
+            )
+
+    return anomalies
+
+
 def detect_all_anomalies(items: list[CollectedItem]) -> list[Anomaly]:
     """Run all anomaly detectors and return sorted by severity."""
     anomalies = []
     anomalies.extend(detect_tvl_anomalies(items))
     anomalies.extend(detect_governance_anomalies(items))
+    anomalies.extend(detect_volume_anomalies(items))
+    anomalies.extend(detect_funding_rate_anomalies(items))
+    anomalies.extend(detect_github_anomalies(items))
 
     severity_order = {"critical": 0, "high": 1, "medium": 2}
     anomalies.sort(key=lambda a: severity_order.get(a.severity, 3))

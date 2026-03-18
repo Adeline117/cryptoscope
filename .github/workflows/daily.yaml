@@ -29,6 +29,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+          ARENA_DB_HOST: ${{ secrets.ARENA_DB_HOST }}
+          ARENA_DB_USER: ${{ secrets.ARENA_DB_USER }}
+          ARENA_DB_PASS: ${{ secrets.ARENA_DB_PASS }}
         run: python -m src.pipeline.daily_pipeline
 
       - name: Upload charts

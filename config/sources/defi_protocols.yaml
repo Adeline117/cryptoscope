@@ -1802,7 +1802,7 @@
   governance_forum: https://forum.thegraph.com
   github_org: graphprotocol
 
-- id: flashbots
+- id: flashbots_defi
   name: Flashbots
   type: rss
   url: https://writings.flashbots.net/feed.xml

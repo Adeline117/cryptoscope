@@ -8,6 +8,7 @@ Flow:
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -52,56 +53,86 @@ async def send_thread_for_review(
         from telegram import Bot
 
         bot = Bot(token=bot_token)
+        any_sent = False
 
         # 1. Header
-        sources_text = "\n".join(f"  • {s}" for s in sources_used[:10])
-        await bot.send_message(
-            chat_id=chat_id,
-            text=(
-                f"📊 <b>{_esc(topic)}</b>\n"
-                f"Score: {priority_score:.0f}/100\n\n"
-                f"Sources:\n{_esc(sources_text)}"
-            ),
-            parse_mode="HTML",
-        )
+        try:
+            sources_text = "\n".join(f"  • {s}" for s in sources_used[:10])
+            await bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"📊 <b>{_esc(topic)}</b>\n"
+                    f"Score: {priority_score:.0f}/100\n\n"
+                    f"Sources:\n{_esc(sources_text)}"
+                ),
+                parse_mode="HTML",
+            )
+            any_sent = True
+        except Exception as e:
+            logger.error("telegram_header_failed", error=str(e))
 
         # 2. EN thread
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f"🇬🇧 <b>EN Thread:</b>\n\n{_esc(thread_text_en)}",
-            parse_mode="HTML",
-        )
+        try:
+            await asyncio.sleep(0.3)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"🇬🇧 <b>EN Thread:</b>\n\n{_esc(thread_text_en)}",
+                parse_mode="HTML",
+            )
+            any_sent = True
+        except Exception as e:
+            logger.error("telegram_en_thread_failed", error=str(e))
 
         # 3. ZH thread
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f"🇨🇳 <b>中文 Thread:</b>\n\n{_esc(thread_text_zh)}",
-            parse_mode="HTML",
-        )
+        try:
+            await asyncio.sleep(0.3)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"🇨🇳 <b>中文 Thread:</b>\n\n{_esc(thread_text_zh)}",
+                parse_mode="HTML",
+            )
+            any_sent = True
+        except Exception as e:
+            logger.error("telegram_zh_thread_failed", error=str(e))
 
         # 4. Charts
-        if chart_paths:
-            for p in chart_paths:
-                if p.exists():
-                    with open(p, "rb") as f:
-                        await bot.send_photo(chat_id=chat_id, photo=f)
+        try:
+            if chart_paths:
+                for p in chart_paths:
+                    if p.exists():
+                        await asyncio.sleep(0.3)
+                        with open(p, "rb") as f:
+                            await bot.send_photo(chat_id=chat_id, photo=f)
+                        any_sent = True
+        except Exception as e:
+            logger.error("telegram_charts_failed", error=str(e))
 
         # 5. EN long-form analysis
-        if long_form_en:
-            await _send_long_text(
-                bot, chat_id,
-                f"📝 <b>EN Full Analysis:</b>\n\n{_esc(long_form_en)}",
-            )
+        try:
+            if long_form_en:
+                await asyncio.sleep(0.3)
+                await _send_long_text(
+                    bot, chat_id,
+                    f"📝 <b>EN Full Analysis:</b>\n\n{_esc(long_form_en)}",
+                )
+                any_sent = True
+        except Exception as e:
+            logger.error("telegram_long_en_failed", error=str(e))
 
         # 6. ZH long-form analysis
-        if long_form_zh:
-            await _send_long_text(
-                bot, chat_id,
-                f"📝 <b>中文长文分析:</b>\n\n{_esc(long_form_zh)}",
-            )
+        try:
+            if long_form_zh:
+                await asyncio.sleep(0.3)
+                await _send_long_text(
+                    bot, chat_id,
+                    f"📝 <b>中文长文分析:</b>\n\n{_esc(long_form_zh)}",
+                )
+                any_sent = True
+        except Exception as e:
+            logger.error("telegram_long_zh_failed", error=str(e))
 
-        logger.info("telegram_sent", topic=topic)
-        return True
+        logger.info("telegram_sent", topic=topic, any_sent=any_sent)
+        return any_sent
 
     except Exception as e:
         logger.error("telegram_send_failed", error=str(e))
@@ -111,7 +142,9 @@ async def send_thread_for_review(
 async def _send_long_text(bot, chat_id: str, text: str) -> None:
     """Send long text, splitting into multiple messages if needed (4096 char limit)."""
     chunks = _split_text(text, 4000)
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        if i > 0:
+            await asyncio.sleep(0.3)
         await bot.send_message(
             chat_id=chat_id,
             text=chunk,

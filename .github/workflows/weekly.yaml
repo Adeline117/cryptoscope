@@ -30,7 +30,7 @@ jobs:
           ARENA_DB_HOST: ${{ secrets.ARENA_DB_HOST }}
           ARENA_DB_USER: ${{ secrets.ARENA_DB_USER }}
           ARENA_DB_PASS: ${{ secrets.ARENA_DB_PASS }}
-        run: python -m src.pipeline.daily_pipeline  # TODO: switch to weekly_pipeline
+        run: python -m src.pipeline.weekly_pipeline
 
       - name: Upload artifacts
         if: always()

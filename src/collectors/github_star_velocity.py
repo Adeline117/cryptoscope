@@ -31,6 +31,8 @@ class StarHistoryStore:
 
     async def init(self) -> None:
         """Create tables and indexes if they don't exist."""
+        if self._db is not None:
+            return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self.db_path))
         await self._db.executescript(

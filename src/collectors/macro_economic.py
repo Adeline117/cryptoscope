@@ -109,7 +109,7 @@ class FREDCollector(BaseCollector):
 
             meta = FRED_SERIES.get(series_id, {"name": series_id, "category": "other"})
             change = (current_val - prev_val) if prev_val is not None else None
-            change_pct = ((current_val - prev_val) / abs(prev_val) * 100) if prev_val else None
+            change_pct = ((current_val - prev_val) / abs(prev_val) * 100) if prev_val and prev_val != 0 else None
 
             return CollectedItem(
                 id=f"fred_{series_id}_{latest['date']}",
@@ -121,7 +121,7 @@ class FREDCollector(BaseCollector):
                     if prev_val is not None else f"Current: {current_val:,.2f}"
                 ),
                 url=f"https://fred.stlouisfed.org/series/{series_id}",
-                published_at=datetime.fromisoformat(latest["date"]).replace(tzinfo=timezone.utc),
+                published_at=datetime.strptime(latest["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc),
                 metadata={
                     "data_type": "fred_series",
                     "series_id": series_id,

@@ -44,3 +44,11 @@ Thumbs.db
 
 # Playwright
 playwright-browsers/
+
+# Logs
+*.log
+logs/
+
+# Coverage
+.coverage
+htmlcov/

@@ -492,7 +492,7 @@
   notes: Uniswap v3 subgraph on Base.
 
 # --- SushiSwap ---
-- id: sushiswap
+- id: sushiswap_exchange
   name: SushiSwap
   type: api
   url: https://api.thegraph.com/subgraphs/name/sushi-v3/v3-ethereum
@@ -605,7 +605,7 @@
   notes: Trader Joe v2 on Arbitrum.
 
 # --- Camelot ---
-- id: camelot
+- id: camelot_exchange
   name: Camelot DEX
   type: api
   url: https://api.thegraph.com/subgraphs/name/camelotlabs/camelot-amm-v3
@@ -618,7 +618,7 @@
   notes: Camelot v3 on Arbitrum. Native Arbitrum DEX with concentrated liquidity.
 
 # --- Aerodrome ---
-- id: aerodrome
+- id: aerodrome_exchange
   name: Aerodrome (Base)
   type: api
   url: https://api.thegraph.com/subgraphs/name/aerodrome-finance/aerodrome-base
@@ -643,7 +643,7 @@
   notes: Aerodrome REST API for pool and gauge data.
 
 # --- Velodrome ---
-- id: velodrome
+- id: velodrome_exchange
   name: Velodrome (Optimism)
   type: api
   url: https://api.thegraph.com/subgraphs/name/velodrome-finance/velodrome-v2
@@ -681,7 +681,7 @@
   notes: GMX stats subgraph. Volume, fees, open interest, and trader P&L analytics.
 
 # --- Hyperliquid ---
-- id: hyperliquid
+- id: hyperliquid_exchange
   name: Hyperliquid
   type: api
   url: https://api.hyperliquid.xyz
@@ -694,7 +694,7 @@
   notes: On-chain perpetual DEX. POST /info for meta, funding, open interest. High-volume perps with low fees.
 
 # --- Jupiter ---
-- id: jupiter
+- id: jupiter_exchange
   name: Jupiter (Solana)
   type: api
   url: https://quote-api.jup.ag/v6
@@ -731,7 +731,7 @@
   notes: Jupiter perpetual exchange data. Markets, positions, and funding rates on Solana.
 
 # --- Raydium ---
-- id: raydium
+- id: raydium_exchange
   name: Raydium (Solana)
   type: api
   url: https://api-v3.raydium.io
@@ -744,7 +744,7 @@
   notes: Solana AMM and CLMM pools. /pools/info/list, /mint/price. Core Solana liquidity venue.
 
 # --- Orca ---
-- id: orca
+- id: orca_exchange
   name: Orca (Solana)
   type: api
   url: https://api.orca.so/v1

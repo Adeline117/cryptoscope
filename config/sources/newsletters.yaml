@@ -127,13 +127,3 @@
   priority: low
   enabled: true
 
-- id: hasu
-  name: Hasu (Uncommon Core / Flashbots)
-  type: rss
-  url: "https://uncommoncore.co/feed/"
-  collector: news_feed
-  frequency: 12h
-  category: newsletter
-  subcategory: mev
-  priority: high
-  enabled: true

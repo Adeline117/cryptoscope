@@ -18,7 +18,7 @@ from src.collectors.github_tracker import GitHubTracker
 from src.collectors.news_feed import NewsFeedCollector
 from src.collectors.platform_reports import PlatformReportCollector
 from src.collectors.political_regulatory import PoliticalRegulatoryCollector
-from src.content.thread_formatter import format_for_telegram, format_for_twitter
+from src.content.thread_writer import generate_thread
 from src.distribution.draft_manager import DraftManager
 from src.distribution.telegram_sender import send_daily_digest, send_thread_for_review
 
@@ -106,10 +106,25 @@ async def run_daily_pipeline() -> dict:
         try:
             draft_id = f"daily_{datetime.now(timezone.utc).strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}"
 
-            # For now, create draft with item content directly
-            # Thread generation via Claude API would go here
-            text_en = f"📊 {item.title}\n\n{item.content[:500]}"
-            text_zh = text_en  # Placeholder — real bilingual generation needs API key
+            # Generate bilingual thread via Claude API, with fallback
+            source_urls = [item.url] if item.url else []
+            data_points = [item.content[:500]]
+            try:
+                thread = await generate_thread(
+                    topic=item.title,
+                    data_points=data_points,
+                    source_urls=source_urls,
+                )
+                text_en = "\n\n".join(t.text_en for t in thread.tweets)
+                text_zh = "\n\n".join(t.text_zh for t in thread.tweets)
+            except Exception as gen_err:
+                logger.warning(
+                    "thread_generation_fallback",
+                    item=item.title,
+                    error=str(gen_err),
+                )
+                text_en = f"📊 {item.title}\n\n{item.content[:500]}"
+                text_zh = text_en
 
             # Long-form analysis (expanded version of the thread)
             long_en = (
@@ -119,7 +134,13 @@ async def run_daily_pipeline() -> dict:
                 f"---\n"
                 f"CryptoScope · Arena (arenafi.org)"
             )
-            long_zh = long_en  # Placeholder — real bilingual needs API key
+            long_zh = (
+                f"{item.title}\n\n"
+                f"{item.content}\n\n"
+                f"来源: {item.url}\n\n"
+                f"---\n"
+                f"CryptoScope · Arena (arenafi.org)"
+            )
 
             await draft_manager.create_draft(
                 draft_id=draft_id,

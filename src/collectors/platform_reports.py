@@ -15,6 +15,7 @@ platforms' own analysis and commentary.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 from datetime import datetime, timezone
 from time import mktime
@@ -27,13 +28,12 @@ from src.config import load_sources
 
 # Report type classification keywords (order matters — more specific types first)
 REPORT_TYPE_KEYWORDS = {
-    "fund_flows": ["fund flow", "inflow", "outflow", "etf flow", "institutional flow"],
+    "fund_flows": ["fund flow", "inflow", "outflow", "etf flow", "institutional flow", "etf", "institutional"],
     "security_incident": ["hack", "exploit", "incident", "vulnerability", "attack", "drain"],
     "weekly_digest": ["week on-chain", "weekly report", "week in review", "this week", "state of the network"],
     "deep_dive": ["deep dive", "report", "analysis", "research", "thesis", "theses"],
     "data_update": ["dashboard", "data", "metrics", "rankings", "update"],
     "market_commentary": ["market", "outlook", "commentary", "macro", "monthly"],
-    "fund_flows": ["fund flow", "inflow", "outflow", "etf", "institutional"],
     "sector_report": ["sector", "defi", "l2", "nft", "gaming", "stablecoin"],
     "protocol_analysis": ["protocol", "token", "project", "deep dive"],
     "developer_report": ["developer", "dev activity", "github", "commits"],
@@ -111,7 +111,7 @@ class PlatformReportCollector(BaseCollector):
 
                 items.append(
                     CollectedItem(
-                        id=f"platform_{source['id']}_{hash(item_id) & 0xFFFFFFFF:08x}",
+                        id=f"platform_{source['id']}_{hashlib.md5(item_id.encode()).hexdigest()[:8]}",
                         title=f"[{source['name']}] {title}",
                         content=full_content,
                         url=link,
@@ -195,7 +195,7 @@ class PlatformReportCollector(BaseCollector):
 
                 items.append(
                     CollectedItem(
-                        id=f"platform_{source['id']}_{hash(href) & 0xFFFFFFFF:08x}",
+                        id=f"platform_{source['id']}_{hashlib.md5(href.encode()).hexdigest()[:8]}",
                         title=f"[{source['name']}] {text}",
                         content="",
                         url=href,

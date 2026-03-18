@@ -88,4 +88,15 @@ GLOSSARY: dict[str, str] = {
     "minting": "铸造",
     "restaking": "再质押",
     "liquid staking": "流动性质押",
+
+    # 2026 additions
+    "account abstraction": "账户抽象",
+    "intent": "意图",
+    "modular blockchain": "模块化区块链",
+    "atomic swap": "原子交换",
+    "inscription": "铭文",
+    "runes": "符文",
+    "data availability": "数据可用性",
+    "agent framework": "Agent 框架",
+    "fully homomorphic encryption": "全同态加密",
 }

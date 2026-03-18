@@ -76,6 +76,9 @@ class DraftManager:
 
     async def update_status(self, draft_id: str, status: str) -> None:
         """Update draft status. Valid: pending, editing, approved, posted, skipped."""
+        VALID_STATUSES = {"pending", "editing", "approved", "posted", "skipped"}
+        if status not in VALID_STATUSES:
+            raise ValueError(f"Invalid draft status: {status}. Must be one of {VALID_STATUSES}")
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             "UPDATE drafts SET status = ?, updated_at = ? WHERE draft_id = ?",

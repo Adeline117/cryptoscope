@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from src.content.jargon_glossary import GLOSSARY
 from src.content.thread_writer import GeneratedThread
 
@@ -36,5 +38,7 @@ def enforce_glossary(text_zh: str) -> str:
     """Ensure consistent Chinese crypto terminology."""
     for en_term, zh_term in GLOSSARY.items():
         # Replace English terms that appear in the Chinese text
-        text_zh = text_zh.replace(en_term, zh_term)
+        # Use case-insensitive word boundary matching
+        pattern = re.compile(r'\b' + re.escape(en_term) + r'\b', re.IGNORECASE)
+        text_zh = pattern.sub(zh_term, text_zh)
     return text_zh

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from datetime import datetime, timezone
 
@@ -201,7 +202,7 @@ class DeFiLlamaCollector(BaseCollector):
             for h in (hacks if isinstance(hacks, list) else [])[:20]:
                 items.append(
                     CollectedItem(
-                        id=f"defillama_hack_{h.get('id', hash(str(h)) & 0xFFFFFFFF)}",
+                        id=f"defillama_hack_{h.get('id', hashlib.md5(str(h).encode()).hexdigest()[:8])}",
                         title=f"Hack: {h.get('name', 'Unknown')} — ${h.get('amount', 0):,.0f}",
                         content=h.get("technique", ""),
                         url="https://defillama.com/hacks",
@@ -356,42 +357,105 @@ class EtherscanCollector(BaseCollector):
             base_url = self.EXPLORERS.get(chain)
             if not base_url:
                 continue
+
+            # 1. ETH price
             try:
-                # Get latest large ETH transfers (internal txs to top contracts)
-                data = await self._fetch_json(
+                price_data = await self._fetch_json(
                     base_url,
                     params={
-                        "module": "account",
-                        "action": "txlist",
-                        "address": "0x0000000000000000000000000000000000000000",
-                        "startblock": "latest",
-                        "endblock": "latest",
-                        "page": 1,
-                        "offset": 10,
-                        "sort": "desc",
+                        "module": "stats",
+                        "action": "ethprice",
                         "apikey": self.api_key,
                     },
                     use_cache=False,
                 )
-                for tx in data.get("result", [])[:10]:
-                    if isinstance(tx, dict):
-                        items.append(
-                            CollectedItem(
-                                id=f"etherscan_{chain}_{tx.get('hash', '')}",
-                                title=f"[{chain}] TX: {tx.get('hash', '')[:16]}...",
-                                content="",
-                                url=f"https://etherscan.io/tx/{tx.get('hash', '')}",
-                                published_at=datetime.now(timezone.utc),
-                                metadata={
-                                    "data_type": "transaction",
-                                    "chain": chain,
-                                    "value_eth": int(tx.get("value", 0)) / 1e18,
-                                },
-                                raw=tx,
-                            )
+                result = price_data.get("result", {})
+                if isinstance(result, dict):
+                    items.append(
+                        CollectedItem(
+                            id=f"etherscan_{chain}_ethprice",
+                            title=f"[{chain}] ETH Price: ${result.get('ethusd', 'N/A')}",
+                            content="",
+                            url=f"https://etherscan.io/chart/etherprice",
+                            published_at=datetime.now(timezone.utc),
+                            metadata={
+                                "data_type": "eth_price",
+                                "chain": chain,
+                                "eth_usd": result.get("ethusd"),
+                                "eth_btc": result.get("ethbtc"),
+                                "timestamp": result.get("ethusd_timestamp"),
+                            },
+                            raw=result,
                         )
+                    )
             except Exception as e:
-                self.log.warning("etherscan_failed", chain=chain, error=str(e))
+                self.log.warning("etherscan_price_failed", chain=chain, error=str(e))
+
+            # 2. ETH supply
+            try:
+                supply_data = await self._fetch_json(
+                    base_url,
+                    params={
+                        "module": "stats",
+                        "action": "ethsupply2",
+                        "apikey": self.api_key,
+                    },
+                    use_cache=False,
+                )
+                result = supply_data.get("result", {})
+                if isinstance(result, dict):
+                    items.append(
+                        CollectedItem(
+                            id=f"etherscan_{chain}_ethsupply",
+                            title=f"[{chain}] ETH Supply Data",
+                            content="",
+                            url=f"https://etherscan.io/stat/supply",
+                            published_at=datetime.now(timezone.utc),
+                            metadata={
+                                "data_type": "eth_supply",
+                                "chain": chain,
+                                "eth_supply": result.get("EthSupply"),
+                                "eth2_staking": result.get("Eth2Staking"),
+                                "burnt_fees": result.get("BurntFees"),
+                            },
+                            raw=result,
+                        )
+                    )
+            except Exception as e:
+                self.log.warning("etherscan_supply_failed", chain=chain, error=str(e))
+
+            # 3. Gas price
+            try:
+                gas_data = await self._fetch_json(
+                    base_url,
+                    params={
+                        "module": "proxy",
+                        "action": "eth_gasPrice",
+                        "apikey": self.api_key,
+                    },
+                    use_cache=False,
+                )
+                gas_hex = gas_data.get("result", "0x0")
+                gas_wei = int(gas_hex, 16) if isinstance(gas_hex, str) else 0
+                gas_gwei = gas_wei / 1e9
+                items.append(
+                    CollectedItem(
+                        id=f"etherscan_{chain}_gasprice",
+                        title=f"[{chain}] Gas Price: {gas_gwei:.2f} Gwei",
+                        content="",
+                        url=f"https://etherscan.io/gastracker",
+                        published_at=datetime.now(timezone.utc),
+                        metadata={
+                            "data_type": "gas_price",
+                            "chain": chain,
+                            "gas_wei": gas_wei,
+                            "gas_gwei": gas_gwei,
+                        },
+                        raw=gas_data,
+                    )
+                )
+            except Exception as e:
+                self.log.warning("etherscan_gas_failed", chain=chain, error=str(e))
 
         return CollectionResult(
             source_id=self.source_id,

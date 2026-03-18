@@ -105,7 +105,13 @@ class NewsFeedCollector(BaseCollector):
         feeds = self._get_feed_sources()
         self.log.info("collecting_feeds", count=len(feeds))
 
-        tasks = [self._collect_single_feed(feed) for feed in feeds]
+        semaphore = asyncio.Semaphore(20)
+
+        async def _limited_collect(feed: dict) -> list[CollectedItem]:
+            async with semaphore:
+                return await self._collect_single_feed(feed)
+
+        tasks = [_limited_collect(feed) for feed in feeds]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_items = []

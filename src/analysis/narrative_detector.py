@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -26,6 +27,17 @@ KNOWN_NARRATIVES = [
     "cross-chain", "interoperability", "bridge exploit",
     "governance attack", "token migration", "protocol merge",
 ]
+
+# Narrative keyword mapping for keyword-based detection
+NARRATIVES: dict[str, list[str]] = {
+    "farcaster_frames": ["farcaster", "frames", "onchain social", "lens protocol"],
+    "bitcoin_l2": ["bitcoin l2", "runes", "inscriptions", "ordinals", "stacks", "lightning"],
+    "intent_architecture": ["intent", "intent-based", "solver", "order flow auction"],
+    "eigenlayer_avs": ["eigenlayer", "avs", "actively validated", "restaking operator"],
+    "modular_blockchain": ["modular", "celestia", "data availability", "da layer", "avail"],
+    "fhe_privacy": ["fhe", "fully homomorphic", "fhevm", "zama", "encrypted computation"],
+    "agent_framework": ["ai agent", "agent framework", "autonomous agent", "agent infrastructure"],
+}
 
 
 def extract_keyword_narratives(items: list[CollectedItem]) -> dict[str, int]:
@@ -86,13 +98,26 @@ async def detect_narratives_with_llm(
         )
 
         result_text = response.content[0].text
-        # Extract JSON from response
-        start = result_text.find("{")
-        end = result_text.rfind("}") + 1
-        if start >= 0 and end > start:
-            parsed = json.loads(result_text[start:end])
+
+        # Try parsing full response as JSON first
+        parsed = None
+        try:
+            parsed = json.loads(result_text)
+        except json.JSONDecodeError:
+            # Fallback: extract JSON between first { and last }
+            match = re.search(r"\{.*\}", result_text, re.DOTALL)
+            if match:
+                try:
+                    parsed = json.loads(match.group())
+                except json.JSONDecodeError:
+                    pass
+
+        if parsed is not None:
             parsed["method"] = "llm"
             return parsed
+
+        # Final fallback: keyword method
+        return {"narratives": extract_keyword_narratives(items), "method": "keyword_fallback"}
 
     except Exception as e:
         logger.warning("llm_narrative_detection_failed", error=str(e))

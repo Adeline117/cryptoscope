@@ -162,9 +162,34 @@ async def _run_daily():
 
 async def _run_weekly():
     logger.info("scheduled_weekly_pipeline")
-    # Weekly pipeline implementation
     from src.pipeline.daily_pipeline import run_daily_pipeline
-    await run_daily_pipeline()  # Placeholder — weekly has extra Arena report logic
+    from src.distribution.draft_manager import DraftManager
+    from src.distribution.telegram_sender import send_alert
+
+    # Run the daily pipeline as part of weekly
+    daily_result = await run_daily_pipeline()
+
+    # Generate weekly summary from draft stats
+    try:
+        dm = DraftManager()
+        await dm.init()
+        stats = await dm.get_stats()
+        await dm.close()
+
+        stats_lines = "\n".join(f"  - {status}: {count}" for status, count in stats.items())
+        weekly_summary = (
+            f"Weekly Digest\n\n"
+            f"Daily pipeline result: {daily_result.get('status', 'unknown')}\n"
+            f"Items collected this run: {daily_result.get('items_collected', 0)}\n"
+            f"Threads generated: {daily_result.get('threads_generated', 0)}\n"
+            f"Anomalies: {daily_result.get('anomalies', 0)}\n\n"
+            f"Draft stats (all time):\n{stats_lines}\n\n"
+            f"Top narratives: {', '.join(daily_result.get('top_narratives', []))}"
+        )
+        await send_alert(weekly_summary)
+        logger.info("weekly_digest_sent")
+    except Exception as e:
+        logger.error("weekly_digest_failed", error=str(e))
 
 
 async def _run_highlight():
@@ -186,7 +211,14 @@ async def _run_anomaly_check():
     critical = [a for a in anomalies if a.severity == "critical"]
     if critical:
         logger.warning("critical_anomalies_found", count=len(critical))
-        # TODO: trigger event_pipeline for critical anomalies
+        from src.distribution.telegram_sender import send_alert
+        for anomaly in critical[:5]:
+            await send_alert(
+                f"Critical Anomaly Detected\n\n"
+                f"Type: {anomaly.anomaly_type}\n"
+                f"Details: {anomaly.description}\n"
+                f"Severity: {anomaly.severity}"
+            )
 
 
 async def _run_tier1_reports():
@@ -202,7 +234,15 @@ async def _run_tier1_reports():
         high_priority = [(item, score) for item, score in scored if score > 60]
         if high_priority:
             logger.info("tier1_high_priority_reports", count=len(high_priority))
-            # TODO: auto-draft threads for high-scoring reports
+            from src.distribution.telegram_sender import send_thread_for_review
+            for item, score in high_priority[:3]:
+                await send_thread_for_review(
+                    topic=item.title,
+                    priority_score=score,
+                    sources_used=[item.url] if item.url else [],
+                    thread_text_en=f"📊 {item.title}\n\n{item.content[:500]}",
+                    thread_text_zh=f"📊 {item.title}\n\n{item.content[:500]}",
+                )
 
 
 async def _run_tier2_reports():
@@ -235,7 +275,13 @@ async def _check_glassnode_weekly():
     for item in result.items:
         if "glassnode" in item.metadata.get("platform", "") and "week" in item.title.lower():
             logger.info("glassnode_weekly_found", title=item.title)
-            # TODO: auto-generate thread for this report
+            from src.distribution.telegram_sender import send_alert
+            await send_alert(
+                f"Glassnode Weekly Report Available\n\n"
+                f"Title: {item.title}\n"
+                f"URL: {item.url or 'N/A'}\n"
+                f"Summary: {item.content[:300]}"
+            )
             break
 
 
@@ -249,7 +295,13 @@ async def _check_coinshares_weekly():
     for item in result.items:
         if "coinshares" in item.metadata.get("platform", "") and "flow" in item.title.lower():
             logger.info("coinshares_weekly_found", title=item.title)
-            # TODO: auto-generate fund flows visualization + thread
+            from src.distribution.telegram_sender import send_alert
+            await send_alert(
+                f"CoinShares Weekly Fund Flows Report\n\n"
+                f"Title: {item.title}\n"
+                f"URL: {item.url or 'N/A'}\n"
+                f"Summary: {item.content[:300]}"
+            )
             break
 
 
@@ -263,7 +315,13 @@ async def _check_coinmetrics_weekly():
     for item in result.items:
         if "coin_metrics" in item.metadata.get("platform", "") and "state" in item.title.lower():
             logger.info("coinmetrics_sotn_found", title=item.title)
-            # TODO: auto-generate thread
+            from src.distribution.telegram_sender import send_alert
+            await send_alert(
+                f"Coin Metrics State of the Network Report\n\n"
+                f"Title: {item.title}\n"
+                f"URL: {item.url or 'N/A'}\n"
+                f"Summary: {item.content[:300]}"
+            )
             break
 
 
@@ -298,7 +356,14 @@ async def _run_regulatory_scan():
         critical = [(item, score) for item, score in scored if score > 65]
         if critical:
             logger.warning("critical_regulatory_news", count=len(critical))
-            # TODO: trigger event_pipeline for critical regulatory events
+            from src.distribution.telegram_sender import send_alert
+            for item, score in critical[:5]:
+                await send_alert(
+                    f"Critical Regulatory News (Score: {score:.0f})\n\n"
+                    f"Title: {item.title}\n"
+                    f"URL: {item.url or 'N/A'}\n"
+                    f"Summary: {item.content[:300]}"
+                )
 
 
 async def _run_github_star_check():
@@ -338,7 +403,27 @@ async def _run_github_discovery():
 async def _run_github_weekly_digest():
     """Generate weekly GitHub star digest."""
     logger.info("github_weekly_digest")
-    # TODO: compile week's star data, generate charts, draft thread
+    try:
+        from src.collectors.github_star_velocity import GitHubStarVelocityCollector
+        from src.distribution.telegram_sender import send_alert
+
+        detector = GitHubStarVelocityCollector()
+        result = await detector.collect()
+        if result.items:
+            # Compile digest from collected items
+            lines = ["GitHub Weekly Star Digest\n"]
+            for item in result.items[:15]:
+                repo = item.metadata.get("repo", item.title)
+                stars = item.metadata.get("stars_delta", "N/A")
+                level = item.metadata.get("alert_level", "")
+                lines.append(f"  - {repo}: +{stars} stars {f'[{level}]' if level else ''}")
+            summary = "\n".join(lines)
+            await send_alert(summary)
+            logger.info("github_weekly_digest_sent", items=len(result.items))
+        else:
+            logger.info("github_weekly_digest_empty")
+    except Exception as e:
+        logger.debug("github_weekly_digest_error", error=str(e))
 
 
 async def main():

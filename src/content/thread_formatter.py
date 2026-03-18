@@ -15,9 +15,13 @@ def format_for_twitter(thread: GeneratedThread, lang: str = "en") -> list[str]:
         prefix = f"{t.tweet_number}/{total} "
         full = prefix + text
 
-        # Validate character count
+        # Validate character count (word-boundary aware truncation)
         if len(full) > 280:
-            full = full[:277] + "..."
+            truncated = full[:277]
+            last_space = truncated.rfind(" ")
+            if last_space > 0:
+                truncated = truncated[:last_space]
+            full = truncated + "..."
 
         tweets.append(full)
     return tweets

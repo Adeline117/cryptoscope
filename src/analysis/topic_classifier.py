@@ -20,9 +20,13 @@ TOPIC_KEYWORDS: dict[str, list[str]] = {
     "nft": ["nft", "opensea", "blur", "collection", "mint"],
     "bitcoin": ["bitcoin", "btc", "ordinals", "inscription", "lightning"],
     "solana": ["solana", "sol", "jupiter", "raydium", "jito", "marinade"],
-    "ai_crypto": ["ai agent", "artificial intelligence", "machine learning", "gpt", "llm"],
+    "ai_crypto": ["ai agent", "artificial intelligence", "machine learning", "gpt", "llm", "autonomous agent", "agent framework", "inference", "on-chain ai", "ai oracle"],
     "rwa": ["rwa", "real world asset", "tokeniz", "ondo", "centrifuge", "treasury"],
     "infrastructure": ["chainlink", "oracle", "pyth", "indexer", "subgraph"],
+    "onchain_social": ["farcaster", "lens", "social graph", "decentralized social"],
+    "bitcoin_ecosystem": ["ordinals", "runes", "inscriptions", "bitcoin l2", "stacks", "lightning network"],
+    "account_abstraction": ["account abstraction", "erc-4337", "smart account", "paymaster", "bundler"],
+    "fhe": ["fully homomorphic", "fhe", "encrypted computation", "fhevm"],
 }
 
 

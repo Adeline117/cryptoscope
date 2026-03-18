@@ -121,7 +121,7 @@ class CollectorCache:
             if row is None:
                 return None
             body, cached_at, ttl = row
-            cached_time = datetime.fromisoformat(cached_at)
+            cached_time = datetime.fromisoformat(cached_at).replace(tzinfo=timezone.utc)
             elapsed = (datetime.now(timezone.utc) - cached_time).total_seconds()
             if elapsed > ttl:
                 await self._db.execute(
@@ -279,4 +279,8 @@ class BaseCollector(ABC):
     ) -> Any:
         """Fetch URL and parse as JSON."""
         body = await self._fetch_url(url, headers, params, use_cache)
-        return json.loads(body)
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as e:
+            self.log.warning("json_parse_error", url=url, error=str(e))
+            raise

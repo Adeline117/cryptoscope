@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import structlog
 
@@ -51,9 +52,21 @@ async def generate_headlines(
     )
 
     text = response.content[0].text
-    start = text.find("[")
-    end = text.rfind("]") + 1
-    if start >= 0 and end > start:
-        return json.loads(text[start:end])
+
+    # Try parsing full response as JSON first
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: extract JSON array between first [ and last ]
+    match = re.search(r"\[.*\]", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
 
     return [{"text_en": topic, "text_zh": topic}]
