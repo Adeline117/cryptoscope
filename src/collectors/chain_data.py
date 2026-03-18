@@ -331,11 +331,13 @@ class EtherscanCollector(BaseCollector):
     source_name = "Etherscan"
     source_type = "api"
 
-    EXPLORERS = {
-        "ethereum": "https://api.etherscan.io/api",
-        "base": "https://api.basescan.org/api",
-        "arbitrum": "https://api.arbiscan.io/api",
-        "optimism": "https://api-optimistic.etherscan.io/api",
+    # Etherscan V2 unified endpoint with chain IDs
+    BASE_URL = "https://api.etherscan.io/v2/api"
+    CHAIN_IDS = {
+        "ethereum": 1,
+        "base": 8453,
+        "arbitrum": 42161,
+        "optimism": 10,
     }
 
     def __init__(self, chains: list[str] | None = None, **kwargs):
@@ -354,15 +356,16 @@ class EtherscanCollector(BaseCollector):
 
         items = []
         for chain in self.chains:
-            base_url = self.EXPLORERS.get(chain)
-            if not base_url:
+            chain_id = self.CHAIN_IDS.get(chain)
+            if not chain_id:
                 continue
 
             # 1. ETH price
             try:
                 price_data = await self._fetch_json(
-                    base_url,
+                    self.BASE_URL,
                     params={
+                        "chainid": chain_id,
                         "module": "stats",
                         "action": "ethprice",
                         "apikey": self.api_key,
@@ -394,8 +397,9 @@ class EtherscanCollector(BaseCollector):
             # 2. ETH supply
             try:
                 supply_data = await self._fetch_json(
-                    base_url,
+                    self.BASE_URL,
                     params={
+                        "chainid": chain_id,
                         "module": "stats",
                         "action": "ethsupply2",
                         "apikey": self.api_key,
@@ -427,8 +431,9 @@ class EtherscanCollector(BaseCollector):
             # 3. Gas price
             try:
                 gas_data = await self._fetch_json(
-                    base_url,
+                    self.BASE_URL,
                     params={
+                        "chainid": chain_id,
                         "module": "proxy",
                         "action": "eth_gasPrice",
                         "apikey": self.api_key,
