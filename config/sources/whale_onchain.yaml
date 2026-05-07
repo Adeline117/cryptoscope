@@ -1,0 +1,82 @@
+# Whale tracking and on-chain intelligence sources
+# Monitors large transactions, smart money movements, and blockchain analytics blogs
+
+# =============================================================================
+# Whale & Large Transaction Tracking
+# =============================================================================
+
+- id: whale_alert_rss
+  name: Whale Alert
+  type: rss
+  url: "https://whale-alert.io/feed"
+  collector: news_feed
+  frequency: 5m
+  category: whale_onchain
+  subcategory: whale_tracking
+  priority: critical
+  enabled: true
+  notes: Tracks large crypto transfers across blockchains. API available at https://api.whale-alert.io/v1 with API key (WHALE_ALERT_API_KEY).
+
+- id: whale_alert_api
+  name: Whale Alert API
+  type: api
+  url: "https://api.whale-alert.io/v1/transactions"
+  collector: chain_data
+  frequency: 1m
+  category: whale_onchain
+  subcategory: whale_tracking
+  priority: critical
+  enabled: true
+  notes: Requires API key (WHALE_ALERT_API_KEY). Real-time large transaction alerts for BTC, ETH, stablecoins, and more.
+
+- id: lookonchain_rss
+  name: Lookonchain
+  type: rss
+  url: "https://lookonchain.com/feed"
+  collector: news_feed
+  frequency: 15m
+  category: whale_onchain
+  subcategory: whale_tracking
+  priority: high
+  enabled: true
+  notes: On-chain analysis of smart money and whale movements. Also active on Twitter @lookonchain.
+
+# =============================================================================
+# On-Chain Intelligence Blogs
+# =============================================================================
+
+- id: arkham_blog
+  name: Arkham Intelligence Blog
+  type: rss
+  url: "https://www.arkhamintelligence.com/blog/rss"
+  collector: news_feed
+  frequency: 4h
+  category: whale_onchain
+  subcategory: onchain_intelligence
+  priority: high
+  enabled: true
+  notes: Entity identification and wallet labeling research. API available at https://api.arkhamintelligence.com with API key (ARKHAM_API_KEY).
+
+- id: etherscan_blog
+  name: Etherscan Blog
+  type: rss
+  url: "https://etherscan.io/blog/rss"
+  collector: news_feed
+  frequency: 6h
+  category: whale_onchain
+  subcategory: onchain_intelligence
+  priority: medium
+  enabled: true
+  notes: Ethereum explorer updates, new features, and on-chain analysis posts.
+
+- id: dune_blog
+  name: Dune Analytics Blog
+  type: rss
+  url: "https://dune.com/blog/rss"
+  collector: news_feed
+  frequency: 6h
+  category: whale_onchain
+  subcategory: onchain_intelligence
+  priority: medium
+  enabled: true
+  notes: Community analytics highlights, new dashboard features, and on-chain research.

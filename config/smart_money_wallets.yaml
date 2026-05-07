@@ -1,0 +1,2653 @@
+cluster_detection:
+  min_tier1_wallets: 2
+  min_tx_value_usd: 500
+  window_hours: 4
+wallets:
+- address: 6FNbu3i6vpigXMatC6SyWKibUAdJyyX8nM8WDtZCNcEz
+  chain: solana
+  label: 'Smart Wallet #1'
+  tier: 1
+- address: 6xUL8CUfV1fzd3UQoDBs7agWNXpwyE5q56css1wHNFFU
+  chain: solana
+  label: 'Smart Wallet #2'
+  tier: 1
+- address: 4J5rDTvRbzjuKkB4B9rvNEvDz6f1BEBzUVT5mdctKHoT
+  chain: solana
+  label: 'Smart Wallet #3'
+  tier: 1
+- address: 9v6RGY46wf672PtpYMxCJ1nvrVTrukUDn1AjE634rvCf
+  chain: solana
+  label: 'Smart Wallet #4'
+  tier: 1
+- address: GpNbukV5nggkJfsEEbKrJaZkdgYcNWCAaD91Mi4MmGQi
+  chain: solana
+  label: 'Smart Wallet #5'
+  tier: 1
+- address: DNfuF1L62WWyW3pNakVkyGGFzVVhj4Yr52jSmdTyeBHm
+  chain: solana
+  label: 'Smart Wallet #6'
+  tier: 1
+- address: FTg1gqW7vPm4kdU1LPM7JJnizbgPdRDy2PitKw6mY27j
+  chain: solana
+  label: 'Smart Wallet #7'
+  tier: 1
+- address: 69ngexW9UkgRp5KFjLpaK9XNSCxUFmps6jYmqhK3q6m9
+  chain: solana
+  label: 'Smart Wallet #8'
+  tier: 1
+- address: 7XgBprwnRfFHd287pnNQj4AZ6Yb9QE5pJ6ChQ3zhsGpJ
+  chain: solana
+  label: 'Smart Wallet #9'
+  tier: 1
+- address: 4Be9CvxqHW6BYiRAxW9Q3xu1ycTMWaL5z8NX4HR3ha7t
+  chain: solana
+  label: 'Smart Wallet #10 (100x hunter)'
+  tier: 1
+- address: HWdeC9mMkYzqqfhxkLYmKFq5bgFYNuUxTD2TDJK4pump
+  chain: solana
+  label: Meme King ($39.8M PnL)
+  notes: Top all-time pump.fun PnL
+  tier: 1
+- address: 5FHwkrdxnhQCqDAt3qFbfyBKMHJqGoSz2fBch5yzGXoa
+  chain: solana
+  label: traderpow ($14.8M TRUMP)
+  tier: 1
+- address: AC5RDfQFmDS1deWZos921JfqscXdByf4BKk5RbR6dWke
+  chain: solana
+  label: shatter.sol (1663 trades, 82 tokens)
+  tier: 1
+- address: AArPXm8JatJiuyEffuC1un2Sc835SULa4uQqDcaGpAjV
+  chain: solana
+  label: cifwifhatday.sol (579% ROI)
+  tier: 1
+- address: H72yLkhTnoBfhBTXXaj1RBXuirm8s8G5fcVh2XpQLggM
+  chain: solana
+  label: GMGN Alpha (early entries)
+  tier: 1
+- address: 8zFZHuSRuDpuAR7J6FzwyF3vKNx4CVW3DFHJerQhc7Zd
+  chain: solana
+  label: Dune Alpha Wallet
+  tier: 1
+- address: 7rhxnLV8C76MfQMxznSiMkvAR9YESXHNE2dceW5CGUQ5
+  chain: solana
+  label: Ansem (@blknoiz06)
+  notes: BONK/WIF caller, track but don't copy
+  tier: 2
+- address: Gt5RJFBBSTm6kf2EvNWL7bfacitYjfDfUFcjFEgYbPMR
+  chain: solana
+  label: Murad
+  notes: SPX6900 concentrated holder
+  tier: 2
+- address: DfTjPpkpG1u7TcoKGpwJKu94YB1o99hncWbS2JrEiE8R
+  chain: solana
+  label: Jump Trading (SOL)
+  tier: 1
+- address: 4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T
+  chain: solana
+  label: Wintermute (SOL)
+  tier: 1
+- address: BCgfMGJgQ7wsMrZPWbp6GBz8m4QNZby5H9Y2L1xVcTjy
+  chain: solana
+  label: Sigil Fund ($6M profit, 820 trades)
+  tier: 1
+- address: Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB
+  chain: solana
+  label: WIF Flipper ($7.2M, 538% ROI)
+  tier: 1
+- address: 2jg8nFaoMdz9RkPLLsFCyVk6dEeFPCfhJWZBxEG3PxNR
+  chain: solana
+  label: SOL Meme Sniper Alpha 1
+  tier: 2
+- address: 3p4F8JppR1QRhDJKrSjqjzE9F4TZnCrYBvR2wVVN7oqv
+  chain: solana
+  label: SOL Meme Sniper Alpha 2
+  tier: 2
+- address: 5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1
+  chain: solana
+  label: Raydium Authority
+  notes: Track for large pool additions
+  tier: 2
+- address: 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8
+  chain: solana
+  label: Raydium AMM V4 Program
+  notes: Monitor for new pool creations
+  tier: 3
+- address: '0x820fb25352BB0c5E03E07AFc1d86252fFd2F0A18'
+  chain: ethereum
+  label: Paradigm
+  tier: 1
+- address: '0x9845e1909dCa337944a0272F1f9f7249833D2D19'
+  chain: ethereum
+  label: a16z
+  tier: 1
+- address: '0x0716a17FBAeE714f1E6aB0f9d59edbC5f09815C0'
+  chain: ethereum
+  label: Jump Trading
+  tier: 1
+- address: '0xDBF5E9c5206d0dB70a90108bf936DA60221dC080'
+  chain: ethereum
+  label: Wintermute
+  tier: 1
+- address: '0xf584F8728B874a6a5c7A8d4d387C9aae9172D621'
+  chain: ethereum
+  label: Jump Trading 2
+  tier: 1
+- address: '0x28C6c06298d514Db089934071355E5743bf21d60'
+  chain: ethereum
+  label: Binance Hot Wallet 14
+  tier: 2
+- address: '0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549'
+  chain: ethereum
+  label: Binance Cold Wallet
+  tier: 2
+- address: '0x56Eddb7aa87536c09CCc2793473599fD21A8b17F'
+  chain: ethereum
+  label: Cumberland (DRW)
+  tier: 1
+- address: '0x1DB3439a222C519ab44bb1144fC28167b4Fa6EE6'
+  chain: ethereum
+  label: Alameda Research
+  notes: FTX estate liquidation tracker
+  tier: 2
+- address: '0x267be1C1D684F78cb4F6a176C4911b741E4Ffdc0'
+  chain: ethereum
+  label: Kraken
+  tier: 2
+- address: '0x7431931094e8BAe1ECAA7D0b57d2284e121F0054'
+  chain: ethereum
+  label: ETH DeFi Whale (tetranode.eth)
+  tier: 2
+- address: '0xF977814e90dA44bFA03b6295A0616a897441aceC'
+  chain: ethereum
+  label: Binance 8
+  tier: 2
+- address: '0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8'
+  chain: ethereum
+  label: Binance 7
+  tier: 2
+- address: '0xae2Fc483527B8EF99EB5D9B44875F005ba1FaE13'
+  chain: base
+  label: Base Meme Whale 1
+  tier: 2
+- address: '0x6f9bB7e454f5B3eb2310343f0E99269dC2BB8A1d'
+  chain: base
+  label: Base Meme Whale 2
+  tier: 2
+- address: 5pSJcJxMiLhvHsEy9jVMxzFH3gWi9aBK8uTT4eabkjX
+  chain: solana
+  label: SOL Meme Trader A
+  tier: 2
+- address: 2gYPyQRGumcDCAyWt4pqbAKWRSGGiMmKZRbxCBfFMCBM
+  chain: solana
+  label: SOL Meme Trader B
+  tier: 2
+- address: FXRwkJDYEVopVKWHR6DWZLB3bREapEeZLdtkXw9AXhw6
+  chain: solana
+  label: SOL Meme Trader C
+  tier: 2
+- address: 9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM
+  chain: solana
+  label: SOL Degen Whale D
+  tier: 3
+- address: 3Bz6tPYrjQxXdQkKLbCx4YEZsPjsMKyVC7vRGwzCJVTF
+  chain: solana
+  label: SOL Sniper E
+  tier: 3
+- address: 6JfPCzG2srXq8H82a3cR7V9mXqp5q9FMgHiXhYjK5fRa
+  chain: solana
+  label: SOL Alpha F
+  tier: 3
+- address: BsGkXx8h3aBnrNMDqsHy5NEv1QBxBC3UhNPV3M4F3iFJ
+  chain: solana
+  label: SOL Meme Hunter G
+  tier: 3
+- address: 7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs
+  chain: solana
+  label: Raydium LP Whale
+  tier: 2
+- address: CKKwVGNyERpNwCRKUqKhyU2E9hDSJcvXTJVT5E3Pgpgu
+  chain: solana
+  label: SOL Meme Trader H
+  tier: 3
+- address: DEtkWuGn6YMBrhE7o2L9MJMZDd5wQXDCwBTDB2DfjRCi
+  chain: solana
+  label: SOL Sniper I
+  tier: 3
+- address: Hte3kFvU8LPK5Mu1pJVsyWJqtwJupE6z3GvRiTFVuTd6
+  chain: solana
+  label: SOL Alpha Trader J
+  tier: 3
+- address: 2MFXRVvGMGj7Y8JLqCFyGiQB8gZyK5t3jy4z2hWoJYLw
+  chain: solana
+  label: SOL Degen K
+  tier: 3
+- address: 3QqgGLz9MrVzMkW1xqUha3sLF6JEr2vqLRmZbV4QqLiz
+  chain: solana
+  label: SOL Meme Trader L
+  tier: 3
+- address: 9iD3ceJJqHpXKmbJBgYeHxufYrQPVmzE7vLEhCaZEz6j
+  chain: solana
+  label: SOL Whale M
+  tier: 3
+- address: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+  chain: solana
+  label: USDT Mint (track flows)
+  tier: 3
+- address: '0x3DdfA8eC3052539b6C9549F12cEA2C295cfF5296'
+  chain: ethereum
+  label: Galaxy Digital
+  tier: 1
+- address: '0x9B5C25B5a3C3aa3E5f8eE1e0F1B6B1E5b6F3D5A7'
+  chain: ethereum
+  label: Paradigm Fund 2
+  tier: 1
+- address: '0x5f65f7b609678448494De4C87521CdF6cEf1e932'
+  chain: ethereum
+  label: Gemini
+  tier: 2
+- address: '0xDa9CE944a37d218c3302F6B82a094844C6ECEb17'
+  chain: ethereum
+  label: Celsius Network
+  tier: 2
+- address: '0x0D0707963952f2fBA59dD06f2b425ace40b492Fe'
+  chain: ethereum
+  label: Gate.io
+  tier: 2
+- address: '0xA7EFAe728D2936e78BDA97dc267687568dD593f3'
+  chain: ethereum
+  label: OKX 2
+  tier: 2
+- address: '0x6cC5F688a315f3dC28A7781717a9A798a59fDA7b'
+  chain: ethereum
+  label: OKX 3
+  tier: 2
+- address: '0xFBb1b73C4f0BDa4f67dcA266ce6Ef42f520fBB98'
+  chain: ethereum
+  label: Bitfinex 1
+  tier: 2
+- address: '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD1E'
+  chain: ethereum
+  label: Bitfinex 2
+  tier: 2
+- address: '0x53d284357ec70cE289D6D64134DfAc8E511c8a3D'
+  chain: ethereum
+  label: Kraken Cold
+  tier: 2
+- address: '0x2B6eD29A95753C3Ad948348e3e7b1A251080Ffb9'
+  chain: ethereum
+  label: Dragonfly Capital 2
+  tier: 1
+- address: '0xA090e606E30bD747d4E6245a1517EbE430F0057e'
+  chain: ethereum
+  label: Circle USDC Treasury
+  tier: 2
+- address: '0x47ac0Fb4F2D84898e4D9E7b4DaB3C24507a6D503'
+  chain: ethereum
+  label: Binance Cold 2
+  tier: 2
+- address: '0x8103683202aa8DA10536036EDef04CDd865C225E'
+  chain: ethereum
+  label: Vitalik Related
+  tier: 2
+- address: '0x55FE002aefF02F77364de339a1292923A15844B8'
+  chain: ethereum
+  label: Circle Deployer
+  tier: 2
+- address: '0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97'
+  chain: base
+  label: Base Whale 3
+  tier: 2
+- address: '0x1a7e4e63778B4f12a199C062f3eFdD288afCBce8'
+  chain: base
+  label: Aerodrome Whale
+  tier: 2
+- address: '0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae'
+  chain: ethereum
+  label: 'ETH-Auto (4基金: Jump Trading, Dragonfly, Parad)'
+  notes: '与4个基金交互, tokens: Visit https://aeth.trade to claim rewards, $ UniLPv3.com  -
+    Visit to claim bonus rewards, Visit LiquidEther.us to claim rewards'
+  tier: 2
+- address: '0xd152f549545093347a162dce210e7293f1452150'
+  chain: ethereum
+  label: 'ETH-Auto (3基金: Jump Trading, Dragonfly, Galax)'
+  notes: '与3个基金交互, tokens: PEIPEIEW, wBGROK, HOKK'
+  tier: 2
+- address: '0xd1917932a7db6af687b523d5db5d7f5c2734763f'
+  chain: ethereum
+  label: 'ETH-Auto (3基金: Jump Trading, Dragonfly, Galax)'
+  notes: '与3个基金交互, tokens: Raze, GEC, GEN'
+  tier: 2
+- address: '0xb5fd5318956772adefd40aeeab97c46c3c3c73ed'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: Hachiko, ETH'
+  tier: 3
+- address: '0x1111111254eeb25477b68fb85ed929f73a960582'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: AITEST, REKTOBER, PolitiFi'
+  tier: 3
+- address: '0xebb64eb5c686ac484a01df6724df2b22e80e8456'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: MINIPEPE'
+  tier: 3
+- address: '0xa36b1ae9ca17f7f7c8a4bdf9b1ab54a259b95a40'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: Hachi'
+  tier: 3
+- address: '0x908fb858027e739134248fc1573e5aacc74fe127'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: LUMIA'
+  tier: 3
+- address: '0x70930319a7d25100171c1bba06c0a8632c0100c5'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: REKTOBER'
+  tier: 3
+- address: '0x4f84cab2eaa8bba034b2cd16a0c1772d878dc60c'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ERMNMUSK'
+  tier: 3
+- address: '0x77f0d9fed1a03dbe532a047b12f41e5b89bf0f27'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: MOBILE'
+  tier: 3
+- address: '0x6701322515319777ecb95ce6100c1302319dcf36'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: PRISMA'
+  tier: 3
+- address: '0x3633524e8bf3a1bf3aa2edc0b6e9c4af85748062'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: MIMIPEPE'
+  tier: 3
+- address: '0xf38bb36b77ff4b0fdbc21824fff1596b6edff181'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: OCAT'
+  tier: 3
+- address: '0x7c8e43625908689356a8ff9b26d83f1fc1b0f7e6'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: White Cat'
+  tier: 3
+- address: '0x38a54516086c47715d0f7fa6aa3090e71867cff9'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: NXMLE'
+  tier: 3
+- address: '0xb19201922480307b06d95164303ede4a741c59a1'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: LayerZero AI'
+  tier: 3
+- address: '0xca30b21d4787af9e386cf0a0a6bcc19a6d6b4827'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: DOGEDADA'
+  tier: 3
+- address: '0xace9c534c138c4c63be12be9a4de01d0d7c3a649'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: CyberSpoon'
+  tier: 3
+- address: '0xc1850ef5ae93a3f2614c4975e6d325817f15345b'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: FLAG'
+  tier: 3
+- address: '0xff11c8bed6f8d35d728288575320e9a03a6be32d'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ORDICOOK'
+  tier: 3
+- address: '0x2428dd4dd3ca14a1a196ac68bf52ed3cea43661d'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: PAMPE'
+  tier: 3
+- address: '0x4c3dad1a249a533fa1ef3317355eee47c03727c6'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: WAFFLE'
+  tier: 3
+- address: '0x36b99b751bbc4a143cc01609a2c55c0015edab3a'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ALCOH'
+  tier: 3
+- address: '0x114e99e33f3f28c46b56c4035dd7033c7278a60b'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: SNAP BOME'
+  tier: 3
+- address: '0x0e8575c777b4808641d48deba95b4b17fb87d1d1'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: Monkeys George'
+  tier: 3
+- address: '0x28c29bedb334c45e1c4962c809b9e66911eaf50c'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: PAUO'
+  tier: 3
+- address: '0xa40487762ce523c35bafa0f828054c55876394d0'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: KAKEO'
+  tier: 3
+- address: '0xe7423bd1271dd65d0e394e71144b7945776843ce'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: CAKEN'
+  tier: 3
+- address: '0x36b457e62e17f9acaf78c027c3f67092fd5cd53f'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: HAFU'
+  tier: 3
+- address: '0x34d0cc7cf027f4c4aa8f73ad4b8d9f9f6be70d4b'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: BiiS PEPE'
+  tier: 3
+- address: '0x1d6fbb16a395ea743f742f00d16380532bf45460'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: JTOOP'
+  tier: 3
+- address: '0x3fc1d0c389644b4cd18d384a89e34d5022ae2a3c'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ORDI GROK'
+  tier: 3
+- address: '0x9720a34e34096c4921eef16ba7936ab801d0c489'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: Antspepe'
+  tier: 3
+- address: '0xbfda1422949c052edf0699f8a0f2fbcda3af66f9'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: HOPE'
+  tier: 3
+- address: '0x32a09d3d3d5400069babd84d6e5ff084db0ba73a'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: BAONG'
+  tier: 3
+- address: '0xb88d82dbf359538c7cee2bd1031f170f31e73498'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: MATICDOGE'
+  tier: 3
+- address: '0xd530a43013efa2a9a21de48cf21a4020e746b43d'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Jump Trading, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: CyberX'
+  tier: 3
+- address: '0xe18c293e4f429ed75d2581e4a66620a5ccc471d1'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Jump Trading, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: TRON'
+  tier: 3
+- address: '0xb983b0759c715b807ca4d33a871d4e26b8384f6a'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: TENGU'
+  tier: 3
+- address: '0x6f981123c3e3e86b38af5cfc9fc707a42fd91c03'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: OmniAI'
+  tier: 3
+- address: '0xc05f11006e2083c3a1d13a65f4907b1529edf8aa'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: OMNI SOL'
+  tier: 3
+- address: '0x2022b03dbc0266c06e8c02786c793c6c769a9d61'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: RATSORDI'
+  tier: 3
+- address: '0x6ec96331466191551ab59a8515cd3a40feb38d3e'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ORDI2.0'
+  tier: 3
+- address: '0xc6621b8d2b340334fa78b615b06e0d6d3d3d2d0c'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ORDIMCE'
+  tier: 3
+- address: '0x9ba8b44c439bc8a730e0696569465ce8a7aabd0c'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: SATSORDI'
+  tier: 3
+- address: '0x0f57ba6c292b3c0b540c949d3f7c542d8f9fc9b5'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: MEME GroK'
+  tier: 3
+- address: '0x1902af3ec321ca38cfcac410da6627b3ad5991a4'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: GFYInuElonEtf'
+  tier: 3
+- address: '0x073ca45ac0e94bbd7233b8970f64d463190affb4'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: Venus Bake'
+  tier: 3
+- address: '0xb52d394aa5e56a651f728508f03c4eed878c4305'
+  chain: ethereum
+  label: 'ETH-Auto (2基金: Dragonfly, Galaxy Digital)'
+  notes: '与2个基金交互, tokens: ORDIPEPE'
+  tier: 3
+- address: '0x2ce910fbba65b454bbaf6a18c952a70f3bcd8299'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x99c9fc46f92e8a1c0dec1b1747d010903e884be1'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x428ab2ba90eba0a4be7af34c9ac451ab061ac010'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0xfdff0b569f14af593d446e51b3e42f502124ac85'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x08d2e418b82e6349ac8927edc745568274fa3613'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0xc186fa914353c44b2e33ebe05f21846f1048beda'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x3d126d6b1581f7566a34bd4e912920bba41367d5'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0xaa8ba7d4611437141192e7ceced531bc0a133efb'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x83162f1b647e19be0dbff3667930da83e079ad56'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0xe83f75907fb4c575414fa6f5cfe8cef24dc5870c'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x04ce218ead72401702dd5f3e56cedb7d2d477777'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x0172e05392aba65366c4dbbb70d958bbf43304e4'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x990aba4b05adc3761efaf38fb871b93c7b162d03'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0xf14aa9ed0b6d90b7a49b782f6a9846bea8f0b333'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x4e13a67181efe34e1cad6f2005980c479034132e'
+  chain: ethereum
+  label: optimism-bridge-whale
+  tier: 3
+- address: '0x5dc45b7ef8bed02ef95d89734caaa0330f08f0b8'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0xe2e6adf59bdb94e49f7a918ef417358a065c2be7'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0xa5025faba6e70b84f74e9b1113e5f7f4e7f4859f'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x0434f9d6a0995e3c24384a13712c7bc0afd3b69f'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x1306e6ca3fb47f9b158a63a92f213d6bad926a61'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x22faac3d46c1c4388c00559376241a9d29efecb9'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x1c11ba15939e1c16ec7ca1678df6160ea2063bc5'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0xf1556137e7f45817e774096c5922f32c68ab15ae'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x9f069c493360941540eeb90482435b3df06ba018'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0xcb2c1d2637162879f6acfeaefa5ab4e30951369e'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x3a813108c8643610006b5bb2b2477c3748bab0aa'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x471929caf1baddbaed8f6105f62c6c500f01697a'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x8175600719c1574a4fcd13296ccf50866783bde1'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x674fb97777a324d97f5185f2bbab08ffdbed8ab4'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x440a4cc2767992d316e4e1a236c940572a67707c'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0xbd2a6d4a24302f4989429e3f8867765acf57a152'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x8c0c6aedfed1a9b49cfb090fdce09aa71747e2bf'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x04dab4b3a78b1270068326b3276d5229ca4305d5'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x2cb43022c2cd141b56ff9f4a56dac0e2de7b7478'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0x5c6d5b8a4a57ebb0f1ea0264c211e7f5117c7b88'
+  chain: ethereum
+  label: a16z-counterparty
+  tier: 3
+- address: '0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x46340b20830761efd32832a74d7169b29feb9758'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x30f2864e7bf6e89a3955217c78c8689594228940'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x30f3d1c3fe1d6bb2dccabf5b6468dc9b80b28940'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xbcd986563ba93af5c6c92b16ab06e843a281a4a9'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x6643887784cb89cc9537dbb7ea20b00c45abeefb'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x056c1eb7c23feaefa4ce9187aca960529868fd92'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x651641299c7ec0aa44ad7ed9b7e12702fed2022f'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x4a4aaa0155237881fbd5c34bfae16e985a7b068d'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xdfd5293d8e347dfe59e90efd55b2956a1343963d'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xd6b38bea1b891c9064b1167fb68f8478f6829326'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xf89d7b9c864f589bbf53a82105107622b35eaa40'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xed89da9dd83a0d703991ee833969489278b260e7'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x1ab4973a48dc892cd9971ece8e01dcc7688f8f23'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x3b98b9e9cb75c1cb1729aab8f09ced2936505e4f'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xc7d3c88077d07b9ede6acd2060e5dacbcf08e668'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x05ff6964d21e5dae3b1010d5ae0465b3c450f381'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x1dfc6bec8499fcb5e3151c7c6d27feb9d7eae1d4'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xdf5d50a3c4602f66052a82b1e3cc01d6e1cce766'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0xc90785f0ec3e4813934a9e6eddfb416cbd1e1afd'
+  chain: ethereum
+  label: Jump 2-counterparty
+  tier: 3
+- address: '0x6b79f5a829c41531e7f3f4460D40870e4512B11D'
+  chain: ethereum
+  label: Boosted-token-0x6b79f5
+  tier: 3
+- address: JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4
+  chain: solana
+  label: Jupiter V6
+  notes: Protocol address - monitor for large flows
+  tier: 2
+- address: CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK
+  chain: solana
+  label: Raydium CLMM
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C
+  chain: solana
+  label: Raydium CPMM
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P
+  chain: solana
+  label: Pump.fun Program
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: 39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg
+  chain: solana
+  label: PumpSwap
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc
+  chain: solana
+  label: Orca Whirlpool
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: MERLuDFBMmsHnsBPZw2sDQZHvXFMwp8EdjudcU2HKky
+  chain: solana
+  label: Mercurial/Meteora
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo
+  chain: solana
+  label: Meteora DLMM
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+  chain: solana
+  label: SPL Token Program
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: TSWAPaqyCSx2KABk68Shruf4rp7CxcNi8hAsbdwmHbN
+  chain: solana
+  label: Tensor Swap
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49
+  chain: solana
+  label: Jito Tip 1
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY
+  chain: solana
+  label: Jito Tip 2
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe
+  chain: solana
+  label: Jito Tip 3
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh
+  chain: solana
+  label: Jito Tip 4
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: 96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5
+  chain: solana
+  label: Jito Tip 5
+  notes: Protocol address - monitor for large flows
+  tier: 3
+- address: CK1GqY6mJoXj8JvqPKr8JKzQdMR8Nk3P5B3bkRkHTLz
+  chain: solana
+  label: SOL Whale N
+  tier: 3
+- address: 3kQJsMqhkxRkd2cx7AKnPJu5SFbSVrUDqnWLZRGJpMx6
+  chain: solana
+  label: SOL Trader O
+  tier: 3
+- address: B1aLzaNMeFVAyQ6f3XbbUyKcH2YPHu2fqiEagmiF23VR
+  chain: solana
+  label: SOL DeFi Whale P
+  tier: 3
+- address: 4UQC2e8P3Dt6ZjRk3bXB5kCz2TxPXgJr9BWV6fpzWJDz
+  chain: solana
+  label: SOL Meme Trader Q
+  tier: 3
+- address: DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK
+  chain: solana
+  label: SOL Alpha R
+  tier: 3
+- address: 3oY5bVZJBEsuFNGMeCGAEad4WmvsMvcLLqe6MAbQxFfA
+  chain: solana
+  label: SOL Sniper S
+  tier: 3
+- address: BWBgpGMpRcCDBg87NjMLoGDp26L9CP9FJBs3CZDhNuRG
+  chain: solana
+  label: SOL Degen T
+  tier: 3
+- address: EfhMhmZxS9G9hTjGnnEevCgXh8Dq1tMV7gQCqVuDucBL
+  chain: solana
+  label: SOL Whale U
+  tier: 3
+- address: 41z4i2Tz3Kj2R3h7xk6VPZxhPGbR5fJABWfFcLJqd3B1
+  chain: solana
+  label: SOL Trader V
+  tier: 3
+- address: GKNAiBaoCZsfEdGoyvXjCkPYxXpJBFCqkYLHJxbhGmkb
+  chain: solana
+  label: SOL Alpha W
+  tier: 3
+- address: 9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E
+  chain: solana
+  label: SOL BTC Oracle
+  tier: 2
+- address: 5ZKQcVkJsCDFHbiUwmemGq5V2wjTzBgt6HERNdRe8j4g
+  chain: solana
+  label: SOL Meme Trader X
+  tier: 3
+- address: 7Pj5SCSDhAm3z5xXmGQGC4aE8UrNv2VHG8Gf5xyJcUR3
+  chain: solana
+  label: SOL DeFi Y
+  tier: 3
+- address: GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE
+  chain: solana
+  label: SOL Whale Z
+  tier: 3
+- address: FXKsJDGo6WZkbkgac12PM3GSnqCpUmQhP4Bt1YTgTpfJ
+  chain: solana
+  label: SOL Early Buyer AA
+  tier: 3
+- address: G2YxRa6wt1qePMwfJzdXZG62ej4qaTC7wXoKZ1N1Bpmj
+  chain: solana
+  label: SOL Trader AB
+  tier: 3
+- address: CXPeim1wQMkcTvEHx9QQ3KnyLCNbVGaLHqoG5CeJSz4f
+  chain: solana
+  label: SOL Meme AC
+  tier: 3
+- address: 3uetDDizgTtadDHZzyy9BqxrjQcozMEkYzbXtfn7nVn2
+  chain: solana
+  label: SOL Sniper AD
+  tier: 3
+- address: 3fMboiMx8gHGxXrDMKxkPx5JvgMTxdB8J9d2mRhAz6bF
+  chain: solana
+  label: SOL DeFi AE
+  tier: 3
+- address: GThUX1Atko4tqhN2NaiTazWSeFWMuiUvfFnyJyUghFMJ
+  chain: solana
+  label: Wormhole Bridge
+  tier: 2
+- address: B9K2wTQcRDLRLhMKFyRh2hPqHrr6VKiCC9yNGpkMUXrh
+  chain: solana
+  label: 'Kolscan: Xanse'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9
+  chain: solana
+  label: 'Kolscan: decu'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: BHREKFkPQgAtDs8Vb1UfLkUpjG6ScidTjHaCWFuG2AtX
+  chain: solana
+  label: 'Kolscan: Risk'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: FqamE7xrahg7FEWoByrx1o8SeyHt44rpmE6ZQfT7zrve
+  chain: solana
+  label: 'Kolscan: EustazZ'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 2RyUYqX1VFoGdDSKm3brWV5c2bY4thXx1Wctz22uYS1p
+  chain: solana
+  label: 'Kolscan: Niners'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: DYmsQudNqJyyDvq86XmzAvrU9T7xwfQEwh6gPQw9TPNF
+  chain: solana
+  label: 'Kolscan: KOL-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: AmofvGJ59dgf5P85Pofip83pk7nZqrQRmSZvv5rRFVtf
+  chain: solana
+  label: 'Kolscan: KOL-2'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: GwoFJFjUTUSWq2EwTz4P2Sznoq9XYLrf8t4q5kbTgZ1R
+  chain: solana
+  label: 'Kolscan: KOL-3'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 6m5sW6EAPAHncxnzapi1ZVJNRb9RZHQ3Bj7FD84X9rAF
+  chain: solana
+  label: 'Kolscan: KOL-4'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 4YzpSZpxDdjNf3unjkCtdWEsz2FL5mok7e5XQaDNqry8
+  chain: solana
+  label: 'Kolscan: KOL-5'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 4WPTQA7BB4iRdrPhgNpJihGcxKh8T43gLjMn5PbEVfQw
+  chain: solana
+  label: 'Kolscan: KOL-6'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: CkPFGv2Wv1vwdWjtXioEgb8jhZQfs3eVZez3QCetu7xD
+  chain: solana
+  label: 'Kolscan: KOL-7'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 4uTeAz9TmZ1J5bNkgGLvqAELvCHJwLZgo7Hxar2KAiyu
+  chain: solana
+  label: 'Kolscan: KOL-8'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: G3g1CKqKWSVEVURZDNMazDBv7YAhMNTjhJBVRTiKZygk
+  chain: solana
+  label: 'Kolscan: KOL-9'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: GJyhzLoZAxZHZGPvF3V1wsyGUnoGSQ55n6hN6nHv7W8B
+  chain: solana
+  label: 'Kolscan: KOL-10'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 64ymeD9XTAkNJgHtXgrG6JCNZmBC9fSVcmgkL54pFikE
+  chain: solana
+  label: 'Kolscan: Meme-Trader-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: GrD2umbfEBjQKFPDQvmmYNQ5eyRL9SAdWJj9FFMyeaDN
+  chain: solana
+  label: 'Kolscan: Meme-Trader-2'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: HA1L7GhQfypSRdfBi3tCkkCVEdEcBVYqBSQCENCrwPuB
+  chain: solana
+  label: 'Kolscan: Meme-Trader-3'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: D1H83ueSw5Nxy5okxH7VBfV4jRnqAK5Mm1tm3JAj3m5t
+  chain: solana
+  label: 'Kolscan: Meme-Trader-4'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 34ZEH778zL8ctkLwxxERLX5ZnUu6MuFyX9CWrs8kucMw
+  chain: solana
+  label: 'Kolscan: Meme-Trader-5'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 8oQoMhfBQnRspn7QtNAq2aPThRE4q94kLSTwaaFQvRgs
+  chain: solana
+  label: 'Kolscan: Meme-Trader-6'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: J23qr98GjGJJqKq9CBEnyRhHbmkaVxtTJNNxKu597wsA
+  chain: solana
+  label: 'Kolscan: Meme-Trader-7'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: J6TDXvarvpBdPXTaTU8eJbtso1PUCYKGkVtMKUUY8iEa
+  chain: solana
+  label: 'Kolscan: Meme-Trader-8'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 7dP8DmRka5rmQti4zEEDjdAyaQyvFsPkcXMjEKJucqCu
+  chain: solana
+  label: 'Kolscan: Meme-Trader-9'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 3BLjRcxWGtR7WRshJ3hL25U3RjWr5Ud98wMcczQqk4Ei
+  chain: solana
+  label: 'Kolscan: Meme-Trader-10'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: Enjoy9BmQgAUD9AKC4HpUbHByVdzwp7jQppKukEvdyWm
+  chain: solana
+  label: 'Kolscan: Sniper-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: GP9PyTwGybX3q3tC5dMRKeuq8Dr15uPVvn3Z9fKbempH
+  chain: solana
+  label: 'Kolscan: Sniper-2'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 9X5n5i1mugTjgGPhqf1KJDt8r4kD8TF3s62ttbxKzFHa
+  chain: solana
+  label: 'Kolscan: Sniper-3'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: B3wagQZiZU2hKa5pUCj6rrdhWsX3Q6WfTTnki9PjwzMh
+  chain: solana
+  label: 'Kolscan: Sniper-4'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam
+  chain: solana
+  label: 'Kolscan: Sniper-5'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 8hKZKqCgZWxnvRz1XAvmbuzCAfqo5xFjH17vM2J2HTe1
+  chain: solana
+  label: 'Kolscan: Whale-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 5M8ACGKEXG1ojKDTMH3sMqhTihTgHYMSsZc6W8i7QW3Y
+  chain: solana
+  label: 'Kolscan: Whale-2'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: BTeqNydtKyDaSxQNRm8ByaUDPK3cpQ1FsXMtaF1Hfaom
+  chain: solana
+  label: 'Kolscan: Whale-3'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: Gv8YFCU9WESGpN6fcGKG9nirqcyF9wVZAqnQ1DjrsfcE
+  chain: solana
+  label: 'Kolscan: Whale-4'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: winkACDSxstg19HJgX1pwDGpD8f2ZpiqqAjyAbkgXLu
+  chain: solana
+  label: 'Kolscan: Whale-5'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: AtmeWwb6Y6KNDgu2dPJT5dsar84bFCbNxLiW2DyYfm8p
+  chain: solana
+  label: 'Kolscan: Degen-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: AeLb2RpVwrqKZJ87PEiFdReiEXJXACQn17c8APQS1FHx
+  chain: solana
+  label: 'Kolscan: Degen-2'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: Bu8iZsGvS5dwuY3GiEDjUSDayEME7LthH4x7TRGTnMXA
+  chain: solana
+  label: 'Kolscan: Degen-3'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 4ud45nGBqtBptQPyoVtcLCCCs1Evh1zLsVVLMmDQn2JW
+  chain: solana
+  label: 'Kolscan: Degen-4'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 9pgKiUsNHXMe5p4DoGwzT9i6of7XympnNJ5TgbrZVqk6
+  chain: solana
+  label: 'Kolscan: Degen-5'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: FSAmbD6jm6SZZQadSJeC1paX3oTtAiY9hTx1UYzVoXqj
+  chain: solana
+  label: 'Kolscan: Alpha-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 86AEJExyjeNNgcp7GrAvCXTDicf5aGWgoERbXFiG1EdD
+  chain: solana
+  label: 'Kolscan: Alpha-2'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: ALauG4FwEYDgSXd5Hen6kvuWSCdUi2fYNSNqM1Ci31wE
+  chain: solana
+  label: 'Kolscan: Alpha-3'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: 3TsRAE3Pdx4eJAcxbiwi9NY8mNYChEkjV5DbAwazFKSq
+  chain: solana
+  label: 'Kolscan: Alpha-4'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: An68XCxJvfXc9NRWjNXGSFY55dyFVKjfgtpt8AKGJ2dE
+  chain: solana
+  label: 'Kolscan: Alpha-5'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: FpD6n8gfoZNxyAN6QqNH4TFQdV9vZEgcv5W4H2YL8k4X
+  chain: solana
+  label: 'Kolscan: Alpha-6'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: GNrmKZCxYyNiSUsjduwwPJzhed3LATjciiKVuSGrsHEC
+  chain: solana
+  label: 'Kolscan: Alpha-7'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: AVAZvHLR2PcWpDf8BXY4rVxNHYRBytycHkcB5z5QNXYm
+  chain: solana
+  label: 'Kolscan: Pump-Sniper-1'
+  notes: Kolscan meme trader leaderboard
+  tier: 2
+- address: '0x4cb75146e98562c9d79b31649c6c739e4dcb7cd5'
+  chain: solana
+  label: GMGN-SM-1
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xb4beddf1b828aaed9638601f7145b0f6093f2d3f'
+  chain: solana
+  label: GMGN-SM-2
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: BVMJKd35CEw4n6BN7NbYPzV5XsoY24H2TawsAJzLG5rh
+  chain: solana
+  label: GMGN-SM-3
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x777c47498b42dbe449fb4cb810871a46cd777777'
+  chain: solana
+  label: GMGN-SM-4
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xe1c6b92eb6c4435be30362632a01766706133861'
+  chain: solana
+  label: GMGN-SM-5
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x8ae497630ad9dd3e7f5dafa2bb4f3ff19f64d379'
+  chain: solana
+  label: GMGN-SM-6
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 5JJLDJ9d7WeP4sz6KGNRF3ueEF33dtbsihGVC5eyQu9D
+  chain: solana
+  label: GMGN-SM-7
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xfa1ace1285c210fbe5694bd70fa5d588a1ca77f6'
+  chain: solana
+  label: GMGN-SM-8
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xbee44aba13855ad98d57190906803b09c175cccb'
+  chain: solana
+  label: GMGN-SM-9
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xc564550797a892a62e3699fc523b1a1fdd28cc6f'
+  chain: solana
+  label: GMGN-SM-10
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 8NJ7Ujpji8uMF2675mqaTSEm2DCbfJA7fiRKtiaqkaLN
+  chain: solana
+  label: GMGN-SM-11
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x664d6645a04be9e27a8b33088f85025f29d45dc1'
+  chain: solana
+  label: GMGN-SM-12
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xae9b2082c9ef1edc7dba94e7297a1ec00da6cbd1'
+  chain: solana
+  label: GMGN-SM-13
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9d34151abe8d1594e74f463d350840119ab0689b'
+  chain: solana
+  label: GMGN-SM-14
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: CDUz1QYzfv31AK4Z5nS991jJYXPtsUpAAzhmWh5VWpq4
+  chain: solana
+  label: GMGN-SM-15
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xea10edb408dd4269ce95b6898f4c407524cf051f'
+  chain: solana
+  label: GMGN-SM-16
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: GUgMNi2tJcjYpDSFs2VZQpjryeWRG4Xgmi1JPDEoe1TH
+  chain: solana
+  label: GMGN-SM-17
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9c5083dd4838e120dbeac44c052179692aa5dac5'
+  chain: solana
+  label: GMGN-SM-18
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdc894ce5b8c3f57aa44110e8ab0910a0d717ef40'
+  chain: solana
+  label: GMGN-SM-19
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: EYuxzK8WFKceiHPwsMo4FHdq9Uht23vpGYjU938YCYeR
+  chain: solana
+  label: GMGN-SM-20
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 7kGAXsa7n1qN2FuNoJAGmzebmN9KqqLAHcwj7gvoekKk
+  chain: solana
+  label: GMGN-SM-21
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: BpxZNCi8hgEaj8Q1zUS12KXwgkXRiXLSMdxL11CqHSJM
+  chain: solana
+  label: GMGN-SM-22
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 6z51o3BNbYLJTL7SeGeHJQNpoc7rcWt8f6mzUg533uYe
+  chain: solana
+  label: GMGN-SM-23
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x8b977bccea80ee7c87cc61a7a8179c2a25de1ad8'
+  chain: solana
+  label: GMGN-SM-24
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6d5d4fb55c61019c5eb9236c3da58c774b8232d1'
+  chain: solana
+  label: GMGN-SM-25
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x08d9ad7e4edb948ab4779aea8f8a39f94c02c716'
+  chain: solana
+  label: GMGN-SM-26
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7b46d4c2126211a2af135b4da6006cfebce5de00'
+  chain: solana
+  label: GMGN-SM-27
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 4HSvNQnbMNdLLsbARbRZMvZrwF6o6XP5C76TGqCPVrEi
+  chain: solana
+  label: GMGN-SM-28
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xe0556e691ac67d135b485a68b4806610cdf3d2a8'
+  chain: solana
+  label: GMGN-SM-29
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5fb36c08124a78edb09a990f863ba1982580016d'
+  chain: solana
+  label: GMGN-SM-30
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa397139de38af9f4deed93788e9ed031d8b3d706'
+  chain: solana
+  label: GMGN-SM-31
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa7bfa56d1fbb7809b8424b452896707be408e1bc'
+  chain: solana
+  label: GMGN-SM-32
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: DPNPVvoGdwNBY849ryx2JZzakWuWbDTfSUYr8aNfKLwA
+  chain: solana
+  label: GMGN-SM-33
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x08d580acba009b4bd2ba839d123168c5fbaaaa53'
+  chain: solana
+  label: GMGN-SM-34
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x567469503dbe791e2676e838cd39c115feb34e60'
+  chain: solana
+  label: GMGN-SM-35
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 8DGbkGgQewL9mx4aXzZCUChr7hBVXvPK9fYqSqc7Ajpn
+  chain: solana
+  label: GMGN-SM-36
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xca1a2fb7f3179d887504966b25d1606978adcd42'
+  chain: solana
+  label: GMGN-SM-37
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x077b9981bc8a2ca417cea41861111da63266988b'
+  chain: solana
+  label: GMGN-SM-38
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 7moqFjvm2MwAiMtCZoqYoTAPzRBxxMRT2ddyHThQuWjr
+  chain: solana
+  label: GMGN-SM-39
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk
+  chain: solana
+  label: GMGN-SM-40
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd374f30e969fa1e83b4ec8bcb527e4890991bdd7'
+  chain: solana
+  label: GMGN-SM-41
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x4eb3d06c16f8e40b0f9585895b2d106c1104079f'
+  chain: solana
+  label: GMGN-SM-42
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x039b69771cc77aee58830bfc61bd77ae49f991cf'
+  chain: solana
+  label: GMGN-SM-43
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0000208d547a446ba9059cbb2cfcfbaead7d3fa3'
+  chain: solana
+  label: GMGN-SM-44
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9631335762e3603d2a7507d84838aa3236d52745'
+  chain: solana
+  label: GMGN-SM-45
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x25c256f6437de6e9ba2c0ded33b87d99bd9de8db'
+  chain: solana
+  label: GMGN-SM-46
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xc14561515fdcdf88ec9c94f41a88c85c2c62efaa'
+  chain: solana
+  label: GMGN-SM-47
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdeecceaafb28ef5cf1f8c8f2190a0d63fe681cdb'
+  chain: solana
+  label: GMGN-SM-48
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9a4610eec2ac36ee2d9ec66295e771aec62b8823'
+  chain: solana
+  label: GMGN-SM-49
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x549b72d4c8b982fd23b8749c65552b666311b8f0'
+  chain: solana
+  label: GMGN-SM-50
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: FAicXNV5FVqtfbpn4Zccs71XcfGeyxBSGbqLDyDJZjke
+  chain: solana
+  label: GMGN-SM-51
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x82606fe1a7d2c55cc01899330e6f83171c6e8095'
+  chain: solana
+  label: GMGN-SM-52
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xda9f482ea717384af879597303e8b67968afcde2'
+  chain: solana
+  label: GMGN-SM-53
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3d51cbfeaea061278d2b20b5da046869f29a20da'
+  chain: solana
+  label: GMGN-SM-54
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd7e95370851ac6c8ba7aae951c7b669be7c9b5f3'
+  chain: solana
+  label: GMGN-SM-55
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xcbf83d10a021ebc73de69c5c283862a87a120229'
+  chain: solana
+  label: GMGN-SM-56
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x95ca218b746c11e7dcae21a13378ab7c6e522b9c'
+  chain: solana
+  label: GMGN-SM-57
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 456xjxMrRKcp5odo8B1McWiTbvTUffFi5iCV1Ky9Sft7
+  chain: solana
+  label: GMGN-SM-58
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x631f18e4192846574b05246f7349ba6b1e70a016'
+  chain: solana
+  label: GMGN-SM-59
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: ALJ4P5QNyHeLEjpKGmA1eUfJHSEGQMjY8HLnDkSgjczb
+  chain: solana
+  label: GMGN-SM-60
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: CDkVHiRu363Atxe9Hv1a8zgWEtZn4G1xNyuqWb9iJ5Xt
+  chain: solana
+  label: GMGN-SM-61
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x97015688edae42d65f94bc6fe36cfdbdcd50a710'
+  chain: solana
+  label: GMGN-SM-62
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd4925678acc37e78d9d27f742789f4938e8a6921'
+  chain: solana
+  label: GMGN-SM-63
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xbfc016652a6708b20ae850ee92d2ea23cca5f31a'
+  chain: solana
+  label: GMGN-SM-64
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdf2a8e398b97899ecda4db93bb00eee386338d3a'
+  chain: solana
+  label: GMGN-SM-65
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: CQhf9UaiyQpCzYW4GE9eeziUUQT954zBtGGDLKfRS4QE
+  chain: solana
+  label: GMGN-SM-66
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 4CACkyfE7TDHFLRevxc4uTyE6xbmZYxCWAvBcSFQCwfG
+  chain: solana
+  label: GMGN-SM-67
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xf7c864d7e24e1688ad424a4eebd17b866bdc3d62'
+  chain: solana
+  label: GMGN-SM-68
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x13c0e0590412fcf5b9adcde9178d5c0bdd19a550'
+  chain: solana
+  label: GMGN-SM-69
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 7p9w3HzSMYp6GQPWEtF7yNtb9BMt9EipebutGrqS1RYA
+  chain: solana
+  label: GMGN-SM-70
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: pwZpq97vcUqG5r79PMYJ2rPdJeVfuqdTaxmNvj5KYMR
+  chain: solana
+  label: GMGN-SM-71
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: cBJLGHsEcXMLYiY8Ds1PpUtpwESJFh4zgWmV4LfBhwu
+  chain: solana
+  label: GMGN-SM-72
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: BkxwpCCNHwv4dToQAgncxR72V1WAmb8evGWygKta6754
+  chain: solana
+  label: GMGN-SM-73
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa6424e666b4beac7f8c1979c93aee89a04142eaf'
+  chain: solana
+  label: GMGN-SM-74
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd387a6e4e84a6c86bd90c158c6028a58cc8ac459'
+  chain: solana
+  label: GMGN-SM-75
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 89HbgWduLwoxcofWpmn1EiF9wEdpgkNDEyPjzZ72mkDi
+  chain: solana
+  label: GMGN-SM-76
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 5FqUo9aBjsp7QeeyN6Vi2ZmF2fjS4H5EU7wnAQwPy17z
+  chain: solana
+  label: GMGN-SM-77
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0fc8dab6fe02b57140caafda13d163c5a5f2dffc'
+  chain: solana
+  label: GMGN-SM-78
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x762229e03ac76d5df17447eef0c3e5caf60d9709'
+  chain: solana
+  label: GMGN-SM-79
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7a2363a401b2340c7941dd2eeff0196a5078d2e6'
+  chain: solana
+  label: GMGN-SM-80
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 6TbDFs2dkHETrRWVbheiC11bwg7EWLDgszsCADF1ML1b
+  chain: solana
+  label: GMGN-SM-81
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5b28b4d4c71bef6bebb1735b56ea882752694720'
+  chain: solana
+  label: GMGN-SM-82
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: DpYuj2At1Z1tH4baoz5A1XV4AanjJa8bgbB51BWSZUyn
+  chain: solana
+  label: GMGN-SM-83
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9gxgKRGJGEtYeHKRSp3yjFRNvn8SdfTifMSPQ257SVLn
+  chain: solana
+  label: GMGN-SM-84
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: CzbN6T1gKkKutvuPXcxNmV8FLqzjsDWebWmg9o8e2ZbU
+  chain: solana
+  label: GMGN-SM-85
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x347ffc6db9acc54ac2019795173b9599e8b82bd9'
+  chain: solana
+  label: GMGN-SM-86
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0314e136b60931c443d352eb083af26c04db3f12'
+  chain: solana
+  label: GMGN-SM-87
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7e8fb0392542812476d9f2d0d71c01d1fa0776c5'
+  chain: solana
+  label: GMGN-SM-88
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: CZMvsfuFkCLQV6cgXkyMDvDAQ5sL3B7r6Jy69CRuBYyF
+  chain: solana
+  label: GMGN-SM-89
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 5Pr7D2d5WUM7j8fMF36DuzVDDGEHLtYsF7a6ezyzFG19
+  chain: solana
+  label: GMGN-SM-90
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 4BNMaUdBjUB54SKCTjBEoiEjcF3nGP5pqj3KXV4VEnCu
+  chain: solana
+  label: GMGN-SM-91
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xc37cfc71e26c38afdf79d391c541d6a2f7701146'
+  chain: solana
+  label: GMGN-SM-92
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 7szNtB9WXHpUdyGiBvMRaYouBBTsL2QbTtYrig8wo2vP
+  chain: solana
+  label: GMGN-SM-93
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xfc9fdf943a988c8fc09830df38052ac9e320d4c8'
+  chain: solana
+  label: GMGN-SM-94
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xc652368b05a27dd70d135f636536714e2806bd9a'
+  chain: solana
+  label: GMGN-SM-95
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xeb20b344612e8825ca07206f40f2b88e5afd5dd3'
+  chain: solana
+  label: GMGN-SM-96
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6f1af86a5c8ea05d51ec1458e0ac4e79a655108c'
+  chain: solana
+  label: GMGN-SM-97
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 5ATd36Tdq6zrtHBokC5moRs9Y5EFSNaZQ12fzRmTeNWd
+  chain: solana
+  label: GMGN-SM-98
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: oMhYGWmMbvcN79J1Ujmp8zyRWyrpjnkqMUeqhV8BihK
+  chain: solana
+  label: GMGN-SM-99
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd4e2e667f3d7d4970ab85a1324aa4188829da183'
+  chain: solana
+  label: GMGN-SM-100
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xb3fd97526020fbf5560857b7dca5dd2f1652422f'
+  chain: solana
+  label: GMGN-SM-101
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x4d92b910b36bd25dd876d2e770bd38e0c62e598b'
+  chain: solana
+  label: GMGN-SM-102
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa866c5adddc1c3570b6328491b510deefa374e0d'
+  chain: solana
+  label: GMGN-SM-103
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xecd1f3e99caa4cdbf174ad12ce79d89a8ba54fca'
+  chain: solana
+  label: GMGN-SM-104
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: DRJPceLCjNDiDtJoDJCQtH2P8UUNit5kndRiCwMjxFDX
+  chain: solana
+  label: GMGN-SM-105
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7fb9a9e3089814aeb915d7fff2abf59b63b718d8'
+  chain: solana
+  label: GMGN-SM-106
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9TCH1zJpHqrC6dAEyZdbL4E7Hw1YNEKKS5xuwYGE985o
+  chain: solana
+  label: GMGN-SM-107
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: GmmVt4Xac82u2hbhFacQpZEG2prjiVbgLSshdKS9p5Ye
+  chain: solana
+  label: GMGN-SM-108
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: BCDUS718HJyVqnWH8kiCGymNNVzLAv6bSK88wx21eLRg
+  chain: solana
+  label: GMGN-SM-109
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xb0e789db1f4c33ae2e5559f4290b7710caee5de9'
+  chain: solana
+  label: GMGN-SM-110
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x64b23c2987aca16b3d3c55ad6f694058783c72ea'
+  chain: solana
+  label: GMGN-SM-111
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xe245c4db06637112657427444153581b625531a2'
+  chain: solana
+  label: GMGN-SM-112
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xf49c774212ae16cdd19f1dccf90fc7eb5330071d'
+  chain: solana
+  label: GMGN-SM-113
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: cqakon1K22iRvSAnzyNGE44KRk52p7ucRoJtvR6UFem
+  chain: solana
+  label: GMGN-SM-114
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x2f84ebb2f7f8edcf8e83a75a12f32bd8d99de3e0'
+  chain: solana
+  label: GMGN-SM-115
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9897b49174dc565730ef1d116d80081574ccb3ec'
+  chain: solana
+  label: GMGN-SM-116
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 8QdLq5UWJAjTP3SGSbUJFcsFUY6xBQU3DwFZ6XwyFPwK
+  chain: solana
+  label: GMGN-SM-117
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x1064bc5406bc61951cb62829e71eb966a012799e'
+  chain: solana
+  label: GMGN-SM-118
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5638484ba2d2f1d1d35020572b0aa439a9869192'
+  chain: solana
+  label: GMGN-SM-119
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa44d64dfee68895e9c71b66404eac833037657af'
+  chain: solana
+  label: GMGN-SM-120
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6c0d8848234fdee4dedda96e5c89fb25a0b2e579'
+  chain: solana
+  label: GMGN-SM-121
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x057ea874698fb0a421e001ac6b6a6d874b47f66a'
+  chain: solana
+  label: GMGN-SM-122
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9dzFKBd6EWqWsELnNQ6sDsrHEU6U6S17xjWmNo7dQdzv
+  chain: solana
+  label: GMGN-SM-123
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: FxwArENkKBx4QyfoEU1vkBnDzMfZV9Z1b8GBzpT9zb5k
+  chain: solana
+  label: GMGN-SM-124
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 67Nwfi9hgwqhxGoovT2JGLU67uxfomLwQAWncjXXzU6U
+  chain: solana
+  label: GMGN-SM-125
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3cdf6e157a41995929af82c60bf4d8903225ec37'
+  chain: solana
+  label: GMGN-SM-126
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: DGAeue48FDvvtaCBesndg6v8EkFwt4JasixcRMGsx6R5
+  chain: solana
+  label: GMGN-SM-127
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x2259ea8ceaa9142af761f9c9c8189f6334655609'
+  chain: solana
+  label: GMGN-SM-128
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdba50a7d04993a36dfabc4fce3a8d599e03c8c33'
+  chain: solana
+  label: GMGN-SM-129
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd155c63a34c653185eac62109300e44a92eb2e86'
+  chain: solana
+  label: GMGN-SM-130
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: J7GR6XoJfCPwZumW9xZ1nbWkyaq1oYSQuSVmCdBTx6Nf
+  chain: solana
+  label: GMGN-SM-131
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x630a7ba7f83c6eb771ae98be5190dcfa49e3865d'
+  chain: solana
+  label: GMGN-SM-132
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xb6cc827f1f87bc8662603f3ac58774b225778a4b'
+  chain: solana
+  label: GMGN-SM-133
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6d73f2a9b41d79ac3ee33f503bc50c48e2e2a6a9'
+  chain: solana
+  label: GMGN-SM-134
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 2c4gLYy6RfY1nNrv1vH7Cnn5AAWVhTezSWTktZbJmtQo
+  chain: solana
+  label: GMGN-SM-135
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3JD7zrZVXfGozgaSrnn3GzAcGsHCM5ATazX8EqwJqZWY
+  chain: solana
+  label: GMGN-SM-136
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x44d1cf677ba8ce96bfa398e6cabce5aea891566f'
+  chain: solana
+  label: GMGN-SM-137
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 78N177fzNJpp8pG49xDv1efYcTMSzo9tPTKEA9mAVkh2
+  chain: solana
+  label: GMGN-SM-138
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9325564ade7683706107685cf1993678b1163261'
+  chain: solana
+  label: GMGN-SM-139
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd8da6bf26964af9d7eed9e03e53415d37aa96045'
+  chain: solana
+  label: GMGN-SM-140
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xeba562f1b7d88185a066f40f3d45cc33b341acb9'
+  chain: solana
+  label: GMGN-SM-141
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3kGaUKSo1Vhr8fQiCyf18hFTCahD99h1sRVwFWCqK6H8
+  chain: solana
+  label: GMGN-SM-142
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: JBV41vYBL2b8HuBmNcCnpRoBfrLDJrUFViQFPJ2vZrWd
+  chain: solana
+  label: GMGN-SM-143
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: DC99qH3jXiq5pPWQd6PjjJcCxTV593s58CLPxWGpEywt
+  chain: solana
+  label: GMGN-SM-144
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9447f1ecced31144cc53857503c76be6035d93f7'
+  chain: solana
+  label: GMGN-SM-145
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0c5c2f7cc62eef5e921eadd5e59e232fd85d99c4'
+  chain: solana
+  label: GMGN-SM-146
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xc76c568dd83c9c05d73ca4ffcf5fde89b56d87df'
+  chain: solana
+  label: GMGN-SM-147
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdb627001f7ae64af09edc9450f834d7195ad4f49'
+  chain: solana
+  label: GMGN-SM-148
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 2HcFC8Ny4nPC4jn4uBRsZTKkxQrKFh7QbgRb4QbKUbY6
+  chain: solana
+  label: GMGN-SM-149
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5e38674ea6bf593046acb52a55a5c89ffeb262c7'
+  chain: solana
+  label: GMGN-SM-150
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0b3edd0d0bf7c6281a7f8ae5a5630defb94ae78e'
+  chain: solana
+  label: GMGN-SM-151
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3WhSaf7ksmBuj5NbtG68S2PdR6zsr1YQZys9fN5T9Rqe
+  chain: solana
+  label: GMGN-SM-152
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x15fc03b3214780eb822ecbc09cf2f0751390145c'
+  chain: solana
+  label: GMGN-SM-153
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x8f6448ea8a6a0d223acf4f2746dab5d032c65b72'
+  chain: solana
+  label: GMGN-SM-154
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9d13dd680a6c6065b865ede71638c1ffbbb2e95a'
+  chain: solana
+  label: GMGN-SM-155
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: EeXvxkcGqMDZeTaVeawzxm9mbzZwqDUMmfG3bF7uzumH
+  chain: solana
+  label: GMGN-SM-156
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3f869e66797fef84aee8ed4ca914790df9332a1d'
+  chain: solana
+  label: GMGN-SM-157
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x07cd5843d74699f69b5780876eff93fc0ee858b5'
+  chain: solana
+  label: GMGN-SM-158
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xaa9543f2eff0e7a4b267f839612945841172b02f'
+  chain: solana
+  label: GMGN-SM-159
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x169da68fc62c8e98b51077e9846341db5d47c73a'
+  chain: solana
+  label: GMGN-SM-160
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xbdfa4f4492dd7b7cf211209c4791af8d52bf5c50'
+  chain: solana
+  label: GMGN-SM-161
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: Gghj6515zeefxS2Dv7vwSSGyWqtASJFojuLwVMFsc6FN
+  chain: solana
+  label: GMGN-SM-162
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xacdeeba7c27b93b7c488db6d75159e33be40c195'
+  chain: solana
+  label: GMGN-SM-163
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6bb8bc41e668b7c8ef3850486c9455b5c86830b3'
+  chain: solana
+  label: GMGN-SM-164
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x137560b3f2063dcbff7c55b7e7e5149751aa04b5'
+  chain: solana
+  label: GMGN-SM-165
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xf0f8a6479a428edd0eab965e624800585b62972c'
+  chain: solana
+  label: GMGN-SM-166
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x82eb45562f991329ed2867f43fc60f0ba52c3dab'
+  chain: solana
+  label: GMGN-SM-167
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7b9761145ef55f33dfcd514f1e20f5313da978af'
+  chain: solana
+  label: GMGN-SM-168
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 5d3jQcuUvsuHyZkhdp78FFqc7WogrzZpTtec1X9VNkuE
+  chain: solana
+  label: GMGN-SM-169
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: HKnj8ANjw9wszVMMzsZJ8PkyjWBqhAeYkJDJVDXZCXq4
+  chain: solana
+  label: GMGN-SM-170
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x51642d4a00beb1471a5db032e768bfe970feb3f1'
+  chain: solana
+  label: GMGN-SM-171
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6e1bac1b1980cc2f4724e12a30627170ded93ca6'
+  chain: solana
+  label: GMGN-SM-172
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x2ce9d43d1cba6ae31d7f07bfe0098dfa2d833373'
+  chain: solana
+  label: GMGN-SM-173
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: HiSo5kykqDPs3EG14Fk9QY4B5RvkuEs8oJTiqPX3EDAn
+  chain: solana
+  label: GMGN-SM-174
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 61yLDoXd2f84coYTr9kA7FHcCoVcNFBuf4v1NWKCR5Py
+  chain: solana
+  label: GMGN-SM-175
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: Dv32u9mvSXGVNshf7xM7afuMoPRifQxzuzEjfmfMysZY
+  chain: solana
+  label: GMGN-SM-176
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x737b524e87843032ac175cb5716936ea68eec866'
+  chain: solana
+  label: GMGN-SM-177
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd74b9a17b5a3011ad4fa9480a7acb2f58366311a'
+  chain: solana
+  label: GMGN-SM-178
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x2156f29d64f81701b58877129006e8b1964149b6'
+  chain: solana
+  label: GMGN-SM-179
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xfc426a7850205d2aa7d0414345e7c9d7c2e8dd1d'
+  chain: solana
+  label: GMGN-SM-180
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: devJHDj1kuTurER6GnjxL69VSTmutjqpwJ7t4AptRft
+  chain: solana
+  label: GMGN-SM-181
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x1df3160f73fd6c1bec394c51fc20b7b2a91d6330'
+  chain: solana
+  label: GMGN-SM-182
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xbc92e1c89d408a0dcd2d5d9df63f766403ad4fe0'
+  chain: solana
+  label: GMGN-SM-183
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5f9bc316d8473d8c6634bd26f3e0932cd6bf0718'
+  chain: solana
+  label: GMGN-SM-184
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: J9ZFuAdfNAcWiP5kPtv6VxrxxqKsFrJ8pbWT24RGtHyi
+  chain: solana
+  label: GMGN-SM-185
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x010e79ec13f61f14d646d6ff1837aa6a50f4f63a'
+  chain: solana
+  label: GMGN-SM-186
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x23ac50a59278ff8280ad6c729ea4da4186825914'
+  chain: solana
+  label: GMGN-SM-187
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x491ae86b37ef4ea1126d15168bbd52ec375f70db'
+  chain: solana
+  label: GMGN-SM-188
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd35390dabbe9a0503a0bfd417b034c054514f702'
+  chain: solana
+  label: GMGN-SM-189
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3d06315c94ac30b6061c91caf748fc2db04a89f4'
+  chain: solana
+  label: GMGN-SM-190
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd91db60c479d1e41a6bdf2ddceb24e42cc847a71'
+  chain: solana
+  label: GMGN-SM-191
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x723100f05a37f5e66aaecbdce4567e1779e691be'
+  chain: solana
+  label: GMGN-SM-192
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: A8Z1ejQGk45EJibBPJviWnM3UvwKSuYun53nSCkWKM52
+  chain: solana
+  label: GMGN-SM-193
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: A4ege1RE19ZjRsHqCqDRTdRoZynv9YUH6aG4bapUatCJ
+  chain: solana
+  label: GMGN-SM-194
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3e57efef507b4db7acfa2ee79ceca6b19e18d106'
+  chain: solana
+  label: GMGN-SM-195
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x4af892064371e7919fa5b250949bb953e1e628fe'
+  chain: solana
+  label: GMGN-SM-196
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x88948c5a2b66aca95dbb8a15f1c6335754f1f112'
+  chain: solana
+  label: GMGN-SM-197
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x1d9919009c4761d334689b875f971a686459f40b'
+  chain: solana
+  label: GMGN-SM-198
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3aK9HWN81oG56KcsLENEg39E8CoKYBv15vNzXgfiV2Bj
+  chain: solana
+  label: GMGN-SM-199
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: DhYaxKJr656KApaAAuGscPTPjZZojEfAqufhTSCNvHF5
+  chain: solana
+  label: GMGN-SM-200
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x8979f2ad349a83d1d3288efb316346121904874a'
+  chain: solana
+  label: GMGN-SM-201
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xf78b066050e00fdb9b980e265aa9f317ef4b947c'
+  chain: solana
+  label: GMGN-SM-202
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x96db4194ae64d11635a0fbc41cc3037df080bb3b'
+  chain: solana
+  label: GMGN-SM-203
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0d597d96a16665402a03e4c354291fe0c5cb9b6b'
+  chain: solana
+  label: GMGN-SM-204
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 2WKmSunBvpEKmyhXkg9sfYC9yMuGL6NimsDVK3VBHNea
+  chain: solana
+  label: GMGN-SM-205
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd4229d8166dbaa45689589d59fa968abc840b20f'
+  chain: solana
+  label: GMGN-SM-206
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 8HRGZE96te3PsoPYzJnk5md3w3hz8gsG7YpjEh4P2WaM
+  chain: solana
+  label: GMGN-SM-207
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 7zJUBgLFUDigTkqRnjpbrYHLmc4niRrJqkmpLjLvS91i
+  chain: solana
+  label: GMGN-SM-208
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x8ef7c7df4747dd2c79f1743c9cff442cc79b4236'
+  chain: solana
+  label: GMGN-SM-209
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xff3879b8a363aed92a6eaba8f61f1a96a9ec3c1e'
+  chain: solana
+  label: GMGN-SM-210
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x1fa8bbd3f95f89958930450ee155355588888888'
+  chain: solana
+  label: GMGN-SM-211
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xaf4242feb0c20c1145ed802f6391038355444a16'
+  chain: solana
+  label: GMGN-SM-212
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdec6ffe7c29d907b10c58a79537ad5ab7db878b5'
+  chain: solana
+  label: GMGN-SM-213
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x886452902e9b2017a1d89e9a87acbe28e257ff18'
+  chain: solana
+  label: GMGN-SM-214
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xc9d7c09e32ae8b422047fa9c8e14ec4dba671692'
+  chain: solana
+  label: GMGN-SM-215
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x53a9f47eeddbfbae527d259a742f1ecfd0592844'
+  chain: solana
+  label: GMGN-SM-216
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: FDWJ7wQWKHWRCBv4172uihXiYte5McEE4izGoEcwSocT
+  chain: solana
+  label: GMGN-SM-217
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9A4h17UgLGaVws6T1mBxzH5gkG35CUSrTfNgNK5Uj4Rp
+  chain: solana
+  label: GMGN-SM-218
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xe540a8d94bd379c4d9c0478c8fe9f7fe7f0b06e1'
+  chain: solana
+  label: GMGN-SM-219
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3z5FDHPFQTDo2GYpDZT7XCbSVY9q1ehr7T6Gzuu4UMyx
+  chain: solana
+  label: GMGN-SM-220
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: Xh2Y84WN8t3ZEKbwkDRT1ap5thJUAf3Ndv44wbbEXxX
+  chain: solana
+  label: GMGN-SM-221
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9c0963ea7dd663fb7fef3b8509874a6366ee876a'
+  chain: solana
+  label: GMGN-SM-222
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa058e988e2c575de36f9a9552868b0f719212d2b'
+  chain: solana
+  label: GMGN-SM-223
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: Au1GUWfcadx7jMzhsg6gHGUgViYJrnPfL1vbdqnvLK4i
+  chain: solana
+  label: GMGN-SM-224
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: HJanh4pRroez2icDzkNdnF889wMUYDMvKPaR8FmFsnSk
+  chain: solana
+  label: GMGN-SM-225
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3db4351acea05f2c14651e735f33a256635d71c6'
+  chain: solana
+  label: GMGN-SM-226
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x38e4203f12b1e74d87deb0083d3c8b51ad9a104e'
+  chain: solana
+  label: GMGN-SM-227
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x78693a466a6029979f4e42c728b1f40c4e65fa59'
+  chain: solana
+  label: GMGN-SM-228
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7d41597c314e1b85f1b9398c84109eb708f65087'
+  chain: solana
+  label: GMGN-SM-229
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7852346c77b3a622fa73607ee35cc784e53f326b'
+  chain: solana
+  label: GMGN-SM-230
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x2999ed02e6c732f9b57d125452a6abf06060dea9'
+  chain: solana
+  label: GMGN-SM-231
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x037e6b68ca866598d464a370afa060e4583aa0b8'
+  chain: solana
+  label: GMGN-SM-232
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x674495201f43139c559568910726121e572c81e4'
+  chain: solana
+  label: GMGN-SM-233
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9dJKzPJQVoSLQ3ujdzUpUw3o2Ef2kTJLTgbLWnCMMD3i
+  chain: solana
+  label: GMGN-SM-234
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd59b6a5dc9126ea0ebacd2d8560584b3ce48f62f'
+  chain: solana
+  label: GMGN-SM-235
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd56082bad51cf1ca2f05bd644b838711e857e78a'
+  chain: solana
+  label: GMGN-SM-236
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x0345f9f617376d0b2bf4e162064d0b99ebc7a399'
+  chain: solana
+  label: GMGN-SM-237
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: FSd5jo1Kny1EYXz67qbZuL4TXTA4zsSWA7ZxQUaev683
+  chain: solana
+  label: GMGN-SM-238
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xf8ce9f1bd06c7559ff45336d55b1c9de46ce019d'
+  chain: solana
+  label: GMGN-SM-239
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 5ZuV8eqkvzYFVEKbLvGBdexL2tFv7E5BCd2HZpjqbdg
+  chain: solana
+  label: GMGN-SM-240
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x39dca9c3c5daca0b453fd27c027a0cd0347ff7cb'
+  chain: solana
+  label: GMGN-SM-241
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xeb89055e16ae1c1e42ad6770a7344ff5c7b4f31d'
+  chain: solana
+  label: GMGN-SM-242
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 843VNwYH83tgpBfrZxkxQQWfQ8CRdsLBmzhcT4JGjHBs
+  chain: solana
+  label: GMGN-SM-243
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x49b3e70dfc8b18654f5335532c17406794ac5ddd'
+  chain: solana
+  label: GMGN-SM-244
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd
+  chain: solana
+  label: GMGN-SM-245
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: Gdaqp3ND6r3HVAWXpawkQU18EuQqwNxpaeeio8ASVAYd
+  chain: solana
+  label: GMGN-SM-246
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x1610bb7929fab4b9da1e2b628e8c1ee5d80391b3'
+  chain: solana
+  label: GMGN-SM-247
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9Tee3dgA4agNnvVATUhakWzngwYrGzQWrxyafGGKpYi7
+  chain: solana
+  label: GMGN-SM-248
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3HGqppv8tKVWHPFugQm1qQGPqkL6BDV2mnYgr4rXNGnE
+  chain: solana
+  label: GMGN-SM-249
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 93kgxYKex5wPyEkjH9P4KspLFAi3fdWBkw8vZce51pbp
+  chain: solana
+  label: GMGN-SM-250
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xce381a18bce0a27e6a5dbcef8b7f58b425bc9d93'
+  chain: solana
+  label: GMGN-SM-251
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x32900607c9ee8370b1afc3400a4b3973d8cecb61'
+  chain: solana
+  label: GMGN-SM-252
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xefbb65ecb551cee381457332de116ac62e7bb2b9'
+  chain: solana
+  label: GMGN-SM-253
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa18309eaa80f271738ea2de6578006ddffaf9dab'
+  chain: solana
+  label: GMGN-SM-254
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7a470d8014a122245b0410774618b7ed0e990daa'
+  chain: solana
+  label: GMGN-SM-255
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 3qUX51gXTkYkzasyggT2cba4mP6XTCPeXieiyJpnj2U5
+  chain: solana
+  label: GMGN-SM-256
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x6fb1ba6566645faa06884ec2125a11d8973e6eec'
+  chain: solana
+  label: GMGN-SM-257
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5ac7e742fda236c451113d7cec9174160f8c2125'
+  chain: solana
+  label: GMGN-SM-258
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x4ef2e45e7dc955522c4f273ff47ad1bf69b4969a'
+  chain: solana
+  label: GMGN-SM-259
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x38e47fece3ea323e864c65410f6458c820eaa897'
+  chain: solana
+  label: GMGN-SM-260
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 69aiAKU3uJMxMLRkUEGFNt6nQ43PiVimE4ZbErJ7VSM1
+  chain: solana
+  label: GMGN-SM-261
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9ryBR3SnxgGPhWsKvsfxuNHUCTt6tSpLe8wrKCShXLaq
+  chain: solana
+  label: GMGN-SM-262
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: HfzkhYBTyxZ6BxeuJCFi2kWVExTZSURmEizmNucGdrYh
+  chain: solana
+  label: GMGN-SM-263
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xb3f41e08154d6fccfc2a2050dce22a37b6941587'
+  chain: solana
+  label: GMGN-SM-264
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xd30e8021c3fbb2c97cea15ec1acdf9a88203ade2'
+  chain: solana
+  label: GMGN-SM-265
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x54be3a794282c030b15e43ae2bb182e14c409c5e'
+  chain: solana
+  label: GMGN-SM-266
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: HC124RVqPwdhaDRiRCciJxXtiUDBAmggx93zXyvNvhG3
+  chain: solana
+  label: GMGN-SM-267
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x87d63b96ca7695775fdde18ade27480143f9dfa0'
+  chain: solana
+  label: GMGN-SM-268
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3d874eab2766bcf5ed67aa1e142722ab347d17b5'
+  chain: solana
+  label: GMGN-SM-269
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x4239e9f5e2e11ec39e9a9f194eaf9977b1f35301'
+  chain: solana
+  label: GMGN-SM-270
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: BGGJhxGXeTmzGXDMuF5ivwjXdEGY471r5pTHmkWJyBGs
+  chain: solana
+  label: GMGN-SM-271
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 9fXtvqrA8CUhyhmxSK2K8HbPE3y1V5xqXRB3AXkCG66H
+  chain: solana
+  label: GMGN-SM-272
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x69d3158a17e11fbbdb2a0e7e8bd05ac3628e3630'
+  chain: solana
+  label: GMGN-SM-273
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xdd37b38d0520e52ba1ddd34247f53d64a1fee8ab'
+  chain: solana
+  label: GMGN-SM-274
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x23e99c96f1d7ee345c1b00ec900ab482b7d3a9ba'
+  chain: solana
+  label: GMGN-SM-275
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x5da72f20bd623be14a1a4193f3bbcaab443a4c75'
+  chain: solana
+  label: GMGN-SM-276
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: B32QbbdDAyhvUQzjcaM5j6ZVKwjCxAwGH5Xgvb9SJqnC
+  chain: solana
+  label: GMGN-SM-277
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xa49ca2af9e081e16f2ea5ccfad7e91f82853518e'
+  chain: solana
+  label: GMGN-SM-278
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xef59cdd3c40ffc97da8c05c7e7ba66d0f9b31140'
+  chain: solana
+  label: GMGN-SM-279
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: xyzfhxfy8NhfeNG3Um3WaUvFXzNuHkrhrZMD8dsStB6
+  chain: solana
+  label: GMGN-SM-280
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xeee2ed5d5699a78cef90e7245bb92468ccd8702c'
+  chain: solana
+  label: GMGN-SM-281
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: FFEjC9MHhpQViBPrD2iU6LmV2hEigyhLJaL7MZUZzyD4
+  chain: solana
+  label: GMGN-SM-282
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x07cdaf0140c60a0c34681065abf49bb8d85b8cbe'
+  chain: solana
+  label: GMGN-SM-283
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x718cc7ee2ae2493ebf7d454316df6b61f4e1a868'
+  chain: solana
+  label: GMGN-SM-284
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x3c5083022114ea14fb3d8d06f5931c629c2bedd6'
+  chain: solana
+  label: GMGN-SM-285
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xb2c484bcd38fd0324cf04941ee0fb47c712aae7d'
+  chain: solana
+  label: GMGN-SM-286
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x9dbfded199ee3a6b291c223e65f97d387156aada'
+  chain: solana
+  label: GMGN-SM-287
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x23f7bfa376bc353922dd7a2dd883250c35a4ac50'
+  chain: solana
+  label: GMGN-SM-288
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 8FiuwM6FmVKmBLCaJ6QcNScnVw4NuNs7Tt4Skf91saF8
+  chain: solana
+  label: GMGN-SM-289
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: GdRSPexhxbQz5H2zFQrNN2BAZUqEjAULBigTPvQ6oDMP
+  chain: solana
+  label: GMGN-SM-290
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0x7551fd7a88afd941ddcc0a4f1cb62cf85afdae61'
+  chain: solana
+  label: GMGN-SM-291
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: 6TAXiK1fT87LrYNWd4Likpe9hkXHreLyCNvUCBVR1uVK
+  chain: solana
+  label: GMGN-SM-292
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xbf004bff64725914ee36d03b87d6965b0ced4903'
+  chain: solana
+  label: GMGN-SM-293
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xcfb7f480d1ec45faf2c8062ce1d31a1430bc0d0c'
+  chain: solana
+  label: GMGN-SM-294
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xf6343af82388bad3a1706ef0b614aa677b0349d3'
+  chain: solana
+  label: GMGN-SM-295
+  notes: GMGN smart money wallet ranking
+  tier: 2
+- address: '0xfe1fd4974ff1adfaa73ebbbd0b4fab0ad0d36df5'
+  chain: solana
+  label: GMGN-SM-296
+  notes: GMGN smart money wallet ranking
+  tier: 2

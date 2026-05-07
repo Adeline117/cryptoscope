@@ -1,0 +1,275 @@
+# Crypto KOL Twitter/X feeds via Nitter RSS
+#
+# Primary instance: nitter.poast.org
+# Backup instances (swap if primary goes down):
+#   - nitter.privacydev.net
+#   - nitter.woodland.cafe
+#   - nitter.1d4.us
+#   - nitter.kavin.rocks
+#
+# To switch instance in bulk, find-replace the base URL.
+
+sources:
+  # ============================================================
+  # Macro / Trading
+  # ============================================================
+  - id: kol_arthur_hayes
+    name: "Arthur Hayes"
+    type: rss
+    url: "https://nitter.poast.org/CryptoHayes/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: critical
+    enabled: true
+
+  - id: kol_cobie
+    name: "Cobie"
+    type: rss
+    url: "https://nitter.poast.org/coaborokie/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: critical
+    enabled: true
+
+  - id: kol_gcr
+    name: "GCR (GiganticRebirth)"
+    type: rss
+    url: "https://nitter.poast.org/GCRClassic/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: critical
+    enabled: true
+
+  - id: kol_hsaka
+    name: "Hsaka"
+    type: rss
+    url: "https://nitter.poast.org/HsakaTrades/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: high
+    enabled: true
+
+  - id: kol_cryptocred
+    name: "CryptoCred"
+    type: rss
+    url: "https://nitter.poast.org/CryptoCred/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: high
+    enabled: true
+
+  - id: kol_pentoshi
+    name: "Pentoshi"
+    type: rss
+    url: "https://nitter.poast.org/Pentosh1/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: high
+    enabled: true
+
+  # ============================================================
+  # DeFi
+  # ============================================================
+  - id: kol_tetranode
+    name: "Tetranode"
+    type: rss
+    url: "https://nitter.poast.org/Tetranode/rss"
+    category: kol
+    subcategory: defi
+    priority: high
+    enabled: true
+
+  - id: kol_defi_dad
+    name: "DeFi Dad"
+    type: rss
+    url: "https://nitter.poast.org/DeFi_Dad/rss"
+    category: kol
+    subcategory: defi
+    priority: medium
+    enabled: true
+
+  - id: kol_banteg
+    name: "banteg"
+    type: rss
+    url: "https://nitter.poast.org/bantaborokie/rss"
+    category: kol
+    subcategory: defi
+    priority: high
+    enabled: true
+
+  - id: kol_hayden_eth
+    name: "hayden.eth (Uniswap)"
+    type: rss
+    url: "https://nitter.poast.org/haaborokie_adams/rss"
+    category: kol
+    subcategory: defi
+    priority: high
+    enabled: true
+
+  # ============================================================
+  # Research / Security
+  # ============================================================
+  - id: kol_hasu
+    name: "Hasu"
+    type: rss
+    url: "https://nitter.poast.org/haaborokie_/rss"
+    category: kol
+    subcategory: research
+    priority: critical
+    enabled: true
+
+  - id: kol_samczsun
+    name: "samczsun"
+    type: rss
+    url: "https://nitter.poast.org/samczsun/rss"
+    category: kol
+    subcategory: research
+    priority: critical
+    enabled: true
+
+  - id: kol_jon_charbonneau
+    name: "Jon Charbonneau"
+    type: rss
+    url: "https://nitter.poast.org/jon_charb/rss"
+    category: kol
+    subcategory: research
+    priority: high
+    enabled: true
+
+  - id: kol_polynya
+    name: "Polynya"
+    type: rss
+    url: "https://nitter.poast.org/apolynya/rss"
+    category: kol
+    subcategory: research
+    priority: high
+    enabled: true
+
+  # ============================================================
+  # Chinese KOL
+  # ============================================================
+  - id: kol_wu_blockchain
+    name: "Wu Blockchain"
+    type: rss
+    url: "https://nitter.poast.org/WuBlockchain/rss"
+    category: kol
+    subcategory: chinese
+    priority: critical
+    enabled: true
+
+  - id: kol_colin_wu
+    name: "Colin Wu"
+    type: rss
+    url: "https://nitter.poast.org/WuBlockchain/rss"
+    category: kol
+    subcategory: chinese
+    priority: high
+    enabled: true
+
+  # ============================================================
+  # Meme / Alpha
+  # ============================================================
+  - id: kol_ansem
+    name: "Ansem"
+    type: rss
+    url: "https://nitter.poast.org/blaborokieansem/rss"
+    category: kol
+    subcategory: meme_alpha
+    priority: high
+    enabled: true
+
+  - id: kol_blknoiz06
+    name: "Blknoiz06"
+    type: rss
+    url: "https://nitter.poast.org/Blknoiz06/rss"
+    category: kol
+    subcategory: meme_alpha
+    priority: high
+    enabled: true
+
+  - id: kol_gainzy
+    name: "Gainzy"
+    type: rss
+    url: "https://nitter.poast.org/gainaborokie222/rss"
+    category: kol
+    subcategory: meme_alpha
+    priority: medium
+    enabled: true
+
+  - id: kol_cryptogodjohn
+    name: "CryptoGodJohn"
+    type: rss
+    url: "https://nitter.poast.org/CryptoGodJohn/rss"
+    category: kol
+    subcategory: meme_alpha
+    priority: medium
+    enabled: true
+
+  - id: kol_lookonchain
+    name: "Lookonchain"
+    type: rss
+    url: "https://nitter.poast.org/lookonchain/rss"
+    category: kol
+    subcategory: meme_alpha
+    priority: critical
+    enabled: true
+
+  # ============================================================
+  # VC / Institutional
+  # ============================================================
+  - id: kol_a16zcrypto
+    name: "a16z crypto"
+    type: rss
+    url: "https://nitter.poast.org/a16zcrypto/rss"
+    category: kol
+    subcategory: vc_institutional
+    priority: high
+    enabled: true
+
+  - id: kol_paradigm
+    name: "Paradigm"
+    type: rss
+    url: "https://nitter.poast.org/paradigm/rss"
+    category: kol
+    subcategory: vc_institutional
+    priority: high
+    enabled: true
+
+  - id: kol_draboratory
+    name: "Delphi Digital (draboratory)"
+    type: rss
+    url: "https://nitter.poast.org/draboratory/rss"
+    category: kol
+    subcategory: vc_institutional
+    priority: medium
+    enabled: true
+
+  # ============================================================
+  # Additional notable KOLs
+  # ============================================================
+  - id: kol_zachxbt
+    name: "ZachXBT"
+    type: rss
+    url: "https://nitter.poast.org/zachxbt/rss"
+    category: kol
+    subcategory: research
+    priority: critical
+    enabled: true
+
+  - id: kol_degenspaborokie
+    name: "DegenSpartan"
+    type: rss
+    url: "https://nitter.poast.org/DegenSpartan/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: medium
+    enabled: true
+
+  - id: kol_inversebrah
+    name: "inversebrah"
+    type: rss
+    url: "https://nitter.poast.org/inversebrah/rss"
+    category: kol
+    subcategory: macro_trader
+    priority: medium
+    enabled: true

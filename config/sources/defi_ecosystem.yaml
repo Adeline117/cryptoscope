@@ -1,0 +1,98 @@
+# DeFi ecosystem protocol blogs and announcements
+# Core DeFi infrastructure projects sorted by category
+
+# =============================================================================
+# DEX Protocols
+# =============================================================================
+
+- id: uniswap_blog
+  name: Uniswap Blog
+  type: rss
+  url: "https://blog.uniswap.org/rss.xml"
+  collector: news_feed
+  frequency: 4h
+  category: defi_ecosystem
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Largest DEX by volume. Governance proposals, protocol upgrades, and ecosystem updates.
+
+- id: curve_blog
+  name: Curve Finance Blog
+  type: rss
+  url: "https://news.curve.fi/rss/"
+  collector: news_feed
+  frequency: 4h
+  category: defi_ecosystem
+  subcategory: dex
+  priority: high
+  enabled: true
+  notes: Stableswap and concentrated liquidity AMM. Key for stablecoin and LST ecosystem.
+
+# =============================================================================
+# Lending & Borrowing
+# =============================================================================
+
+- id: aave_blog
+  name: Aave Blog
+  type: rss
+  url: "https://aave.mirror.xyz/feed/atom"
+  collector: news_feed
+  frequency: 4h
+  category: defi_ecosystem
+  subcategory: lending
+  priority: high
+  enabled: true
+  notes: Largest DeFi lending protocol. Governance updates, risk parameter changes, and new market deployments.
+
+- id: compound_blog
+  name: Compound Blog
+  type: rss
+  url: "https://medium.com/feed/compound-finance"
+  collector: news_feed
+  frequency: 6h
+  category: defi_ecosystem
+  subcategory: lending
+  priority: medium
+  enabled: true
+  notes: Pioneering lending protocol. Compound III (Comet) updates and governance.
+
+- id: makerdao_blog
+  name: MakerDAO Blog
+  type: rss
+  url: "https://blog.makerdao.com/feed/"
+  collector: news_feed
+  frequency: 4h
+  category: defi_ecosystem
+  subcategory: lending
+  priority: high
+  enabled: true
+  notes: DAI stablecoin issuer (rebranded to Sky). Governance, RWA integration, and SubDAO updates.
+
+# =============================================================================
+# Liquid Staking & Restaking
+# =============================================================================
+
+- id: lido_blog
+  name: Lido Blog
+  type: rss
+  url: "https://blog.lido.fi/rss/"
+  collector: news_feed
+  frequency: 4h
+  category: defi_ecosystem
+  subcategory: liquid_staking
+  priority: high
+  enabled: true
+  notes: Largest liquid staking protocol. stETH is a core DeFi collateral asset.
+
+- id: eigenlayer_blog
+  name: EigenLayer Blog
+  type: rss
+  url: "https://www.blog.eigenlayer.xyz/rss/"
+  collector: news_feed
+  frequency: 4h
+  category: defi_ecosystem
+  subcategory: restaking
+  priority: high
+  enabled: true
+  notes: Restaking protocol. AVS launches, operator updates, and shared security developments.

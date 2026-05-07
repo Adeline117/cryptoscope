@@ -1,0 +1,4289 @@
+# Imported from chainfeeds/RSSAggregatorforWeb3 (600+ Web3 RSS feeds)
+# Total feeds: 611
+# Import date: 2026-03-18
+
+sources:
+  # --- 01. Project Updates ---
+  - id: chainfeeds_0x_blog_medium
+    name: "0x Blog - Medium"
+    type: rss
+    url: "https://blog.0xproject.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_1inch_exchange_on_medium
+    name: "1inch exchange on Medium"
+    type: rss
+    url: "https://medium.com/feed/@1inch-exchange"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_2key_medium
+    name: "2key - Medium"
+    type: rss
+    url: "https://medium.com/feed/2key"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_aave
+    name: "Aave"
+    type: rss
+    url: "https://aave.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_aave_blog_medium
+    name: "Aave Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/aave"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_acinq_on_medium
+    name: "ACINQ on Medium"
+    type: rss
+    url: "https://medium.com/feed/@ACINQ"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_alchemist_on_medium
+    name: "Alchemist on Medium"
+    type: rss
+    url: "https://medium.com/feed/@alchemistcoin"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_alchemix_finance_on_medium
+    name: "Alchemix Finance on Medium"
+    type: rss
+    url: "https://medium.com/feed/@alchemixfi"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_algorand_medium
+    name: "Algorand - Medium"
+    type: rss
+    url: "https://medium.com/feed/algorand"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_alkemi_network_medium
+    name: "Alkemi Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/alkemi"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_alliance_dao_medium
+    name: "Alliance DAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/defi-alliance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_alpha_finance_lab
+    name: "Alpha Finance Lab"
+    type: rss
+    url: "https://blog.alphafinance.io/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_altlayer
+    name: "AltLayer"
+    type: rss
+    url: "https://medium.com/feed/@altlayer"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_anchorage_digital_medium
+    name: "Anchorage Digital - Medium"
+    type: rss
+    url: "https://medium.com/feed/anchorage"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_angle_protocol_medium
+    name: "Angle Protocol - Medium"
+    type: rss
+    url: "https://blog.angle.money/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_anoma_medium
+    name: "Anoma - Medium"
+    type: rss
+    url: "https://medium.com/feed/anomanetwork"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_apifiny_medium
+    name: "Apifiny - Medium"
+    type: rss
+    url: "https://medium.com/feed/apifiny"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_aptos
+    name: "Aptos"
+    type: rss
+    url: "https://aptoslabs.medium.com/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_apwine_finance_on_medium
+    name: "APWine Finance on Medium"
+    type: rss
+    url: "https://medium.com/feed/@apwine"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_arcana_network_on_medium
+    name: "Arcana Network on Medium"
+    type: rss
+    url: "https://medium.com/feed/@arcana-network"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_archer_team_on_medium
+    name: "Archer Team on Medium"
+    type: rss
+    url: "https://medium.com/feed/@archerdao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ardrive
+    name: "ArDrive"
+    type: rss
+    url: "https://ardrive.io/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_argent_medium
+    name: "Argent - Medium"
+    type: rss
+    url: "https://medium.com/feed/argenthq"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_arianee_medium
+    name: "Arianee - Medium"
+    type: rss
+    url: "https://medium.com/feed/arianee"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_arweave_project_on_medium
+    name: "Arweave Project on Medium"
+    type: rss
+    url: "https://medium.com/feed/@arweave"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_askashaorg_blog_rss_feed
+    name: "Askasha.org Blog RSS Feed"
+    type: rss
+    url: "https://akasha.org/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_atvanguard_on_medium
+    name: "Atvanguard on Medium"
+    type: rss
+    url: "https://medium.com/feed/@atvanguard"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_augur_weekly
+    name: "Augur Weekly"
+    type: rss
+    url: "https://augur.substack.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_authereum_medium
+    name: "Authereum - Medium"
+    type: rss
+    url: "https://medium.com/feed/authereum"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_automata_network_on_medium
+    name: "Automata Network on Medium"
+    type: rss
+    url: "https://medium.com/feed/@automatanetwork"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ava_labs_on_medium
+    name: "Ava Labs on Medium"
+    type: rss
+    url: "https://medium.com/feed/@avalabs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_avalanche_on_medium
+    name: "Avalanche on Medium"
+    type: rss
+    url: "https://medium.com/feed/@avalancheavax"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_aztec_network_medium
+    name: "Aztec Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/aztec-protocol"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_babylonfinance_medium
+    name: "Babylon.finance - Medium"
+    type: rss
+    url: "https://medium.com/feed/babylon-finance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_badger_dao_on_medium
+    name: "Badger DAO 🦡 on Medium"
+    type: rss
+    url: "https://medium.com/feed/@badgerdao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bakkt_blog_medium
+    name: "Bakkt Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/bakkt-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_balancer_protocol_medium
+    name: "Balancer Protocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/balancer-protocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bancor_medium
+    name: "Bancor - Medium"
+    type: rss
+    url: "https://blog.bancor.network/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_banklessdao_medium
+    name: "BanklessDAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/bankless-dao"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_barnbridge_medium
+    name: "BarnBridge - Medium"
+    type: rss
+    url: "https://medium.com/feed/barnbridge"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_beam_privacy_medium
+    name: "BEAM Privacy - Medium"
+    type: rss
+    url: "https://medium.com/feed/beam-mw"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_benqi_on_medium
+    name: "BENQI on Medium"
+    type: rss
+    url: "https://medium.com/feed/@benqifinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bisq
+    name: "Bisq"
+    type: rss
+    url: "https://bisq.network/blog/feed.atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitcoin_core_releases
+    name: "Bitcoin Core releases"
+    type: rss
+    url: "https://bitcoin.org/en/rss/releases.rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitfinex_blog
+    name: "Bitfinex blog"
+    type: rss
+    url: "http://blog.bitfinex.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitgo_blog_medium
+    name: "BitGo Blog - Medium"
+    type: rss
+    url: "https://blog.bitgo.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitmex_blog
+    name: "BitMEX Blog"
+    type: rss
+    url: "https://blog.bitmex.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitmex_blog_chinese
+    name: "BitMEX Blog (Chinese)"
+    type: rss
+    url: "https://blog.bitmex.com/feed/?lang=zh_CN"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitquery
+    name: "Bitquery"
+    type: rss
+    url: "https://bitquery.io/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitwise_asset_management_medium
+    name: "Bitwise Asset Management - Medium"
+    type: rss
+    url: "https://medium.com/feed/bitwise-asset-management"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockchaincom
+    name: "Blockchain.com"
+    type: rss
+    url: "https://medium.com/feed/blockchain"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockfolio_on_medium
+    name: "Blockfolio on Medium"
+    type: rss
+    url: "https://medium.com/feed/@Blockfolio"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blocknative
+    name: "BlockNative"
+    type: rss
+    url: "https://blog.blocknative.com/blog/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockrocket_medium
+    name: "BlockRocket - Medium"
+    type: rss
+    url: "https://medium.com/feed/blockrocket"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blocksethq_medium
+    name: "BlocksetHQ - Medium"
+    type: rss
+    url: "https://medium.com/feed/blocksethq"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockstream
+    name: "Blockstream"
+    type: rss
+    url: "https://blog.blockstream.com/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockstream_on_medium
+    name: "Blockstream on Medium"
+    type: rss
+    url: "https://medium.com/feed/@blockstream"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockwallet_on_medium
+    name: "BlockWallet on Medium"
+    type: rss
+    url: "https://medium.com/feed/@blockwallet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockware_research_publications_blockware_solutions
+    name: "Blockware Research & Publications - Blockware Solutions"
+    type: rss
+    url: "https://www.blockwaresolutions.com/research-and-publications?format=rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blog_trust_machines
+    name: "Blog - Trust Machines"
+    type: rss
+    url: "https://www.trustmachines.co/blog?format=rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blog_on_berty_technologies
+    name: "Blog on Berty Technologies"
+    type: rss
+    url: "https://berty.tech/blog/index.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bloxroute_team_on_medium
+    name: "bloXroute Team on Medium"
+    type: rss
+    url: "https://medium.com/feed/@bloxroutelabs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bluesky
+    name: "Bluesky"
+    type: rss
+    url: "https://blueskyweb.xyz/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bluewallet_medium
+    name: "bluewallet - Medium"
+    type: rss
+    url: "https://medium.com/feed/bluewallet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_boba
+    name: "Boba"
+    type: rss
+    url: "https://boba.network/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_borderless_capital_on_medium
+    name: "Borderless Capital on Medium"
+    type: rss
+    url: "https://medium.com/feed/@borderlesscapital"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bouncefinance_on_medium
+    name: "Bounce.finance on Medium"
+    type: rss
+    url: "https://medium.com/feed/@bouncefinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_brave_browser
+    name: "Brave Browser"
+    type: rss
+    url: "https://brave.com/blog/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_breez_technology_medium
+    name: "Breez Technology - Medium"
+    type: rss
+    url: "https://medium.com/feed/breez-technology"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_caitlin_long
+    name: "Caitlin Long"
+    type: rss
+    url: "https://caitlin-long.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cartesi_medium
+    name: "Cartesi - Medium"
+    type: rss
+    url: "https://medium.com/feed/cartesi"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_casa_blog
+    name: "Casa Blog"
+    type: rss
+    url: "https://blog.keys.casa/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_celer_network
+    name: "Celer Network"
+    type: rss
+    url: "https://blog.celer.network/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_celestia_blog
+    name: "Celestia Blog"
+    type: rss
+    url: "https://blog.celestia.org/rss/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_centre_blog_medium
+    name: "Centre blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/centre-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_centrifuge_medium
+    name: "Centrifuge - Medium"
+    type: rss
+    url: "https://medium.com/feed/centrifuge"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainfeeds
+    name: "ChainFeeds"
+    type: rss
+    url: "http://mirror.xyz/chainfeeds.eth/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainlink
+    name: "Chainlink"
+    type: rss
+    url: "https://blog.chain.link/rss/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_chainsafe_medium
+    name: "ChainSafe - Medium"
+    type: rss
+    url: "https://medium.com/feed/chainsafe-systems"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_chainsecurity_medium
+    name: "ChainSecurity - Medium"
+    type: rss
+    url: "https://medium.com/feed/chainsecurity"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_charm_medium
+    name: "Charm - Medium"
+    type: rss
+    url: "https://medium.com/feed/charmfinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chia_network
+    name: "Chia Network"
+    type: rss
+    url: "https://chia.net/feed.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_circle_blog
+    name: "Circle Blog"
+    type: rss
+    url: "https://www.circle.com/blog/rss.xml"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_citydao
+    name: "CityDAO"
+    type: rss
+    url: "http://city.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_clipper
+    name: "Clipper"
+    type: rss
+    url: "https://blog.clipper.exchange/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_clrfund
+    name: "clr.fund"
+    type: rss
+    url: "http://blog.clr.fund/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cmt_digital_limited_on_medium
+    name: "CMT Digital Limited on Medium"
+    type: rss
+    url: "https://medium.com/feed/@CMTDigitalLtd"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_coin_center
+    name: "Coin Center"
+    type: rss
+    url: "https://www.coincenter.org/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_colony_blog
+    name: "Colony Blog"
+    type: rss
+    url: "https://blog.colony.io/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_compound_medium
+    name: "Compound - Medium"
+    type: rss
+    url: "https://medium.com/feed/compound-finance"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_concourse_open
+    name: "Concourse Open"
+    type: rss
+    url: "https://concourseopen.com/blog/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_connext_medium
+    name: "Connext - Medium"
+    type: rss
+    url: "https://medium.com/feed/connext"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_consensys
+    name: "ConsenSys"
+    type: rss
+    url: "https://feeds.feedburner.com/ConsenSys/posts"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_consensys_media_medium
+    name: "ConsenSys Media - Medium"
+    type: rss
+    url: "https://media.consensys.net/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_convergence_finance_on_medium
+    name: "Convergence Finance on Medium"
+    type: rss
+    url: "https://medium.com/feed/@convergencefinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cryptocom_official_blog
+    name: "Crypto.com | Official Blog"
+    type: rss
+    url: "https://blog.crypto.com/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_curve_finance
+    name: "Curve Finance"
+    type: rss
+    url: "https://blog.curve.fi/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_daofi_medium
+    name: "DAOfi - Medium"
+    type: rss
+    url: "https://medium.com/feed/daofi"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dapper_labs_on_medium
+    name: "Dapper Labs on Medium"
+    type: rss
+    url: "https://medium.com/feed/@hellodapper"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_decentraland
+    name: "Decentraland"
+    type: rss
+    url: "https://decentraland.org/blog/feed.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_defi_lab_on_medium
+    name: "Defi Lab on Medium"
+    type: rss
+    url: "https://medium.com/feed/@defi-lab"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_defi_saver_medium
+    name: "DeFi Saver - Medium"
+    type: rss
+    url: "https://medium.com/feed/defi-saver"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_degate_team_on_medium
+    name: "DeGate Team on Medium"
+    type: rss
+    url: "https://medium.com/feed/@degate"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dego_on_medium
+    name: "DEGO on Medium"
+    type: rss
+    url: "https://medium.com/feed/@degofinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_delphinus_lab
+    name: "Delphinus Lab"
+    type: rss
+    url: "https://delphinuslab.com/feed/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_deribit_insights
+    name: "Deribit Insights"
+    type: rss
+    url: "https://blog.deribit.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_derivadex_medium
+    name: "DerivaDEX - Medium"
+    type: rss
+    url: "https://medium.com/feed/derivadex"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dfinity_on_medium
+    name: "DFINITY on Medium"
+    type: rss
+    url: "https://medium.com/feed/@dfinity"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dforce_medium
+    name: "dForce - Medium"
+    type: rss
+    url: "https://medium.com/feed/dforcenet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dhedge_on_medium
+    name: "dHEDGE on Medium"
+    type: rss
+    url: "https://medium.com/feed/@dhedgeorg"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dia_insights_medium
+    name: "DIA Insights - Medium"
+    type: rss
+    url: "https://medium.com/feed/dia-insights"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dmm_dao_medium
+    name: "DMM DAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/dmm-dao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_duckdao_medium
+    name: "DuckDAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/duckdao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dydx_the_integral
+    name: "dYdX - The Integral"
+    type: rss
+    url: "https://integral.dydx.exchange/rss/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_edgeware
+    name: "Edgeware"
+    type: rss
+    url: "https://blog.edgewa.re/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_egl_on_medium
+    name: "EGL on Medium"
+    type: rss
+    url: "https://medium.com/feed/@eglvote"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_electric_coin_company
+    name: "Electric Coin Company"
+    type: rss
+    url: "https://electriccoin.co/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_electron_labs_medium
+    name: "Electron Labs - Medium"
+    type: rss
+    url: "https://medium.com/feed/electron-labs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_element_finance_medium
+    name: "Element Finance - Medium"
+    type: rss
+    url: "https://medium.com/feed/element-finance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_enigma_medium
+    name: "Enigma - Medium"
+    type: rss
+    url: "http://blog.enigma.co/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ens
+    name: "ENS"
+    type: rss
+    url: "https://ens.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_ensofinance_medium
+    name: "EnsoFinance - Medium"
+    type: rss
+    url: "https://medium.com/feed/ensofinance"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_enterprise_ethereum_alliance
+    name: "Enterprise Ethereum Alliance"
+    type: rss
+    url: "https://entethalliance.org/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_enzyme_medium
+    name: "Enzyme - Medium"
+    type: rss
+    url: "https://medium.com/feed/melonprotocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_eosio
+    name: "EOSIO"
+    type: rss
+    url: "https://eos.io/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_equilibrium_medium
+    name: "Equilibrium - Medium"
+    type: rss
+    url: "https://medium.com/feed/equilibrium-eosdt"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_erisx
+    name: "ErisX"
+    type: rss
+    url: "https://www.erisx.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_erisx_insights_on_medium
+    name: "ErisX Insights on Medium"
+    type: rss
+    url: "https://medium.com/feed/@erisxinsights"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_esprezzo_blog
+    name: "Esprezzo Blog"
+    type: rss
+    url: "https://blog.esprezzo.io/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ethereum_blog
+    name: "Ethereum Blog"
+    type: rss
+    url: "https://blog.ethereum.org/feed.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ethereum_cat_herders_medium
+    name: "Ethereum Cat Herders - Medium"
+    type: rss
+    url: "https://medium.com/feed/ethereum-cat-herders"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_ethereum_swarm_medium
+    name: "Ethereum Swarm - Medium"
+    type: rss
+    url: "https://medium.com/feed/ethereum-swarm"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ethereum_world_blog
+    name: "Ethereum World Blog"
+    type: rss
+    url: "https://blog.ethereum.world/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ethernity_chain_on_medium
+    name: "Ethernity Chain on Medium"
+    type: rss
+    url: "https://medium.com/feed/@ethernitychain"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_etherscan_blog_medium
+    name: "Etherscan Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/etherscan-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_etoro
+    name: "eToro"
+    type: rss
+    url: "https://www.etoro.com/en-us/news-and-analysis/crypto/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_euler_newsletter
+    name: "Euler Newsletter"
+    type: rss
+    url: "https://newsletter.euler.finance/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_fei_protocol_medium
+    name: "Fei Protocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/fei-protocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_filecoin
+    name: "Filecoin"
+    type: rss
+    url: "https://filecoin.io/blog/feed/index.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_findora_medium
+    name: "Findora - Medium"
+    type: rss
+    url: "https://medium.com/feed/findora"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_fio_blog_medium
+    name: "FIO Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/fio-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_firefly_medium
+    name: "Firefly - Medium"
+    type: rss
+    url: "https://medium.com/feed/dtrade"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_flashbots_medium
+    name: "Flashbots - Medium"
+    type: rss
+    url: "https://medium.com/feed/flashbots"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_fleek_blog
+    name: "Fleek Blog"
+    type: rss
+    url: "https://blog.fleek.co/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_flexa_medium
+    name: "Flexa - Medium"
+    type: rss
+    url: "https://medium.com/feed/flexa"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_float_protocol_on_medium
+    name: "Float Protocol on Medium"
+    type: rss
+    url: "https://medium.com/feed/@floatprotocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_fluidity_medium
+    name: "Fluidity - Medium"
+    type: rss
+    url: "https://medium.com/feed/fluidity"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_force_on_medium
+    name: "Force on Medium"
+    type: rss
+    url: "https://medium.com/feed/@forcedao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_forta_network
+    name: "Forta Network"
+    type: rss
+    url: "https://forta.org/blog/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_frame_labs
+    name: "Frame Labs"
+    type: rss
+    url: "https://blog.frame.sh/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_fuel_labs
+    name: "Fuel Labs"
+    type: rss
+    url: "https://fuel-labs.ghost.io/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_futureswap_medium
+    name: "Futureswap - Medium"
+    type: rss
+    url: "https://medium.com/feed/futureswap"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gelato_network_on_medium
+    name: "Gelato Network on Medium"
+    type: rss
+    url: "https://medium.com/feed/@gelatonetwork"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ghost
+    name: "Ghost"
+    type: rss
+    url: "https://ghost.org/changelog/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gitcoins_blog
+    name: "Gitcoin's Blog"
+    type: rss
+    url: "https://gitcoin.co/blog/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_givecryptoorg_medium
+    name: "GiveCrypto.org - Medium"
+    type: rss
+    url: "https://medium.com/feed/givecrypto"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gnosis_medium
+    name: "Gnosis - Medium"
+    type: rss
+    url: "https://blog.gnosis.pm/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_gnosis_on_medium
+    name: "Gnosis on Medium"
+    type: rss
+    url: "https://medium.com/feed/@gnosisPM"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_gnosis_safe
+    name: "Gnosis Safe"
+    type: rss
+    url: "https://safe.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_golem
+    name: "Golem"
+    type: rss
+    url: "https://blog.golemproject.net/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_goodghosting_on_medium
+    name: "GoodGhosting on Medium"
+    type: rss
+    url: "https://medium.com/feed/@goodghosting"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gpu_report_on_medium
+    name: "GPU Report on Medium"
+    type: rss
+    url: "https://medium.com/feed/@raiden_network"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_grayscale_investments
+    name: "Grayscale Investments"
+    type: rss
+    url: "https://www.globenewswire.com/SubscribeToRss/uYBer3uzJgsFPGKc1jORaA%3d%3d"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gridplus_medium
+    name: "GridPlus - Medium"
+    type: rss
+    url: "https://blog.gridplus.io/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gro_on_medium
+    name: "Gro on Medium"
+    type: rss
+    url: "https://medium.com/feed/@groprotocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gyroscope_protocol_medium
+    name: "gyroscope-protocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/gyroscope-protocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hang
+    name: "Hang"
+    type: rss
+    url: "https://mirror.xyz/0x86D4b75B33989e04cfaA630d243642a7784e06ED/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_helium_foundation_on_medium
+    name: "Helium Foundation on Medium"
+    type: rss
+    url: "https://medium.com/feed/@dewialliance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hermez_blog
+    name: "Hermez | Blog"
+    type: rss
+    url: "https://blog.hermez.io/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hop
+    name: "Hop"
+    type: rss
+    url: "https://hop.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hopr_medium
+    name: "HOPR - Medium"
+    type: rss
+    url: "https://medium.com/feed/hoprnet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_horizon_games_medium
+    name: "Horizon Games - Medium"
+    type: rss
+    url: "https://medium.com/feed/horizongames"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hyperledger
+    name: "Hyperledger"
+    type: rss
+    url: "https://www.hyperledger.org/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_idex_blog
+    name: "IDEX Blog"
+    type: rss
+    url: "https://blog.idex.io/all-posts?format=rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_idle_on_medium
+    name: "Idle on Medium"
+    type: rss
+    url: "https://medium.com/feed/@idlefinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_illuvium_on_medium
+    name: "Illuvium on Medium"
+    type: rss
+    url: "https://medium.com/feed/@illuvium"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_instadapp_medium
+    name: "InstaDApp - Medium"
+    type: rss
+    url: "https://medium.com/feed/instadapp"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_interlay_medium
+    name: "Interlay - Medium"
+    type: rss
+    url: "https://medium.com/feed/interlay"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ipfs_blog_news
+    name: "IPFS Blog & News"
+    type: rss
+    url: "https://blog.ipfs.io/index.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_jack_mallers_on_medium
+    name: "Jack Mallers on Medium"
+    type: rss
+    url: "https://medium.com/feed/@JimmyMow"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_jarvis_network_medium
+    name: "Jarvis Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/jarvis-network"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_keep_network_medium
+    name: "Keep Network - Medium"
+    type: rss
+    url: "https://blog.keep.network/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_keystone_wallet
+    name: "Keystone Wallet"
+    type: rss
+    url: "https://blog.keyst.one/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_keystone_wallet_chinese
+    name: "Keystone Wallet (Chinese)"
+    type: rss
+    url: "https://mirror.xyz/keystonecn.eth/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_klaytn_medium
+    name: "Klaytn - Medium"
+    type: rss
+    url: "https://medium.com/feed/klaytn"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_kraken_blog
+    name: "Kraken Blog"
+    type: rss
+    url: "https://blog.kraken.com/feed/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_krystal_defi_medium
+    name: "Krystal DeFi - Medium"
+    type: rss
+    url: "https://medium.com/feed/krystaldefi"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_kyve_medium
+    name: "KYVE - Medium"
+    type: rss
+    url: "https://blog.kyve.network/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_layerzero_official_medium
+    name: "LayerZero Official - Medium"
+    type: rss
+    url: "https://medium.com/feed/layerzero-official"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_ledger
+    name: "Ledger"
+    type: rss
+    url: "https://www.ledger.com/category/blog-posts/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_leverj_medium
+    name: "LEVERJ - Medium"
+    type: rss
+    url: "https://blog.leverj.io/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lexdaoism_medium
+    name: "LexDAOism - Medium"
+    type: rss
+    url: "https://medium.com/feed/lexdaoism"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lien_medium
+    name: "Lien - Medium"
+    type: rss
+    url: "https://medium.com/feed/lien-finance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_liquity_medium
+    name: "Liquity - Medium"
+    type: rss
+    url: "https://medium.com/feed/liquity"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_magic_medium
+    name: "Magic - Medium"
+    type: rss
+    url: "https://medium.com/feed/magiclabs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_maker_blog
+    name: "Maker Blog"
+    type: rss
+    url: "https://blog.makerdao.com/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_mask_network_chinese
+    name: "Mask Network (Chinese)"
+    type: rss
+    url: "https://news.mask.io/zh-Hans/rss-feed.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_matter_labs_medium
+    name: "Matter Labs - Medium"
+    type: rss
+    url: "https://medium.com/feed/matter-labs"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_matter_labs_on_medium
+    name: "Matter Labs on Medium"
+    type: rss
+    url: "https://medium.com/feed/@matterlabs"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_mechanism_capital
+    name: "Mechanism Capital"
+    type: rss
+    url: "https://www.mechanism.capital/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mercuryo_medium
+    name: "Mercuryo - Medium"
+    type: rss
+    url: "https://medium.com/feed/mercuryo"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_metacartel_dao_medium
+    name: "MetaCartel DAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/metacartel"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_metamask_medium
+    name: "MetaMask - Medium"
+    type: rss
+    url: "https://medium.com/feed/metamask"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_metisdao
+    name: "MetisDAO"
+    type: rss
+    url: "https://medium.com/feed/@metisdao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mina_protocol
+    name: "Mina Protocol"
+    type: rss
+    url: "https://minaprotocol.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_minaprotocol_medium
+    name: "MinaProtocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/minaprotocol/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mining_dao_medium
+    name: "Mining DAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/mining-dao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mintbase_medium
+    name: "Mintbase - Medium"
+    type: rss
+    url: "https://medium.com/feed/mintbase"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_mirror_development
+    name: "Mirror Development"
+    type: rss
+    url: "https://dev.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mixmarvel_on_medium
+    name: "MIXMARVEL on Medium"
+    type: rss
+    url: "https://medium.com/feed/@MIXMARVELGAME"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_monolith_medium
+    name: "Monolith - Medium"
+    type: rss
+    url: "https://medium.com/feed/monolith"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_moralis
+    name: "Moralis"
+    type: rss
+    url: "https://moralis.io/blog/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mstable_medium
+    name: "mStable - Medium"
+    type: rss
+    url: "https://medium.com/feed/mstable"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_muun_medium
+    name: "Muun - Medium"
+    type: rss
+    url: "https://medium.com/feed/muunwallet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mycrypto_medium
+    name: "MyCrypto - Medium"
+    type: rss
+    url: "https://medium.com/feed/mycrypto"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_myetherwallet_on_medium
+    name: "MyEtherWallet on Medium"
+    type: rss
+    url: "https://medium.com/feed/@myetherwallet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mysterium_network_medium
+    name: "Mysterium Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/mysterium-network"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_near_protocol
+    name: "NEAR Protocol"
+    type: rss
+    url: "https://nearprotocol.com/feed/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_near_protocol_medium
+    name: "NEAR Protocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/nearprotocol"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_neo_blog_posts_list
+    name: "Neo blog posts list"
+    type: rss
+    url: "https://neo.org/blog/rss?language=zh"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nethermindeth_medium
+    name: "Nethermind.eth - Medium"
+    type: rss
+    url: "https://medium.com/feed/nethermind-eth"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nexo_medium
+    name: "Nexo - Medium"
+    type: rss
+    url: "https://medium.com/feed/nexo"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nexus_mutual_medium
+    name: "Nexus Mutual - Medium"
+    type: rss
+    url: "https://medium.com/feed/nexus-mutual"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nicklers
+    name: "nickler's"
+    type: rss
+    url: "https://nickler.ninja/atom.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nkn_medium
+    name: "NKN - Medium"
+    type: rss
+    url: "https://medium.com/feed/nknetwork"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_node_from_voyager
+    name: "NODE from Voyager"
+    type: rss
+    url: "https://www.investvoyager.com/blog/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nodle_medium
+    name: "Nodle - Medium"
+    type: rss
+    url: "https://medium.com/feed/nodle-io"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nomic_foundation_medium
+    name: "Nomic Foundation - Medium"
+    type: rss
+    url: "https://medium.com/feed/nomic-foundation-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nomics_blog
+    name: "Nomics Blog"
+    type: rss
+    url: "https://blog.nomics.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_notesfinance_medium
+    name: "Notes.Finance - Medium"
+    type: rss
+    url: "https://medium.com/feed/notes-finance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nucypher
+    name: "NuCypher"
+    type: rss
+    url: "https://blog.nucypher.com/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nym_on_medium
+    name: "Nym on Medium"
+    type: rss
+    url: "https://medium.com/feed/@nymtech"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_offchain_labs
+    name: "Offchain Labs"
+    type: rss
+    url: "https://offchain.medium.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_offchain_labs_arbitrum
+    name: "Offchain Labs (Arbitrum)"
+    type: rss
+    url: "https://medium.com/feed/offchainlabs"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_omnibolt_medium
+    name: "OmniBOLT - Medium"
+    type: rss
+    url: "https://medium.com/feed/omnibolt"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_opendao_medium
+    name: "OpenDAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/opendao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_opengsn_on_medium
+    name: "OpenGSN on Medium"
+    type: rss
+    url: "https://medium.com/feed/@opengsn"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_opennode_blog
+    name: "OpenNode Blog"
+    type: rss
+    url: "https://www.opennode.co/blog/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_openzeppelin_blog
+    name: "OpenZeppelin blog"
+    type: rss
+    url: "https://blog.openzeppelin.com/feed/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_opium_team_medium
+    name: "Opium Team - Medium"
+    type: rss
+    url: "https://medium.com/feed/opium-network"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_opyn_medium
+    name: "Opyn - Medium"
+    type: rss
+    url: "https://medium.com/feed/opyn"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_orchid_rss_feed
+    name: "Orchid RSS feed"
+    type: rss
+    url: "https://blog.orchid.com/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_our_status
+    name: "Our Status"
+    type: rss
+    url: "https://our.status.im/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_paypal_newsroom
+    name: "PayPal Newsroom"
+    type: rss
+    url: "https://newsroom.paypal-corp.com/news?pagetemplate=rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_pendle_medium
+    name: "Pendle - Medium"
+    type: rss
+    url: "https://medium.com/feed/pendle"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_percent
+    name: "Percent"
+    type: rss
+    url: "https://withcadence.io/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_phoenix_finance_medium
+    name: "Phoenix Finance - Medium"
+    type: rss
+    url: "https://medium.com/feed/finnexus"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_piedao_medium
+    name: "PieDAO - Medium"
+    type: rss
+    url: "https://medium.com/feed/piedao"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_pinata_medium
+    name: "Pinata - Medium"
+    type: rss
+    url: "https://medium.com/feed/pinata"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_pnetwork_team_on_medium
+    name: "pNetwork Team on Medium"
+    type: rss
+    url: "https://medium.com/feed/@provablethings"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_poap_medium
+    name: "POAP - Medium"
+    type: rss
+    url: "https://medium.com/feed/poap"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_pods_medium
+    name: "Pods - Medium"
+    type: rss
+    url: "https://blog.pods.finance/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_polkadot_network
+    name: "Polkadot Network"
+    type: rss
+    url: "https://polkadot.network/blog/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_polkadot_network_medium
+    name: "Polkadot Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/polkadot-network"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_pooltogether_medium
+    name: "PoolTogether - Medium"
+    type: rss
+    url: "https://medium.com/feed/pooltogether"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_portis_on_medium
+    name: "Portis on Medium"
+    type: rss
+    url: "https://medium.com/feed/@portis"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_powerpool_medium
+    name: "PowerPool - Medium"
+    type: rss
+    url: "https://medium.com/feed/powerpool/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_primedao_on_medium
+    name: "PrimeDAO on Medium"
+    type: rss
+    url: "https://medium.com/feed/@primefoundation"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_primitive_on_medium
+    name: "Primitive on Medium"
+    type: rss
+    url: "https://medium.com/feed/@primitivefinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_propine
+    name: "Propine"
+    type: rss
+    url: "https://www.propine.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_prysmatic_labs_medium
+    name: "Prysmatic Labs - Medium"
+    type: rss
+    url: "https://medium.com/feed/prysmatic-labs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_quoletta_on_medium
+    name: "Quoletta on Medium"
+    type: rss
+    url: "https://medium.com/feed/@mustcometh"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_rabbithole
+    name: "RabbitHole"
+    type: rss
+    url: "https://rabbithole.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_radicle
+    name: "Radicle"
+    type: rss
+    url: "https://radicle.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_reach_platform_medium
+    name: "Reach Platform - Medium"
+    type: rss
+    url: "https://medium.com/feed/reach-sh"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_reflexer_labs_medium
+    name: "Reflexer Labs - Medium"
+    type: rss
+    url: "https://medium.com/feed/reflexer-labs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ren_project_medium
+    name: "Ren Project - Medium"
+    type: rss
+    url: "https://medium.com/feed/renproject"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_reserve_medium
+    name: "Reserve - Medium"
+    type: rss
+    url: "https://medium.com/feed/reserve-currency"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_revolut_blog
+    name: "Revolut Blog"
+    type: rss
+    url: "https://blog.revolut.com/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ribbon_finance_on_medium
+    name: "Ribbon Finance on Medium"
+    type: rss
+    url: "https://medium.com/feed/@ribbonfinance"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_risc_zero_blog
+    name: "RISC Zero Blog"
+    type: rss
+    url: "https://www.risczero.com/blog/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_rocket_pool_medium
+    name: "Rocket Pool - Medium"
+    type: rss
+    url: "https://medium.com/feed/rocket-pool"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_roll_the_new_standard_in_social_money
+    name: "Roll – the new standard in social money"
+    type: rss
+    url: "https://tryroll.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_safenetwork_medium
+    name: "safenetwork - Medium"
+    type: rss
+    url: "https://medium.com/feed/safenetwork"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_samourai_wallet
+    name: "Samourai Wallet"
+    type: rss
+    url: "https://blog.samouraiwallet.com/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_samourai_wallet_on_medium
+    name: "Samourai Wallet on Medium"
+    type: rss
+    url: "https://medium.com/feed/@SamouraiWallet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_scopelift_high_caliber_crypto
+    name: "ScopeLift - High Caliber Crypto"
+    type: rss
+    url: "https://www.scopelift.co/blog?format=rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_scroll
+    name: "Scroll"
+    type: rss
+    url: "https://mirror.xyz/scroll.eth/feed/atom"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_set_labs_medium
+    name: "Set Labs - Medium"
+    type: rss
+    url: "https://medium.com/feed/set-protocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sia_and_skynet_blog_medium
+    name: "Sia and Skynet Blog - Medium"
+    type: rss
+    url: "https://blog.sia.tech/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sigma_prime
+    name: "Sigma Prime"
+    type: rss
+    url: "https://blog.sigmaprime.io/feeds/all.atom.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_simba_chain_blog
+    name: "SIMBA Chain Blog"
+    type: rss
+    url: "https://blog.simbachain.com/blog/rss.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sismo_on_medium
+    name: "Sismo on Medium"
+    type: rss
+    url: "https://blog.sismo.io/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_skale_blog
+    name: "SKALE Blog"
+    type: rss
+    url: "https://skale.network/blog/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_slockit_blog_medium
+    name: "slock.it Blog - Medium"
+    type: rss
+    url: "https://blog.slock.it/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_slowmist_on_medium
+    name: "SlowMist on Medium"
+    type: rss
+    url: "https://slowmist.medium.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_smart_token_labs_medium
+    name: "Smart Token Labs - Medium"
+    type: rss
+    url: "https://medium.com/feed/alphawallet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_snake_charmers
+    name: "Snake Charmers"
+    type: rss
+    url: "https://snakecharmers.ethereum.org/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_snapshot_labs
+    name: "Snapshot Labs"
+    type: rss
+    url: "https://snapshot.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_solidity_blog
+    name: "Solidity Blog"
+    type: rss
+    url: "https://solidity.ethereum.org/feed.xml"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_solv_protocol
+    name: "Solv Protocol"
+    type: rss
+    url: "https://solvprotocol.medium.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_spatium_blog_medium
+    name: "Spatium Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/spatium-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_spruce
+    name: "Spruce"
+    type: rss
+    url: "https://blog.spruceid.com/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_stacks_blog_apps_and_smart_contracts_for_bitcoin
+    name: "Stacks Blog – Apps and smart contracts for Bitcoin"
+    type: rss
+    url: "https://blog.blockstack.org/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_stakenet_medium
+    name: "Stakenet - Medium"
+    type: rss
+    url: "https://medium.com/feed/stakenet"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_starkware_on_medium
+    name: "StarkWare on Medium"
+    type: rss
+    url: "https://medium.com/feed/@StarkWare"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_stasis_blog_medium
+    name: "STASIS Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/stasis-blog"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_subquery_network_on_medium
+    name: "SubQuery Network on Medium"
+    type: rss
+    url: "https://medium.com/feed/@subquery"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sui_by_mysten_labs
+    name: "Sui by Mysten Labs"
+    type: rss
+    url: "https://medium.com/feed/mysten-labs"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_superfluid_on_medium
+    name: "Superfluid on Medium"
+    type: rss
+    url: "https://medium.com/feed/@superfluid_HQ"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sushi_medium
+    name: "Sushi - Medium"
+    type: rss
+    url: "https://medium.com/feed/sushiswap-org"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_swipe_medium
+    name: "Swipe - Medium"
+    type: rss
+    url: "https://medium.com/feed/swipe"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sylo_medium
+    name: "Sylo - Medium"
+    type: rss
+    url: "https://medium.com/feed/sylo-io"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_synthetix_blog
+    name: "Synthetix Blog"
+    type: rss
+    url: "https://blog.synthetix.io/rss/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_tally_ho
+    name: "Tally Ho!"
+    type: rss
+    url: "https://blog.tally.cash/rss"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_taxa_network_medium
+    name: "Taxa Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/taxanetwork"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tbdex_tbd54566975
+    name: "tbDEX - @TBD54566975"
+    type: rss
+    url: "https://tbd54566975.ghost.io/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tellor_core_on_medium
+    name: "Tellor Core on Medium"
+    type: rss
+    url: "https://medium.com/feed/@tellor"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tempus_medium
+    name: "tempus - Medium"
+    type: rss
+    url: "https://medium.com/feed/tempusfinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_thales_on_medium
+    name: "Thales on Medium"
+    type: rss
+    url: "https://medium.com/feed/@thalesmarket"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_bitpay_blog
+    name: "The BitPay Blog"
+    type: rss
+    url: "https://bitpay.com/blog/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_celo_blog_medium
+    name: "The Celo Blog - Medium"
+    type: rss
+    url: "https://medium.com/feed/celoorg"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_ceramic_blog
+    name: "The Ceramic Blog"
+    type: rss
+    url: "https://blog.ceramic.network/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_coinbase_blog_medium
+    name: "The Coinbase Blog - Medium"
+    type: rss
+    url: "https://blog.coinbase.com/feed"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_the_deversifi_blog
+    name: "The DeversiFi Blog"
+    type: rss
+    url: "https://blog.ethfinex.com/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_ethereum_name_service_medium
+    name: "The Ethereum Name Service - Medium"
+    type: rss
+    url: "https://medium.com/feed/the-ethereum-name-service"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_index_coop_medium
+    name: "The Index Coop - Medium"
+    type: rss
+    url: "https://medium.com/feed/indexcoop"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_lao_on_medium
+    name: "The LAO on Medium"
+    type: rss
+    url: "https://medium.com/feed/@thelaoofficial"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_optimism_collective
+    name: "The Optimism Collective"
+    type: rss
+    url: "https://optimism.mirror.xyz/feed/atom"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_the_optimistic_dev_blog
+    name: "The Optimistic Dev Blog"
+    type: rss
+    url: "https://dev.optimism.io/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_rook_blog
+    name: "The Rook Blog"
+    type: rss
+    url: "https://blog.rook.fi/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_sandbox_medium
+    name: "The Sandbox - Medium"
+    type: rss
+    url: "https://medium.com/feed/sandbox-game"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_theta_network_medium
+    name: "Theta Network - Medium"
+    type: rss
+    url: "https://medium.com/feed/theta-network"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_thorchain_medium
+    name: "THORChain - Medium"
+    type: rss
+    url: "https://medium.com/feed/thorchain"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tornado_cash_on_medium
+    name: "Tornado Cash on Medium"
+    type: rss
+    url: "https://medium.com/feed/@tornado-cash"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_truebit_network_sync
+    name: "Truebit Network Sync"
+    type: rss
+    url: "https://truebit.substack.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_trustless_fund_medium
+    name: "Trustless Fund - Medium"
+    type: rss
+    url: "https://medium.com/feed/trustless-fund"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_uma_project_medium
+    name: "UMA Project - Medium"
+    type: rss
+    url: "https://medium.com/feed/uma-project"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_umbrel_blog_medium
+    name: "Umbrel Blog - Medium"
+    type: rss
+    url: "https://blog.getumbrel.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_unilogin_medium
+    name: "UniLogin - Medium"
+    type: rss
+    url: "https://medium.com/feed/universal-ethereum"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_unitradeappnews_on_medium
+    name: "Unitradeappnews on Medium"
+    type: rss
+    url: "https://medium.com/feed/@unitradeapp"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_universal_protocol_medium
+    name: "Universal Protocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/universalprotocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_uphold_blog
+    name: "Uphold Blog"
+    type: rss
+    url: "https://uphold.com/en/blog/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_upshothq_medium
+    name: "UpshotHQ - Medium"
+    type: rss
+    url: "https://medium.com/feed/upshothq"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_utopia_labs
+    name: "Utopia Labs"
+    type: rss
+    url: "https://mirror.xyz/utopialabs.eth/feed/atom"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_vega_protocol_medium
+    name: "Vega Protocol - Medium"
+    type: rss
+    url: "https://medium.com/feed/vegaprotocol"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_vertalo_on_medium
+    name: "Vertalo on Medium"
+    type: rss
+    url: "https://medium.com/feed/@Vertalo"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_vesper_finance_medium
+    name: "Vesper Finance - Medium"
+    type: rss
+    url: "https://medium.com/feed/vesperfinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_visor_finance_medium
+    name: "Visor Finance - Medium"
+    type: rss
+    url: "https://medium.com/feed/visorfinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_visor_finance_on_medium
+    name: "Visor Finance on Medium"
+    type: rss
+    url: "https://medium.com/feed/@visorfinance"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_walletconnect_medium
+    name: "WalletConnect - Medium"
+    type: rss
+    url: "https://medium.com/feed/walletconnect"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_walletconnect_mirror
+    name: "WalletConnect — Mirror"
+    type: rss
+    url: "http://walletconnect.submirror.xyz/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_wasabi_wallet_blog
+    name: "Wasabi Wallet Blog"
+    type: rss
+    url: "https://blog.wasabiwallet.io/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_web3auth_medium
+    name: "Web3Auth - Medium"
+    type: rss
+    url: "https://medium.com/feed/toruslabs"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_whale_shark_on_medium
+    name: "Whale Shark on Medium"
+    type: rss
+    url: "https://medium.com/feed/@whalesharkdotpro"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_wyre_on_medium
+    name: "Wyre on Medium"
+    type: rss
+    url: "https://medium.com/feed/@wyre"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_xage_security
+    name: "Xage Security"
+    type: rss
+    url: "https://xage.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_xdefi_wallet_on_medium
+    name: "XDEFI Wallet on Medium"
+    type: rss
+    url: "https://medium.com/feed/@xdefi-io"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_yearn_medium
+    name: "Yearn - Medium"
+    type: rss
+    url: "https://medium.com/feed/iearn"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_zcash_foundation
+    name: "Zcash foundation"
+    type: rss
+    url: "https://zfnd.org/feed/"
+    category: "01. Project Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_zeitgeist
+    name: "Zeitgeist"
+    type: rss
+    url: "https://blog.zeitgeist.pm/rss/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zengo_bitcoin_cryptocurrency_wallet
+    name: "ZenGo – Bitcoin & Cryptocurrency Wallet"
+    type: rss
+    url: "https://zengo.com/feed/"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zilliqa_official_blog_medium
+    name: "Zilliqa — Official Blog - Medium"
+    type: rss
+    url: "https://blog.zilliqa.com/feed"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zklinkdefi_medium
+    name: "zkLinkDeFi - Medium"
+    type: rss
+    url: "https://medium.com/feed/zklinkdefi"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zkopru_ef
+    name: "ZKOPRU (EF)"
+    type: rss
+    url: "https://medium.com/feed/privacy-scaling-explorations"
+    category: "01. Project Updates"
+    priority: medium
+    enabled: true
+  # --- 02. Media/Aggregator/Curator ---
+  - id: chainfeeds_blocktempo_chinese
+    name: "BlockTempo (Chinese)"
+    type: rss
+    url: "https://www.blocktempo.com/feed/"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_blockworks
+    name: "Blockworks"
+    type: rss
+    url: "https://blockworks.co/feed/"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainfeeds_selected_chinese
+    name: "ChainFeeds Selected (Chinese)"
+    type: rss
+    url: "https://www.chainfeeds.xyz/rss"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_coindesk
+    name: "CoinDesk"
+    type: rss
+    url: "http://feeds.feedburner.com/Coindesk"
+    category: "02. Media/Aggregator/Curator"
+    priority: high
+    enabled: true
+  - id: chainfeeds_cointelegraphcom_news
+    name: "Cointelegraph.com News"
+    type: rss
+    url: "https://cointelegraph.com/rss"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_crunchbase_crypto
+    name: "Crunchbase Crypto"
+    type: rss
+    url: "https://news.crunchbase.com/sections/crypto/feed/"
+    category: "02. Media/Aggregator/Curator"
+    priority: high
+    enabled: true
+  - id: chainfeeds_crypto_briefing
+    name: "Crypto Briefing"
+    type: rss
+    url: "https://cryptobriefing.com/feed/"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_crypto_news_on_seeking_alpha
+    name: "Crypto News on Seeking Alpha"
+    type: rss
+    url: "https://seekingalpha.com/news/crypto/feed"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_decrypt
+    name: "Decrypt"
+    type: rss
+    url: "https://decryptmedia.com/feed/"
+    category: "02. Media/Aggregator/Curator"
+    priority: high
+    enabled: true
+  - id: chainfeeds_ecn_chinese
+    name: "ECN (Chinese)"
+    type: rss
+    url: "https://news.ethereum.cn/rss.xml"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hacker_noon
+    name: "Hacker Noon"
+    type: rss
+    url: "https://hackernoon.com/feed"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_messari_crypto_news_feed
+    name: "Messari Crypto News Feed"
+    type: rss
+    url: "https://messari.io/rss"
+    category: "02. Media/Aggregator/Curator"
+    priority: high
+    enabled: true
+  - id: chainfeeds_paradigm_fund
+    name: "Paradigm Fund"
+    type: rss
+    url: "https://medium.com/feed/paradigm-fund/"
+    category: "02. Media/Aggregator/Curator"
+    priority: high
+    enabled: true
+  - id: chainfeeds_techcrunch_bitcoin
+    name: "TechCrunch - Bitcoin"
+    type: rss
+    url: "https://techcrunch.com/tag/bitcoin/feed"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_techflow_chinese
+    name: "TechFlow (Chinese)"
+    type: rss
+    url: "https://techflowpost.mirror.xyz/feed/atom"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_trustnodes
+    name: "Trustnodes"
+    type: rss
+    url: "https://www.trustnodes.com/feed"
+    category: "02. Media/Aggregator/Curator"
+    priority: medium
+    enabled: true
+  # --- 03. Newsletter ---
+  - id: chainfeeds_kurt_pans_crypto_weekly
+    name: "🔐Kurt Pan’s Crypto Weekly"
+    type: rss
+    url: "https://www.getrevue.co/profile/kurtpan?format=rss"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_0xsoros_chinese
+    name: "0xSoros (Chinese)"
+    type: rss
+    url: "https://0xsoros.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_a16z_web3_weekly
+    name: "a16z web3 weekly"
+    type: rss
+    url: "https://a16zcrypto.substack.com/feed"
+    category: "03. Newsletter"
+    priority: high
+    enabled: true
+  - id: chainfeeds_allcoredevs_updates_mirror
+    name: "AllCoreDevs Updates  — Mirror"
+    type: rss
+    url: "https://tim.submirror.xyz/"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitcoin_magazine_pro
+    name: "Bitcoin Magazine PRO®"
+    type: rss
+    url: "https://bmpro.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitcoin_optech
+    name: "Bitcoin Optech"
+    type: rss
+    url: "https://bitcoinops.org/feed.xml"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_boardroom
+    name: "Boardroom"
+    type: rss
+    url: "https://governance.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainbreaker_chinese
+    name: "ChainBreaker (Chinese)"
+    type: rss
+    url: "https://submirror.xyz/0xchainbreaker.eth"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainfeeds_selection
+    name: "ChainFeeds Selection"
+    type: rss
+    url: "https://chainfeeds.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainfeeds_selection_mirror
+    name: "ChainFeeds Selection — Mirror"
+    type: rss
+    url: "https://submirror.xyz/feedselection.eth"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_coin_metrics_state_of_the_network
+    name: "Coin Metrics' State of the Network"
+    type: rss
+    url: "https://coinmetrics.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_defi_weekly
+    name: "DeFi Weekly"
+    type: rss
+    url: "https://defiweekly.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dotleap
+    name: "DotLeap"
+    type: rss
+    url: "https://dotleap.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dove_dispatch
+    name: "Dove Dispatch"
+    type: rss
+    url: "https://dovemountain.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ethhub
+    name: "EthHub"
+    type: rss
+    url: "https://ethhub.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_grin_newsletter
+    name: "Grin Newsletter"
+    type: rss
+    url: "https://grinnews.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_matrixdaos_newsletter
+    name: "MatrixDAO’s Newsletter"
+    type: rss
+    url: "https://matrixdao.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mcdao
+    name: "mcdao"
+    type: rss
+    url: "https://mcdao.mirror.xyz/feed/atom"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_minerupdate
+    name: "MinerUpdate"
+    type: rss
+    url: "https://minerupdate.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mirror_dao
+    name: "Mirror DAO"
+    type: rss
+    url: "https://dao.mirror.xyz/feed/atom"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_oreilly_radar
+    name: "O’Reilly Radar"
+    type: rss
+    url: "http://www.oreilly.com/radar/feed/index.xml"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_orange_paper_chinese
+    name: "Orange Paper (Chinese)"
+    type: rss
+    url: "https://orangexyz.mirror.xyz/feed/atom"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_proof_of_work
+    name: "Proof of Work"
+    type: rss
+    url: "https://proofofwork.news/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_starknet_cn_chinese
+    name: "StarkNet CN (Chinese)"
+    type: rss
+    url: "https://starknetzh.substack.com/feed"
+    category: "03. Newsletter"
+    priority: high
+    enabled: true
+  - id: chainfeeds_techflow_chinese
+    name: "TechFlow (Chinese)"
+    type: rss
+    url: "https://techflowpost.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_daily_gwei
+    name: "The Daily Gwei"
+    type: rss
+    url: "https://thedailygwei.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_defiant
+    name: "The Defiant"
+    type: rss
+    url: "https://thedefiant.substack.com/feed"
+    category: "03. Newsletter"
+    priority: high
+    enabled: true
+  - id: chainfeeds_unblock_周报
+    name: "un.Block 周报"
+    type: rss
+    url: "https://unblock256.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_week_in_ethereum_news
+    name: "Week in Ethereum News"
+    type: rss
+    url: "https://weekinethereumnews.com/feed/"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zk_whiteboard_sessions
+    name: "ZK Whiteboard Sessions"
+    type: rss
+    url: "https://whiteboard.zkhack.dev/feed/"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zkmesh
+    name: "zkMesh"
+    type: rss
+    url: "https://zkmesh.substack.com/feed"
+    category: "03. Newsletter"
+    priority: medium
+    enabled: true
+  # --- 04. GitHub Updates ---
+  - id: chainfeeds_alpha_wallet_ios
+    name: "Alpha-wallet-ios"
+    type: rss
+    url: "https://github.com/AlphaWallet/alpha-wallet-ios/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_anoma
+    name: "Anoma"
+    type: rss
+    url: "https://github.com/anoma/anoma/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_arbitrum
+    name: "Arbitrum"
+    type: rss
+    url: "https://github.com/OffchainLabs/arbitrum/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_ardrive_web
+    name: "Ardrive-web"
+    type: rss
+    url: "https://github.com/ardriveapp/ardrive-web/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_argent_x
+    name: "Argent-x"
+    type: rss
+    url: "https://github.com/argentlabs/argent-x/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_arweave
+    name: "Arweave"
+    type: rss
+    url: "https://github.com/ArweaveTeam/arweave/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitcoin
+    name: "Bitcoin"
+    type: rss
+    url: "https://github.com/bitcoin/bitcoin/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bluewallet
+    name: "BlueWallet"
+    type: rss
+    url: "https://github.com/BlueWallet/BlueWallet/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_brave_ios
+    name: "Brave-ios"
+    type: rss
+    url: "https://github.com/brave/brave-ios/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_breezmobile
+    name: "Breezmobile"
+    type: rss
+    url: "https://github.com/breez/breezmobile/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cairo_contracts
+    name: "Cairo-contracts"
+    type: rss
+    url: "https://github.com/OpenZeppelin/cairo-contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cairo_lang
+    name: "Cairo-lang"
+    type: rss
+    url: "https://github.com/starkware-libs/cairo-lang/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cape_by_espresso
+    name: "Cape by Espresso"
+    type: rss
+    url: "https://github.com/EspressoSystems/cape/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cardano_node
+    name: "Cardano-node"
+    type: rss
+    url: "https://github.com/input-output-hk/cardano-node/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_celo_blockchain
+    name: "Celo-blockchain"
+    type: rss
+    url: "https://github.com/celo-org/celo-blockchain/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ceno_browser
+    name: "ceno-browser"
+    type: rss
+    url: "https://github.com/censorship-no/ceno-browser/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chia_blockchain
+    name: "Chia-blockchain"
+    type: rss
+    url: "https://github.com/Chia-Network/chia-blockchain/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ckb
+    name: "ckb"
+    type: rss
+    url: "https://github.com/nervosnetwork/ckb/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_clrfund
+    name: "clr.fund"
+    type: rss
+    url: "https://github.com/clrfund/monorepo/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cosmos_sdk
+    name: "Cosmos-sdk"
+    type: rss
+    url: "https://github.com/cosmos/cosmos-sdk/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_council_by_element
+    name: "council by Element"
+    type: rss
+    url: "https://github.com/element-fi/council/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cowswap
+    name: "COWswap"
+    type: rss
+    url: "https://github.com/gnosis/cowswap/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_daedalus
+    name: "Daedalus"
+    type: rss
+    url: "https://github.com/input-output-hk/daedalus/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_eclair
+    name: "Eclair"
+    type: rss
+    url: "https://github.com/ACINQ/eclair/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_eea_l2
+    name: "EEA L2"
+    type: rss
+    url: "https://github.com/eea-oasis/L2/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_erigon
+    name: "Erigon"
+    type: rss
+    url: "https://github.com/ledgerwatch/erigon/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_facebook_winterfell
+    name: "Facebook Winterfell"
+    type: rss
+    url: "https://github.com/novifinancial/winterfell/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_forta_node
+    name: "forta-node"
+    type: rss
+    url: "https://github.com/forta-network/forta-node/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_frame_wallet
+    name: "Frame wallet"
+    type: rss
+    url: "https://github.com/floating/frame/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_fuel_core
+    name: "Fuel-core"
+    type: rss
+    url: "https://github.com/FuelLabs/fuel-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gitcoin_web
+    name: "Gitcoin web"
+    type: rss
+    url: "https://github.com/gitcoinco/web/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_go_ethereum
+    name: "go-ethereum"
+    type: rss
+    url: "https://github.com/ethereum/go-ethereum/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_go_ipfs
+    name: "go-ipfs"
+    type: rss
+    url: "https://github.com/ipfs/go-ipfs/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_go_spacemesh
+    name: "go-spacemesh"
+    type: rss
+    url: "https://github.com/spacemeshos/go-spacemesh/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_green_ios
+    name: "green_ios"
+    type: rss
+    url: "https://github.com/Blockstream/green_ios/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_grin
+    name: "Grin"
+    type: rss
+    url: "https://github.com/mimblewimble/grin/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hubble_contracts
+    name: "hubble-contracts"
+    type: rss
+    url: "https://github.com/thehubbleproject/hubble-contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_huff_low_level_language_for_evm
+    name: "Huff (Low level language for EVM)"
+    type: rss
+    url: "https://github.com/huff-language/huffc/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ibc_go
+    name: "ibc-go"
+    type: rss
+    url: "https://github.com/cosmos/ibc-go/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_js_ceramic
+    name: "js-ceramic"
+    type: rss
+    url: "https://github.com/ceramicnetwork/js-ceramic/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_juvix
+    name: "juvix"
+    type: rss
+    url: "https://github.com/anoma/juvix/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_kepler
+    name: "kepler"
+    type: rss
+    url: "https://github.com/spruceid/kepler/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_kryptology
+    name: "Kryptology"
+    type: rss
+    url: "https://github.com/coinbase/kryptology/commits/master.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_kyve
+    name: "KYVE"
+    type: rss
+    url: "https://github.com/KYVENetwork/chain/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ledger_live_desktop
+    name: "Ledger-live-desktop"
+    type: rss
+    url: "https://github.com/LedgerHQ/ledger-live-desktop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lighthouse
+    name: "Lighthouse"
+    type: rss
+    url: "https://github.com/sigp/lighthouse/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lightning
+    name: "Lightning"
+    type: rss
+    url: "https://github.com/ElementsProject/lightning/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lnd
+    name: "lnd"
+    type: rss
+    url: "https://github.com/lightningnetwork/lnd/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lodestar
+    name: "Lodestar"
+    type: rss
+    url: "https://github.com/ChainSafe/lodestar/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_loop
+    name: "Loop"
+    type: rss
+    url: "https://github.com/lightninglabs/loop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_maskbook
+    name: "Maskbook"
+    type: rss
+    url: "https://github.com/DimensionDev/Maskbook/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_metamask_mobile
+    name: "Metamask-mobile"
+    type: rss
+    url: "https://github.com/MetaMask/metamask-mobile/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mev_geth
+    name: "MEV-geth"
+    type: rss
+    url: "https://github.com/flashbots/mev-geth/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_monero
+    name: "Monero"
+    type: rss
+    url: "https://github.com/monero-project/monero/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_mysterium
+    name: "Mysterium"
+    type: rss
+    url: "https://github.com/MysteriumNetwork/node/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_near_core
+    name: "NEAR Core"
+    type: rss
+    url: "https://github.com/near/nearcore/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_nethermind
+    name: "Nethermind"
+    type: rss
+    url: "https://github.com/NethermindEth/nethermind/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nimbus_eth1
+    name: "Nimbus-eth1"
+    type: rss
+    url: "https://github.com/status-im/nimbus-eth1/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nimbus_eth2
+    name: "Nimbus-eth2"
+    type: rss
+    url: "https://github.com/status-im/nimbus-eth2/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nxtp
+    name: "NXTP"
+    type: rss
+    url: "https://github.com/connext/nxtp/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_nym
+    name: "NYM"
+    type: rss
+    url: "https://github.com/nymtech/nym/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_oasis_core
+    name: "Oasis-core"
+    type: rss
+    url: "https://github.com/oasisprotocol/oasis-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_openethereum
+    name: "OpenEthereum"
+    type: rss
+    url: "https://github.com/openethereum/openethereum/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_openzeppelin_contracts
+    name: "Openzeppelin-contracts"
+    type: rss
+    url: "https://github.com/OpenZeppelin/openzeppelin-contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_opera_desktop
+    name: "Opera Desktop"
+    type: rss
+    url: "https://blogs.opera.com/desktop/feed/"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_opera_mobile
+    name: "Opera Mobile"
+    type: rss
+    url: "https://blogs.opera.com/mobile/feed/"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_otterscan
+    name: "Otterscan"
+    type: rss
+    url: "https://github.com/wmitsuda/otterscan/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_phoenix
+    name: "Phoenix"
+    type: rss
+    url: "https://github.com/ACINQ/phoenix/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_platon_go
+    name: "PlatON-Go"
+    type: rss
+    url: "https://github.com/PlatONnetwork/PlatON-Go/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_pocket_core
+    name: "Pocket-core"
+    type: rss
+    url: "https://github.com/pokt-network/pocket-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_polkadot
+    name: "Polkadot"
+    type: rss
+    url: "https://github.com/paritytech/polkadot/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_prysm
+    name: "prysm"
+    type: rss
+    url: "https://github.com/prysmaticlabs/prysm/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_recent_commits_to_ethmaster
+    name: "Recent Commits to eth:master"
+    type: rss
+    url: "https://github.com/darkforest-eth/eth/commits/master.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_recent_commits_to_ferveomaster
+    name: "Recent Commits to ferveo:master"
+    type: rss
+    url: "https://github.com/anoma/ferveo/commits/master.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_akula
+    name: "Release notes from akula"
+    type: rss
+    url: "https://github.com/akula-bft/akula/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_almonit_plugin
+    name: "Release notes from almonit-plugin"
+    type: rss
+    url: "https://github.com/almonit/almonit-plugin/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_aptos_core
+    name: "Release notes from aptos-core"
+    type: rss
+    url: "https://github.com/aptos-labs/aptos-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_argent_contracts
+    name: "Release notes from argent-contracts"
+    type: rss
+    url: "https://github.com/argentlabs/argent-contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_baseline
+    name: "Release notes from baseline"
+    type: rss
+    url: "https://github.com/eea-oasis/baseline/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_beaker
+    name: "Release notes from beaker"
+    type: rss
+    url: "https://github.com/beakerbrowser/beaker/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_celestia_core
+    name: "Release notes from celestia-core"
+    type: rss
+    url: "https://github.com/celestiaorg/celestia-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_consensus_specs
+    name: "Release notes from consensus-specs"
+    type: rss
+    url: "https://github.com/ethereum/eth2.0-specs/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_contracts
+    name: "Release notes from contracts"
+    type: rss
+    url: "https://github.com/hermeznetwork/contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_core
+    name: "Release notes from core"
+    type: rss
+    url: "https://github.com/aave/lens-protocol/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_eclair_mobile
+    name: "Release notes from eclair-mobile"
+    type: rss
+    url: "https://github.com/ACINQ/eclair-wallet/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_electrum
+    name: "Release notes from electrum"
+    type: rss
+    url: "https://github.com/spesmilo/electrum/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_extension
+    name: "Release notes from extension"
+    type: rss
+    url: "https://github.com/tallycash/tally-extension/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_fe
+    name: "Release notes from fe"
+    type: rss
+    url: "https://github.com/ethereum/fe/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_green_qt
+    name: "Release notes from green_qt"
+    type: rss
+    url: "https://github.com/Blockstream/green_qt/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_hardhat
+    name: "Release notes from hardhat"
+    type: rss
+    url: "https://github.com/nomiclabs/hardhat/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_hummingbot
+    name: "Release notes from hummingbot"
+    type: rss
+    url: "https://github.com/CoinAlpha/hummingbot/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_keep_core
+    name: "Release notes from keep-core"
+    type: rss
+    url: "https://github.com/keep-network/keep-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_metamask_extension
+    name: "Release notes from metamask-extension"
+    type: rss
+    url: "https://github.com/MetaMask/metamask-extension/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_miden
+    name: "Release notes from miden"
+    type: rss
+    url: "https://github.com/maticnetwork/miden/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_mina
+    name: "Release notes from mina"
+    type: rss
+    url: "https://github.com/MinaProtocol/mina/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_mobilecoin
+    name: "Release notes from mobilecoin"
+    type: rss
+    url: "https://github.com/mobilecoinfoundation/mobilecoin/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_motoko
+    name: "Release notes from motoko"
+    type: rss
+    url: "https://github.com/dfinity/motoko/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_mycrypto
+    name: "Release notes from MyCrypto"
+    type: rss
+    url: "https://github.com/MyCryptoHQ/MyCrypto/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_myetherwallet
+    name: "Release notes from MyEtherWallet"
+    type: rss
+    url: "https://github.com/MyEtherWallet/MyEtherWallet/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_nightfall_3
+    name: "Release notes from nightfall_3"
+    type: rss
+    url: "https://github.com/EYBlockchain/nightfall_3/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_planet
+    name: "Release notes from Planet"
+    type: rss
+    url: "https://github.com/Planetable/Planet/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_protocol_monorepo
+    name: "Release notes from protocol-monorepo"
+    type: rss
+    url: "https://github.com/superfluid-finance/protocol-monorepo/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_rust_lightning
+    name: "Release notes from rust-lightning"
+    type: rss
+    url: "https://github.com/rust-bitcoin/rust-lightning/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_safe_contracts
+    name: "Release notes from safe-contracts"
+    type: rss
+    url: "https://github.com/gnosis/safe-contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_safe_ios
+    name: "Release notes from safe-ios"
+    type: rss
+    url: "https://github.com/gnosis/safe-ios/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_safe_react
+    name: "Release notes from safe-react"
+    type: rss
+    url: "https://github.com/gnosis/safe-react/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_siwe
+    name: "Release notes from siwe"
+    type: rss
+    url: "https://github.com/spruceid/siwe/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_snarkvm
+    name: "Release notes from snarkVM"
+    type: rss
+    url: "https://github.com/AleoHQ/snarkVM/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_sparrow
+    name: "Release notes from sparrow"
+    type: rss
+    url: "https://github.com/sparrowwallet/sparrow/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_specter_desktop
+    name: "Release notes from specter-desktop"
+    type: rss
+    url: "https://github.com/cryptoadvance/specter-desktop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_synthetix
+    name: "Release notes from synthetix"
+    type: rss
+    url: "https://github.com/Synthetixio/synthetix/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_venus
+    name: "Release notes from venus"
+    type: rss
+    url: "https://github.com/filecoin-project/go-filecoin/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_wallet
+    name: "Release notes from wallet"
+    type: rss
+    url: "https://github.com/liquality/wallet/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_walletwasabi
+    name: "Release notes from WalletWasabi"
+    type: rss
+    url: "https://github.com/zkSNACKs/WalletWasabi/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_zcash_ios_wallet
+    name: "Release notes from zcash-ios-wallet"
+    type: rss
+    url: "https://github.com/zcash/zcash-ios-wallet/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_release_notes_from_zebra
+    name: "Release notes from zebra"
+    type: rss
+    url: "https://github.com/ZcashFoundation/zebra/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_zkevm_circuits
+    name: "Release notes from zkevm-circuits"
+    type: rss
+    url: "https://github.com/appliedzkp/zkevm-circuits/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_release_notes_from_zodiac
+    name: "Release notes from zodiac"
+    type: rss
+    url: "https://github.com/gnosis/zodiac/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_remix_desktop
+    name: "Remix-desktop"
+    type: rss
+    url: "https://github.com/ethereum/remix-desktop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_risc0
+    name: "risc0"
+    type: rss
+    url: "https://github.com/risc0/risc0/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_rosetta_specifications
+    name: "Rosetta-specifications"
+    type: rss
+    url: "https://github.com/coinbase/rosetta-specifications/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_rotki
+    name: "Rotki"
+    type: rss
+    url: "https://github.com/rotki/rotki/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_rss_aggregator_for_web3
+    name: "RSS Aggregator for Web3"
+    type: rss
+    url: "https://github.com/chainfeeds/RSSAggregatorforWeb3/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_seaport_from_opensea
+    name: "Seaport from Opensea"
+    type: rss
+    url: "https://github.com/ProjectOpenSea/seaport/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_secret_network
+    name: "Secret Network"
+    type: rss
+    url: "https://github.com/scrtlabs/SecretNetwork/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_semaphore
+    name: "semaphore"
+    type: rss
+    url: "https://github.com/semaphore-protocol/semaphore/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_snarkos_by_aleo
+    name: "snarkOS by Aleo"
+    type: rss
+    url: "https://github.com/AleoHQ/snarkOS/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_solana
+    name: "Solana"
+    type: rss
+    url: "https://github.com/solana-labs/solana/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_solidity
+    name: "Solidity"
+    type: rss
+    url: "https://github.com/ethereum/solidity/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_starkex_contracts
+    name: "StarkEx-contracts"
+    type: rss
+    url: "https://github.com/starkware-libs/starkex-contracts/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_status_desktop
+    name: "Status-desktop"
+    type: rss
+    url: "https://github.com/status-im/status-desktop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_status_react
+    name: "Status-react"
+    type: rss
+    url: "https://github.com/status-im/status-react/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_substrate
+    name: "Substrate"
+    type: rss
+    url: "https://github.com/paritytech/substrate/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sui
+    name: "Sui"
+    type: rss
+    url: "https://github.com/MystenLabs/sui/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_swarm_desktop
+    name: "Swarm Desktop"
+    type: rss
+    url: "https://github.com/ethersphere/bee-desktop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_sway_by_fuel
+    name: "Sway by Fuel"
+    type: rss
+    url: "https://github.com/FuelLabs/sway/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tags_from_radicle_upstream
+    name: "Tags from radicle-upstream"
+    type: rss
+    url: "https://github.com/radicle-dev/radicle-upstream/tags.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tags_from_tor
+    name: "Tags from tor"
+    type: rss
+    url: "https://github.com/torproject/tor/tags.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_trueblocks_core
+    name: "Trueblocks-core"
+    type: rss
+    url: "https://github.com/TrueBlocks/trueblocks-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_trust_wallet_core
+    name: "Trust wallet core"
+    type: rss
+    url: "https://github.com/trustwallet/wallet-core/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_umbrel
+    name: "umbrel"
+    type: rss
+    url: "https://github.com/getumbrel/umbrel/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_walletconnect
+    name: "Walletconnect"
+    type: rss
+    url: "https://github.com/WalletConnect/walletconnect-monorepo/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zap_desktop
+    name: "Zap-desktop"
+    type: rss
+    url: "https://github.com/LN-Zap/zap-desktop/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zcash
+    name: "ZCash"
+    type: rss
+    url: "https://github.com/zcash/zcash/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  - id: chainfeeds_zeus
+    name: "Zeus"
+    type: rss
+    url: "https://github.com/ZeusLN/zeus/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zkopru
+    name: "zkopru"
+    type: rss
+    url: "https://github.com/zkopru-network/zkopru/releases.atom"
+    category: "04. GitHub Updates"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zksync
+    name: "zkSync"
+    type: rss
+    url: "https://github.com/matter-labs/zksync/releases.atom"
+    category: "04. GitHub Updates"
+    priority: high
+    enabled: true
+  # --- 05. Research/VC ---
+  - id: chainfeeds_0xb10cs_blog_german_bitcoin_freelance_developer_on_0xb10cs_b
+    name: "0xB10C's Blog: German Bitcoin freelance developer on 0xB10C's Blog"
+    type: rss
+    url: "https://b10c.me/feed.xml"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_a16z_crypto
+    name: "a16z Crypto"
+    type: rss
+    url: "https://a16z.com/category/blockchain-cryptocurrencies/feed/"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_alex_beckett
+    name: "Alex Beckett"
+    type: rss
+    url: "https://www.alexbeckett.xyz/rss/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_alfablok
+    name: "AlfaBlok"
+    type: rss
+    url: "https://alfablok.substack.com/feed"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_bitcoin_dev_blog
+    name: "bitcoin-dev blog"
+    type: rss
+    url: "https://bitcoin-dev.blog/feed.xml"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_btc_study_chinese
+    name: "BTC Study (Chinese)"
+    type: rss
+    url: "https://www.btcstudy.org/atom.xml"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_chainalysis
+    name: "Chainalysis"
+    type: rss
+    url: "https://blog.chainalysis.com/feed/"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_cobie
+    name: "Cobie"
+    type: rss
+    url: "https://cobie.substack.com/feed"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_collider_ventures_medium
+    name: "Collider Ventures - Medium"
+    type: rss
+    url: "https://medium.com/feed/colliderventures"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_crypto_punks_medium
+    name: "Crypto Punks - Medium"
+    type: rss
+    url: "https://medium.com/feed/crypto-punks"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_cypherpunk_cogitations
+    name: "Cypherpunk Cogitations"
+    type: rss
+    url: "https://blog.lopp.net/rss/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dan_finlay
+    name: "Dan Finlay"
+    type: rss
+    url: "https://mirror.xyz/0x55e2780588aa5000F464f700D2676fD0a22Ee160/feed/atom"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dankrad_feist
+    name: "Dankrad Feist"
+    type: rss
+    url: "https://dankradfeist.de/feed.xml"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_dragonfly_research_medium
+    name: "Dragonfly Research - Medium"
+    type: rss
+    url: "https://medium.com/feed/dragonfly-research"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_electric_capital_medium
+    name: "Electric Capital - Medium"
+    type: rss
+    url: "https://medium.com/feed/electric-capital"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_elliptic_blog
+    name: "Elliptic Blog"
+    type: rss
+    url: "https://www.elliptic.co/blog/rss.xml"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_fabric_ventures_medium
+    name: "Fabric Ventures - Medium"
+    type: rss
+    url: "https://medium.com/feed/fabric-ventures"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_freeyao_chinese
+    name: "freeyao (Chinese)"
+    type: rss
+    url: "https://mirror.xyz/0xbeC73ba0817403cd11C11bE891D671EA30443562/feed/atom"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_fundamental_labs
+    name: "Fundamental Labs"
+    type: rss
+    url: "https://mirror.xyz/fundamentalabs.eth/feed/atom"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_gauntlet_medium
+    name: "Gauntlet - Medium"
+    type: rss
+    url: "https://medium.com/feed/gauntlet-networks"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_gcr
+    name: "GCR"
+    type: rss
+    url: "https://globalcoinresearch.com/feed/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_guoyu_chinese
+    name: "Guoyu (Chinese)"
+    type: rss
+    url: "http://guoyu.mirror.xyz/feed/atom"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_konrad_s_graf
+    name: "Konrad S. Graf"
+    type: rss
+    url: "http://feeds.feedburner.com/Blog-KonradSGraf"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_linda_xie
+    name: "Linda Xie"
+    type: rss
+    url: "https://linda.mirror.xyz/feed/atom"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_luyao_zhang_chinese
+    name: "Luyao Zhang (Chinese)"
+    type: rss
+    url: "https://zhangluyao.com/index.xml"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_lyn_alden
+    name: "Lyn Alden"
+    type: rss
+    url: "https://www.lynalden.com/feed/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_maven11_research
+    name: "Maven11 Research"
+    type: rss
+    url: "https://maven11.substack.com/feed"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_multicoin_capital
+    name: "Multicoin Capital"
+    type: rss
+    url: "https://multicoin.capital/rss.xml"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_nakamoto
+    name: "NAKAMOTO"
+    type: rss
+    url: "https://nakamoto.com/rss/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_newcomer
+    name: "Newcomer"
+    type: rss
+    url: "https://www.newcomer.co/feed"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_outlier_ventures
+    name: "Outlier Ventures"
+    type: rss
+    url: "https://outlierventures.io/feed/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_palkeo
+    name: "palkeo"
+    type: rss
+    url: "https://www.palkeo.com/blog/atom.xml"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_paradigm
+    name: "Paradigm"
+    type: rss
+    url: "https://www.paradigm.xyz/rss/feed.xml"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_placeholder_blog_placeholder
+    name: "Placeholder Blog - Placeholder"
+    type: rss
+    url: "https://www.placeholder.vc/blog?format=RSS"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_polynya
+    name: "polynya"
+    type: rss
+    url: "https://polynya.mirror.xyz/feed/atom"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_research_outlier_ventures
+    name: "Research | Outlier Ventures"
+    type: rss
+    url: "https://outlierventures.io/research/feed/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_samczsun
+    name: "samczsun"
+    type: rss
+    url: "https://samczsun.com/rss/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_stories_by_bixin_ventures_on_medium
+    name: "Stories by Bixin Ventures on Medium"
+    type: rss
+    url: "https://bixinventures.medium.com/feed"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_stories_by_foresight_ventures_中文_on_medium
+    name: "Stories by Foresight Ventures 中文 on Medium"
+    type: rss
+    url: "https://medium.com/feed/@foresightventures-zh"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_stories_by_pantera_capital_on_medium
+    name: "Stories by Pantera Capital on Medium"
+    type: rss
+    url: "https://medium.com/feed/@PanteraCapital"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_stories_by_polynya_on_medium
+    name: "Stories by Polynya on Medium"
+    type: rss
+    url: "https://medium.com/feed/@polynya"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_taipei_ethereum_meetup_medium
+    name: "Taipei Ethereum Meetup - Medium"
+    type: rss
+    url: "https://medium.com/feed/taipei-ethereum-meetup"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_the_tie_research
+    name: "The TIE Research"
+    type: rss
+    url: "https://research.thetie.io/feed/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_tradeblock
+    name: "TradeBlock"
+    type: rss
+    url: "http://feeds.feedburner.com/tradeblockfeed"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_trail_of_bits_blog
+    name: "Trail of Bits Blog"
+    type: rss
+    url: "https://blog.trailofbits.com/feed/"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_unenumerated
+    name: "Unenumerated"
+    type: rss
+    url: "https://unenumerated.blogspot.com/feeds/posts/default"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_veradiverdict
+    name: "VeradiVerdict"
+    type: rss
+    url: "https://veradiverdict.substack.com/feed/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_vitalik_buterin
+    name: "Vitalik Buterin"
+    type: rss
+    url: "https://vitalik.ca//./feed.xml"
+    category: "05. Research/VC"
+    priority: high
+    enabled: true
+  - id: chainfeeds_woobull
+    name: "Woobull"
+    type: rss
+    url: "https://woobull.com/rss/"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_wrong_a_lot_zee_prime_capital
+    name: "Wrong A Lot (Zee Prime Capital)"
+    type: rss
+    url: "https://wrongalot.substack.com/feed"
+    category: "05. Research/VC"
+    priority: medium
+    enabled: true
+  # --- 06. Podcasts ---
+  - id: chainfeeds_a16z_podcast
+    name: "a16z Podcast"
+    type: rss
+    url: "https://feeds.simplecast.com/JGE3yC0V"
+    category: "06. Podcasts"
+    priority: high
+    enabled: true
+  - id: chainfeeds_bankless
+    name: "Bankless"
+    type: rss
+    url: "http://feeds.libsyn.com/247424/rss"
+    category: "06. Podcasts"
+    priority: high
+    enabled: true
+  - id: chainfeeds_bitcoin_magazine_podcast_bitcoin_magazine
+    name: "Bitcoin Magazine Podcast - Bitcoin Magazine"
+    type: rss
+    url: "https://bitcoinmagazine.com/.rss/full/tags/bitcoin-magazine-podcast"
+    category: "06. Podcasts"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_hodlong_后浪
+    name: "HODLong 后浪"
+    type: rss
+    url: "https://feeds.simplecast.com/lnmJvIXR"
+    category: "06. Podcasts"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_trail_of_bits
+    name: "Trail of Bits"
+    type: rss
+    url: "https://feeds.simplecast.com/oM_1xVen"
+    category: "06. Podcasts"
+    priority: high
+    enabled: true
+  - id: chainfeeds_unchained_podcast
+    name: "Unchained Podcast"
+    type: rss
+    url: "https://unchainedpodcast.com/feed/"
+    category: "06. Podcasts"
+    priority: high
+    enabled: true
+  - id: chainfeeds_uncommon_core_by_su_zhu_and_hasu
+    name: "Uncommon Core by Su Zhu and Hasu"
+    type: rss
+    url: "https://uncommoncore.co/feed/"
+    category: "06. Podcasts"
+    priority: high
+    enabled: true
+  - id: chainfeeds_up_only
+    name: "Up Only"
+    type: rss
+    url: "https://uponly.tv/feed/"
+    category: "06. Podcasts"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_web3无名说
+    name: "Web3无名说"
+    type: rss
+    url: "https://anchor.fm/s/8dd87bb4/podcast/rss"
+    category: "06. Podcasts"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_zk_podcast
+    name: "ZK Podcast"
+    type: rss
+    url: "https://zeroknowledge.fm/feed/"
+    category: "06. Podcasts"
+    priority: high
+    enabled: true
+  # --- 07. Others ---
+  - id: chainfeeds_ethereum_research_latest_posts
+    name: "Ethereum Research - Latest posts"
+    type: rss
+    url: "https://ethresear.ch/posts.rss"
+    category: "07. Others"
+    priority: medium
+    enabled: true
+  - id: chainfeeds_ethereum_research_latest_topics
+    name: "Ethereum Research - Latest topics"
+    type: rss
+    url: "https://ethresear.ch/latest.rss"
+    category: "07. Others"
+    priority: medium
+    enabled: true

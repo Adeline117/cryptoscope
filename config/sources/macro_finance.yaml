@@ -1,0 +1,108 @@
+# Macro and traditional finance RSS feeds impacting crypto markets
+# Central bank policy, economic data, and financial market commentary
+
+# =============================================================================
+# Central Banks & Government
+# =============================================================================
+
+- id: fed_press_all
+  name: Federal Reserve Press Releases
+  type: rss
+  url: "https://www.federalreserve.gov/feeds/press_all.xml"
+  collector: news_feed
+  frequency: 15m
+  category: macro_finance
+  subcategory: central_bank
+  priority: critical
+  enabled: true
+  notes: All Fed press releases including FOMC statements, speeches, and policy announcements.
+
+- id: fred_blog
+  name: FRED Blog (St. Louis Fed)
+  type: rss
+  url: "https://fredblog.stlouisfed.org/feed/"
+  collector: news_feed
+  frequency: 6h
+  category: macro_finance
+  subcategory: central_bank
+  priority: medium
+  enabled: true
+  notes: Economic data analysis and commentary from the Federal Reserve Bank of St. Louis.
+
+# =============================================================================
+# Wire Services & Major Financial Media
+# =============================================================================
+
+- id: reuters_markets
+  name: Reuters Markets
+  type: rss
+  url: "https://www.reuters.com/markets/rss"
+  collector: news_feed
+  frequency: 15m
+  category: macro_finance
+  subcategory: financial_media
+  priority: high
+  enabled: true
+
+- id: bloomberg_crypto_macro
+  name: Bloomberg Crypto
+  type: rss
+  url: "https://www.bloomberg.com/crypto/feed"
+  collector: news_feed
+  frequency: 30m
+  category: macro_finance
+  subcategory: financial_media
+  priority: high
+  enabled: true
+  notes: Bloomberg crypto coverage. May require authentication for full articles.
+
+- id: wsj_markets
+  name: Wall Street Journal Markets
+  type: rss
+  url: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"
+  collector: news_feed
+  frequency: 15m
+  category: macro_finance
+  subcategory: financial_media
+  priority: high
+  enabled: true
+
+- id: ft_markets
+  name: Financial Times Markets
+  type: rss
+  url: "https://www.ft.com/markets?format=rss"
+  collector: news_feed
+  frequency: 30m
+  category: macro_finance
+  subcategory: financial_media
+  priority: high
+  enabled: true
+  notes: May require authentication for full articles.
+
+# =============================================================================
+# Independent Financial Commentary
+# =============================================================================
+
+- id: zerohedge
+  name: Zero Hedge
+  type: rss
+  url: "https://feeds.feedburner.com/zerohedge/feed"
+  collector: news_feed
+  frequency: 30m
+  category: macro_finance
+  subcategory: independent_commentary
+  priority: medium
+  enabled: true
+  notes: Contrarian financial commentary. High volume feed. Filter for macro and crypto-relevant posts.
+
+- id: wolf_street
+  name: Wolf Street
+  type: rss
+  url: "https://wolfstreet.com/feed/"
+  collector: news_feed
+  frequency: 2h
+  category: macro_finance
+  subcategory: independent_commentary
+  priority: medium
+  enabled: true
+  notes: Independent analysis of economic trends, housing, credit markets, and Fed policy.

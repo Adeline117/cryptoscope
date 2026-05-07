@@ -1,0 +1,128 @@
+# Trading signals, analysis, and crypto research RSS feeds
+# Sources focused on market analysis, on-chain metrics interpretation, and trading ideas
+
+# =============================================================================
+# Trading Ideas & Technical Analysis
+# =============================================================================
+
+- id: tradingview_crypto
+  name: TradingView Crypto Ideas
+  type: rss
+  url: "https://www.tradingview.com/feed/?sort=hot&stream=crypto"
+  collector: news_feed
+  frequency: 30m
+  category: trading_signals
+  subcategory: technical_analysis
+  priority: medium
+  enabled: true
+
+- id: coinglass_blog
+  name: CoinGlass Blog
+  type: rss
+  url: "https://www.coinglass.com/blog/rss"
+  collector: news_feed
+  frequency: 2h
+  category: trading_signals
+  subcategory: derivatives_data
+  priority: medium
+  enabled: true
+
+# =============================================================================
+# On-Chain Analytics & Metrics Research
+# =============================================================================
+
+- id: glassnode_insights
+  name: Glassnode Insights
+  type: rss
+  url: "https://insights.glassnode.com/rss/"
+  collector: news_feed
+  frequency: 4h
+  category: trading_signals
+  subcategory: onchain_analytics
+  priority: high
+  enabled: true
+
+- id: cryptoquant_blog
+  name: CryptoQuant Blog
+  type: rss
+  url: "https://cryptoquant.com/blog/rss"
+  collector: news_feed
+  frequency: 4h
+  category: trading_signals
+  subcategory: onchain_analytics
+  priority: high
+  enabled: true
+
+- id: santiment_blog
+  name: Santiment Blog
+  type: rss
+  url: "https://insights.santiment.net/rss"
+  collector: news_feed
+  frequency: 4h
+  category: trading_signals
+  subcategory: onchain_analytics
+  priority: medium
+  enabled: true
+
+# =============================================================================
+# Research Outlets
+# =============================================================================
+
+- id: messari_research_signals
+  name: Messari Research
+  type: rss
+  url: "https://messari.io/rss"
+  collector: news_feed
+  frequency: 2h
+  category: trading_signals
+  subcategory: research
+  priority: high
+  enabled: true
+
+- id: delphi_digital_signals
+  name: Delphi Digital Research
+  type: rss
+  url: "https://members.delphidigital.io/feed"
+  collector: news_feed
+  frequency: 4h
+  category: trading_signals
+  subcategory: research
+  priority: high
+  enabled: true
+
+# =============================================================================
+# Crypto-Native Media & Newsletters
+# =============================================================================
+
+- id: the_defiant
+  name: The Defiant
+  type: rss
+  url: "https://thedefiant.io/feed"
+  collector: news_feed
+  frequency: 30m
+  category: trading_signals
+  subcategory: crypto_media
+  priority: medium
+  enabled: true
+
+- id: bankless
+  name: Bankless
+  type: rss
+  url: "https://www.bankless.com/rss"
+  collector: news_feed
+  frequency: 2h
+  category: trading_signals
+  subcategory: crypto_media
+  priority: high
+  enabled: true
+
+- id: unchained_crypto
+  name: Unchained Crypto
+  type: rss
+  url: "https://unchainedcrypto.com/feed/"
+  collector: news_feed
+  frequency: 2h
+  category: trading_signals
+  subcategory: crypto_media
+  priority: medium
+  enabled: true

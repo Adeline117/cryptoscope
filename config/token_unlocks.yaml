@@ -1,0 +1,124 @@
+unlocks:
+  # --- March 2026 ---
+  - token: ARB
+    date: "2026-03-29"
+    amount_usd: 50000000
+    type: investor
+    pct_of_circulating: 3.2
+
+  - token: STRK
+    date: "2026-03-25"
+    amount_usd: 35000000
+    type: investor
+    pct_of_circulating: 2.8
+
+  # --- April 2026 ---
+  - token: OP
+    date: "2026-04-01"
+    amount_usd: 80000000
+    type: team
+    pct_of_circulating: 4.5
+
+  - token: APT
+    date: "2026-04-05"
+    amount_usd: 120000000
+    type: investor
+    pct_of_circulating: 3.8
+
+  - token: SUI
+    date: "2026-04-08"
+    amount_usd: 95000000
+    type: investor
+    pct_of_circulating: 2.9
+
+  - token: TIA
+    date: "2026-04-12"
+    amount_usd: 200000000
+    type: investor
+    pct_of_circulating: 7.1
+
+  - token: SEI
+    date: "2026-04-15"
+    amount_usd: 40000000
+    type: team
+    pct_of_circulating: 3.5
+
+  - token: PYTH
+    date: "2026-04-18"
+    amount_usd: 110000000
+    type: community
+    pct_of_circulating: 2.4
+
+  - token: WLD
+    date: "2026-04-22"
+    amount_usd: 65000000
+    type: team
+    pct_of_circulating: 5.8
+
+  - token: JTO
+    date: "2026-04-25"
+    amount_usd: 30000000
+    type: investor
+    pct_of_circulating: 4.2
+
+  # --- May 2026 ---
+  - token: DYDX
+    date: "2026-05-01"
+    amount_usd: 55000000
+    type: investor
+    pct_of_circulating: 3.0
+
+  - token: IMX
+    date: "2026-05-05"
+    amount_usd: 45000000
+    type: team
+    pct_of_circulating: 2.6
+
+  - token: BLUR
+    date: "2026-05-10"
+    amount_usd: 25000000
+    type: community
+    pct_of_circulating: 1.8
+
+  - token: MANTA
+    date: "2026-05-15"
+    amount_usd: 38000000
+    type: investor
+    pct_of_circulating: 5.2
+
+  - token: ALT
+    date: "2026-05-20"
+    amount_usd: 28000000
+    type: team
+    pct_of_circulating: 4.0
+
+  # --- June 2026 ---
+  - token: ZK
+    date: "2026-06-01"
+    amount_usd: 150000000
+    type: investor
+    pct_of_circulating: 6.3
+
+  - token: ETHFI
+    date: "2026-06-10"
+    amount_usd: 42000000
+    type: team
+    pct_of_circulating: 3.7
+
+  - token: W
+    date: "2026-06-15"
+    amount_usd: 70000000
+    type: investor
+    pct_of_circulating: 5.5
+
+  - token: ENA
+    date: "2026-06-20"
+    amount_usd: 85000000
+    type: investor
+    pct_of_circulating: 4.8
+
+  - token: ZRO
+    date: "2026-06-25"
+    amount_usd: 60000000
+    type: team
+    pct_of_circulating: 3.4
