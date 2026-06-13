@@ -428,6 +428,18 @@ async def _run_github_weekly_digest():
 
 async def main():
     """Run the scheduler."""
+    # Load .env so credentials (TELEGRAM_BOT_TOKEN, TG_REVIEW_CHANNEL, API keys)
+    # are available when run as a long-lived process (e.g. under launchd/Docker).
+    # Load from the project root explicitly so it works regardless of cwd.
+    try:
+        from dotenv import load_dotenv
+
+        from src.config import PROJECT_ROOT
+
+        load_dotenv(PROJECT_ROOT / ".env")
+    except ImportError:
+        pass
+
     logger.info("starting_scheduler")
     scheduler = create_scheduler()
     scheduler.start()

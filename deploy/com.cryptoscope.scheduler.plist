@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS LaunchAgent for the 24/7 CryptoScope scheduler.
+
+  Install:
+    cp deploy/com.cryptoscope.scheduler.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.cryptoscope.scheduler.plist
+
+  Adjust the two absolute paths below if the repo lives elsewhere.
+  Credentials are read from .env (see .env.example) at startup.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cryptoscope.scheduler</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/adelinewen/cryptoscope/.venv/bin/python</string>
+        <string>-m</string>
+        <string>src.pipeline.scheduler</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/adelinewen/cryptoscope</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/adelinewen/cryptoscope/logs/scheduler.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/adelinewen/cryptoscope/logs/scheduler.err.log</string>
+</dict>
+</plist>
