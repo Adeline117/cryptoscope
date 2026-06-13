@@ -103,6 +103,32 @@ async def test_max_pain_large_deviation_produces_signal():
     )
     assert result is not None
     assert result.direction == "SHORT"
+    assert 0 <= result.confidence <= 100
+
+
+@pytest.mark.asyncio
+async def test_max_pain_price_below_is_long():
+    from src.signals.max_pain_gravity import MaxPainGravitySignal
+
+    sig = MaxPainGravitySignal()
+    # Price 20% below max_pain → expect a LONG signal (mean-revert up).
+    result = await sig.evaluate(
+        {"max_pain": 100, "underlying_price": 80, "days_to_expiry": 1}
+    )
+    assert result is not None
+    assert result.direction == "LONG"
+
+
+@pytest.mark.asyncio
+async def test_max_pain_far_expiry_returns_none():
+    from src.signals.max_pain_gravity import MaxPainGravitySignal
+
+    sig = MaxPainGravitySignal()
+    # Beyond MAX_DAYS_TO_EXPIRY (3) → no signal regardless of deviation.
+    result = await sig.evaluate(
+        {"max_pain": 100, "underlying_price": 130, "days_to_expiry": 10}
+    )
+    assert result is None
 
 
 # --------------------------------------------------------------------------
@@ -175,6 +201,37 @@ def test_recency_score_unknown_date():
     from src.analysis.priority_scorer import _recency_score
 
     assert _recency_score(None, max_score=25) == pytest.approx(25 * 0.3)
+
+
+def test_keyword_score_bounded():
+    from src.analysis.priority_scorer import _keyword_score
+
+    plain = CollectedItem(id="a", title="weather report", content="sunny day")
+    loud = CollectedItem(
+        id="b",
+        title="exploit hack rug pull",
+        content="exploit hack rug pull exploit hack rug pull",
+    )
+    assert _keyword_score(plain, max_score=15) >= 0
+    assert _keyword_score(loud, max_score=15) <= 15
+    assert _keyword_score(loud) >= _keyword_score(plain)
+
+
+def test_category_boost_capped():
+    from src.analysis.priority_scorer import _category_boost
+
+    item = CollectedItem(
+        id="c", title="t", metadata={"category": "security", "subcategory": "hack"}
+    )
+    assert 0 <= _category_boost(item) <= 15
+
+
+def test_html_escape():
+    from src.distribution.telegram_sender import _esc
+
+    assert _esc("a < b & c > d") == "a &lt; b &amp; c &gt; d"
+    # Idempotency is NOT expected (& gets re-escaped), but plain text is safe.
+    assert _esc("no special chars") == "no special chars"
 
 
 def test_score_item_capped_at_100():
