@@ -193,6 +193,7 @@ class SmartMoneyCollector(BaseCollector):
 
         # Fallback: Solana RPC getSignaturesForAddress + getTransaction
         try:
+            import asyncio
             import json
             import urllib.request
 
@@ -208,9 +209,16 @@ class SmartMoneyCollector(BaseCollector):
                 data=payload.encode(),
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode())
-                signatures = result.get("result", [])
+
+            # urllib is blocking; offload to a thread so it doesn't stall the
+            # event loop (this method runs under asyncio.gather with other
+            # collectors — a blocking call here serializes all of them).
+            def _blocking_rpc() -> dict:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read().decode())
+
+            result = await asyncio.to_thread(_blocking_rpc)
+            signatures = result.get("result", [])
 
             normalized: list[dict] = []
             for sig_info in signatures[:20]:

@@ -159,8 +159,10 @@ def check_token_security(mint: str) -> bool:
         score = data.get("score_normalised", data.get("score", 100))
         if score > 500:  # High risk score
             return False
-    except Exception:
-        pass
+    except Exception as e:
+        # Fail-open by design, but log so API outages don't silently mark
+        # every token as "safe" without any trace.
+        logger.warning("rugcheck_unavailable", mint=mint, error=str(e))
 
     # GoPlus
     try:
@@ -168,8 +170,8 @@ def check_token_security(mint: str) -> bool:
         result = data.get("result", {}).get(mint, {})
         if result.get("is_honeypot") in ("1", 1, True):
             return False
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("goplus_unavailable", mint=mint, error=str(e))
 
     return True
 
