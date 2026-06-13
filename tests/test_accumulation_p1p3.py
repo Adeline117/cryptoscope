@@ -33,6 +33,24 @@ def test_funder_cache_roundtrip(tmp_path):
     assert "0xmissing" not in got  # never looked up
 
 
+def test_cex_label_for():
+    from src.onchain.cex_addresses import label_for
+
+    # Solana is case-sensitive; EVM is not.
+    assert label_for("2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S", "solana") == "Binance"
+    assert label_for("0x28C6c06298d514Db089934071355E5743bf21d60", "ethereum") == "Binance"
+    assert label_for("notacex", "solana") == "unknown"
+    assert label_for("", "ethereum") == "unknown"
+
+
+def test_solana_ui_balance_parse():
+    from src.pipeline.exit_monitor import _ui
+
+    assert _ui({"uiTokenAmount": {"uiAmount": 12.5}}) == 12.5
+    assert _ui({"uiTokenAmount": {"uiAmount": None}}) == 0.0
+    assert _ui({}) == 0.0
+
+
 def test_funder_solana_uses_cache(tmp_path):
     # Pre-seed the cache so no network call is made; verify Solana path reads it.
     db = tmp_path / "f.db"

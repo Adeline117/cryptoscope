@@ -71,9 +71,9 @@ def _recent_accumulation_tokens() -> list[dict]:
 
 def _fetch_labeled_transfers(token: str, chain_id: int, timeout: int = 20) -> list[dict]:
     """Fetch recent ERC-20 transfers and label endpoints as CEX or unknown."""
-    from src.collectors.whale_tracker import WhaleTrackerCollector
+    from src.onchain.cex_addresses import evm_exchanges
 
-    exchanges = {a.lower(): n for a, n in WhaleTrackerCollector.KNOWN_EXCHANGES.items()}
+    exchanges = evm_exchanges()
     key = os.environ.get("ETHERSCAN_API_KEY", "")
     if not key:
         return []
@@ -101,6 +101,71 @@ def _fetch_labeled_transfers(token: str, chain_id: int, timeout: int = 20) -> li
     ]
 
 
+def _solana_rpc(method: str, params: list, timeout: int = 15) -> dict:
+    rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    req = urllib.request.Request(
+        rpc,
+        data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _fetch_solana_flows(mint: str, max_txs: int = 25, timeout: int = 15) -> dict:
+    """Count CEX deposit/withdrawal flows for a Solana mint from recent txs.
+
+    For each recent transaction touching the mint, compares pre/post token
+    balances per owner: a CEX owner that GAINED tokens = wallet→CEX deposit
+    (distribution); a CEX owner that LOST tokens = CEX→wallet (accumulation).
+    Best-effort and bounded; returns {to_cex_count, from_cex_count}.
+    """
+    from src.onchain.cex_addresses import solana_exchanges
+
+    cex = solana_exchanges()
+    to_cex = from_cex = 0
+    try:
+        sigs = _solana_rpc("getSignaturesForAddress", [mint, {"limit": max_txs}], timeout).get("result", [])
+    except Exception as e:
+        logger.debug("solana_flows_sigs_failed", mint=mint, error=str(e))
+        return {"to_cex_count": 0, "from_cex_count": 0}
+
+    for s in sigs[:max_txs]:
+        sig = s.get("signature")
+        if not sig:
+            continue
+        try:
+            tx = _solana_rpc(
+                "getTransaction",
+                [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+                timeout,
+            ).get("result", {})
+        except Exception:
+            continue
+        meta = (tx or {}).get("meta", {}) or {}
+        pre = {b.get("owner"): _ui(b) for b in meta.get("preTokenBalances", []) if b.get("mint") == mint}
+        post = {b.get("owner"): _ui(b) for b in meta.get("postTokenBalances", []) if b.get("mint") == mint}
+        tx_to = tx_from = False
+        for owner in set(pre) | set(post):
+            if owner not in cex:
+                continue
+            delta = post.get(owner, 0) - pre.get(owner, 0)
+            if delta > 0:
+                tx_to = True   # CEX received → someone deposited to sell
+            elif delta < 0:
+                tx_from = True  # CEX sent out → withdrawal
+        to_cex += int(tx_to)
+        from_cex += int(tx_from)
+    return {"to_cex_count": to_cex, "from_cex_count": from_cex}
+
+
+def _ui(balance: dict) -> float:
+    try:
+        return float(balance.get("uiTokenAmount", {}).get("uiAmount") or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
 async def run_exit_monitor(send: bool = True) -> dict:
     """One exit-monitor tick. Returns a summary dict."""
     tokens = _recent_accumulation_tokens()[:MAX_TOKENS]
@@ -113,14 +178,16 @@ async def run_exit_monitor(send: bool = True) -> dict:
     for tok in tokens:
         chain = tok["chain"]
         if chain in ("solana", "sol"):
-            logger.debug("exit_monitor_skip_solana", token=tok["address"])
-            continue
-        chain_id = _EVM_CHAIN_IDS.get(chain, 1)
-        transfers = _fetch_labeled_transfers(tok["address"], chain_id)
-        if not transfers:
-            continue
+            flows = _fetch_solana_flows(tok["address"])
+            if not flows.get("to_cex_count") and not flows.get("from_cex_count"):
+                continue
+        else:
+            chain_id = _EVM_CHAIN_IDS.get(chain, 1)
+            transfers = _fetch_labeled_transfers(tok["address"], chain_id)
+            if not transfers:
+                continue
+            flows = classify_flows(transfers)
         checked += 1
-        flows = classify_flows(transfers)
         sig = await sig_eval.evaluate({
             **flows,
             "had_accumulation": True,
