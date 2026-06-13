@@ -206,16 +206,31 @@ def list_tokens(db_path: Path = DB_PATH) -> list[tuple[str, str]]:
 
 
 def get_holders_history(
-    token: str, chain: str, limit: int = 100, db_path: Path = DB_PATH
+    token: str, chain: str, limit: int = 100, since: str | None = None,
+    db_path: Path = DB_PATH,
 ) -> list[tuple[str, list[dict[str, Any]]]]:
-    """Return [(snapshot_at, holders)] oldest-first, for recomputing series."""
+    """Return [(snapshot_at, holders)] oldest-first, for recomputing series.
+
+    `since` (ISO timestamp) bounds the window so a *realtime* signal is not
+    polluted by stale snapshots from months ago — the same class of bug that
+    let a 3-month-old item leak into the 2h highlight. Pass it to keep the
+    accumulation slope reflecting recent activity only.
+    """
     conn = _connect(db_path)
     try:
-        rows = conn.execute(
-            """SELECT snapshot_at, holders_json FROM holder_snapshots
-               WHERE token = ? AND chain = ? ORDER BY snapshot_at ASC LIMIT ?""",
-            (token, chain, limit),
-        ).fetchall()
+        if since is not None:
+            rows = conn.execute(
+                """SELECT snapshot_at, holders_json FROM holder_snapshots
+                   WHERE token = ? AND chain = ? AND snapshot_at >= ?
+                   ORDER BY snapshot_at ASC LIMIT ?""",
+                (token, chain, since, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT snapshot_at, holders_json FROM holder_snapshots
+                   WHERE token = ? AND chain = ? ORDER BY snapshot_at ASC LIMIT ?""",
+                (token, chain, limit),
+            ).fetchall()
     finally:
         conn.close()
     out: list[tuple[str, list[dict[str, Any]]]] = []

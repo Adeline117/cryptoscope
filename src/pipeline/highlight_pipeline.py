@@ -24,6 +24,12 @@ from src.distribution.telegram_sender import send_alert
 
 logger = structlog.get_logger()
 
+# Items older than this are NOT eligible for the realtime 2h highlight. RSS feeds
+# routinely serve old articles (re-published, or still in the feed window); a
+# 3-month-old item once leaked into the realtime stream because this filter only
+# checked the source, never the timestamp.
+HIGHLIGHT_MAX_AGE_HOURS = 48
+
 
 async def _collect_without_dedup(collector) -> CollectionResult:
     """Run a collector WITHOUT dedup so highlights can re-scan all recent items."""
@@ -37,13 +43,25 @@ async def _collect_without_dedup(collector) -> CollectionResult:
         await collector.teardown()
 
 
-def _is_genuinely_recent(item: CollectedItem, hours: int = 6) -> bool:
-    """Filter out historical data and secondary news media (competitors).
+def _is_genuinely_recent(item: CollectedItem, hours: int = HIGHLIGHT_MAX_AGE_HOURS) -> bool:
+    """Filter out STALE items, historical data, and secondary news media.
 
     We only want PRIMARY sources — original research, on-chain data,
-    official announcements, regulatory filings, GitHub activity.
-    NOT repackaged news from media outlets that have their own Twitter.
+    official announcements, regulatory filings, GitHub activity —
+    AND only items actually published within the last `hours`.
     """
+    # --- Recency gate (the actual "recent" check) ---
+    # Drop anything with a publish date older than the window. Items without a
+    # date (much on-chain / GitHub activity) are kept — they are inherently
+    # "now" and the data_type gate below removes historical snapshots.
+    published = item.published_at
+    if published is not None:
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        age_hours = (datetime.now(timezone.utc) - published).total_seconds() / 3600
+        if age_hours > hours:
+            return False
+
     data_type = item.metadata.get("data_type", "")
     # DeFiLlama snapshots/historical data — not breaking news
     if data_type in ("hack", "protocol_tvl", "yield_pool", "stablecoin", "chain_tvl", "bridge"):

@@ -14,7 +14,7 @@ pipeline degrades gracefully: any per-token failure is logged and skipped.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 
@@ -27,6 +27,10 @@ logger = structlog.get_logger()
 # Bound per-run work so a cron tick stays cheap.
 MAX_CANDIDATES = 15
 MIN_SECURITY_SCORE = 50  # contract gate: drop anything riskier than this
+# Only snapshots within this window feed the realtime accumulation slope —
+# stale snapshots from a prior appearance must not pollute the signal (same
+# class of bug as the 2h-highlight stale-item leak).
+SERIES_WINDOW_DAYS = 7
 
 # pool_watcher chain string → contract_security chain id / key
 _CHAIN_ID = {
@@ -87,7 +91,8 @@ def _build_series(token: str, chain: str) -> dict | None:
     immutable and cached) and feeds them into the clustering so effective
     concentration can actually diverge from nominal.
     """
-    history = hs.get_holders_history(token, chain)
+    since = (datetime.now(timezone.utc) - timedelta(days=SERIES_WINDOW_DAYS)).isoformat()
+    history = hs.get_holders_history(token, chain, since=since)
     if not history:
         return None
 
