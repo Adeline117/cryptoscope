@@ -55,6 +55,8 @@ def format_twitter_thread_copyable(thread: GeneratedThread, lang: str = "en") ->
     tweet-by-tweet.
     """
     tweets = format_for_twitter(thread, lang)
+    if not tweets:
+        return ""
     # Add a placeholder for the last tweet's OpenClaw link
     last = tweets[-1]
     if "openclaw" not in last.lower() and "full analysis" not in last.lower():

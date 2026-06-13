@@ -227,5 +227,71 @@ async def send_alert(message: str) -> bool:
         return False
 
 
+async def send_meme_alert(message: str, reply_markup=None) -> bool:
+    """Send a pre-formatted meme/pool alert (HTML) to the review channel.
+
+    The message is already HTML-escaped by the message templates, so it is sent
+    as-is with parse_mode="HTML". Long messages are split at the 4096-char limit;
+    an optional inline keyboard is attached to the final chunk.
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = _get_chat_id()
+
+    if not bot_token or not chat_id:
+        logger.warning("telegram_not_configured")
+        return False
+
+    try:
+        from telegram import Bot
+
+        bot = Bot(token=bot_token)
+        chunks = _split_text(message, 4000)
+        for i, chunk in enumerate(chunks):
+            if i > 0:
+                await asyncio.sleep(0.3)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode="HTML",
+                # Attach keyboard only to the last chunk
+                reply_markup=reply_markup if i == len(chunks) - 1 else None,
+            )
+        return True
+    except Exception as e:
+        logger.error("meme_alert_send_failed", error=str(e))
+        return False
+
+
+async def send_critical_alert(message: str) -> bool:
+    """Send a pre-formatted P0 critical alert (HTML) to the review channel.
+
+    Like send_meme_alert, the message is already HTML-formatted and is sent
+    without re-escaping. Long messages are split at the 4096-char limit.
+    """
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = _get_chat_id()
+
+    if not bot_token or not chat_id:
+        logger.warning("telegram_not_configured")
+        return False
+
+    try:
+        from telegram import Bot
+
+        bot = Bot(token=bot_token)
+        for i, chunk in enumerate(_split_text(message, 4000)):
+            if i > 0:
+                await asyncio.sleep(0.3)
+            await bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode="HTML",
+            )
+        return True
+    except Exception as e:
+        logger.error("critical_alert_send_failed", error=str(e))
+        return False
+
+
 def _esc(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

@@ -85,7 +85,7 @@ class LiquidityInflectionSignal:
         """计算以 offset 为终点的 13 周变化率。offset=-1 表示最新一期。"""
         idx = len(series) + offset
         lookback_idx = idx - 13
-        if lookback_idx < 0 or idx < 0:
+        if lookback_idx < 0 or idx < 0 or idx >= len(series):
             return 0.0
         base = series[lookback_idx]
         if base == 0:

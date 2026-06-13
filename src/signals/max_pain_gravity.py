@@ -27,6 +27,11 @@ class MaxPainGravitySignal:
         if max_pain is None or price is None or days_to_expiry is None:
             return None
 
+        # max_pain is a strike price; a zero/negative value is malformed data and
+        # would otherwise cause a ZeroDivisionError in the deviation calc below.
+        if max_pain <= 0:
+            return None
+
         if days_to_expiry > self.MAX_DAYS_TO_EXPIRY:
             return None
 

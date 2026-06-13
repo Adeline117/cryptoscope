@@ -372,7 +372,7 @@ def new_repo_radar(
     )
 
     # Add overall score annotation
-    overall = round(sum(scores) / len(scores), 1)
+    overall = round(sum(scores) / len(scores), 1) if scores else 0.0
     fig.add_annotation(
         text=f"Overall: {overall}/100",
         xref="paper",

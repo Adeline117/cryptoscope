@@ -216,7 +216,6 @@ def check_exits():
 
         if pnl_pct >= TP_PCT:
             exit_reason = f"TP +{pnl_pct:.0f}%"
-            pnl_sol = pnl_sol * 0.5
         elif pnl_pct <= SL_PCT:
             exit_reason = f"SL {pnl_pct:.0f}%"
         elif age_hours >= TIME_STOP_HOURS:
