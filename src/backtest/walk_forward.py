@@ -63,6 +63,55 @@ def default_signal_predicate(features: dict) -> bool:
     return cond_div and cond_sat and cond_float
 
 
+def build_samples_from_snapshots(
+    outcomes: dict[str, float],
+    chain: str | None = None,
+    db_path=None,
+) -> list[dict]:
+    """Reconstruct backtest samples from the holder_snapshots DB.
+
+    For each snapshotted token, rebuilds the effective/nominal concentration
+    series (the same features the live signal sees) and pairs it with a realized
+    outcome from `outcomes` (token_address -> max_return multiple). Tokens absent
+    from `outcomes` are skipped — the caller is responsible for supplying the
+    FULL outcome set including fizzled setups (to avoid survivorship bias).
+
+    `outcomes` must include the dead setups, not just the winners.
+    """
+    from src.onchain import holder_snapshot as hs
+    from src.onchain.entity_clustering import effective_concentration
+
+    kwargs = {"db_path": db_path} if db_path is not None else {}
+    samples: list[dict] = []
+    for token, ch in hs.list_tokens(**kwargs):
+        if chain and ch != chain:
+            continue
+        if token not in outcomes:
+            continue
+        history = hs.get_holders_history(token, ch, **kwargs)
+        if not history:
+            continue
+        eff_series, gap_series = [], []
+        for _ts, holders in history:
+            m = effective_concentration(holders, top_n=10)
+            eff_series.append(m["effective_top_n_pct"])
+            gap_series.append(m["concentration_gap"])
+        eff_top = eff_series[-1] if eff_series else 0
+        samples.append({
+            "token": token,
+            "timestamp": history[-1][0],  # latest snapshot time
+            "features": {
+                "gap_series": gap_series,
+                "effective_series": eff_series,
+                "float_active": max(0.0, min(1.0, 1 - eff_top / 100)),
+                "security_passed": True,
+            },
+            "max_return": float(outcomes[token]),
+        })
+    logger.info("backtest_samples_built", count=len(samples))
+    return samples
+
+
 def walk_forward_split(
     samples: list[dict], cutoff_ts: str
 ) -> tuple[list[dict], list[dict]]:

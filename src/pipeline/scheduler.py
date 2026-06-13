@@ -64,6 +64,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="二级妖币 Accumulation Detection (Stage 0/1)",
     )
 
+    # Exit monitor (distribution detection on accumulated tokens) — hourly
+    scheduler.add_job(
+        _run_exit_monitor,
+        CronTrigger(minute=15),
+        id="exit_monitor",
+        name="二级妖币 Exit Monitor (distribution → exit)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -235,6 +243,14 @@ async def _run_accumulation():
 
     result = await run_accumulation_pipeline()
     logger.info("accumulation_detection_done", **result)
+
+
+async def _run_exit_monitor():
+    logger.info("scheduled_exit_monitor")
+    from src.pipeline.exit_monitor import run_exit_monitor
+
+    result = await run_exit_monitor()
+    logger.info("exit_monitor_done", **result)
 
 
 async def _run_tier1_reports():

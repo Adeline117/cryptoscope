@@ -33,8 +33,13 @@ def test_funder_cache_roundtrip(tmp_path):
     assert "0xmissing" not in got  # never looked up
 
 
-def test_funder_solana_returns_empty(tmp_path):
-    assert fg.get_funders(["addr1", "addr2"], "solana", db_path=tmp_path / "f.db") == {}
+def test_funder_solana_uses_cache(tmp_path):
+    # Pre-seed the cache so no network call is made; verify Solana path reads it.
+    db = tmp_path / "f.db"
+    fg._cache_put("SoLaddr1", "solana", "SoLfunder", db_path=db)
+    fg._cache_put("SoLaddr2", "solana", None, db_path=db)
+    got = fg.get_funders(["SoLaddr1", "SoLaddr2"], "solana", db_path=db)
+    assert got == {"SoLaddr1": "SoLfunder"}  # only resolved funders returned
 
 
 # --------------------------------------------------------------------------
@@ -136,3 +141,22 @@ def test_survivorship_warning():
     ]
     m = wf.evaluate(samples, cutoff_ts="2026-04-30")
     assert m.survivorship_warning is True
+
+
+def test_build_samples_from_snapshots(tmp_path):
+    from src.onchain import holder_snapshot as hs
+
+    db = tmp_path / "snap.db"
+    # Two snapshots for one token so a series can be built.
+    hs.save_snapshot("TKN", "ethereum", [{"address": "0x1", "balance": 100},
+                                          {"address": "0x2", "balance": 50}], db_path=db)
+    hs.save_snapshot("TKN", "ethereum", [{"address": "0x1", "balance": 200},
+                                          {"address": "0x2", "balance": 50}], db_path=db)
+    # Only winners-and-losers outcome map keeps the denominator honest.
+    samples = wf.build_samples_from_snapshots(
+        {"TKN": 3.0, "DEAD": 0.4}, chain="ethereum", db_path=db
+    )
+    assert len(samples) == 1  # DEAD not in snapshots → skipped
+    s = samples[0]
+    assert s["token"] == "TKN" and s["max_return"] == 3.0
+    assert len(s["features"]["effective_series"]) == 2

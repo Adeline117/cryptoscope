@@ -33,6 +33,15 @@ import structlog
 logger = structlog.get_logger()
 
 
+def _norm(addr: str) -> str:
+    """Normalize an address for matching: lowercase EVM (0x…) only.
+
+    Solana / other base58 addresses are case-sensitive and must be preserved.
+    """
+    s = str(addr)
+    return s.lower() if s.startswith("0x") else s
+
+
 # Known custodial / non-entity address labels to exclude from whale clustering.
 # Seeded from whale_tracker.KNOWN_EXCHANGES; extend as needed. These represent
 # omnibus wallets (many users), not a single accumulating actor.
@@ -88,7 +97,7 @@ def cluster_addresses(
         exclude = _exchange_addresses()
     exclude = {a.lower() for a in exclude}
 
-    addrs = [a.lower() for a in addresses]
+    addrs = [_norm(a) for a in addresses]
     uf = _UnionFind()
     for a in addrs:
         uf.find(a)  # ensure present
@@ -97,7 +106,7 @@ def cluster_addresses(
     if funders:
         by_funder: dict[str, list[str]] = {}
         for addr, funder in funders.items():
-            al, fl = addr.lower(), (funder or "").lower()
+            al, fl = _norm(addr), _norm(funder or "")
             if not fl or al in exclude or fl in exclude:
                 continue
             by_funder.setdefault(fl, []).append(al)
@@ -108,7 +117,7 @@ def cluster_addresses(
     # Edge type 2: temporal co-buying.
     if co_buy_groups:
         for group in co_buy_groups:
-            members = [a.lower() for a in group if a.lower() not in exclude]
+            members = [_norm(a) for a in group if _norm(a) not in exclude]
             for other in members[1:]:
                 uf.union(members[0], other)
 
@@ -133,7 +142,7 @@ def effective_concentration(
         largest_entity_pct     — share held by the single largest entity
     """
     pos = [
-        {"address": str(h["address"]).lower(), "balance": float(h.get("balance", 0) or 0)}
+        {"address": _norm(h["address"]), "balance": float(h.get("balance", 0) or 0)}
         for h in holders
         if float(h.get("balance", 0) or 0) > 0
     ]

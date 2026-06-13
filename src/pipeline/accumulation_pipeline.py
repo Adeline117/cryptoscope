@@ -92,8 +92,10 @@ def _build_series(token: str, chain: str) -> dict | None:
         return None
 
     # Collect every address seen across snapshots, resolve funders once.
+    from src.onchain.entity_clustering import _norm
+
     all_addrs = sorted({
-        str(h.get("address", "")).lower()
+        _norm(h.get("address", ""))
         for _ts, holders in history for h in holders if h.get("address")
     })
     try:

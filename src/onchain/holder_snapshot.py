@@ -191,6 +191,18 @@ def get_snapshots(
     return [dict(zip(cols, r)) for r in rows]
 
 
+def list_tokens(db_path: Path = DB_PATH) -> list[tuple[str, str]]:
+    """Return [(token, chain)] for every token with at least one snapshot."""
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT token, chain FROM holder_snapshots"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [(t, c) for t, c in rows]
+
+
 def get_holders_history(
     token: str, chain: str, limit: int = 100, db_path: Path = DB_PATH
 ) -> list[tuple[str, list[dict[str, Any]]]]:

@@ -119,29 +119,100 @@ def _fetch_first_funder_evm(address: str, chain_id: int, key: str, timeout: int 
         return None
 
 
+def _rpc(url: str, method: str, params: list, timeout: int = 15) -> dict:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def _fetch_first_funder_solana(address: str, max_pages: int = 3, timeout: int = 15) -> str | None:
+    """Return the source of the address's first incoming SOL transfer, or None.
+
+    Paginates getSignaturesForAddress back to the oldest signature (fresh
+    accumulation wallets have few txs, so this is cheap), then parses that
+    transaction for the SOL transfer whose destination is the address.
+    """
+    rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    try:
+        oldest = None
+        before = None
+        for _ in range(max_pages):
+            params: list = [address, {"limit": 1000}]
+            if before:
+                params[1]["before"] = before
+            sigs = _rpc(rpc, "getSignaturesForAddress", params, timeout).get("result", [])
+            if not sigs:
+                break
+            oldest = sigs[-1].get("signature")
+            if len(sigs) < 1000:
+                break  # reached the last (oldest) page
+            before = oldest
+        if not oldest:
+            return None
+
+        tx = _rpc(
+            rpc, "getTransaction",
+            [oldest, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+            timeout,
+        ).get("result", {})
+        instrs = (
+            tx.get("transaction", {}).get("message", {}).get("instructions", [])
+        )
+        for ins in instrs:
+            parsed = ins.get("parsed", {})
+            if isinstance(parsed, dict) and parsed.get("type") in ("transfer", "createAccount"):
+                info = parsed.get("info", {})
+                dest = info.get("destination") or info.get("newAccount")
+                if dest == address:
+                    src = info.get("source") or info.get("lamports") and info.get("source")
+                    if src:
+                        return src
+        # Fallback: fee payer (first account key) usually funded a fresh wallet.
+        keys = tx.get("transaction", {}).get("message", {}).get("accountKeys", [])
+        if keys:
+            first = keys[0]
+            payer = first.get("pubkey") if isinstance(first, dict) else first
+            if payer and payer != address:
+                return payer
+        return None
+    except Exception as e:
+        logger.debug("solana_funder_fetch_failed", address=address, error=str(e))
+        return None
+
+
 def get_funders(
     addresses: list[str], chain: str, max_lookups: int = 40, db_path: Path = DB_PATH
 ) -> dict[str, str]:
     """Resolve first-funders for a set of addresses (cached, rate-limited).
 
     Returns address -> funder for those that resolve. Unknown/None funders are
-    cached too (as NULL) to avoid repeat lookups. Solana returns {} for now.
+    cached too (as NULL) to avoid repeat lookups. EVM via Etherscan, Solana via
+    Helius/RPC signature pagination.
     """
-    addrs = [a.lower() for a in addresses if a]
-    if chain in ("solana", "sol") or not addrs:
+    is_solana = chain in ("solana", "sol")
+    # Solana addresses are case-sensitive (base58); EVM are not.
+    addrs = [a if is_solana else a.lower() for a in addresses if a]
+    if not addrs:
+        return {}
+
+    keys = _keys()
+    if not is_solana and not keys:
         return {}
     chain_id = _EVM_CHAIN_IDS.get(chain, 1)
-    keys = _keys()
-    if not keys:
-        return {}
 
     cached = _cache_get(addrs, chain, db_path)
     result: dict[str, str] = {a: f for a, f in cached.items() if f}
 
     todo = [a for a in addrs if a not in cached][:max_lookups]
     for i, addr in enumerate(todo):
-        key = keys[i % len(keys)]  # rotate the pool to spread rate limits
-        funder = _fetch_first_funder_evm(addr, chain_id, key)
+        if is_solana:
+            funder = _fetch_first_funder_solana(addr)
+        else:
+            funder = _fetch_first_funder_evm(addr, chain_id, keys[i % len(keys)])
         _cache_put(addr, chain, funder, db_path)
         if funder:
             result[addr] = funder
