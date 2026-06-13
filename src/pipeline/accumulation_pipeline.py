@@ -81,17 +81,42 @@ async def _security_gate(candidates: list[dict]) -> list[dict]:
 
 
 def _build_series(token: str, chain: str) -> dict | None:
-    """Recompute effective/nominal concentration series from snapshot history."""
+    """Recompute effective/nominal concentration series from snapshot history.
+
+    Resolves first-funders across the full holder set (once — funders are
+    immutable and cached) and feeds them into the clustering so effective
+    concentration can actually diverge from nominal.
+    """
     history = hs.get_holders_history(token, chain)
     if not history:
         return None
+
+    # Collect every address seen across snapshots, resolve funders once.
+    all_addrs = sorted({
+        str(h.get("address", "")).lower()
+        for _ts, holders in history for h in holders if h.get("address")
+    })
+    try:
+        from src.onchain.funder_graph import get_funders
+
+        funders = get_funders(all_addrs, chain)
+    except Exception as e:
+        logger.debug("funder_resolve_failed", token=token, error=str(e))
+        funders = {}
+
     eff_series: list[float] = []
     gap_series: list[float] = []
+    latest_metrics: dict = {}
     for _ts, holders in history:
-        m = effective_concentration(holders, top_n=10)
+        m = effective_concentration(holders, funders=funders, top_n=10)
         eff_series.append(m["effective_top_n_pct"])
         gap_series.append(m["concentration_gap"])
-    return {"effective_series": eff_series, "gap_series": gap_series}
+        latest_metrics = m
+    return {
+        "effective_series": eff_series,
+        "gap_series": gap_series,
+        "latest": latest_metrics,
+    }
 
 
 async def run_accumulation_pipeline(send: bool = True) -> dict:
@@ -125,10 +150,17 @@ async def run_accumulation_pipeline(send: bool = True) -> dict:
         if not series:
             continue
 
+        latest = series.get("latest") or {}
+        # Float-active proxy: supply NOT held by the top-10 entities is the float
+        # still in (potentially weak) hands. Higher → launch more likely ahead.
+        eff_top = latest.get("effective_top_n_pct", 0)
+        float_active = max(0.0, min(1.0, 1 - eff_top / 100))
+        c["nominal_top_n_pct"] = latest.get("nominal_top_n_pct")
+
         market_data = {
-            **series,
-            # Float-active proxy: low gini in latest snapshot → float still spread.
-            "float_active": c.get("float_active", 0.5),
+            "effective_series": series["effective_series"],
+            "gap_series": series["gap_series"],
+            "float_active": float_active,
             "security_passed": c.get("security_passed", None),
             "token_symbol": c.get("symbol", addr[:6]),
             "token_address": addr,
@@ -199,7 +231,11 @@ async def _emit_signal(token: dict, sig, send: bool = True) -> None:
                 "address": addr, "chain": chain, "url": token.get("url", ""),
                 "security_score": token.get("security_score"),
             },
-            divergence=sig.components,
+            divergence={
+                **sig.components,
+                "confidence": sig.confidence,
+                "nominal_top_n_pct": token.get("nominal_top_n_pct"),
+            },
             position_hint=hint,
         )
         await send_alert(msg)

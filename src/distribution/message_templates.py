@@ -1123,45 +1123,62 @@ def format_accumulation_alert(
     gap_slope = divergence.get("gap_slope", 0)
     float_active = divergence.get("float_active", 0)
     decel = divergence.get("decelerating", False)
+    conf = divergence.get("confidence")
 
+    bar = "━━━━━━━━━━━━━━"
     lines = [
-        f"🕵️ <b>二级妖币吸筹背离</b> — {sym}",
-        f"链: {chain}",
+        f"🕵️ <b>有人在悄悄吸筹</b> · {sym}",
+        f"<i>{chain}链 · 一句话：表面看不出来，但庄家在暗中收筹</i>",
+        bar,
         "",
-        "<b>━━ 集中度背离 ━━</b>",
-        f"有效集中度(聚类后): <b>{eff:.0f}%</b>"
-        + (f"  vs 名义 {nominal:.0f}%" if nominal is not None else ""),
-        f"背离斜率: {gap_slope:.2f} /快照 {'📈' if gap_slope > 0 else ''}",
-        f"吸筹斜率: {'拐头减速 ⚠️ 庄快收完' if decel else '仍在加速'}",
-        f"浮筹活跃度: {float_active:.0%} {'(启动还在前面 ✅)' if float_active >= 0.35 else '(浮筹偏少)'}",
+        "<b>📊 怎么看出来的</b>",
+        f"· 真实集中度 <b>{eff:.0f}%</b>（把马甲地址聚类还原后）",
+    ]
+    if nominal is not None:
+        lines.append(f"· 表面集中度 {nominal:.0f}%（散户直接看到的）")
+        lines.append(f"· 两者差距在<b>拉大</b> → 有人用马甲暗中收筹")
+    else:
+        lines.append("· 集中度在上升")
+
+    lines += [
+        "",
+        "<b>⏳ 现在到哪一步了</b>",
+        f"· 吸筹{'<b>在减速</b> → 庄快收完了' if decel else '还在加速中'}",
+        f"· 浮筹还活跃 <b>{float_active:.0%}</b> → "
+        + ("启动还<b>没开始</b> ✅" if float_active >= 0.35 else "浮筹偏少，可能晚了"),
+        "→ <b>吸筹尾段，启动之前</b>（这正是要抢的位置）",
     ]
 
+    sec = token.get("security_score")
     mc = token.get("mc")
     liq = token.get("liquidity")
-    sec = token.get("security_score")
-    if mc is not None or liq is not None or sec is not None:
+    if sec is not None or mc is not None or liq is not None:
         lines.append("")
-        lines.append("<b>━━ 基本面 ━━</b>")
-        if mc is not None:
-            lines.append(f"市值: {_format_usd(mc)}")
-        if liq is not None:
-            lines.append(f"流动性: {_format_usd(liq)}")
+        lines.append("<b>🔒 安全 / 基本面</b>")
         if sec is not None:
-            lines.append(f"安全分: {sec}/100 {'✅' if sec >= 70 else '⚠️'}")
+            verdict = "安全 ✅" if sec >= 70 else ("一般 ⚠️" if sec >= 50 else "危险 ❌")
+            lines.append(f"· 合约安全分 {sec}/100（{verdict}）")
+        if mc is not None:
+            lines.append(f"· 市值 {_format_usd(mc)}")
+        if liq is not None:
+            lines.append(f"· 流动性 {_format_usd(liq)}")
 
     if position_hint:
         lines.append("")
-        lines.append("<b>━━ 纸面仓位建议 (Kelly折半) ━━</b>")
-        lines.append(f"建议仓位: {position_hint.get('pct', 0):.1%}")
+        lines.append("<b>💰 参考仓位（纸面，非真实下单）</b>")
+        lines.append(f"· <b>{position_hint.get('pct', 0):.1%}</b> 资金")
         if position_hint.get("note"):
-            lines.append(_esc(position_hint["note"]))
+            lines.append(f"  <i>{_esc(position_hint['note'])}</i>")
 
-    if addr:
+    if conf is not None:
         lines.append("")
-        lines.append(f"<code>{addr}</code>")
-    if url:
-        lines.append(f'🔗 <a href="{_esc(url)}">图表</a>')
+        lines.append(f"<b>信号强度 {conf}/100</b>")
 
     lines.append("")
-    lines.append("<i>检测/研究信号，非投资建议。慢信号，需耐心等启动。</i>")
+    lines.append(bar)
+    if addr:
+        lines.append(f"📍 <code>{addr}</code>")
+    if url:
+        lines.append(f'🔗 <a href="{_esc(url)}">看 K 线图</a>')
+    lines.append("<i>⚠️ 慢信号，需耐心等启动，别立刻追。检测/研究用途，非投资建议。</i>")
     return "\n".join(lines)

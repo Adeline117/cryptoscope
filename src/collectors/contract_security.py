@@ -10,7 +10,10 @@ Scans EVM and Solana token contracts for security risks including:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -19,6 +22,17 @@ import structlog
 from src.collectors.base import BaseCollector, CollectedItem, CollectionResult
 
 logger = structlog.get_logger()
+
+
+def _urllib_get_json(url: str, params: dict | None = None, timeout: int = 15) -> dict:
+    """Blocking urllib GET → JSON. Used as a fallback when aiohttp can't connect
+    (some sandboxed/locked-down networks block aiohttp's connector but allow
+    urllib). Call via asyncio.to_thread to avoid blocking the event loop."""
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
 
 # Supported EVM chain IDs
 CHAIN_IDS = {
@@ -112,16 +126,22 @@ class ContractSecurityChecker(BaseCollector):
         try:
             data = await self._fetch_json(url, params=params, use_cache=True)
         except Exception as e:
-            self.log.error("goplus_evm_fetch_failed", error=str(e), chain_id=chain_id, address=address)
-            return SecurityResult(
-                address=address,
-                chain_id=chain_id,
-                risk_score=50,  # Unknown — return neutral
-                is_honeypot=False,
-                risks=["API fetch failed — unable to verify"],
-                info={},
-                raw={},
-            )
+            # Fallback: aiohttp connector blocked in some envs; urllib often works.
+            try:
+                data = await asyncio.to_thread(_urllib_get_json, url, params)
+                self.log.info("goplus_evm_urllib_fallback", chain_id=chain_id, address=address)
+            except Exception as e2:
+                self.log.error("goplus_evm_fetch_failed", error=f"{e} / fallback: {e2}",
+                               chain_id=chain_id, address=address)
+                return SecurityResult(
+                    address=address,
+                    chain_id=chain_id,
+                    risk_score=50,  # Unknown — return neutral
+                    is_honeypot=False,
+                    risks=["API fetch failed — unable to verify"],
+                    info={},
+                    raw={},
+                )
 
         result_data = data.get("result", {})
         token_data = result_data.get(address, {})
@@ -147,16 +167,21 @@ class ContractSecurityChecker(BaseCollector):
         try:
             data = await self._fetch_json(url, params=params, use_cache=True)
         except Exception as e:
-            self.log.error("goplus_solana_fetch_failed", error=str(e), address=address)
-            return SecurityResult(
-                address=address,
-                chain_id="solana",
-                risk_score=50,
-                is_honeypot=False,
-                risks=["API fetch failed — unable to verify"],
-                info={},
-                raw={},
-            )
+            try:
+                data = await asyncio.to_thread(_urllib_get_json, url, params)
+                self.log.info("goplus_solana_urllib_fallback", address=address)
+            except Exception as e2:
+                self.log.error("goplus_solana_fetch_failed", error=f"{e} / fallback: {e2}",
+                               address=address)
+                return SecurityResult(
+                    address=address,
+                    chain_id="solana",
+                    risk_score=50,
+                    is_honeypot=False,
+                    risks=["API fetch failed — unable to verify"],
+                    info={},
+                    raw={},
+                )
 
         result_data = data.get("result", {})
         token_data = result_data.get(address, {})
