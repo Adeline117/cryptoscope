@@ -51,7 +51,9 @@ def _keys() -> list[str]:
 
 def _connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS funders (
             address TEXT NOT NULL,

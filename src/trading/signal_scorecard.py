@@ -30,7 +30,8 @@ DB_PATH = Path("data/signal_scorecard.db")
 def _ensure_db() -> sqlite3.Connection:
     """Create DB and table if not exists."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS signals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

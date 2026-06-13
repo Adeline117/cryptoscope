@@ -66,6 +66,10 @@ class CollectorCache:
     async def init(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(str(self.db_path))
+        # WAL + busy_timeout: many collectors share this cache file under the
+        # scheduler; without these, concurrent access raises "database is locked".
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA busy_timeout=10000")
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS seen_items (
                 item_hash TEXT PRIMARY KEY,

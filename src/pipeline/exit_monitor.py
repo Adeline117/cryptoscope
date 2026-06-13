@@ -43,7 +43,8 @@ def _recent_accumulation_tokens() -> list[dict]:
     if not DB_PATH.exists():
         return []
     cutoff = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
     try:
         rows = conn.execute(
             """SELECT asset, chain, metadata FROM signals
