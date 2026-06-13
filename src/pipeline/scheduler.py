@@ -56,6 +56,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Anomaly Detection Scan",
     )
 
+    # Accumulation detection (二级妖币 Stage 0/1) — every 30 minutes
+    scheduler.add_job(
+        _run_accumulation,
+        CronTrigger(minute="*/30"),
+        id="accumulation_detection",
+        name="二级妖币 Accumulation Detection (Stage 0/1)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -219,6 +227,14 @@ async def _run_anomaly_check():
                 f"Details: {anomaly.description}\n"
                 f"Severity: {anomaly.severity}"
             )
+
+
+async def _run_accumulation():
+    logger.info("scheduled_accumulation_detection")
+    from src.pipeline.accumulation_pipeline import run_accumulation_pipeline
+
+    result = await run_accumulation_pipeline()
+    logger.info("accumulation_detection_done", **result)
 
 
 async def _run_tier1_reports():

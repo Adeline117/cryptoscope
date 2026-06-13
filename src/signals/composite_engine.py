@@ -16,6 +16,7 @@ from src.signals.liquidation_cascade import LiquidationCascadeSignal
 from src.signals.smart_money_social import SmartMoneySocialSignal
 from src.signals.exchange_reserve_divergence import ExchangeReserveDivergenceSignal
 from src.signals.volatility_regime import VolatilityRegimeSignal
+from src.signals.accumulation_divergence import AccumulationDivergenceSignal
 
 logger = structlog.get_logger()
 
@@ -29,6 +30,7 @@ SIGNAL_WEIGHTS: dict[str, float] = {
     "smart_money_social": 1.5,  # 聪明钱+社交背离历史胜率最高
     "exchange_reserve_divergence": 1.0,
     "volatility_regime": 0.9,
+    "accumulation_divergence": 1.5,  # 链上吸筹背离，慢信号 alpha，高权重
 }
 
 # 共识阈值
@@ -48,6 +50,7 @@ class CompositeSignalEngine:
             SmartMoneySocialSignal(),
             ExchangeReserveDivergenceSignal(),
             VolatilityRegimeSignal(),
+            AccumulationDivergenceSignal(),
         ]
         self.log = logger.bind(component="composite_engine")
 

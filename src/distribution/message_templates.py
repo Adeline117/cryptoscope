@@ -1098,3 +1098,70 @@ def format_price_response(
         f"💎 Market Cap: {_format_usd(mcap)}\n"
         f"📊 24h Volume: {_format_usd(volume)}"
     )
+
+
+def format_accumulation_alert(
+    token: dict,
+    divergence: dict,
+    position_hint: dict | None = None,
+) -> str:
+    """Format a 二级妖币 accumulation-divergence alert (Telegram HTML).
+
+    Args:
+        token: {symbol, address, chain, mc, liquidity, security_score, url}
+        divergence: signal components {gap_slope, effective_level_pct,
+            decelerating, float_active, nominal_top_n_pct?}
+        position_hint: optional {pct, note} from the Kelly sizer.
+    """
+    sym = _esc(token.get("symbol", "?"))
+    chain = _esc(token.get("chain", ""))
+    addr = _esc(token.get("address", ""))
+    url = token.get("url", "")
+
+    eff = divergence.get("effective_level_pct", 0)
+    nominal = divergence.get("nominal_top_n_pct")
+    gap_slope = divergence.get("gap_slope", 0)
+    float_active = divergence.get("float_active", 0)
+    decel = divergence.get("decelerating", False)
+
+    lines = [
+        f"🕵️ <b>二级妖币吸筹背离</b> — {sym}",
+        f"链: {chain}",
+        "",
+        "<b>━━ 集中度背离 ━━</b>",
+        f"有效集中度(聚类后): <b>{eff:.0f}%</b>"
+        + (f"  vs 名义 {nominal:.0f}%" if nominal is not None else ""),
+        f"背离斜率: {gap_slope:.2f} /快照 {'📈' if gap_slope > 0 else ''}",
+        f"吸筹斜率: {'拐头减速 ⚠️ 庄快收完' if decel else '仍在加速'}",
+        f"浮筹活跃度: {float_active:.0%} {'(启动还在前面 ✅)' if float_active >= 0.35 else '(浮筹偏少)'}",
+    ]
+
+    mc = token.get("mc")
+    liq = token.get("liquidity")
+    sec = token.get("security_score")
+    if mc is not None or liq is not None or sec is not None:
+        lines.append("")
+        lines.append("<b>━━ 基本面 ━━</b>")
+        if mc is not None:
+            lines.append(f"市值: {_format_usd(mc)}")
+        if liq is not None:
+            lines.append(f"流动性: {_format_usd(liq)}")
+        if sec is not None:
+            lines.append(f"安全分: {sec}/100 {'✅' if sec >= 70 else '⚠️'}")
+
+    if position_hint:
+        lines.append("")
+        lines.append("<b>━━ 纸面仓位建议 (Kelly折半) ━━</b>")
+        lines.append(f"建议仓位: {position_hint.get('pct', 0):.1%}")
+        if position_hint.get("note"):
+            lines.append(_esc(position_hint["note"]))
+
+    if addr:
+        lines.append("")
+        lines.append(f"<code>{addr}</code>")
+    if url:
+        lines.append(f'🔗 <a href="{_esc(url)}">图表</a>')
+
+    lines.append("")
+    lines.append("<i>检测/研究信号，非投资建议。慢信号，需耐心等启动。</i>")
+    return "\n".join(lines)
