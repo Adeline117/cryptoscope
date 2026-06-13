@@ -12,6 +12,9 @@ api_keys:
   coingecko: ${COINGECKO_API_KEY}
   messari: ${MESSARI_API_KEY}
   semantic_scholar: ${SEMANTIC_SCHOLAR_API_KEY}
+  alchemy: ${ALCHEMY_API_KEY}
+  helius: ${HELIUS_API_KEY}
+  solscan: ${SOLSCAN_API_KEY}
 
 # Arena database connection
 arena_db:
