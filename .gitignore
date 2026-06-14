@@ -52,3 +52,7 @@ logs/
 # Coverage
 .coverage
 htmlcov/
+
+# Backtest throwaway data
+data/backtest_targets.json
+data/backtest_samples.json
