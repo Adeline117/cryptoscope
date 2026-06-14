@@ -138,6 +138,87 @@ def reconstruct_series(token: str, chain: str, n_points: int = 8,
     }
 
 
+def _sol_rpc(method: str, params: list, timeout: int = 25) -> dict:
+    import os
+
+    rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    req = urllib.request.Request(
+        rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
+
+
+def reconstruct_series_solana(mint: str, n_points: int = 8, max_early_txs: int = 1000,
+                              max_sig_pages: int = 20) -> dict | None:
+    """Reconstruct a Solana token's EARLY-life concentration series via Helius.
+
+    Most accumulation happens while a token is quiet (few txs), so the early
+    window is cheap to replay:
+      1. Paginate getSignaturesForAddress to the oldest, keep the earliest
+         `max_early_txs` (the accumulation window).
+      2. Replay them ascending; each tx's postTokenBalances updates a running
+         per-owner balance map.
+      3. Snapshot effective/nominal concentration at N checkpoints.
+
+    Returns {gap_series, effective_series, n_txs} or None.
+    """
+    # 1. Walk signatures back to the oldest (cheap — no getTransaction yet).
+    all_sigs: list[dict] = []
+    before = None
+    for _ in range(max_sig_pages):
+        params: list = [mint, {"limit": 1000}]
+        if before:
+            params[1]["before"] = before
+        sigs = _sol_rpc("getSignaturesForAddress", params).get("result", [])
+        if not sigs:
+            break
+        all_sigs.extend(sigs)
+        before = sigs[-1].get("signature")
+        if len(sigs) < 1000:
+            break
+    if len(all_sigs) < 20:
+        logger.info("solana_too_few_sigs", mint=mint, n=len(all_sigs))
+        return None
+
+    # Earliest txs = end of the newest-first list; reverse to ascending.
+    early = list(reversed(all_sigs))[:max_early_txs]
+    checkpoints = {int(len(early) / n_points * i) for i in range(1, n_points + 1)}
+
+    balances: dict[str, float] = {}
+    eff_series, gap_series = [], []
+    for idx, s in enumerate(early):
+        sig = s.get("signature")
+        if not sig:
+            continue
+        try:
+            tx = _sol_rpc(
+                "getTransaction",
+                [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+            ).get("result", {})
+        except Exception:
+            continue
+        meta = (tx or {}).get("meta", {}) or {}
+        for b in meta.get("postTokenBalances", []):
+            if b.get("mint") != mint:
+                continue
+            owner = b.get("owner")
+            amt = b.get("uiTokenAmount", {}).get("uiAmount")
+            if owner and amt is not None:
+                balances[owner] = float(amt)  # latest known balance for this owner
+        if idx in checkpoints:
+            holders = [{"address": a, "balance": v} for a, v in balances.items() if v > 0]
+            # Exclude AMM pool / curve vaults (>30% share = not a real holder).
+            m = effective_concentration(holders, top_n=10, exclude_share_above=0.30)
+            eff_series.append(m["effective_top_n_pct"])
+            gap_series.append(m["concentration_gap"])
+
+    if len(eff_series) < 4:
+        return None
+    return {"gap_series": gap_series, "effective_series": eff_series, "n_txs": len(early)}
+
+
 def get_max_return(token: str, chain: str, timeout: int = 15) -> float | None:
     """Realized max return = ATH / earliest price, from GeckoTerminal OHLCV.
 

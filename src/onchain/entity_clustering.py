@@ -181,6 +181,7 @@ def effective_concentration(
     co_buy_groups: list[list[str]] | None = None,
     exclude: set[str] | None = None,
     top_n: int = 10,
+    exclude_share_above: float | None = None,
 ) -> dict[str, Any]:
     """Compute effective (entity-level) vs nominal (address-level) concentration.
 
@@ -197,6 +198,12 @@ def effective_concentration(
         for h in holders
         if float(h.get("balance", 0) or 0) > 0
     ]
+    # Drop pool/treasury accounts: on an established, distributed token no single
+    # REAL holder holds an outsized share — that account is the AMM vault / curve.
+    if exclude_share_above is not None and pos:
+        gross = sum(h["balance"] for h in pos)
+        if gross > 0:
+            pos = [h for h in pos if h["balance"] / gross <= exclude_share_above]
     total = sum(h["balance"] for h in pos)
     if total <= 0:
         return {
