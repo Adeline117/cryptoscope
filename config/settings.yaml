@@ -15,6 +15,7 @@ api_keys:
   alchemy: ${ALCHEMY_API_KEY}
   helius: ${HELIUS_API_KEY}
   solscan: ${SOLSCAN_API_KEY}
+  arkham: ${ARKHAM_API_KEY}
 
 # Arena database connection
 arena_db:

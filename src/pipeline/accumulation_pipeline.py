@@ -152,11 +152,22 @@ def _build_series(token: str, chain: str) -> dict | None:
         logger.debug("funder_resolve_failed", token=token, error=str(e))
         funders = {}
 
+    # Arkham ground-truth entity clustering (when ARKHAM_API_KEY is set).
+    entity_map: dict[str, str] = {}
+    try:
+        from src.onchain import arkham
+
+        if arkham.has_key():
+            entity_map = arkham.entity_map(all_addrs, chain)
+    except Exception as e:
+        logger.debug("arkham_resolve_failed", token=token, error=str(e))
+
     eff_series: list[float] = []
     gap_series: list[float] = []
     latest_metrics: dict = {}
     for _ts, holders in history:
-        m = effective_concentration(holders, funders=funders, top_n=10)
+        m = effective_concentration(holders, funders=funders, top_n=10,
+                                    entity_map=entity_map)
         eff_series.append(m["effective_top_n_pct"])
         gap_series.append(m["concentration_gap"])
         latest_metrics = m

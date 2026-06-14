@@ -123,10 +123,12 @@ def cluster_addresses(
     co_buy_groups: list[list[str]] | None = None,
     exclude: set[str] | None = None,
     balances: dict[str, float] | None = None,
+    entity_map: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Cluster addresses into entities via union-find over heuristic edges.
+    """Cluster addresses into entities via union-find over edges.
 
-    Edge types (each a "same entity" signal):
+    Edge types (each a "same entity" signal), strongest first:
+      0. Arkham entity — ground-truth address→entity (when an API key is set).
       1. Common funder + funder-chain root — addresses funded from the same
          source, even several hops deep.
       2. Temporal co-acquisition — addresses that received the token together.
@@ -142,6 +144,19 @@ def cluster_addresses(
     uf = _UnionFind()
     for a in addrs:
         uf.find(a)  # ensure present
+
+    # Edge type 0: Arkham ground-truth entity (strongest). Addresses sharing an
+    # Arkham entity merge directly.
+    if entity_map:
+        by_entity: dict[str, list[str]] = {}
+        for addr, ent in entity_map.items():
+            al = _norm(addr)
+            if al in exclude or not ent:
+                continue
+            by_entity.setdefault(str(ent), []).append(al)
+        for group in by_entity.values():
+            for other in group[1:]:
+                uf.union(group[0], other)
 
     # Edge type 1: shared root funder (chain-aware, skip excluded addresses).
     if funders:
@@ -182,6 +197,7 @@ def effective_concentration(
     exclude: set[str] | None = None,
     top_n: int = 10,
     exclude_share_above: float | None = None,
+    entity_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Compute effective (entity-level) vs nominal (address-level) concentration.
 
@@ -219,7 +235,8 @@ def effective_concentration(
     # Effective: cluster (incl. similar-balance split detection), then top-N.
     bal_map = {h["address"]: h["balance"] for h in pos}
     mapping = cluster_addresses(
-        (h["address"] for h in pos), funders, co_buy_groups, exclude, balances=bal_map
+        (h["address"] for h in pos), funders, co_buy_groups, exclude,
+        balances=bal_map, entity_map=entity_map,
     )
     excluded = set(h["address"] for h in pos) - set(mapping)
     entity_bal: dict[str, float] = {}

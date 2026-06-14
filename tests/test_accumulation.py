@@ -228,3 +228,30 @@ def test_kelly_position_with_history_bounded():
                                            "avg_pnl_24h": "+15%"}}
     out = calculate_kelly_position("accumulation_divergence", summary=summary)
     assert 0.005 <= out["pct"] <= 0.10  # within hard floor/cap
+
+
+def test_arkham_entity_map_clustering():
+    # Arkham ground-truth entity merges addresses sharing an entity.
+    from src.onchain.entity_clustering import cluster_addresses, effective_concentration
+
+    emap = {"0xa": "whale1", "0xb": "whale1", "0xc": "whale2"}
+    m = cluster_addresses(["0xa", "0xb", "0xc"], entity_map=emap, exclude=set())
+    assert m["0xa"] == m["0xb"]      # same Arkham entity → merged
+    assert m["0xa"] != m["0xc"]
+
+    holders = [{"address": "0xa", "balance": 30}, {"address": "0xb", "balance": 30},
+               {"address": "0xc", "balance": 40}]
+    base = effective_concentration(holders, top_n=1)
+    arkm = effective_concentration(holders, top_n=1, entity_map=emap)
+    # Merging a+b makes the top-1 entity bigger than any single address.
+    assert arkm["effective_top_n_pct"] >= base["effective_top_n_pct"]
+
+
+def test_exclude_share_above_drops_pool():
+    from src.onchain.entity_clustering import effective_concentration
+
+    holders = [{"address": "pool", "balance": 900}]  # 90% = pool/vault
+    holders += [{"address": f"h{i}", "balance": 10} for i in range(10)]
+    m = effective_concentration(holders, top_n=3, exclude_share_above=0.30)
+    # The 90% pool account is excluded → metrics reflect only real holders.
+    assert m["nominal_holder_count"] == 10
