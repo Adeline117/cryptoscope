@@ -1,0 +1,21 @@
+# Manually-tracked tokens for the accumulation system.
+#
+# The Stage 0 universe (DexScreener new pools/boosts) skews toward fresh meme
+# launches. But the most valuable accumulation — a whale patiently building a
+# position in an EXISTING token over weeks/months — never shows up there.
+#
+# Add such tokens here: the accumulation pipeline snapshots them every run,
+# building the holder-distribution history needed to detect the divergence,
+# regardless of whether they trend on DexScreener.
+#
+# Format:
+#   - address: <token mint / contract>
+#     chain: solana | ethereum | base | bsc | arbitrum | optimism | polygon
+#     symbol: <optional label>
+#
+# Example (commented out):
+#   - address: DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+#     chain: solana
+#     symbol: BONK
+
+tokens: []

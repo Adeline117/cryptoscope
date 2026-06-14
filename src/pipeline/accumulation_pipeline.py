@@ -49,15 +49,47 @@ def _chain_for_security(chain: str) -> int | str:
     return _CHAIN_ID.get(chain, 1)
 
 
+def _load_watch_tokens() -> list[dict]:
+    """Manually-tracked mature tokens that may not surface in DexScreener trends."""
+    try:
+        import yaml
+
+        from src.config import CONFIG_DIR
+
+        path = CONFIG_DIR / "accumulation_watch_tokens.yaml"
+        if not path.exists():
+            return []
+        data = yaml.safe_load(path.read_text()) or {}
+        out = []
+        for t in data.get("tokens", []) or []:
+            if t.get("address") and t.get("chain"):
+                out.append({
+                    "source": "watch_token", "chain": t["chain"],
+                    "address": t["address"], "symbol": t.get("symbol", ""), "url": "",
+                })
+        return out
+    except Exception as e:
+        logger.warning("watch_tokens_load_failed", error=str(e))
+        return []
+
+
 async def _collect_universe() -> list[dict]:
-    """Stage 0: gather new-token candidates (reuses pool_watcher)."""
+    """Stage 0: new-token candidates (pool_watcher) + manual watch tokens."""
+    universe = list(_load_watch_tokens())  # always include manually-tracked tokens
     try:
         from src.sniper.pool_watcher import scan_new_tokens
 
-        return scan_new_tokens()
+        universe.extend(scan_new_tokens())
     except Exception as e:
         logger.warning("universe_scan_failed", error=str(e))
-        return []
+    # Dedup by (address, chain), keeping the first (watch tokens win).
+    seen, deduped = set(), []
+    for c in universe:
+        k = (c.get("address"), c.get("chain"))
+        if c.get("address") and k not in seen:
+            seen.add(k)
+            deduped.append(c)
+    return deduped
 
 
 async def _security_gate(candidates: list[dict]) -> list[dict]:
@@ -81,10 +113,15 @@ async def _security_gate(candidates: list[dict]) -> list[dict]:
             result = await checker.check_token(_chain_for_security(chain), addr)
             c["security_score"] = result.risk_score
             c["security_passed"] = (not result.is_honeypot) and result.risk_score >= MIN_SECURITY_SCORE
-            if c["security_passed"]:
+            # Manually-tracked watch tokens are always snapshotted (user vouched),
+            # but we still record their score for the alert.
+            if c["security_passed"] or c.get("source") == "watch_token":
                 passed.append(c)
         except Exception as e:
             logger.debug("security_check_failed", address=addr, error=str(e))
+            if c.get("source") == "watch_token":
+                c["security_score"] = None
+                passed.append(c)
     return passed
 
 

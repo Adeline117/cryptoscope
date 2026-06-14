@@ -112,6 +112,60 @@ def build_samples_from_snapshots(
     return samples
 
 
+def make_predicate(min_gap_slope: float, min_eff_level: float, min_float: float):
+    """Build a signal predicate with explicit thresholds (for sweeping)."""
+    from src.signals.accumulation_divergence import _slope, is_decelerating
+
+    MIN_POINTS = 4
+
+    def predicate(features: dict) -> bool:
+        gap = features.get("gap_series") or []
+        eff = features.get("effective_series") or []
+        if len(gap) < MIN_POINTS or len(eff) < MIN_POINTS:
+            return False
+        if features.get("security_passed") is False:
+            return False
+        return (
+            _slope(gap) >= min_gap_slope
+            and is_decelerating(eff) and eff[-1] >= min_eff_level
+            and float(features.get("float_active", 0) or 0) >= min_float
+        )
+
+    return predicate
+
+
+def sweep_thresholds(
+    samples: list[dict],
+    cutoff_ts: str,
+    gap_grid: list[float] | None = None,
+    eff_grid: list[float] | None = None,
+    float_grid: list[float] | None = None,
+    label_multiple: float = LAUNCH_MULTIPLE,
+) -> list[dict]:
+    """Grid-search signal thresholds; return per-config out-of-sample metrics.
+
+    Replaces hand-picked thresholds with data-chosen ones. Sorted by precision
+    then fired count (a config that fires zero times has meaningless precision).
+    """
+    gap_grid = gap_grid or [0.2, 0.3, 0.5, 0.8]
+    eff_grid = eff_grid or [20.0, 25.0, 30.0, 40.0]
+    float_grid = float_grid or [0.25, 0.35, 0.5]
+
+    results = []
+    for g in gap_grid:
+        for e in eff_grid:
+            for f in float_grid:
+                pred = make_predicate(g, e, f)
+                m = evaluate(samples, cutoff_ts, pred, label_multiple)
+                results.append({
+                    "min_gap_slope": g, "min_eff_level": e, "min_float": f,
+                    "precision": m.precision, "recall": m.recall,
+                    "fired": m.fired, "tp": m.tp, "fp": m.fp,
+                })
+    results.sort(key=lambda r: (r["precision"], r["fired"]), reverse=True)
+    return results
+
+
 def walk_forward_split(
     samples: list[dict], cutoff_ts: str
 ) -> tuple[list[dict], list[dict]]:

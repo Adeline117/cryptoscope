@@ -170,6 +170,28 @@ def test_build_outcomes_from_scorecard(tmp_path, monkeypatch):
     assert outs["0xdud"] == 0.5          # 1.0 / 2.0 — loser kept in denominator
 
 
+def test_sweep_thresholds():
+    def feat(gap, eff):
+        return {"gap_series": gap, "effective_series": eff,
+                "float_active": 0.6, "security_passed": True}
+    samples = [
+        {"timestamp": "2026-05-01", "features": feat([2, 5, 9, 12, 14], [20, 28, 34, 38, 40]), "max_return": 5.0},
+        {"timestamp": "2026-05-02", "features": feat([5, 5, 5, 5, 5], [10, 10, 10, 10, 10]), "max_return": 0.5},
+    ]
+    res = wf.sweep_thresholds(samples, cutoff_ts="2026-04-30")
+    assert len(res) > 1
+    # results sorted best-first; each row carries thresholds + metrics
+    assert "min_gap_slope" in res[0] and "precision" in res[0]
+    assert res == sorted(res, key=lambda r: (r["precision"], r["fired"]), reverse=True)
+
+
+def test_watch_tokens_loader():
+    from src.pipeline.accumulation_pipeline import _load_watch_tokens
+
+    # The shipped config is an empty template → returns a list (no crash).
+    assert isinstance(_load_watch_tokens(), list)
+
+
 def test_survivorship_warning():
     # All samples "launched" → survivor-heavy → warn.
     samples = [

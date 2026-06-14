@@ -74,24 +74,65 @@ class _UnionFind:
             self.parent[ra] = rb
 
 
+def _root_funder(addr: str, funders: dict[str, str], exclude: set[str], max_depth: int = 4) -> str | None:
+    """Follow the funding chain up to its root (stopping at CEX/unknown).
+
+    Catches the 'fresh wallet funded by another fresh wallet' pattern: even when
+    each hop differs, addresses sharing a deeper common ancestor merge.
+    """
+    seen = set()
+    cur = _norm(addr)
+    root = None
+    for _ in range(max_depth):
+        f = funders.get(cur) or funders.get(addr)
+        if not f:
+            break
+        fl = _norm(f)
+        if fl in exclude or fl in seen:
+            break
+        seen.add(fl)
+        root = fl
+        cur = fl
+    return root
+
+
+def _similar_balance_groups(
+    balances: dict[str, float], min_members: int = 3, sig: int = 3
+) -> list[list[str]]:
+    """Group addresses whose balances are near-identical (a split-position tell).
+
+    Buckets by balance rounded to `sig` significant figures; a bucket with
+    >= min_members non-trivial equal balances is very unlikely by chance.
+    """
+    import math
+
+    buckets: dict[float, list[str]] = {}
+    for addr, bal in balances.items():
+        if not bal or bal <= 0:
+            continue
+        # round to `sig` significant figures
+        digits = sig - int(math.floor(math.log10(abs(bal)))) - 1
+        key = round(bal, digits)
+        buckets.setdefault(key, []).append(_norm(addr))
+    return [members for members in buckets.values() if len(members) >= min_members]
+
+
 def cluster_addresses(
     addresses: Iterable[str],
     funders: dict[str, str] | None = None,
     co_buy_groups: list[list[str]] | None = None,
     exclude: set[str] | None = None,
+    balances: dict[str, float] | None = None,
 ) -> dict[str, str]:
     """Cluster addresses into entities via union-find over heuristic edges.
 
-    Args:
-        addresses: all addresses under consideration (lowercased internally).
-        funders: address -> funder address. Addresses sharing a funder merge.
-        co_buy_groups: lists of addresses that co-bought in the same window;
-            each group merges together.
-        exclude: addresses to keep as singletons (e.g. CEX/MM). Defaults to
-            known exchange addresses.
-
-    Returns:
-        address -> entity_id (the union-find root).
+    Edge types (each a "same entity" signal):
+      1. Common funder + funder-chain root — addresses funded from the same
+         source, even several hops deep.
+      2. Temporal co-acquisition — addresses that received the token together.
+      3. Similar balance — clusters of near-identical non-trivial balances
+         (operators split a position into equal chunks).
+    CEX/MM addresses (`exclude`) are kept as singletons — custodial noise.
     """
     if exclude is None:
         exclude = _exchange_addresses()
@@ -102,24 +143,34 @@ def cluster_addresses(
     for a in addrs:
         uf.find(a)  # ensure present
 
-    # Edge type 1: common funder (skip excluded addresses).
+    # Edge type 1: shared root funder (chain-aware, skip excluded addresses).
     if funders:
-        by_funder: dict[str, list[str]] = {}
-        for addr, funder in funders.items():
-            al, fl = _norm(addr), _norm(funder or "")
-            if not fl or al in exclude or fl in exclude:
+        by_root: dict[str, list[str]] = {}
+        for addr in funders:
+            al = _norm(addr)
+            if al in exclude:
                 continue
-            by_funder.setdefault(fl, []).append(al)
-        for group in by_funder.values():
+            root = _root_funder(addr, funders, exclude)
+            if root and root not in exclude:
+                by_root.setdefault(root, []).append(al)
+        for group in by_root.values():
             for other in group[1:]:
                 uf.union(group[0], other)
 
-    # Edge type 2: temporal co-buying.
+    # Edge type 2: temporal co-acquisition.
     if co_buy_groups:
         for group in co_buy_groups:
             members = [_norm(a) for a in group if _norm(a) not in exclude]
             for other in members[1:]:
                 uf.union(members[0], other)
+
+    # Edge type 3: similar-balance split positions.
+    if balances:
+        for group in _similar_balance_groups(
+            {a: b for a, b in balances.items() if _norm(a) not in exclude}
+        ):
+            for other in group[1:]:
+                uf.union(group[0], other)
 
     return {a: uf.find(a) for a in addrs if a not in exclude}
 
@@ -158,9 +209,10 @@ def effective_concentration(
     addr_bal = sorted((h["balance"] for h in pos), reverse=True)
     nominal_top = round(sum(addr_bal[:top_n]) / total * 100, 4)
 
-    # Effective: cluster, then top-N by entity.
+    # Effective: cluster (incl. similar-balance split detection), then top-N.
+    bal_map = {h["address"]: h["balance"] for h in pos}
     mapping = cluster_addresses(
-        (h["address"] for h in pos), funders, co_buy_groups, exclude
+        (h["address"] for h in pos), funders, co_buy_groups, exclude, balances=bal_map
     )
     excluded = set(h["address"] for h in pos) - set(mapping)
     entity_bal: dict[str, float] = {}

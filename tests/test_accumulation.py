@@ -92,6 +92,37 @@ def test_effective_concentration_empty():
     assert m["concentration_gap"] == 0.0 and m["entity_count"] == 0
 
 
+def test_cluster_root_funder_chain():
+    # a<-b<-c and d<-c → a, b, d share root funder c
+    from src.onchain.entity_clustering import cluster_addresses
+
+    funders = {"0xa": "0xb", "0xb": "0xc", "0xd": "0xc"}
+    m = cluster_addresses(["0xa", "0xb", "0xd"], funders=funders, exclude=set())
+    assert m["0xa"] == m["0xb"] == m["0xd"]
+
+
+def test_cluster_similar_balance():
+    from src.onchain.entity_clustering import _similar_balance_groups, cluster_addresses
+
+    bals = {f"0x{i:040x}": 1000.0 for i in range(4)}
+    bals["0xother"] = 37.0
+    groups = _similar_balance_groups(bals)
+    assert any(len(g) >= 4 for g in groups)
+
+    m = cluster_addresses(list(bals), balances=bals, exclude=set())
+    roots = {m[f"0x{i:040x}"] for i in range(4)}
+    assert len(roots) == 1  # the 4 equal-balance马甲 merge into one entity
+
+
+def test_effective_concentration_catches_split_position():
+    # 5 wallets each holding 20 (looks spread) — equal balances → one entity.
+    holders = [{"address": f"0x{i:040x}", "balance": 20} for i in range(5)]
+    holders += [{"address": f"0xreal{i}", "balance": 3} for i in range(20)]
+    m = effective_concentration(holders, top_n=1)
+    assert m["effective_top_n_pct"] > m["nominal_top_n_pct"]
+    assert m["concentration_gap"] > 0
+
+
 # --------------------------------------------------------------------------
 # accumulation_divergence signal
 # --------------------------------------------------------------------------
