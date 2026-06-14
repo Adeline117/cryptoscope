@@ -19,8 +19,12 @@ from datetime import datetime, timedelta, timezone
 import structlog
 
 from src.onchain import holder_snapshot as hs
+from src.onchain import watchlist
 from src.onchain.entity_clustering import effective_concentration
-from src.signals.accumulation_divergence import AccumulationDivergenceSignal
+from src.signals.accumulation_divergence import (
+    AccumulationDivergenceSignal,
+    is_decelerating,
+)
 
 logger = structlog.get_logger()
 
@@ -163,6 +167,16 @@ async def run_accumulation_pipeline(send: bool = True) -> dict:
         eff_top = latest.get("effective_top_n_pct", 0)
         float_active = max(0.0, min(1.0, 1 - eff_top / 100))
         c["nominal_top_n_pct"] = latest.get("nominal_top_n_pct")
+
+        # Stage 1→2 bridge: near-saturation tokens (high effective concentration
+        # AND decelerating accumulation) go on the narrow watchlist that Stage 2
+        # monitors closely — even if the full divergence signal doesn't fire yet.
+        if (eff_top >= AccumulationDivergenceSignal.MIN_EFFECTIVE_LEVEL
+                and is_decelerating(series["effective_series"])):
+            try:
+                watchlist.add_to_watchlist(addr, chain, eff_top, symbol=c.get("symbol", ""))
+            except Exception as e:
+                logger.debug("watchlist_add_failed", address=addr, error=str(e))
 
         market_data = {
             "effective_series": series["effective_series"],

@@ -72,6 +72,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="二级妖币 Exit Monitor (distribution → exit)",
     )
 
+    # Stage 2 launch detector — poll the narrow watchlist every 5 minutes
+    scheduler.add_job(
+        _run_stage2,
+        CronTrigger(minute="*/5"),
+        id="stage2_launch_detector",
+        name="二级妖币 Stage 2 Launch Detector (watchlist poll)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -251,6 +259,14 @@ async def _run_exit_monitor():
 
     result = await run_exit_monitor()
     logger.info("exit_monitor_done", **result)
+
+
+async def _run_stage2():
+    logger.info("scheduled_stage2_detector")
+    from src.pipeline.stage2_detector import run_stage2_detector
+
+    result = await run_stage2_detector()
+    logger.info("stage2_detector_done", **result)
 
 
 async def _run_tier1_reports():

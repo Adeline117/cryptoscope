@@ -151,6 +151,25 @@ def test_evaluate_out_of_sample():
     assert m.survivorship_warning is False  # only 1/3 launched → healthy denominator
 
 
+def test_build_outcomes_from_scorecard(tmp_path, monkeypatch):
+    import src.trading.signal_scorecard as sc
+    from src.backtest import outcomes as oc
+
+    monkeypatch.setattr(sc, "DB_PATH", tmp_path / "scorecard.db")
+    # Record two accumulation signals with entry prices + token_address metadata.
+    sc.record_signal("accumulation_divergence", "WIN", "ethereum", "LONG", 80,
+                     entry_price=1.0, metadata={"token_address": "0xwin"})
+    sc.record_signal("accumulation_divergence", "DUD", "ethereum", "LONG", 70,
+                     entry_price=2.0, metadata={"token_address": "0xdud"})
+
+    prices = {"0xwin": 3.0, "0xdud": 1.0}  # win → 3x, dud → 0.5x (a loser)
+    outs = oc.build_outcomes_from_scorecard(
+        "accumulation_divergence", fetch_price=lambda t, c: prices.get(t)
+    )
+    assert outs["0xwin"] == 3.0          # 3.0 / 1.0
+    assert outs["0xdud"] == 0.5          # 1.0 / 2.0 — loser kept in denominator
+
+
 def test_survivorship_warning():
     # All samples "launched" → survivor-heavy → warn.
     samples = [
