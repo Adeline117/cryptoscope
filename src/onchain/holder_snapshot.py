@@ -255,52 +255,141 @@ def _rpc(url: str, method: str, params: list, timeout: int = 15) -> dict:
         return json.loads(resp.read().decode())
 
 
-def fetch_holders_solana(mint: str, timeout: int = 15) -> list[dict[str, Any]]:
-    """Fetch top token holders on Solana via `getTokenLargestAccounts`.
+def _rpc_das(url: str, method: str, params: dict, timeout: int = 20) -> dict:
+    """Helius DAS RPC (params is an object, not a list)."""
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+    req = urllib.request.Request(
+        url, data=payload.encode(), headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode())
 
-    Returns a list of {address (owner), balance} for the largest accounts.
-    Best-effort: returns [] on any failure.
+
+def fetch_holders_solana(mint: str, max_pages: int = 10, timeout: int = 20) -> list[dict[str, Any]]:
+    """Fetch the FULL Solana holder set via Helius DAS `getTokenAccounts`.
+
+    Paginates all token accounts (1000/page) and aggregates by OWNER (one owner
+    may hold many token accounts). Raw amounts are fine for concentration since
+    every account shares the mint's decimals. Caps at `max_pages` (~10k accounts)
+    — beyond that is dust that doesn't move concentration.
+
+    Falls back to the top-20 `getTokenLargestAccounts` only if Helius is absent.
+    Best-effort: returns [] on total failure.
     """
     rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    has_helius = "helius" in rpc
+
+    if has_helius:
+        owner_bal: dict[str, float] = {}
+        try:
+            for p in range(1, max_pages + 1):
+                data = _rpc_das(
+                    rpc, "getTokenAccounts",
+                    {"mint": mint, "page": p, "limit": 1000}, timeout,
+                )
+                accts = data.get("result", {}).get("token_accounts", [])
+                if not accts:
+                    break
+                for a in accts:
+                    owner = a.get("owner")
+                    amt = float(a.get("amount") or 0)
+                    if owner and amt > 0:
+                        owner_bal[owner] = owner_bal.get(owner, 0.0) + amt
+                if len(accts) < 1000:
+                    break
+            if owner_bal:
+                return [{"address": o, "balance": b} for o, b in owner_bal.items()]
+        except Exception as e:
+            logger.warning("solana_das_fetch_failed", mint=mint, error=str(e))
+            # fall through to the largest-accounts fallback
+
+    # Fallback: top-20 token accounts (coarse, but better than nothing).
     try:
         data = _rpc(rpc, "getTokenLargestAccounts", [mint], timeout)
         accounts = data.get("result", {}).get("value", [])
     except Exception as e:
         logger.warning("solana_holders_fetch_failed", mint=mint, error=str(e))
         return []
-
     holders: list[dict[str, Any]] = []
     for acc in accounts:
-        # `address` here is the token account; resolve to owner for clustering.
-        token_account = acc.get("address", "")
         amount = float(acc.get("uiAmount") or 0)
-        if amount <= 0:
-            continue
-        owner = token_account
-        try:
-            info = _rpc(rpc, "getAccountInfo", [token_account, {"encoding": "jsonParsed"}], timeout)
-            parsed = (
-                info.get("result", {}).get("value", {})
-                .get("data", {}).get("parsed", {}).get("info", {})
-            )
-            owner = parsed.get("owner", token_account)
-        except Exception:
-            pass  # fall back to token-account address; non-fatal for metrics
-        holders.append({"address": owner, "balance": amount})
+        if amount > 0:
+            holders.append({"address": acc.get("address", ""), "balance": amount})
     return holders
 
 
+# chain → Alchemy network subdomain
+_ALCHEMY_NET = {
+    1: "eth-mainnet", 8453: "base-mainnet", 42161: "arb-mainnet",
+    10: "opt-mainnet", 137: "polygon-mainnet", 56: "bnb-mainnet",
+}
+
+
 def fetch_holders_evm(
-    token: str, chain_id: int = 1, lookback_blocks: int = 50_000, timeout: int = 20
+    token: str, chain_id: int = 1, max_pages: int = 25, timeout: int = 25
 ) -> list[dict[str, Any]]:
-    """Approximate EVM holder balances by replaying recent ERC-20 transfers.
+    """Reconstruct EVM holder balances from FULL transfer history via Alchemy.
 
-    Uses Etherscan V2 `tokentx` over a bounded recent window and nets transfers
-    per address. This captures the *active* holder set (the relevant population
-    for accumulation detection), not the full historical holder list.
-
-    Best-effort: returns [] on any failure.
+    Paginates `alchemy_getAssetTransfers` (all ERC-20 transfers of the token,
+    1000/page, value already decimal-adjusted) and nets per address — the real
+    holder set, not just recent transactors. Caps at `max_pages` for very large
+    tokens (logged when truncated). Falls back to Etherscan recent-window if no
+    Alchemy key. Best-effort: returns [] on total failure.
     """
+    key = os.environ.get("ALCHEMY_API_KEY", "")
+    net = _ALCHEMY_NET.get(chain_id)
+    if key and net:
+        balances: dict[str, float] = {}
+        page_key = None
+        truncated = False
+        try:
+            for p in range(max_pages):
+                params = {
+                    "fromBlock": "0x0", "toBlock": "latest",
+                    "contractAddresses": [token], "category": ["erc20"],
+                    "withMetadata": False, "maxCount": "0x3e8", "order": "asc",
+                }
+                if page_key:
+                    params["pageKey"] = page_key
+                data = _rpc_das(
+                    f"https://{net}.g.alchemy.com/v2/{key}",
+                    "alchemy_getAssetTransfers", [params], timeout,
+                )
+                result = data.get("result", {})
+                for t in result.get("transfers", []):
+                    try:
+                        amount = float(t.get("value") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    frm = (t.get("from") or "").lower()
+                    to = (t.get("to") or "").lower()
+                    if frm:
+                        balances[frm] = balances.get(frm, 0.0) - amount
+                    if to:
+                        balances[to] = balances.get(to, 0.0) + amount
+                page_key = result.get("pageKey")
+                if not page_key:
+                    break
+            else:
+                truncated = True
+            if truncated:
+                logger.info("evm_holders_truncated", token=token, max_pages=max_pages)
+            zero = "0x0000000000000000000000000000000000000000"
+            holders = [
+                {"address": a, "balance": round(b, 8)}
+                for a, b in balances.items() if b > 1e-9 and a != zero
+            ]
+            if holders:
+                return holders
+        except Exception as e:
+            logger.warning("evm_alchemy_fetch_failed", token=token, error=str(e))
+            # fall through to Etherscan
+
+    return _fetch_holders_evm_etherscan(token, chain_id, timeout)
+
+
+def _fetch_holders_evm_etherscan(token: str, chain_id: int, timeout: int = 20) -> list[dict[str, Any]]:
+    """Fallback: approximate balances from a recent Etherscan tokentx window."""
     key = os.environ.get("ETHERSCAN_API_KEY", "")
     if not key:
         return []
