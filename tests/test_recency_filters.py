@@ -67,3 +67,14 @@ def test_snapshot_history_since_window(tmp_path):
     windowed = hs.get_holders_history("TKN", "ethereum", since=cutoff, db_path=db)
     assert len(windowed) == 1  # stale 3-month-old snapshot excluded
     assert windowed[0][1][0]["balance"] == 200
+
+
+def test_health_collect_and_format():
+    from src.ops import health
+
+    stats = health.collect_stats()
+    assert "snapshots" in stats and "signals" in stats and "scheduler" in stats
+    report = health.format_report(stats)
+    assert "健康看板" in report
+    tg = health.format_telegram(stats)
+    assert "系统健康" in tg

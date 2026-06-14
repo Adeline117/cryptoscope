@@ -80,6 +80,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="二级妖币 Stage 2 Launch Detector (watchlist poll)",
     )
 
+    # Daily system-health summary to Telegram
+    scheduler.add_job(
+        _run_health_summary,
+        CronTrigger(hour=9, minute=0),
+        id="health_summary",
+        name="Daily System Health Summary",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -267,6 +275,13 @@ async def _run_stage2():
 
     result = await run_stage2_detector()
     logger.info("stage2_detector_done", **result)
+
+
+async def _run_health_summary():
+    logger.info("scheduled_health_summary")
+    from src.ops.health import send_health_summary
+
+    await send_health_summary()
 
 
 async def _run_tier1_reports():
