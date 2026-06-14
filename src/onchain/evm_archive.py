@@ -37,7 +37,8 @@ def _default_rpcs(chain: str) -> list[str]:
     defaults = {
         "ethereum": [f"https://eth-mainnet.g.alchemy.com/v2/{key}"] if key else [],
         "base": ["https://mainnet.base.org", "https://base.publicnode.com"],
-        "bsc": ["https://bsc-dataseed.binance.org", "https://bsc.publicnode.com"],
+        # Free keyless BSC archive endpoints (verified to serve historical state).
+        "bsc": ["https://56.rpc.thirdweb.com", "https://bsc-mainnet.public.blastapi.io"],
         "arbitrum": ["https://arb1.arbitrum.io/rpc"],
         "optimism": ["https://mainnet.optimism.io"],
         "polygon": ["https://polygon-rpc.com"],
