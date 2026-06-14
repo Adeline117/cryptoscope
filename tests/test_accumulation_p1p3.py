@@ -219,3 +219,17 @@ def test_build_samples_from_snapshots(tmp_path):
     s = samples[0]
     assert s["token"] == "TKN" and s["max_return"] == 3.0
     assert len(s["features"]["effective_series"]) == 2
+
+
+def test_evm_archive_rpc_config(monkeypatch):
+    from src.onchain.evm_archive import ArchiveRPC, _default_rpcs
+
+    monkeypatch.setenv("RPC_BSC", "https://my-archive.example, https://backup.example")
+    assert _default_rpcs("bsc") == ["https://my-archive.example", "https://backup.example"]
+    rpc = ArchiveRPC("bsc")
+    assert rpc.available() is True
+
+    monkeypatch.delenv("RPC_BSC", raising=False)
+    monkeypatch.delenv("ALCHEMY_API_KEY", raising=False)
+    # ethereum needs the Alchemy key for its default; without it, empty pool
+    assert ArchiveRPC("ethereum").available() is False

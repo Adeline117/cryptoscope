@@ -1,0 +1,133 @@
+"""Multi-chain archive reconstruction — our own, RPC-pluggable.
+
+The key to "cover all chains ourselves" without Arkham: reconstruct any address
+set's holding of any token AT ANY PAST BLOCK via `eth_call balanceOf` against an
+archive RPC. This sidesteps Alchemy/Etherscan paid multichain tiers — it works
+on ANY chain for which we have a working archive RPC.
+
+Per-chain RPC is configured via env (RPC_<CHAIN>) with sensible defaults; ETH
+uses the Alchemy key we already have (full archive). Chains whose free public
+RPCs lack archive (e.g. BSC in practice) just need one archive RPC URL dropped
+into the env — a ~$49/mo multichain plan covers everything, vs $390 for Arkham.
+
+This is the foundation of the operator-curve and full-holder reconstruction.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.request
+
+import structlog
+
+logger = structlog.get_logger()
+
+BALANCE_OF = "0x70a08231"  # balanceOf(address) selector
+
+
+def _default_rpcs(chain: str) -> list[str]:
+    """RPC pool per chain. Env RPC_<CHAIN> (comma-separated) takes priority."""
+    env = os.environ.get(f"RPC_{chain.upper()}", "")
+    pool = [u.strip() for u in env.split(",") if u.strip()]
+    if pool:
+        return pool
+    key = os.environ.get("ALCHEMY_API_KEY", "")
+    defaults = {
+        "ethereum": [f"https://eth-mainnet.g.alchemy.com/v2/{key}"] if key else [],
+        "base": ["https://mainnet.base.org", "https://base.publicnode.com"],
+        "bsc": ["https://bsc-dataseed.binance.org", "https://bsc.publicnode.com"],
+        "arbitrum": ["https://arb1.arbitrum.io/rpc"],
+        "optimism": ["https://mainnet.optimism.io"],
+        "polygon": ["https://polygon-rpc.com"],
+    }
+    return defaults.get(chain, [])
+
+
+class ArchiveRPC:
+    """A small archive-RPC client with a fallback pool."""
+
+    def __init__(self, chain: str):
+        self.chain = chain
+        self.rpcs = _default_rpcs(chain)
+        self._idx = 0
+
+    def available(self) -> bool:
+        return bool(self.rpcs)
+
+    def _call(self, method: str, params: list, timeout: int = 15) -> dict:
+        last_err = None
+        for _ in range(len(self.rpcs)):
+            rpc = self.rpcs[self._idx % len(self.rpcs)]
+            try:
+                req = urllib.request.Request(
+                    rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
+                                          "params": params}).encode(),
+                    headers={"Content-Type": "application/json", "User-Agent": "CryptoScope/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = json.loads(resp.read().decode())
+                if "error" not in data:
+                    return data
+                last_err = data["error"]
+            except Exception as e:
+                last_err = e
+            self._idx += 1  # rotate on failure
+        raise RuntimeError(f"all RPCs failed for {self.chain}: {last_err}")
+
+    def latest_block(self) -> int:
+        return int(self._call("eth_blockNumber", [])["result"], 16)
+
+    def balance_of(self, token: str, holder: str, block: int | str = "latest") -> float | None:
+        data = BALANCE_OF + holder[2:].lower().rjust(64, "0")
+        blk = block if isinstance(block, str) else hex(block)
+        try:
+            r = self._call("eth_call", [{"to": token, "data": data}, blk])
+            res = r.get("result")
+            return int(res, 16) / 1e18 if res and res != "0x" else 0.0
+        except Exception as e:
+            logger.debug("balance_of_failed", token=token, holder=holder, error=str(e))
+            return None
+
+
+def combined_balance_at(token: str, addresses: list[str], chain: str,
+                        block: int, rpc: ArchiveRPC | None = None) -> float:
+    """Sum balanceOf for an address set at a given block (one entity's holding)."""
+    rpc = rpc or ArchiveRPC(chain)
+    total = 0.0
+    for a in addresses:
+        b = rpc.balance_of(token, a, block)
+        if b:
+            total += b
+    return total
+
+
+def operator_curve_evm(token: str, addresses: list[str], chain: str,
+                       from_block: int, to_block: int | None = None,
+                       n_points: int = 12, pause: float = 0.05) -> dict | None:
+    """Reconstruct an operator cluster's combined holding over a block range.
+
+    Samples the cluster's summed balance at N evenly-spaced blocks via archive
+    eth_call. Works on any chain with a configured archive RPC. Returns
+    {block_series, balance_series, n_addresses} or None.
+    """
+    rpc = ArchiveRPC(chain)
+    if not rpc.available():
+        logger.warning("no_archive_rpc", chain=chain)
+        return None
+    if to_block is None:
+        to_block = rpc.latest_block()
+    if to_block <= from_block:
+        return None
+
+    step = (to_block - from_block) / n_points
+    blocks = [int(from_block + step * i) for i in range(1, n_points + 1)]
+    balance_series = []
+    for blk in blocks:
+        total = combined_balance_at(token, addresses, chain, blk, rpc=rpc)
+        balance_series.append(round(total, 4))
+        if pause:
+            time.sleep(pause)
+    return {"block_series": blocks, "balance_series": balance_series,
+            "n_addresses": len(addresses)}
