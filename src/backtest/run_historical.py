@@ -67,7 +67,7 @@ def build_samples(limit: int = 25) -> list[dict]:
                   f"eff_series={[round(x) for x in s['features']['effective_series']]}")
         else:
             print(f"  [{i+1}/{len(targets)}] {sym:12} {t['chain']:8} — skipped (no data)")
-        time.sleep(0.3)  # be gentle on rate limits
+        time.sleep(2.5)  # GeckoTerminal free-tier rate limit
     SAMPLES_FILE.write_text(json.dumps(samples, indent=2))
     return samples
 

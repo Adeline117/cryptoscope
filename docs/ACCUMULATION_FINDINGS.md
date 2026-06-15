@@ -1,0 +1,61 @@
+# 二级妖币吸筹检测 — 实证结论与工作流
+
+本文件记录**用真实数据验证过**的结论(不是假设),指导这套系统怎么用、别在哪条路上浪费时间。
+
+## 核心结论(数据证明)
+
+> **没有实体聚类(认出庄的马甲),原始链上集中度没有预测力。**
+> 信号的命脉不是"看链上",是"**认出谁是庄**"。
+
+两个实证对照:
+
+| 实验 | 输入 | 结果 |
+|------|------|------|
+| **SIREN(成功)** | Arkham 的"SIREN控盘者"地址簇(131 个) | 清晰重建出 0 → 109M → 139M 峰值 → 派发 的吸筹曲线,判定 `accumulation_then_distribution` |
+| **ETH 自动回测(阴性)** | 8 个 ETH token 的**原始 holder 集中度**(无实体聚类) | 背离信号**所有阈值下 0 次触发**;序列多为平/降(自然分发) |
+
+ETH 实验为什么 0 触发:
+1. token 生命周期前 60% 是**发射+分发期**,集中度本来就降,不是吸筹。
+2. 历史重建里**没做实体聚类** → 有效集中度≈名义 → 背离 gap≈0。
+
+**SIREN 成功 100% 靠 Arkham 那份地址簇。** 这是被数据证明的命脉。
+
+## 推荐工作流(被验证能用的那条)
+
+```
+1. 在 Arkham 免费网页找目标币的"控盘者"实体 → 手动复制地址簇
+2. 存成 data/research/<token>.json:
+   {"token": "0x...", "chain": "bsc", "symbol": "X", "operators": ["0x...", ...]}
+3. python -m src.backtest.run_operator_curve data/research/<token>.json
+   → 自动定位吸筹区间 + 重建合计持仓曲线 + 判定
+```
+
+判定三态:
+- `accumulation` — 正在吸筹(从~0 涨到峰值,可能还在进行)
+- `accumulation_then_distribution` — 完整妖币周期(吸筹→拉盘→派发)
+- `no_accumulation` — 平/降,没有吸筹特征
+
+## 不要走的路(已证伪)
+
+- ❌ **全自动扫原始链上集中度找庄** — ETH 实验 0 信号,自然分发主导,没有预测力。
+- ❌ **为 Arkham API 付 $390** — 庄簇从免费网页手动导即可;真聚类的价值用免费网页 + 我们的重建就能拿到。
+
+## 数据访问现实(全部免费)
+
+| 链 | 全量 holder | 历史重建(balanceOf@block) | 状态 |
+|----|------------|--------------------------|------|
+| Solana | Helius DAS | tx replay (Helius) | ✅ 免费 |
+| Ethereum | Alchemy getAssetTransfers | Alchemy archive | ✅ 免费 |
+| **BSC** | — | **thirdweb / blastapi 免费 keyless archive** | ✅ 免费(突破点) |
+| Base/Arb/Op | — | 需配 RPC_<chain>(部分免费 archive 可用) | ⚠️ 可插拔 |
+
+BSC 曾以为要付费,实测 `56.rpc.thirdweb.com` 和 `bsc-mainnet.public.blastapi.io`
+提供免费 keyless archive,历史 balanceOf 可取。**全链 $0 成立。**
+
+## 仍待做(需要时间或人工输入,非代码阻塞)
+
+1. **对照组证伪**:跑几个"横死盘"的庄簇(从 Arkham 导),验证判定能区分赢家 vs 横死。
+   单个赢家(SIREN)只证明"吸筹可见",不证明"能预测性区分"。
+2. **分辨率**:SIREN 曲线是大台阶(0→109M 一跳),放大可看是否渐进吸筹。
+3. **可选-全自动**:在重建里接 funder 解析做实体聚类,才可能脱离 Arkham 簇全自动跑;
+   但 ETH 实验显示这比直接拿 Arkham 簇贵且弱,优先级低。

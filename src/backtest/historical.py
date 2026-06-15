@@ -253,8 +253,18 @@ def get_max_return(token: str, chain: str, timeout: int = 15) -> float | None:
         if not highs or not opens:
             return None
         ath = max(highs)
-        early = opens[-1] or min(o for o in opens if o > 0)
-        return round(ath / early, 4) if early > 0 else None
+        # Robust entry reference: median of the EARLIEST closes (GT lists newest
+        # first, so the tail is oldest). Avoids the near-zero first-candle artifact
+        # that produces absurd 1000x+ returns. Cap to a sane ceiling.
+        closes = [float(c[4]) for c in candles if c[4]]
+        early_closes = [c for c in closes[-7:] if c > 0]
+        if not early_closes:
+            return None
+        early_closes.sort()
+        early = early_closes[len(early_closes) // 2]  # median of earliest week
+        if early <= 0:
+            return None
+        return round(min(ath / early, 1000.0), 4)
     except Exception as e:
         logger.debug("max_return_failed", token=token, error=str(e))
         return None
