@@ -77,6 +77,31 @@ def collect_stats() -> dict:
     funders_cached = _scalar("funder_graph.db", "SELECT COUNT(*) FROM funders")
     funders_resolved = _scalar("funder_graph.db", "SELECT COUNT(*) FROM funders WHERE funder IS NOT NULL")
 
+    # Screener persistence: tokens tracked + the most-recurring candidates
+    screener_tracked = _scalar("screener_state.db", "SELECT COUNT(*) FROM screener_state")
+    recurring = _rows(
+        "screener_state.db",
+        "SELECT token, chain, appearances FROM screener_state "
+        "WHERE appearances >= 3 ORDER BY appearances DESC LIMIT 8",
+    )
+    top_recurring = [{"token": t, "chain": c, "appearances": n} for t, c, n in recurring]
+
+    # Labels accumulated for validation/training
+    from pathlib import Path
+    labels_dir = Path("data/research/labels")
+    label_files = [f for f in labels_dir.glob("*.json") if not f.name.startswith("_")] if labels_dir.exists() else []
+    labels_pump = labels_dud = 0
+    for f in label_files:
+        try:
+            import json as _j
+            o = _j.loads(f.read_text())
+            if o.get("outcome") == "pump":
+                labels_pump += 1
+            elif o.get("outcome") == "dud":
+                labels_dud += 1
+        except Exception:
+            pass
+
     # API keys
     keys = {
         k: bool(os.environ.get(k))
@@ -91,6 +116,9 @@ def collect_stats() -> dict:
         "signals": {"by_type": signals, "pending_price_checks": sig_pending},
         "watchlist_active": watch_active,
         "funders": {"cached": funders_cached, "resolved": funders_resolved},
+        "screener": {"tracked": screener_tracked, "top_recurring": top_recurring},
+        "labels": {"pump": labels_pump, "dud": labels_dud,
+                   "ready_for_calibration": labels_pump >= 5 and labels_dud >= 5},
         "api_keys": keys,
         "scheduler": _scheduler_status(),
     }
@@ -138,6 +166,19 @@ def format_report(stats: dict) -> str:
     f = s["funders"]
     L.append(f"🔗 funder 缓存: {f['cached']} (已解析 {f['resolved']})")
     L.append("")
+    scr = s.get("screener", {})
+    L.append(f"🔎 筛选器追踪 token: {scr.get('tracked', 0)}")
+    if scr.get("top_recurring"):
+        L.append("  持续出现的候选(越多轮越可信):")
+        for r in scr["top_recurring"]:
+            L.append(f"    {r['token'][:16]}… [{r['chain']}] × {r['appearances']}轮")
+    else:
+        L.append("  (暂无持续≥3轮的候选)")
+    lab = s.get("labels", {})
+    L.append("")
+    L.append(f"🏷  标签: 拉盘 {lab.get('pump',0)} / 横死 {lab.get('dud',0)}"
+             + ("  ✅可校准权重" if lab.get("ready_for_calibration") else "  (各需≥5才能校准)"))
+    L.append("")
     L.append("🔑 API keys")
     L.append("  " + "  ".join(f"{k.split('_')[0]}{'✅' if v else '❌'}" for k, v in s["api_keys"].items()))
     L.append("=" * 50)
@@ -155,9 +196,10 @@ def format_telegram(stats: dict) -> str:
         f"   可出信号(≥4快照): <b>{snap['signal_ready_tokens']}</b>\n"
         f"🎯 累计信号 {sigs} 条\n"
         f"👁 观察名单 {s['watchlist_active']}\n"
-        f"🔗 funder 缓存 {s['funders']['cached']}\n"
+        f"🔎 筛选器追踪 {s.get('screener',{}).get('tracked',0)} · 持续候选 {len(s.get('screener',{}).get('top_recurring',[]))}\n"
+        f"🏷 标签 拉盘{s.get('labels',{}).get('pump',0)}/横死{s.get('labels',{}).get('dud',0)}\n"
         f"调度器 {'✅' if s['scheduler'].get('running') else '❌'}\n"
-        f"<i>积累中——快照够 4 个/币后背离信号开始触发</i>"
+        f"<i>积累中——持续多轮的候选最值得查 Arkham</i>"
     )
 
 
