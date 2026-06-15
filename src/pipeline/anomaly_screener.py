@@ -161,14 +161,39 @@ def cex_outflow_signal(token: str, chain: str, lookback_blocks: int = 600_000) -
     return {"cex_change_pct": change_pct, "outflow": change_pct < -5}
 
 
-def holder_trend_signal(token: str, chain: str) -> dict | None:
-    """Holder-count trend — the strongest cheap on-chain accumulation signal.
+_SMART_SET_CACHE: dict[str, dict[str, int]] = {}
 
-    Snapshots current holders (Solana via Helius DAS = cheap; EVM bounded),
-    persists to holder_snapshots.db, and compares to prior snapshots. Holder
-    count RISING (more wallets acquiring) is real accumulation, orthogonal to
-    price. On first sight there's no history yet — it records and the trend
-    accrues over runs. Returns {holder_count, prior_count, rising} or None.
+
+def _smart_money_set(chain: str) -> dict[str, int]:
+    """Known smart-money wallets for a chain → {address(lower): tier}. Cached."""
+    if chain in _SMART_SET_CACHE:
+        return _SMART_SET_CACHE[chain]
+    out: dict[str, int] = {}
+    try:
+        import yaml
+        from src.config import CONFIG_DIR
+
+        data = yaml.safe_load((CONFIG_DIR / "smart_money_wallets.yaml").read_text()) or {}
+        norm = "ethereum" if chain in ("ethereum", "base", "bsc", "arbitrum", "optimism") else chain
+        for w in data.get("wallets", []):
+            wc = w.get("chain", "")
+            wc_norm = "ethereum" if wc in ("ethereum", "base", "bsc", "arbitrum", "optimism") else wc
+            if wc_norm == norm and w.get("address"):
+                addr = w["address"]
+                out[addr if norm == "solana" else addr.lower()] = w.get("tier", 3)
+    except Exception as e:
+        logger.debug("smart_set_load_failed", error=str(e))
+    _SMART_SET_CACHE[chain] = out
+    return out
+
+
+def onchain_enrich(token: str, chain: str) -> dict | None:
+    """Fetch holders ONCE and derive two signals (zero double-fetch):
+
+      1. Holder-count TREND vs snapshot history (rising = real accumulation).
+      2. SMART-MONEY presence — intersect the holder set with known smart-money
+         wallets. A proven tier-1/2 wallet holding the token is a strong tell,
+         and it's FREE (we already have the holder list).
     """
     try:
         from src.onchain import holder_snapshot as hs
@@ -176,19 +201,32 @@ def holder_trend_signal(token: str, chain: str) -> dict | None:
         return None
     try:
         prior = hs.get_snapshots(token, chain, limit=20)
-        snap = hs.snapshot_token(token, chain, source="screener")
-        if not snap:
+        if chain in ("solana", "sol"):
+            holders = hs.fetch_holders_solana(token)
+        else:
+            cid = {"ethereum": 1, "base": 8453, "bsc": 56, "arbitrum": 42161, "optimism": 10}.get(chain, 1)
+            holders = hs.fetch_holders_evm(token, chain_id=cid, max_pages=15)
+        if not holders:
             return None
-        count = snap.get("holder_count", 0)
+        hs.save_snapshot(token, chain, holders, source="screener")
+        count = len([h for h in holders if (h.get("balance") or 0) > 0])
+
+        # Smart-money intersection (free — reuses fetched holders).
+        smart = _smart_money_set(chain)
+        hit_addrs = [h["address"] for h in holders
+                     if (h["address"] if chain in ("solana", "sol") else str(h["address"]).lower()) in smart]
+        top_tier = min((smart[a if chain in ("solana", "sol") else a.lower()] for a in hit_addrs), default=None)
+
         prior_counts = [s.get("holder_count", 0) for s in prior if s.get("holder_count")]
-        if not prior_counts:
-            return {"holder_count": count, "prior_count": None, "rising": False}
-        base = prior_counts[0]
-        rising = base > 0 and count >= base * 1.05
-        return {"holder_count": count, "prior_count": base,
-                "change_pct": round((count - base) / max(base, 1) * 100, 1), "rising": rising}
+        base = prior_counts[0] if prior_counts else None
+        rising = bool(base and base > 0 and count >= base * 1.05)
+        return {
+            "holder_count": count, "prior_count": base, "rising": rising,
+            "change_pct": round((count - base) / max(base, 1) * 100, 1) if base else None,
+            "smart_hits": len(hit_addrs), "smart_top_tier": top_tier,
+        }
     except Exception as e:
-        logger.debug("holder_trend_failed", token=token, error=str(e))
+        logger.debug("onchain_enrich_failed", token=token, error=str(e))
         return None
 
 
@@ -235,17 +273,23 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
             c["notes"] += f" · CEX流出{cx['cex_change_pct']:+.0f}%"
             c["reasons"].append("cex_outflow")
             c["cex_outflow"] = cx["cex_change_pct"]
-        # Holder-count trend (strongest on-chain signal; Solana cheap). Bound to
-        # the top 8 + pause to respect Helius free-tier rate limits.
+        # On-chain enrich (holder trend + smart-money presence). Bound to top 8
+        # + pause to respect Helius free-tier rate limits.
         if i < 8:
             try:
-                ht = holder_trend_signal(c["address"], c["chain"])
+                oc = onchain_enrich(c["address"], c["chain"])
             except Exception:
-                ht = None
-            if ht and ht.get("rising"):
+                oc = None
+            if oc and oc.get("rising"):
                 c["score"] += 25
-                c["notes"] += f" · 持币人数+{ht.get('change_pct',0):.0f}%"
+                c["notes"] += f" · 持币人数+{oc.get('change_pct',0):.0f}%"
                 c["reasons"].append("holders_rising")
+            if oc and oc.get("smart_hits"):
+                tier = oc.get("smart_top_tier")
+                boost = 35 if tier == 1 else (25 if tier == 2 else 15)
+                c["score"] += boost
+                c["notes"] += f" · 🐳聪明钱{oc['smart_hits']}个(T{tier})"
+                c["reasons"].append("smart_money_holds")
             time.sleep(0.5)
         # Macro environment
         if macro_boost:

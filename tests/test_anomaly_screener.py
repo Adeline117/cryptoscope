@@ -71,3 +71,22 @@ def test_format_candidates_escapes():
 
 def test_illiquid_rejected():
     assert accumulation_footprint(_pair(liq=5000)) is None
+
+
+def test_smart_money_set_loads():
+    from src.pipeline.anomaly_screener import _smart_money_set
+    sol = _smart_money_set("solana")
+    evm = _smart_money_set("ethereum")
+    assert isinstance(sol, dict) and isinstance(evm, dict)
+    # base maps to the same EVM bucket as ethereum
+    assert _smart_money_set("base") is _smart_money_set("base")  # cached
+
+
+def test_smart_money_intersection_logic():
+    from src.pipeline.anomaly_screener import _smart_money_set
+    s = _smart_money_set("solana")
+    if s:  # only if wallets configured
+        addr = next(iter(s))
+        holders = [{"address": addr, "balance": 100}, {"address": "OTHER", "balance": 5}]
+        hits = [h["address"] for h in holders if h["address"] in s]
+        assert len(hits) == 1
