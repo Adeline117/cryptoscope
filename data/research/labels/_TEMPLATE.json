@@ -1,0 +1,13 @@
+{
+  "symbol": "SIREN",
+  "token": "0x997a58129890bbdA032231A52eD1ddC845fc18e1",
+  "chain": "bsc",
+  "outcome": "pump",
+  "max_return": 20,
+  "pump_note": "2026-03 拉盘, sub-$0.17 → $3.60",
+  "operators": [
+    "0x6cf5b47492F5d9d71D39cEf5896A69599386AC23",
+    "0x48bFF775F93F0f5FEd5bde5fc9474CB66B15dFf5"
+  ],
+  "_instructions": "每个币一个文件。从 Arkham 控盘者实体复制地址进 operators。outcome: pump(拉过) / dud(横死). chain: bsc/ethereum/solana/base. 删掉本说明行。"
+}
