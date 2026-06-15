@@ -95,9 +95,21 @@ def test_smart_money_intersection_logic():
 def test_liquidity_trend(tmp_path, monkeypatch):
     import src.config as cfg
     monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
-    from src.pipeline.anomaly_screener import liquidity_trend_signal
-    assert liquidity_trend_signal("0xT", "ethereum", 100000) is None  # first sight
-    sig = liquidity_trend_signal("0xT", "ethereum", 130000)           # +30%
-    assert sig and sig["rising"] is True
-    flat = liquidity_trend_signal("0xT", "ethereum", 131000)          # +0.7%
-    assert flat and flat["rising"] is False
+    from src.pipeline.anomaly_screener import track_state
+    assert track_state("0xT", "ethereum", 100000)["liq_change_pct"] is None  # first sight
+    sig = track_state("0xT", "ethereum", 130000)                              # +30%
+    assert sig["liq_rising"] is True
+    flat = track_state("0xT", "ethereum", 131000)                            # +0.7%
+    assert flat["liq_rising"] is False
+
+
+def test_persistence_tracking(tmp_path, monkeypatch):
+    import src.config as cfg
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    from src.pipeline.anomaly_screener import track_state
+    s1 = track_state("0xP", "ethereum", 100000)
+    assert s1["appearances"] == 1 and s1["recurring"] is False
+    track_state("0xP", "ethereum", 110000)
+    s3 = track_state("0xP", "ethereum", 130000)
+    assert s3["appearances"] == 3 and s3["recurring"] is True  # 3+ runs = sustained
+    assert s3["liq_rising"] is True  # liquidity grew across runs

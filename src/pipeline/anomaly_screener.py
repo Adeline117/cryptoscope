@@ -231,7 +231,7 @@ def onchain_enrich(token: str, chain: str) -> dict | None:
 
 
 def _state_db():
-    """Tiny SQLite to track per-token metrics across runs (liquidity trend)."""
+    """Per-token state across runs: liquidity trend + appearance persistence."""
     import sqlite3
     from src.config import DATA_DIR
 
@@ -240,39 +240,56 @@ def _state_db():
     conn = sqlite3.connect(str(path), timeout=10)
     conn.execute("PRAGMA busy_timeout=10000")
     conn.execute("""CREATE TABLE IF NOT EXISTS screener_state (
-        token TEXT, chain TEXT, ts TEXT, liquidity REAL,
+        token TEXT, chain TEXT, first_seen TEXT, last_seen TEXT,
+        appearances INTEGER DEFAULT 1, liquidity REAL,
         PRIMARY KEY (token, chain))""")
     return conn
 
 
-def liquidity_trend_signal(token: str, chain: str, current_liq: float) -> dict | None:
-    """Liquidity rising across runs = capital entering the pool (accumulation).
+def track_state(token: str, chain: str, current_liq: float) -> dict:
+    """Record this run's appearance and return persistence + liquidity trend.
 
-    Compares current liquidity to the value stored on the previous run, then
-    upserts. First sight has no prior → records only. Cheap (one local DB op)."""
+    Persistence: a token that shows the accumulation footprint across MANY runs
+    is real accumulation; a one-off is likely bot noise. Returns:
+      {appearances, recurring, liq_rising, liq_change_pct}
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
     try:
         conn = _state_db()
-        from datetime import datetime, timezone
         try:
             row = conn.execute(
-                "SELECT liquidity FROM screener_state WHERE token=? AND chain=?",
-                (token, chain),
+                "SELECT appearances, liquidity, first_seen FROM screener_state "
+                "WHERE token=? AND chain=?", (token, chain),
             ).fetchone()
-            conn.execute(
-                "INSERT OR REPLACE INTO screener_state (token, chain, ts, liquidity) VALUES (?,?,?,?)",
-                (token, chain, datetime.now(timezone.utc).isoformat(), current_liq),
-            )
+            if row:
+                appearances = (row[0] or 0) + 1
+                conn.execute(
+                    "UPDATE screener_state SET last_seen=?, appearances=?, liquidity=? "
+                    "WHERE token=? AND chain=?",
+                    (now, appearances, current_liq, token, chain),
+                )
+                prior_liq = row[1]
+            else:
+                appearances, prior_liq = 1, None
+                conn.execute(
+                    "INSERT INTO screener_state (token, chain, first_seen, last_seen, appearances, liquidity) "
+                    "VALUES (?,?,?,?,1,?)", (token, chain, now, now, current_liq),
+                )
             conn.commit()
         finally:
             conn.close()
-        if not row or not row[0]:
-            return None
-        prior = row[0]
-        change = (current_liq - prior) / max(prior, 1) * 100
-        return {"rising": change >= 8, "change_pct": round(change, 1)}
+        liq_change = ((current_liq - prior_liq) / max(prior_liq, 1) * 100) if prior_liq else None
+        return {
+            "appearances": appearances,
+            "recurring": appearances >= 3,           # seen in 3+ runs = sustained
+            "liq_rising": bool(liq_change is not None and liq_change >= 8),
+            "liq_change_pct": round(liq_change, 1) if liq_change is not None else None,
+        }
     except Exception as e:
-        logger.debug("liquidity_trend_failed", token=token, error=str(e))
-        return None
+        logger.debug("track_state_failed", token=token, error=str(e))
+        return {"appearances": 1, "recurring": False, "liq_rising": False, "liq_change_pct": None}
 
 
 def whale_accumulation_symbols() -> set[str]:
@@ -339,15 +356,17 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
             c["score"] += 18
             c["notes"] += " · 鲸鱼累积流"
             c["reasons"].append("whale_accumulation")
-        # Liquidity trend across runs (capital entering the pool)
-        try:
-            lt = liquidity_trend_signal(c["address"], c["chain"], c.get("liquidity", 0))
-        except Exception:
-            lt = None
-        if lt and lt.get("rising"):
+        # Persistence + liquidity trend across runs (one local DB op).
+        st = track_state(c["address"], c["chain"], c.get("liquidity", 0))
+        c["appearances"] = st["appearances"]
+        if st.get("liq_rising"):
             c["score"] += 12
-            c["notes"] += f" · 流动性+{lt.get('change_pct',0):.0f}%"
+            c["notes"] += f" · 流动性+{st.get('liq_change_pct',0):.0f}%"
             c["reasons"].append("liquidity_rising")
+        if st.get("recurring"):                       # sustained across 3+ runs
+            c["score"] += 20
+            c["notes"] += f" · 持续{st['appearances']}轮"
+            c["reasons"].append("persistent")
         # CEX outflow (EVM archive, ~24 calls)
         try:
             cx = cex_outflow_signal(c["address"], c["chain"])
@@ -382,6 +401,19 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
             c["reasons"].append("cex_reserves_draining")
 
     cands.sort(key=lambda c: -c["score"])
+
+    # Close the loop: high-confidence candidates → watchlist, so Stage 2 monitors
+    # them for the launch event and forward holder history accrues.
+    try:
+        from src.onchain import watchlist
+
+        for c in cands:
+            if c["score"] >= 80:
+                watchlist.add_to_watchlist(c["address"], c["chain"],
+                                           c.get("score", 0), symbol=c.get("symbol", ""))
+    except Exception as e:
+        logger.debug("watchlist_add_failed", error=str(e))
+
     return cands
 
 
