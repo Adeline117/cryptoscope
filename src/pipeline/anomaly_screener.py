@@ -26,6 +26,48 @@ import structlog
 
 logger = structlog.get_logger()
 
+# Per-signal weights. Each fired signal (a "reason") contributes its weight to the
+# candidate score. Defaults are hand-set; the calibrator (calibrate_weights.py)
+# overwrites config/screener_weights.json with data-driven weights once enough
+# labeled outcomes exist — so scoring becomes empirical, not guessed.
+DEFAULT_WEIGHTS: dict[str, float] = {
+    # L1 market footprint
+    "absorption": 40, "buy_pressure": 22, "obv_absorption": 18,
+    "vol_compression": 12, "consistency": 20, "established": 13,
+    # L2 on-chain enrichment
+    "cex_outflow": 20, "holders_rising": 25,
+    "smart_money_t1": 35, "smart_money_t2": 25, "smart_money_t3": 15,
+    "whale_accumulation": 18, "liquidity_rising": 12,
+    # cross-run / macro
+    "persistent": 20, "cex_reserves_draining": 10,
+}
+_WEIGHTS_CACHE: dict | None = None
+
+
+def load_weights() -> dict[str, float]:
+    """Signal weights: code defaults overlaid with calibrated config (if present)."""
+    global _WEIGHTS_CACHE
+    if _WEIGHTS_CACHE is not None:
+        return _WEIGHTS_CACHE
+    weights = dict(DEFAULT_WEIGHTS)
+    try:
+        from src.config import CONFIG_DIR
+
+        p = CONFIG_DIR / "screener_weights.json"
+        if p.exists():
+            weights.update({k: float(v) for k, v in json.loads(p.read_text()).items()})
+            logger.info("screener_weights_loaded", source="calibrated")
+    except Exception as e:
+        logger.debug("weights_load_failed", error=str(e))
+    _WEIGHTS_CACHE = weights
+    return weights
+
+
+def score_reasons(reasons: list[str]) -> int:
+    """Candidate score = sum of weights of the fired signals."""
+    w = load_weights()
+    return int(round(sum(w.get(r, 0) for r in reasons)))
+
 
 def _dexscreener_pairs(query: str) -> list[dict]:
     url = f"https://api.dexscreener.com/latest/dex/search?q={query}"
@@ -104,32 +146,33 @@ def accumulation_footprint(pair: dict) -> dict | None:
     vol_liq = vol24 / max(liq, 1)
     consistency = sum(1 for w in ("m5", "h1", "h6") if _ratio(txns, w) >= 1.2)
 
-    score, notes, reasons = 0, [], []
+    notes, reasons = [], []
     # ABSORPTION: buy pressure with suppressed price (the sharp signal)
     if buy_ratio >= 1.5 and -8 <= ch6 <= 5:
-        score += 40; notes.append(f"吸收(买{buy_ratio:.1f}x价压{ch6:+.0f}%)"); reasons.append("absorption")
+        notes.append(f"吸收(买{buy_ratio:.1f}x价压{ch6:+.0f}%)"); reasons.append("absorption")
     elif buy_ratio >= 1.3 and 0 <= ch24 <= 25:
-        score += 22; notes.append(f"买压{buy_ratio:.1f}x价未爆"); reasons.append("buy_pressure")
-    # OBV-style: volume ACCELERATING (recent rate > older) while price flat
+        notes.append(f"买压{buy_ratio:.1f}x价未爆"); reasons.append("buy_pressure")
     if vol6 > 0 and vol1 * 6 >= vol6 * 1.3 and abs(ch1) <= 3:
-        score += 18; notes.append("量增价平(净吸)"); reasons.append("obv_absorption")
-    # VOLATILITY COMPRESSION: recent range tightening relative to longer window
+        notes.append("量增价平(净吸)"); reasons.append("obv_absorption")
     if abs(ch1) <= 2 and abs(ch6) <= max(abs(ch24) * 0.5, 3):
-        score += 12; notes.append("波动压缩(蓄势)"); reasons.append("vol_compression")
+        notes.append("波动压缩(蓄势)"); reasons.append("vol_compression")
     if consistency >= 2:
-        score += 20; notes.append(f"{consistency}/3窗口买压"); reasons.append("consistency")
+        notes.append(f"{consistency}/3窗口买压"); reasons.append("consistency")
     if 0.05 <= vol_liq <= 2.0:
-        score += 12; notes.append("量健康")
+        notes.append("量健康")  # hygiene only, not a weighted reason
     if age_ms and (__import__("time").time() * 1000 - age_ms) > 7 * 86400 * 1000:
-        score += 13; notes.append("已建立"); reasons.append("established")
+        notes.append("已建立"); reasons.append("established")
+
+    penalty = 30 if ch24 > 80 else 0
     if ch24 > 80:
-        score -= 30; notes.append("已大涨")
+        notes.append("已大涨")
+    score = score_reasons(reasons) - penalty
 
     if score < 50:
         return None
     return {"score": score, "buy_ratio": round(buy_ratio, 2),
             "price_change_24h": ch24, "consistency": consistency,
-            "avg_trade_usd": wb["avg_trade_usd"],
+            "avg_trade_usd": wb["avg_trade_usd"], "penalty": penalty,
             "mc": mc, "liquidity": liq, "reasons": reasons, "notes": " · ".join(notes)}
 
 
@@ -243,7 +286,29 @@ def _state_db():
         token TEXT, chain TEXT, first_seen TEXT, last_seen TEXT,
         appearances INTEGER DEFAULT 1, liquidity REAL,
         PRIMARY KEY (token, chain))""")
+    # Emission log: which signals fired for each candidate each run. The
+    # calibrator joins this with labeled outcomes to learn data-driven weights.
+    conn.execute("""CREATE TABLE IF NOT EXISTS emissions (
+        token TEXT, chain TEXT, ts TEXT, reasons TEXT, score REAL)""")
     return conn
+
+
+def log_emission(token: str, chain: str, reasons: list[str], score: float) -> None:
+    """Persist a candidate's fired signals for later weight calibration."""
+    from datetime import datetime, timezone
+
+    try:
+        conn = _state_db()
+        try:
+            conn.execute(
+                "INSERT INTO emissions (token, chain, ts, reasons, score) VALUES (?,?,?,?,?)",
+                (token, chain, datetime.now(timezone.utc).isoformat(), json.dumps(reasons), score),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.debug("log_emission_failed", token=token, error=str(e))
 
 
 def track_state(token: str, chain: str, current_liq: float) -> dict:
@@ -351,56 +416,48 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
 
     for i, c in enumerate(cands):
         c["reasons"] = c.get("reasons", [])
+        penalty = c.get("penalty", 0)
         # Whale accumulation (symbol match against $1M+ CEX→wallet flows)
         if c.get("symbol", "").upper() in whale_accum:
-            c["score"] += 18
-            c["notes"] += " · 鲸鱼累积流"
-            c["reasons"].append("whale_accumulation")
+            c["notes"] += " · 鲸鱼累积流"; c["reasons"].append("whale_accumulation")
         # Persistence + liquidity trend across runs (one local DB op).
         st = track_state(c["address"], c["chain"], c.get("liquidity", 0))
         c["appearances"] = st["appearances"]
         if st.get("liq_rising"):
-            c["score"] += 12
-            c["notes"] += f" · 流动性+{st.get('liq_change_pct',0):.0f}%"
-            c["reasons"].append("liquidity_rising")
-        if st.get("recurring"):                       # sustained across 3+ runs
-            c["score"] += 20
-            c["notes"] += f" · 持续{st['appearances']}轮"
-            c["reasons"].append("persistent")
+            c["notes"] += f" · 流动性+{st.get('liq_change_pct',0):.0f}%"; c["reasons"].append("liquidity_rising")
+        if st.get("recurring"):
+            c["notes"] += f" · 持续{st['appearances']}轮"; c["reasons"].append("persistent")
         # CEX outflow (EVM archive, ~24 calls)
         try:
             cx = cex_outflow_signal(c["address"], c["chain"])
         except Exception:
             cx = None
         if cx and cx.get("outflow"):
-            c["score"] += 20
             c["notes"] += f" · CEX流出{cx['cex_change_pct']:+.0f}%"
-            c["reasons"].append("cex_outflow")
-            c["cex_outflow"] = cx["cex_change_pct"]
-        # On-chain enrich (holder trend + smart-money presence). Bound to top 8
-        # + pause to respect Helius free-tier rate limits.
+            c["reasons"].append("cex_outflow"); c["cex_outflow"] = cx["cex_change_pct"]
+        # On-chain enrich (holder trend + smart-money presence). Top 8 + pause.
         if i < 8:
             try:
                 oc = onchain_enrich(c["address"], c["chain"])
             except Exception:
                 oc = None
             if oc and oc.get("rising"):
-                c["score"] += 25
-                c["notes"] += f" · 持币人数+{oc.get('change_pct',0):.0f}%"
-                c["reasons"].append("holders_rising")
+                c["notes"] += f" · 持币人数+{oc.get('change_pct',0):.0f}%"; c["reasons"].append("holders_rising")
             if oc and oc.get("smart_hits"):
-                tier = oc.get("smart_top_tier")
-                boost = 35 if tier == 1 else (25 if tier == 2 else 15)
-                c["score"] += boost
+                tier = oc.get("smart_top_tier") or 3
                 c["notes"] += f" · 🐳聪明钱{oc['smart_hits']}个(T{tier})"
-                c["reasons"].append("smart_money_holds")
+                c["reasons"].append(f"smart_money_t{tier}")
             time.sleep(0.5)
-        # Macro environment
         if macro_boost:
-            c["score"] += macro_boost
             c["reasons"].append("cex_reserves_draining")
+        # Final score = weighted sum of ALL fired signals − penalty (data-driven).
+        c["score"] = score_reasons(c["reasons"]) - penalty
 
     cands.sort(key=lambda c: -c["score"])
+
+    # Log emissions (fired signals) for weight calibration once labels exist.
+    for c in cands:
+        log_emission(c["address"], c["chain"], c.get("reasons", []), c.get("score", 0))
 
     # Close the loop: high-confidence candidates → watchlist, so Stage 2 monitors
     # them for the launch event and forward holder history accrues.

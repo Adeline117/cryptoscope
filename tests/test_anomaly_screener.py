@@ -113,3 +113,37 @@ def test_persistence_tracking(tmp_path, monkeypatch):
     s3 = track_state("0xP", "ethereum", 130000)
     assert s3["appearances"] == 3 and s3["recurring"] is True  # 3+ runs = sustained
     assert s3["liq_rising"] is True  # liquidity grew across runs
+
+
+def test_score_reasons_weighted():
+    from src.pipeline.anomaly_screener import score_reasons, load_weights
+    w = load_weights()
+    assert score_reasons(["absorption"]) == int(round(w["absorption"]))
+    assert score_reasons(["absorption", "consistency"]) == int(round(w["absorption"] + w["consistency"]))
+    assert score_reasons([]) == 0
+
+
+def test_calibrate_not_ready(tmp_path, monkeypatch):
+    import src.pipeline.calibrate_weights as cw
+    monkeypatch.setattr(cw, "LABELS_DIR", tmp_path)  # empty → no labels
+    res = cw.calibrate(dry=True)
+    assert res["status"] == "not_ready"
+
+
+def test_calibrate_discriminates(tmp_path, monkeypatch):
+    import json
+    import src.config as cfg
+    import src.pipeline.anomaly_screener as a
+    import src.pipeline.calibrate_weights as cw
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    a._WEIGHTS_CACHE = None
+    labels = tmp_path / "labels"; labels.mkdir()
+    monkeypatch.setattr(cw, "LABELS_DIR", labels)
+    for i in range(5):
+        a.log_emission(f"0xp{i}", "ethereum", ["absorption", "smart_money_t1"], 90)
+        a.log_emission(f"0xd{i}", "ethereum", ["buy_pressure"], 55)
+        (labels / f"p{i}.json").write_text(json.dumps({"token": f"0xp{i}", "chain": "ethereum", "outcome": "pump", "operators": ["x"]}))
+        (labels / f"d{i}.json").write_text(json.dumps({"token": f"0xd{i}", "chain": "ethereum", "outcome": "dud", "operators": ["x"]}))
+    res = cw.calibrate(dry=True)
+    assert res["status"] == "calibrated"
+    assert res["weights"]["smart_money_t1"] > res["weights"]["buy_pressure"]
