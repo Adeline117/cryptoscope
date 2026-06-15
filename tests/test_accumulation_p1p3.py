@@ -233,3 +233,9 @@ def test_evm_archive_rpc_config(monkeypatch):
     monkeypatch.delenv("ALCHEMY_API_KEY", raising=False)
     # ethereum needs the Alchemy key for its default; without it, empty pool
     assert ArchiveRPC("ethereum").available() is False
+
+
+def test_operator_finder_evm_only():
+    from src.onchain.operator_finder import find_operator_cluster
+    # Solana is not supported (funder resolution is ETH-only on free keys).
+    assert find_operator_cluster("someSolMint", "solana") is None

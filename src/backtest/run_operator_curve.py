@@ -52,9 +52,19 @@ def _find_window_evm(rpc, token, ops, latest, probes=10):
 def run(target_path: str) -> dict:
     tgt = json.loads(Path(target_path).read_text())
     token, chain = tgt["token"], tgt["chain"]
-    ops = tgt["operators"]
     symbol = tgt.get("symbol", token[:6])
+    ops = tgt.get("operators")
     from src.backtest.operator_curve import analyze_curve
+
+    # Auto-discover the operator cluster when none is provided (ETH only, free).
+    if not ops:
+        from src.onchain.operator_finder import find_operator_cluster
+
+        found = find_operator_cluster(token, chain)
+        if not found or not found.get("operator"):
+            return {"status": "no_operator_found", "symbol": symbol}
+        ops = found["operator"]
+        logger.info("auto_operator", symbol=symbol, count=len(ops), share=found.get("share_pct"))
 
     if chain in ("solana", "sol"):
         from src.backtest.operator_curve import operator_curve_solana
