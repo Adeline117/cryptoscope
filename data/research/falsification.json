@@ -1,0 +1,82 @@
+[
+  {
+    "token": "0x2d61bbbe5ad9a8f18fef35940301fd24f143a72b",
+    "symbol": "sa1t",
+    "chain": "ethereum",
+    "max_return": 1.8351,
+    "verdict": "accumulation",
+    "operator_size": 1,
+    "operator_share_pct": 8.09,
+    "peak": 80919781.45
+  },
+  {
+    "token": "0xa2b4c0af19cc16a6cfacce81f192b024d625817d",
+    "symbol": "KISHU",
+    "chain": "ethereum",
+    "max_return": 9.6879,
+    "verdict": "accumulation_then_distribution",
+    "operator_size": 4,
+    "operator_share_pct": 5.76,
+    "peak": 3505834.55
+  },
+  {
+    "token": "0x44b28991b167582f18ba0259e0173176ca125505",
+    "symbol": "uPEG",
+    "chain": "ethereum",
+    "max_return": 53.2062,
+    "verdict": "accumulation",
+    "operator_size": 1,
+    "operator_share_pct": 7.54,
+    "peak": 1103.19
+  },
+  {
+    "token": "0x0001a500a6b18995b03f44bb040a5ffc28e45cb0",
+    "symbol": "OLAS",
+    "chain": "ethereum",
+    "max_return": 1.118,
+    "verdict": "accumulation_then_distribution",
+    "operator_size": 1,
+    "operator_share_pct": 35.76,
+    "peak": 241341050.12
+  },
+  {
+    "token": "0x893643f9e232e4e857f278d61641c955589a7a37",
+    "symbol": "WOKE",
+    "chain": "ethereum",
+    "max_return": 2.5424,
+    "verdict": "accumulation",
+    "operator_size": 1,
+    "operator_share_pct": 9.26,
+    "peak": 0.09
+  },
+  {
+    "token": "0x40e3d1a4b2c47d9aa61261f5606136ef73e28042",
+    "symbol": "SERV",
+    "chain": "ethereum",
+    "max_return": 5.3435,
+    "verdict": "accumulation",
+    "operator_size": 1,
+    "operator_share_pct": 23.9,
+    "peak": 216000000.0
+  },
+  {
+    "token": "0x92d5942f468447f1f21c2092580f15544923b434",
+    "symbol": "VSTR",
+    "chain": "ethereum",
+    "max_return": 1.2174,
+    "verdict": "accumulation",
+    "operator_size": 1,
+    "operator_share_pct": 68.56,
+    "peak": 34225000000.0
+  },
+  {
+    "token": "0x242ecdfd9e7b6532c3c0cb7451ca8ffc9920a4ca",
+    "symbol": "KOMUGI",
+    "chain": "ethereum",
+    "max_return": 3.0201,
+    "verdict": "accumulation",
+    "operator_size": 1,
+    "operator_share_pct": 5.89,
+    "peak": 125.5
+  }
+]
