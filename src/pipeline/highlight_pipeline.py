@@ -124,9 +124,16 @@ async def _collect_all() -> list[CollectedItem]:
 
 
 def _strip_html(text: str) -> str:
-    """Remove HTML tags and decode common entities."""
+    """Remove HTML tags and FULLY decode entities.
+
+    RSS content is full of numeric/named entities (&#8217; &mdash; &hellip; …);
+    decoding only a few left literals that then got re-escaped into garbled text.
+    html.unescape handles them all.
+    """
+    import html as _html
+
     text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    text = _html.unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -210,9 +217,12 @@ def _format_highlight_message(
 
 
 def _esc(text: str) -> str:
-    """Escape for Telegram HTML, avoiding double-escape."""
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    return text
+    """Escape for Telegram HTML. Decode any pre-existing entities FIRST so RSS
+    content like &#8217;/&mdash; doesn't get re-escaped into garbled &amp;#8217;."""
+    import html as _html
+
+    text = _html.unescape(str(text))
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 async def run_highlight_pipeline() -> dict:

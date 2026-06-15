@@ -302,4 +302,6 @@ async def send_critical_alert(message: str) -> bool:
 
 
 def _esc(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    import html as _html
+
+    return _html.unescape(str(text)).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

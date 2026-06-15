@@ -15,10 +15,13 @@ from html import escape as _html_escape
 
 
 def _esc(text: str | None) -> str:
-    """HTML-escape user-supplied text for Telegram."""
+    """HTML-escape user-supplied text for Telegram. Decode pre-existing entities
+    first so RSS content (&#8217; &mdash; …) isn't re-escaped into garbled text."""
     if text is None:
         return ""
-    return _html_escape(str(text))
+    from html import unescape as _html_unescape
+
+    return _html_escape(_html_unescape(str(text)))
 
 
 def _format_usd(value: float | int | None) -> str:
