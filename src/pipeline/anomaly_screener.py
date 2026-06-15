@@ -230,6 +230,76 @@ def onchain_enrich(token: str, chain: str) -> dict | None:
         return None
 
 
+def _state_db():
+    """Tiny SQLite to track per-token metrics across runs (liquidity trend)."""
+    import sqlite3
+    from src.config import DATA_DIR
+
+    path = DATA_DIR / "screener_state.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("""CREATE TABLE IF NOT EXISTS screener_state (
+        token TEXT, chain TEXT, ts TEXT, liquidity REAL,
+        PRIMARY KEY (token, chain))""")
+    return conn
+
+
+def liquidity_trend_signal(token: str, chain: str, current_liq: float) -> dict | None:
+    """Liquidity rising across runs = capital entering the pool (accumulation).
+
+    Compares current liquidity to the value stored on the previous run, then
+    upserts. First sight has no prior → records only. Cheap (one local DB op)."""
+    try:
+        conn = _state_db()
+        from datetime import datetime, timezone
+        try:
+            row = conn.execute(
+                "SELECT liquidity FROM screener_state WHERE token=? AND chain=?",
+                (token, chain),
+            ).fetchone()
+            conn.execute(
+                "INSERT OR REPLACE INTO screener_state (token, chain, ts, liquidity) VALUES (?,?,?,?)",
+                (token, chain, datetime.now(timezone.utc).isoformat(), current_liq),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return None
+        prior = row[0]
+        change = (current_liq - prior) / max(prior, 1) * 100
+        return {"rising": change >= 8, "change_pct": round(change, 1)}
+    except Exception as e:
+        logger.debug("liquidity_trend_failed", token=token, error=str(e))
+        return None
+
+
+def whale_accumulation_symbols() -> set[str]:
+    """Run whale_tracker once → set of token SYMBOLS showing CEX→wallet
+    accumulation (large $1M+ withdrawals into private wallets). Matched against
+    candidates by symbol. One collector run per screen (not per-token)."""
+    try:
+        from src.collectors.whale_tracker import WhaleTrackerCollector
+
+        async def _fetch():
+            c = WhaleTrackerCollector()
+            await c.setup()
+            try:
+                return await c._collect()
+            finally:
+                await c.teardown()
+
+        res = _run_coro(_fetch())
+        return {
+            str(it.metadata.get("token", "")).upper()
+            for it in res.items if it.metadata.get("signal") == "accumulation"
+        }
+    except Exception as e:
+        logger.debug("whale_accum_failed", error=str(e))
+        return set()
+
+
 def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list[dict]:
     """Scan a universe of tokens and rank by accumulation footprint.
 
@@ -255,14 +325,29 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
     cands.sort(key=lambda c: -c["score"])
     cands = cands[:max_out]
 
-    # --- Macro gate: are major-CEX reserves draining? (1 cheap check per run) ---
+    # --- Macro gate + whale accumulation set (each: 1 collector run per screen) ---
     macro_boost = _macro_reserve_gate()
+    whale_accum = whale_accumulation_symbols()
 
     # --- L2 per-candidate enrichment (top-N only; reuses free collectors) ---
     import time
 
     for i, c in enumerate(cands):
         c["reasons"] = c.get("reasons", [])
+        # Whale accumulation (symbol match against $1M+ CEX→wallet flows)
+        if c.get("symbol", "").upper() in whale_accum:
+            c["score"] += 18
+            c["notes"] += " · 鲸鱼累积流"
+            c["reasons"].append("whale_accumulation")
+        # Liquidity trend across runs (capital entering the pool)
+        try:
+            lt = liquidity_trend_signal(c["address"], c["chain"], c.get("liquidity", 0))
+        except Exception:
+            lt = None
+        if lt and lt.get("rising"):
+            c["score"] += 12
+            c["notes"] += f" · 流动性+{lt.get('change_pct',0):.0f}%"
+            c["reasons"].append("liquidity_rising")
         # CEX outflow (EVM archive, ~24 calls)
         try:
             cx = cex_outflow_signal(c["address"], c["chain"])

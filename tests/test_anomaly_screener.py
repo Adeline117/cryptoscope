@@ -90,3 +90,14 @@ def test_smart_money_intersection_logic():
         holders = [{"address": addr, "balance": 100}, {"address": "OTHER", "balance": 5}]
         hits = [h["address"] for h in holders if h["address"] in s]
         assert len(hits) == 1
+
+
+def test_liquidity_trend(tmp_path, monkeypatch):
+    import src.config as cfg
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    from src.pipeline.anomaly_screener import liquidity_trend_signal
+    assert liquidity_trend_signal("0xT", "ethereum", 100000) is None  # first sight
+    sig = liquidity_trend_signal("0xT", "ethereum", 130000)           # +30%
+    assert sig and sig["rising"] is True
+    flat = liquidity_trend_signal("0xT", "ethereum", 131000)          # +0.7%
+    assert flat and flat["rising"] is False
