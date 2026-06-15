@@ -126,6 +126,34 @@ def test_persistence_tracking(tmp_path, monkeypatch):
     assert s3["liq_rising"] is True  # liquidity grew across runs
 
 
+def test_effective_concentration_discriminates(monkeypatch):
+    # The linchpin test: a SIREN-like token (many wallets, ONE funder = one hidden
+    # entity) must show high effective concentration; a CREPE-like token (many
+    # wallets, many funders) must not. Uses Solana so no getCode/contract filter.
+    import src.pipeline.anomaly_screener as a
+
+    # 20 holders with VARIED balances (so the similar-balance edge doesn't merge
+    # them — funder is the sole discriminator here). Solana skips contract filter.
+    holders = [{"address": f"WALLET{i:02d}", "balance": 100 + i * 37} for i in range(20)]
+
+    # SIREN-like: all funded by ONE address → cluster into 1 entity.
+    monkeypatch.setattr(
+        "src.onchain.funder_graph.get_funders",
+        lambda addrs, chain, **kw: {h: "FUNDER_ONE" for h in addrs},
+    )
+    siren = a.effective_concentration_signal(holders, "TOK", "solana")
+    assert siren and siren["funder_complete"]
+    assert siren["largest_entity_pct"] >= 25  # one entity dominates the float
+
+    # CREPE-like: every wallet a different funder → stays dispersed.
+    monkeypatch.setattr(
+        "src.onchain.funder_graph.get_funders",
+        lambda addrs, chain, **kw: {h: f"FUNDER_{h}" for h in addrs},
+    )
+    crepe = a.effective_concentration_signal(holders, "TOK", "solana")
+    assert crepe and crepe["largest_entity_pct"] < 25  # no single controlling entity
+
+
 def test_score_reasons_weighted():
     from src.pipeline.anomaly_screener import score_reasons, load_weights
     w = load_weights()

@@ -38,6 +38,8 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "cex_outflow": 20, "holders_rising": 25,
     "smart_money_t1": 35, "smart_money_t2": 25, "smart_money_t3": 15,
     "whale_accumulation": 18, "liquidity_rising": 12,
+    # L2 effective concentration — the linchpin (one hidden entity controls float)
+    "effective_concentration": 45, "hidden_cluster": 30,
     # cross-run / macro
     "persistent": 20, "cex_reserves_draining": 10,
 }
@@ -305,6 +307,96 @@ def _smart_money_set(chain: str) -> dict[str, int]:
     return out
 
 
+def _contract_addresses_evm(addresses: list[str], chain: str) -> set[str]:
+    """Return the subset that are CONTRACTS (eth_getCode != 0x). EOAs have no code.
+    Free on any EVM chain (basic RPC, no indexer). Lets us auto-drop protocol
+    contracts (veOLAS/Timelock/vesting/bridges) that inflate raw concentration but
+    aren't an operator. One call per address — bounded to the top holders."""
+    out: set[str] = set()
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        rpc = ArchiveRPC(chain)
+        if not rpc.available():
+            return out
+        for a in addresses:
+            try:
+                code = rpc._call("eth_getCode", [a, "latest"]).get("result", "0x")
+                if code and code != "0x":
+                    out.add(a.lower())
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug("getcode_failed", chain=chain, error=str(e))
+    return out
+
+
+# Chains where first-funder lookup is FREE (Etherscan free = ETH only; Helius =
+# Solana). BSC/others have no free indexer, so funder clustering can't run — those
+# fall back to contract/CEX/similar-balance only and get flagged "needs Arkham".
+_FUNDER_FREE_CHAINS = {"ethereum", "solana", "sol"}
+
+
+def effective_concentration_signal(holders: list[dict], token: str, chain: str) -> dict | None:
+    """The linchpin: does ONE private entity control a big share of the FLOAT,
+    hidden across many wallets (Sybil)? This is what separates a real operator
+    (SIREN: 131 wallets = 1 entity) from a genuinely distributed token (CREPE: 45
+    wallets = 42 entities) or a protocol with locked tokenomics (OLAS: in
+    contracts). Age is irrelevant — effective concentration is the discriminator.
+
+    Steps (all free on ETH/SOL; BSC minus the funder edge):
+      1. Top holders, minus known CEX and contracts (eth_getCode — drops
+         veOLAS/bridges/LP/vesting that aren't an operator).
+      2. Cluster remaining EOAs by shared first-funder + similar balance.
+      3. Effective vs nominal concentration. A big gap = many addresses collapse
+         to few entities = hidden operator.
+    """
+    pos = [{"address": h["address"], "balance": float(h.get("balance", 0) or 0)}
+           for h in holders if float(h.get("balance", 0) or 0) > 0]
+    if len(pos) < 8:
+        return None
+    pos.sort(key=lambda h: -h["balance"])
+    top = pos[:50]
+    is_sol = chain in ("solana", "sol")
+
+    # Exclude known CEX.
+    try:
+        from src.onchain.cex_addresses import evm_exchanges, solana_exchanges
+        cex_raw = (solana_exchanges() if is_sol else evm_exchanges())
+        cex = set(cex_raw) if is_sol else {a.lower() for a in cex_raw}
+    except Exception:
+        cex = set()
+    # Exclude contracts (EVM only; free getCode).
+    contracts = set() if is_sol else _contract_addresses_evm([h["address"] for h in top], chain)
+
+    def is_excluded(a: str) -> bool:
+        al = a if is_sol else a.lower()
+        return al in cex or al in contracts
+
+    eoa = [h for h in top if not is_excluded(h["address"])]
+    if len(eoa) < 5:
+        return None
+
+    funder_free = chain in _FUNDER_FREE_CHAINS
+    funders = {}
+    if funder_free:
+        try:
+            from src.onchain.funder_graph import get_funders
+            funders = get_funders([h["address"] for h in eoa], chain, max_lookups=40)
+        except Exception as e:
+            logger.debug("funders_failed", chain=chain, error=str(e))
+
+    try:
+        from src.onchain.entity_clustering import effective_concentration
+        res = effective_concentration(eoa, funders=funders or None, top_n=10,
+                                      exclude_share_above=0.9, min_batch_funder=2)
+    except Exception as e:
+        logger.debug("eff_conc_failed", token=token, error=str(e))
+        return None
+    res["funder_complete"] = bool(funders)
+    res["eoa_analyzed"] = len(eoa)
+    return res
+
+
 def onchain_enrich(token: str, chain: str) -> dict | None:
     """Fetch holders ONCE and derive two signals (zero double-fetch):
 
@@ -338,10 +430,14 @@ def onchain_enrich(token: str, chain: str) -> dict | None:
         prior_counts = [s.get("holder_count", 0) for s in prior if s.get("holder_count")]
         base = prior_counts[0] if prior_counts else None
         rising = bool(base and base > 0 and count >= base * 1.05)
+        # Effective concentration (the linchpin): cluster holders → is one hidden
+        # entity controlling the float? Reuses the holders we just fetched.
+        conc = effective_concentration_signal(holders, token, chain)
         return {
             "holder_count": count, "prior_count": base, "rising": rising,
             "change_pct": round((count - base) / max(base, 1) * 100, 1) if base else None,
             "smart_hits": len(hit_addrs), "smart_top_tier": top_tier,
+            "concentration": conc,
         }
     except Exception as e:
         logger.debug("onchain_enrich_failed", token=token, error=str(e))
@@ -537,6 +633,23 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
                 tier = oc.get("smart_top_tier") or 3
                 c["notes"] += f" · 🐳聪明钱{oc['smart_hits']}个(T{tier})"
                 c["reasons"].append(f"smart_money_t{tier}")
+            # Effective concentration — the linchpin. One hidden entity controlling
+            # the float (SIREN-like) is the strongest operator signal we have.
+            conc = (oc or {}).get("concentration")
+            if conc:
+                c["largest_entity_pct"] = conc.get("largest_entity_pct")
+                c["concentration_gap"] = conc.get("concentration_gap")
+                c["funder_complete"] = conc.get("funder_complete")
+                lg = conc.get("largest_entity_pct", 0) or 0
+                gap = conc.get("concentration_gap", 0) or 0
+                if conc.get("funder_complete") and lg >= 25:
+                    c["notes"] += f" · ⭐有效集中{lg:.0f}%(单一实体控盘)"
+                    c["reasons"].append("effective_concentration")
+                if gap >= 15:
+                    c["notes"] += f" · 隐藏簇(名义→有效+{gap:.0f}点)"
+                    c["reasons"].append("hidden_cluster")
+                if not conc.get("funder_complete") and c["chain"] not in ("ethereum", "solana", "sol"):
+                    c["notes"] += " · ⚠️需Arkham(BSC funder未解析)"
             time.sleep(0.5)
         if macro_boost:
             c["reasons"].append("cex_reserves_draining")
