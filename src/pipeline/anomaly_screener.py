@@ -286,10 +286,20 @@ def _state_db():
         token TEXT, chain TEXT, first_seen TEXT, last_seen TEXT,
         appearances INTEGER DEFAULT 1, liquidity REAL,
         PRIMARY KEY (token, chain))""")
+    # Migrate older tables (created before the persistence columns existed):
+    # CREATE IF NOT EXISTS won't add columns, so ALTER any that are missing —
+    # otherwise track_state silently fails and persistence never accrues.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(screener_state)").fetchall()}
+    for col, ddl in (("first_seen", "first_seen TEXT"), ("last_seen", "last_seen TEXT"),
+                     ("appearances", "appearances INTEGER DEFAULT 1"),
+                     ("liquidity", "liquidity REAL")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE screener_state ADD COLUMN {ddl}")
     # Emission log: which signals fired for each candidate each run. The
     # calibrator joins this with labeled outcomes to learn data-driven weights.
     conn.execute("""CREATE TABLE IF NOT EXISTS emissions (
         token TEXT, chain TEXT, ts TEXT, reasons TEXT, score REAL)""")
+    conn.commit()
     return conn
 
 
