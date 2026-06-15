@@ -43,15 +43,42 @@ def _ratio(d: dict, w: str) -> float:
     return (x.get("buys", 0) or 0) / max(x.get("sells", 0) or 0, 1)
 
 
+def wash_bot_flags(pair: dict) -> dict:
+    """Detect wash-trading / market-maker-bot patterns that FAKE buy pressure.
+
+    The current buy-pressure signal is gameable: bots can spam tiny buys, or
+    quote both sides 1:1 at high frequency. These guards (computed from the
+    already-fetched pair) flag such fakery so it doesn't score as accumulation.
+    """
+    txns = pair.get("txns", {}) or {}
+    vol = pair.get("volume", {}) or {}
+    liq = (pair.get("liquidity", {}) or {}).get("usd", 0) or 0
+    h24 = txns.get("h24", {}) or {}
+    n24 = (h24.get("buys", 0) or 0) + (h24.get("sells", 0) or 0)
+    vol24 = float(vol.get("h24", 0) or 0)
+    avg_trade = vol24 / max(n24, 1)
+    vol_liq = vol24 / max(liq, 1)
+    bsr = (h24.get("buys", 0) or 0) / max(h24.get("sells", 0) or 0, 1)
+
+    flags = []
+    if n24 >= 500 and avg_trade < 30:            # many trades, all dust
+        flags.append("dust刷量")
+    if n24 >= 2000 and 0.9 <= bsr <= 1.1:        # high-freq, near 1:1 both sides
+        flags.append("做市bot(1:1高频)")
+    if vol_liq > 6:                               # volume implausibly > liquidity
+        flags.append(f"量/流动性畸高{vol_liq:.0f}x")
+    return {"suspicious": bool(flags), "notes": flags, "avg_trade_usd": round(avg_trade, 1)}
+
+
 def accumulation_footprint(pair: dict) -> dict | None:
     """Score a DexScreener pair for the quiet-accumulation footprint (0-100).
 
-    Sharper signals than buy-pressure alone:
-      - ABSORPTION: strong buy pressure WHILE price is suppressed (flat/down) —
-        someone is quietly soaking up sell-side without letting price run. This
-        is the cleanest stealth-accumulation tell.
-      - CONSISTENCY: buy dominance sustained across m5/h1/h6 (not a one-off blip).
-      - volume present vs liquidity; established (not a fresh curve launch).
+    L1 signals (all from the already-fetched pair, ZERO extra calls):
+      - WASH/BOT FILTER: reject fake buy pressure (dust spam / MM 1:1 / wash vol).
+      - ABSORPTION: buy pressure WHILE price suppressed (soaking up sell-side).
+      - OBV-ABSORPTION: volume ACCELERATING while price stays flat (net buying).
+      - VOLATILITY COMPRESSION: recent price range tightening (coiling).
+      - CONSISTENCY across m5/h1/h6; volume vs liquidity; established age.
     """
     txns = pair.get("txns", {}) or {}
     pc = pair.get("priceChange", {}) or {}
@@ -66,33 +93,44 @@ def accumulation_footprint(pair: dict) -> dict | None:
     if buys + sells < 20 or liq < 20_000:
         return None
 
+    # WASH/BOT FILTER (highest-value de-noiser): reject faked buy pressure.
+    wb = wash_bot_flags(pair)
+    if wb["suspicious"]:
+        return None
+
     buy_ratio = buys / max(sells, 1)
-    ch24 = float(pc.get("h24", 0) or 0)
-    ch6 = float(pc.get("h6", 0) or 0)
-    vol_liq = float(vol.get("h24", 0) or 0) / max(liq, 1)
-    # buy dominance across windows = sustained, not a single spike
+    ch24, ch6, ch1 = (float(pc.get(k, 0) or 0) for k in ("h24", "h6", "h1"))
+    vol24, vol6, vol1 = (float(vol.get(k, 0) or 0) for k in ("h24", "h6", "h1"))
+    vol_liq = vol24 / max(liq, 1)
     consistency = sum(1 for w in ("m5", "h1", "h6") if _ratio(txns, w) >= 1.2)
 
-    score, notes = 0, []
+    score, notes, reasons = 0, [], []
     # ABSORPTION: buy pressure with suppressed price (the sharp signal)
     if buy_ratio >= 1.5 and -8 <= ch6 <= 5:
-        score += 40; notes.append(f"吸收(买{buy_ratio:.1f}x价压{ch6:+.0f}%)")
+        score += 40; notes.append(f"吸收(买{buy_ratio:.1f}x价压{ch6:+.0f}%)"); reasons.append("absorption")
     elif buy_ratio >= 1.3 and 0 <= ch24 <= 25:
-        score += 22; notes.append(f"买压{buy_ratio:.1f}x价未爆")
-    if consistency >= 2:                       # sustained across windows
-        score += 20; notes.append(f"{consistency}/3窗口买压")
+        score += 22; notes.append(f"买压{buy_ratio:.1f}x价未爆"); reasons.append("buy_pressure")
+    # OBV-style: volume ACCELERATING (recent rate > older) while price flat
+    if vol6 > 0 and vol1 * 6 >= vol6 * 1.3 and abs(ch1) <= 3:
+        score += 18; notes.append("量增价平(净吸)"); reasons.append("obv_absorption")
+    # VOLATILITY COMPRESSION: recent range tightening relative to longer window
+    if abs(ch1) <= 2 and abs(ch6) <= max(abs(ch24) * 0.5, 3):
+        score += 12; notes.append("波动压缩(蓄势)"); reasons.append("vol_compression")
+    if consistency >= 2:
+        score += 20; notes.append(f"{consistency}/3窗口买压"); reasons.append("consistency")
     if 0.05 <= vol_liq <= 2.0:
-        score += 15; notes.append("量健康")
+        score += 12; notes.append("量健康")
     if age_ms and (__import__("time").time() * 1000 - age_ms) > 7 * 86400 * 1000:
-        score += 15; notes.append("已建立")
-    if ch24 > 80:                              # already mooned → penalize
+        score += 13; notes.append("已建立"); reasons.append("established")
+    if ch24 > 80:
         score -= 30; notes.append("已大涨")
 
     if score < 50:
         return None
     return {"score": score, "buy_ratio": round(buy_ratio, 2),
             "price_change_24h": ch24, "consistency": consistency,
-            "mc": mc, "liquidity": liq, "notes": " · ".join(notes)}
+            "avg_trade_usd": wb["avg_trade_usd"],
+            "mc": mc, "liquidity": liq, "reasons": reasons, "notes": " · ".join(notes)}
 
 
 def cex_outflow_signal(token: str, chain: str, lookback_blocks: int = 600_000) -> dict | None:
@@ -123,6 +161,37 @@ def cex_outflow_signal(token: str, chain: str, lookback_blocks: int = 600_000) -
     return {"cex_change_pct": change_pct, "outflow": change_pct < -5}
 
 
+def holder_trend_signal(token: str, chain: str) -> dict | None:
+    """Holder-count trend — the strongest cheap on-chain accumulation signal.
+
+    Snapshots current holders (Solana via Helius DAS = cheap; EVM bounded),
+    persists to holder_snapshots.db, and compares to prior snapshots. Holder
+    count RISING (more wallets acquiring) is real accumulation, orthogonal to
+    price. On first sight there's no history yet — it records and the trend
+    accrues over runs. Returns {holder_count, prior_count, rising} or None.
+    """
+    try:
+        from src.onchain import holder_snapshot as hs
+    except Exception:
+        return None
+    try:
+        prior = hs.get_snapshots(token, chain, limit=20)
+        snap = hs.snapshot_token(token, chain, source="screener")
+        if not snap:
+            return None
+        count = snap.get("holder_count", 0)
+        prior_counts = [s.get("holder_count", 0) for s in prior if s.get("holder_count")]
+        if not prior_counts:
+            return {"holder_count": count, "prior_count": None, "rising": False}
+        base = prior_counts[0]
+        rising = base > 0 and count >= base * 1.05
+        return {"holder_count": count, "prior_count": base,
+                "change_pct": round((count - base) / max(base, 1) * 100, 1), "rising": rising}
+    except Exception as e:
+        logger.debug("holder_trend_failed", token=token, error=str(e))
+        return None
+
+
 def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list[dict]:
     """Scan a universe of tokens and rank by accumulation footprint.
 
@@ -148,8 +217,15 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
     cands.sort(key=lambda c: -c["score"])
     cands = cands[:max_out]
 
-    # Enrich top candidates with the cheap on-chain CEX-outflow check (EVM only).
-    for c in cands:
+    # --- Macro gate: are major-CEX reserves draining? (1 cheap check per run) ---
+    macro_boost = _macro_reserve_gate()
+
+    # --- L2 per-candidate enrichment (top-N only; reuses free collectors) ---
+    import time
+
+    for i, c in enumerate(cands):
+        c["reasons"] = c.get("reasons", [])
+        # CEX outflow (EVM archive, ~24 calls)
         try:
             cx = cex_outflow_signal(c["address"], c["chain"])
         except Exception:
@@ -157,9 +233,69 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
         if cx and cx.get("outflow"):
             c["score"] += 20
             c["notes"] += f" · CEX流出{cx['cex_change_pct']:+.0f}%"
+            c["reasons"].append("cex_outflow")
             c["cex_outflow"] = cx["cex_change_pct"]
+        # Holder-count trend (strongest on-chain signal; Solana cheap). Bound to
+        # the top 8 + pause to respect Helius free-tier rate limits.
+        if i < 8:
+            try:
+                ht = holder_trend_signal(c["address"], c["chain"])
+            except Exception:
+                ht = None
+            if ht and ht.get("rising"):
+                c["score"] += 25
+                c["notes"] += f" · 持币人数+{ht.get('change_pct',0):.0f}%"
+                c["reasons"].append("holders_rising")
+            time.sleep(0.5)
+        # Macro environment
+        if macro_boost:
+            c["score"] += macro_boost
+            c["reasons"].append("cex_reserves_draining")
+
     cands.sort(key=lambda c: -c["score"])
     return cands
+
+
+def _run_coro(coro):
+    """Run a coroutine whether or not an event loop is already running
+    (screen_universe is sync but called from the async scheduler)."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(1) as ex:
+        return ex.submit(asyncio.run, coro).result()
+
+
+def _macro_reserve_gate() -> int:
+    """If major-CEX reserves are draining (accumulation regime), boost all
+    candidates by a base amount. One cheap DeFiLlama check via exchange_reserves."""
+    try:
+        from src.collectors.exchange_reserves import ExchangeReserveCollector
+
+        async def _fetch():
+            c = ExchangeReserveCollector()
+            await c.setup()
+            try:
+                return await c._collect()
+            finally:
+                await c.teardown()
+
+        res = _run_coro(_fetch())
+        draining = sum(
+            1 for it in res.items
+            if float(it.metadata.get("change_24h_pct", 0) or 0) <= -10
+        )
+        if draining >= 1:
+            logger.info("macro_reserves_draining", count=draining)
+            return 10
+    except Exception as e:
+        logger.debug("macro_gate_failed", error=str(e))
+    return 0
 
 
 def _esc(s) -> str:
