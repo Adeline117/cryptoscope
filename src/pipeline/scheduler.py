@@ -88,6 +88,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Daily System Health Summary",
     )
 
+    # Anomaly candidate screen → push suspected-accumulation coins every 6h
+    scheduler.add_job(
+        _run_anomaly_screen,
+        CronTrigger(minute=30, hour="*/6"),
+        id="anomaly_screen",
+        name="疑似吸筹候选筛选 (market footprint → Telegram)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -282,6 +290,17 @@ async def _run_health_summary():
     from src.ops.health import send_health_summary
 
     await send_health_summary()
+
+
+async def _run_anomaly_screen():
+    logger.info("scheduled_anomaly_screen")
+    from src.pipeline.anomaly_screener import screen_universe, format_candidates
+    from src.distribution.telegram_sender import send_alert
+
+    cands = screen_universe()
+    if cands:
+        await send_alert(format_candidates(cands))
+    logger.info("anomaly_screen_done", candidates=len(cands))
 
 
 async def _run_tier1_reports():
