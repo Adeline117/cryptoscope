@@ -205,7 +205,13 @@ async def send_daily_digest(
 
 
 async def send_alert(message: str) -> bool:
-    """Send urgent alert."""
+    """Send an alert. The message is sent AS-IS with parse_mode=HTML.
+
+    Callers pass pre-formatted HTML (the message templates already escape their
+    own interpolated values). It must NOT be re-escaped here — doing so turned
+    every <b>/<code> tag into literal &lt;b&gt; text (garbled messages). Long
+    messages are split at the 4096-char limit.
+    """
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = _get_chat_id()
 
@@ -216,11 +222,13 @@ async def send_alert(message: str) -> bool:
         from telegram import Bot
 
         bot = Bot(token=bot_token)
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f"⚠️ <b>Alert</b>\n\n{_esc(message)}",
-            parse_mode="HTML",
-        )
+        for i, chunk in enumerate(_split_text(message, 4000)):
+            if i > 0:
+                await asyncio.sleep(0.3)
+            await bot.send_message(
+                chat_id=chat_id, text=chunk, parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
         return True
     except Exception as e:
         logger.error("alert_send_failed", error=str(e))
