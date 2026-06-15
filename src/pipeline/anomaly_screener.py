@@ -43,6 +43,14 @@ DEFAULT_WEIGHTS: dict[str, float] = {
 }
 _WEIGHTS_CACHE: dict | None = None
 
+# Hard floors — a candidate must be a real, tradeable book, not a micro-cap.
+# Below these you can neither accumulate nor exit, and "concentration" is just a
+# dead allocation table (e.g. Solana PRISM: $27k liq / $598k mc, top holder $124k,
+# the rest team multisig + DeFi vaults). Tuned to keep real small-caps
+# (PRISM-eth $295k/$1.34M) while cutting micro-caps.
+MIN_LIQUIDITY_USD = 150_000
+MIN_MARKETCAP_USD = 1_000_000
+
 
 def load_weights() -> dict[str, float]:
     """Signal weights: code defaults overlaid with calibrated config (if present)."""
@@ -190,7 +198,7 @@ def accumulation_footprint(pair: dict) -> dict | None:
     h1, h6 = txns.get("h1", {}) or {}, txns.get("h6", {}) or {}
     buys = (h1.get("buys", 0) or 0) + (h6.get("buys", 0) or 0)
     sells = (h1.get("sells", 0) or 0) + (h6.get("sells", 0) or 0)
-    if buys + sells < 20 or liq < 20_000:
+    if buys + sells < 20 or liq < MIN_LIQUIDITY_USD or mc < MIN_MARKETCAP_USD:
         return None
 
     # WASH/BOT FILTER (highest-value de-noiser): reject faked buy pressure.
