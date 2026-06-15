@@ -255,3 +255,24 @@ def test_exclude_share_above_drops_pool():
     m = effective_concentration(holders, top_n=3, exclude_share_above=0.30)
     # The 90% pool account is excluded → metrics reflect only real holders.
     assert m["nominal_holder_count"] == 10
+
+
+def test_batch_funder_threshold():
+    # Validated bw_flag rule: a funder linking >=5 wallets = one entity; <5 stays split.
+    from src.onchain.entity_clustering import cluster_addresses, batch_funder_flags
+    # 6 addresses share funder 0xF (batch), 2 others share 0xG (coincidental pair)
+    addrs = [f"0x{i:040x}" for i in range(8)]
+    funders = {a: "0xF" for a in addrs[:6]}
+    funders.update({a: "0xG" for a in addrs[6:]})
+
+    # min_batch=5: the 6 merge, the 2 do NOT
+    m = cluster_addresses(addrs, funders=funders, exclude=set(), min_batch_funder=5)
+    roots6 = {m[a] for a in addrs[:6]}
+    roots2 = {m[a] for a in addrs[6:]}
+    assert len(roots6) == 1            # batch-funded 6 → one entity
+    assert len(roots2) == 2            # coincidental pair → stays separate
+
+    flags = batch_funder_flags(addrs, funders, min_batch=5, exclude=set())
+    assert flags[addrs[0]]["funder_wallet_count"] == 6
+    assert flags[addrs[0]]["has_batch_funder"] == 1
+    assert flags[addrs[6]]["has_batch_funder"] == 0

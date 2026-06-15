@@ -117,6 +117,42 @@ def _similar_balance_groups(
     return [members for members in buckets.values() if len(members) >= min_members]
 
 
+def batch_funder_flags(
+    addresses: Iterable[str], funders: dict[str, str],
+    min_batch: int = 5, exclude: set[str] | None = None,
+) -> dict[str, dict]:
+    """Per-address batch-funder coordination signal (ported from bw_flag).
+
+    For each address returns {funder_wallet_count, has_batch_funder}:
+      - funder_wallet_count: how many in-scope wallets share this address's
+        non-CEX root funder (siblings incl. self).
+      - has_batch_funder: 1 if that count >= min_batch (the validated coordination
+        flag — a funder that batch-funded >= min_batch wallets is an operator).
+    """
+    if exclude is None:
+        exclude = _exchange_addresses()
+    exclude = {a.lower() for a in exclude}
+    addrs = [_norm(a) for a in addresses]
+
+    by_root: dict[str, list[str]] = {}
+    addr_root: dict[str, str] = {}
+    for a in addrs:
+        if a in exclude:
+            continue
+        root = _root_funder(a, funders, exclude)
+        if root and root not in exclude:
+            by_root.setdefault(root, []).append(a)
+            addr_root[a] = root
+
+    out: dict[str, dict] = {}
+    for a in addrs:
+        root = addr_root.get(a)
+        count = len(by_root.get(root, [])) if root else 0
+        out[a] = {"funder_wallet_count": count,
+                  "has_batch_funder": 1 if count >= min_batch else 0}
+    return out
+
+
 def cluster_addresses(
     addresses: Iterable[str],
     funders: dict[str, str] | None = None,
@@ -124,13 +160,16 @@ def cluster_addresses(
     exclude: set[str] | None = None,
     balances: dict[str, float] | None = None,
     entity_map: dict[str, str] | None = None,
+    min_batch_funder: int = 1,
 ) -> dict[str, str]:
     """Cluster addresses into entities via union-find over edges.
 
     Edge types (each a "same entity" signal), strongest first:
       0. Arkham entity — ground-truth address→entity (when an API key is set).
-      1. Common funder + funder-chain root — addresses funded from the same
-         source, even several hops deep.
+      1. Batch funder — addresses sharing a common non-CEX funder (chain-aware
+         root). `min_batch_funder` is the validated coordination threshold: a
+         funder must have funded >= this many in-scope wallets to count as one
+         entity (ported from pre-airdrop-detection's bw_flag, validated at 5).
       2. Temporal co-acquisition — addresses that received the token together.
       3. Similar balance — clusters of near-identical non-trivial balances
          (operators split a position into equal chunks).
@@ -169,6 +208,10 @@ def cluster_addresses(
             if root and root not in exclude:
                 by_root.setdefault(root, []).append(al)
         for group in by_root.values():
+            # Validated rule: only treat a shared funder as an entity link if it
+            # batch-funded >= min_batch_funder wallets (avoids coincidental pairs).
+            if len(group) < min_batch_funder:
+                continue
             for other in group[1:]:
                 uf.union(group[0], other)
 
@@ -198,6 +241,7 @@ def effective_concentration(
     top_n: int = 10,
     exclude_share_above: float | None = None,
     entity_map: dict[str, str] | None = None,
+    min_batch_funder: int = 1,
 ) -> dict[str, Any]:
     """Compute effective (entity-level) vs nominal (address-level) concentration.
 
@@ -236,7 +280,7 @@ def effective_concentration(
     bal_map = {h["address"]: h["balance"] for h in pos}
     mapping = cluster_addresses(
         (h["address"] for h in pos), funders, co_buy_groups, exclude,
-        balances=bal_map, entity_map=entity_map,
+        balances=bal_map, entity_map=entity_map, min_batch_funder=min_batch_funder,
     )
     excluded = set(h["address"] for h in pos) - set(mapping)
     entity_bal: dict[str, float] = {}

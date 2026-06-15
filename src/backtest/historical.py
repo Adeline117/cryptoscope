@@ -143,7 +143,7 @@ def reconstruct_series(token: str, chain: str, n_points: int = 8,
     for blk in checkpoints:
         holders = _balances_as_of(transfers, blk)
         m = effective_concentration(holders, funders=funders, top_n=10,
-                                    exclude_share_above=0.30)
+                                    exclude_share_above=0.30, min_batch_funder=5)
         eff_series.append(m["effective_top_n_pct"])
         gap_series.append(m["concentration_gap"])
 

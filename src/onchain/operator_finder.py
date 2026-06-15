@@ -52,7 +52,8 @@ def find_operator_cluster(token: str, chain: str, top_n: int = 60,
 
     # Cluster (shared root funder + similar balance), excluding CEX/pool.
     exclude = _exchange_addresses()
-    mapping = cluster_addresses(addrs, funders=funders, exclude=exclude, balances=bal_map)
+    mapping = cluster_addresses(addrs, funders=funders, exclude=exclude,
+                                balances=bal_map, min_batch_funder=5)
 
     # Group addresses by entity, pick the largest by combined balance.
     by_entity: dict[str, list[str]] = {}
