@@ -73,6 +73,17 @@ def test_illiquid_rejected():
     assert accumulation_footprint(_pair(liq=5000)) is None
 
 
+def test_zombie_dead_book_rejected():
+    # The CAT-BSC failure: deep liquidity, near-zero volume (turnover 0.025).
+    # Flat prices fake "compression"; stray short-window ratios fake "absorption".
+    # Must be rejected — a real accumulation target has actual turnover.
+    z = _pair(liq=153_000, v24=3_845, v6=1_200, v1=200,
+              buys_h1=8, sells_h1=5, buys_h6=30, sells_h6=20)
+    assert accumulation_footprint(z) is None
+    # Low absolute volume even at healthy-looking turnover is still dead.
+    assert accumulation_footprint(_pair(liq=50_000, v24=10_000)) is None
+
+
 def test_smart_money_set_loads():
     from src.pipeline.anomaly_screener import _smart_money_set
     sol = _smart_money_set("solana")

@@ -69,15 +69,73 @@ def score_reasons(reasons: list[str]) -> int:
     return int(round(sum(w.get(r, 0) for r in reasons)))
 
 
+def _http_json(url: str):
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "CryptoScope/1.0", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read().decode())
+
+
 def _dexscreener_pairs(query: str) -> list[dict]:
     url = f"https://api.dexscreener.com/latest/dex/search?q={query}"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read().decode()).get("pairs", [])
+        return _http_json(url).get("pairs", [])
     except Exception as e:
         logger.debug("dexscreener_failed", query=query, error=str(e))
         return []
+
+
+# GeckoTerminal network slug -> DexScreener chainId. Only the free-data chains we
+# can actually confirm operators on downstream.
+_GT_CHAINS = {"eth": "ethereum", "bsc": "bsc", "solana": "solana", "base": "base"}
+
+
+def _dexscreener_tokens(chain: str, addresses: list[str]) -> list[dict]:
+    """Batch-fetch DexScreener pair data for token addresses (<=30 per call)."""
+    pairs: list[dict] = []
+    for i in range(0, len(addresses), 30):
+        csv = ",".join(addresses[i:i + 30])
+        try:
+            d = _http_json(f"https://api.dexscreener.com/tokens/v1/{chain}/{csv}")
+            pairs.extend(d if isinstance(d, list) else d.get("pairs", []))
+        except Exception as e:
+            logger.debug("dexscreener_batch_failed", chain=chain, error=str(e))
+    return pairs
+
+
+def _gt_base_addresses(path: str) -> list[str]:
+    """Extract base-token addresses from a GeckoTerminal pools response."""
+    out = []
+    try:
+        for p in _http_json(f"https://api.geckoterminal.com/api/v2/{path}").get("data", []):
+            tid = (p.get("relationships", {}).get("base_token", {})
+                   .get("data", {}) or {}).get("id", "")
+            if "_" in tid:
+                out.append(tid.split("_", 1)[1])
+    except Exception as e:
+        logger.debug("geckoterminal_failed", path=path, error=str(e))
+    return out
+
+
+def _universe_pairs() -> list[dict]:
+    """Build the screening universe from ACTIVELY-TRADED pools, not vanity name
+    search. Per free-data chain: trending pools (attention) + top-volume pools
+    (real flow). This is the fix for the keyword universe surfacing dead zombies
+    like CAT just because the name matched 'cat'. Returns DexScreener pairs."""
+    pairs: list[dict] = []
+    for net, chain in _GT_CHAINS.items():
+        addrs: list[str] = []
+        addrs += _gt_base_addresses(f"networks/{net}/trending_pools?page=1")
+        addrs += _gt_base_addresses(f"networks/{net}/pools?page=1&sort=h24_volume_usd_desc")
+        # dedupe within chain, preserve order
+        seen, uniq = set(), []
+        for a in addrs:
+            al = a.lower()
+            if al not in seen:
+                seen.add(al); uniq.append(a)
+        if uniq:
+            pairs.extend(_dexscreener_tokens(chain, uniq))
+    return pairs
 
 
 def _ratio(d: dict, w: str) -> float:
@@ -144,6 +202,15 @@ def accumulation_footprint(pair: dict) -> dict | None:
     ch24, ch6, ch1 = (float(pc.get(k, 0) or 0) for k in ("h24", "h6", "h1"))
     vol24, vol6, vol1 = (float(vol.get(k, 0) or 0) for k in ("h24", "h6", "h1"))
     vol_liq = vol24 / max(liq, 1)
+
+    # LIVENESS GATE: a real accumulation target has actual turnover — a whale
+    # buying leaves volume. Zombie books (deep liquidity, near-zero volume) show
+    # flat prices that fake "compression" and stray short-window buy ratios that
+    # fake "absorption". Reject dead books outright (this is what let CAT-BSC,
+    # $3.8k/24h on $153k liq = 0.025 turnover, score 85). Need both real absolute
+    # volume AND meaningful turnover vs liquidity.
+    if vol24 < 25_000 or vol_liq < 0.05:
+        return None
     consistency = sum(1 for w in ("m5", "h1", "h6") if _ratio(txns, w) >= 1.2)
 
     notes, reasons = [], []
@@ -251,7 +318,7 @@ def onchain_enrich(token: str, chain: str) -> dict | None:
             holders = hs.fetch_holders_evm(token, chain_id=cid, max_pages=15)
         if not holders:
             return None
-        hs.save_snapshot(token, chain, holders, source="screener")
+        hs.save_snapshot(token, chain, holders)
         count = len([h for h in holders if (h.get("balance") or 0) > 0])
 
         # Smart-money intersection (free — reuses fetched holders).
@@ -400,20 +467,25 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
     """
     queries = queries or ["ai", "agent", "meme", "pepe", "inu", "cat", "moon"]
     seen, cands = set(), []
+    # Universe = actively-traded pools (GeckoTerminal trending + top-volume across
+    # free-data chains) + keyword search. The first gives a real market universe;
+    # the second catches narrative tokens by name. Both feed the same scorer.
+    universe = _universe_pairs()
     for q in queries:
-        for p in _dexscreener_pairs(q):
-            base = p.get("baseToken", {}) or {}
-            addr, chain = base.get("address"), p.get("chainId")
-            key = (chain, addr)
-            if not addr or key in seen:
-                continue
-            seen.add(key)
-            fp = accumulation_footprint(p)
-            if fp:
-                cands.append({
-                    "symbol": base.get("symbol", "?"), "chain": chain,
-                    "address": addr, "url": p.get("url", ""), **fp,
-                })
+        universe.extend(_dexscreener_pairs(q))
+    for p in universe:
+        base = p.get("baseToken", {}) or {}
+        addr, chain = base.get("address"), p.get("chainId")
+        key = (chain, addr)
+        if not addr or key in seen:
+            continue
+        seen.add(key)
+        fp = accumulation_footprint(p)
+        if fp:
+            cands.append({
+                "symbol": base.get("symbol", "?"), "chain": chain,
+                "address": addr, "url": p.get("url", ""), **fp,
+            })
     cands.sort(key=lambda c: -c["score"])
     cands = cands[:max_out]
 
