@@ -89,7 +89,8 @@ def _balances_as_of(transfers: list[dict], block: int) -> list[dict]:
 
 
 def reconstruct_series(token: str, chain: str, n_points: int = 8,
-                       max_pages: int = 40, observe_fraction: float = 1.0) -> dict | None:
+                       max_pages: int = 40, observe_fraction: float = 1.0,
+                       cluster: bool = True) -> dict | None:
     """Reconstruct the effective/nominal concentration series over a token's life.
 
     `observe_fraction` < 1 reconstructs only over the first fraction of the
@@ -123,12 +124,26 @@ def reconstruct_series(token: str, chain: str, n_points: int = 8,
     step = (last_blk - first_blk) / n_points
     checkpoints = [int(first_blk + step * i) for i in range(1, n_points + 1)]
 
+    # Resolve funders for the FINAL-snapshot top holders once (immutable, cached),
+    # so effective concentration reflects real entity clustering — without this
+    # effective≈nominal and the divergence gap is always ~0.
+    funders: dict[str, str] = {}
+    if cluster and chain in ("ethereum", "eth"):
+        try:
+            from src.onchain.funder_graph import get_funders
+
+            final_holders = _balances_as_of(transfers, last_blk)
+            final_holders.sort(key=lambda h: h["balance"], reverse=True)
+            top_addrs = [h["address"] for h in final_holders[:40]]
+            funders = get_funders(top_addrs, "ethereum", max_lookups=40)
+        except Exception as e:
+            logger.debug("hist_funder_failed", token=token, error=str(e))
+
     gap_series, eff_series = [], []
     for blk in checkpoints:
         holders = _balances_as_of(transfers, blk)
-        # Clustering uses similar-balance + exclusion (funder lookups are skipped
-        # here for cost; similar-balance still catches split positions).
-        m = effective_concentration(holders, top_n=10)
+        m = effective_concentration(holders, funders=funders, top_n=10,
+                                    exclude_share_above=0.30)
         eff_series.append(m["effective_top_n_pct"])
         gap_series.append(m["concentration_gap"])
 
