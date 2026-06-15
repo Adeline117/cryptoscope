@@ -132,17 +132,37 @@ def analyze_curve(curve: dict) -> dict:
     if len(share) < 4:
         return {"verdict": "insufficient", "detail": "too few points"}
 
-    rose = _slope(share) > 0
-    decel = is_decelerating(share)
     peak = max(share)
+    peak_idx = share.index(peak)
     start, end = share[0], share[-1]
+
+    # Accumulation = a meaningful rise from the START to a peak (whether or not the
+    # operator later distributed). If they started from ~nothing, any real peak is
+    # accumulation; if they already held a base, require a >=1.5x rise.
+    if start <= peak * 0.1:           # started from ~zero
+        rose_to_peak = peak > 0
+    else:
+        rose_to_peak = peak >= start * 1.5
+    pre_peak = share[: peak_idx + 1] if peak_idx >= 1 else share
+    decel = is_decelerating(pre_peak) if len(pre_peak) >= 3 else False
+    # Distribution after the peak (the exit signal): fell back materially.
+    distributed = peak > 0 and end < peak * 0.6
+
+    if rose_to_peak and distributed:
+        verdict = "accumulation_then_distribution"  # full 妖币 lifecycle
+    elif rose_to_peak:
+        verdict = "accumulation"
+    else:
+        verdict = "no_accumulation"
+
     return {
-        "verdict": "accumulation" if (rose and end > start) else "no_accumulation",
+        "verdict": verdict,
         "share_start_pct": round(start, 2),
         "share_peak_pct": round(peak, 2),
         "share_end_pct": round(end, 2),
-        "rising": rose,
+        "rose_to_peak": rose_to_peak,
         "decelerating_saturation": decel,
+        "distributed_after_peak": distributed,
         "operator_addresses_seen": f"{curve['n_operator_seen']}/{curve['n_operator_addresses']}",
-        "slope": round(_slope(share), 3),
+        "pre_peak_slope": round(_slope(pre_peak), 3),
     }

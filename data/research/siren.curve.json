@@ -1,0 +1,31 @@
+{
+  "status": "complete",
+  "symbol": "SIREN",
+  "chain": "bsc",
+  "series": [
+    109437454.964,
+    109437454.964,
+    109437454.964,
+    139729789.8554,
+    139729789.9144,
+    144250601.5758,
+    144784125.5158,
+    144784125.5158,
+    144784125.5158,
+    144784125.5158,
+    144784125.5158,
+    144784125.5158,
+    0.0
+  ],
+  "verdict": {
+    "verdict": "no_accumulation",
+    "share_start_pct": 109437454.96,
+    "share_peak_pct": 144784125.52,
+    "share_end_pct": 0.0,
+    "rose_to_peak": false,
+    "decelerating_saturation": true,
+    "distributed_after_peak": true,
+    "operator_addresses_seen": "16/16",
+    "pre_peak_slope": 7355665.708
+  }
+}

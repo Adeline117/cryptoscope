@@ -122,8 +122,9 @@ def operator_curve_evm(token: str, addresses: list[str], chain: str,
     if to_block <= from_block:
         return None
 
+    # Include the from_block endpoint so a from-zero baseline is captured.
     step = (to_block - from_block) / n_points
-    blocks = [int(from_block + step * i) for i in range(1, n_points + 1)]
+    blocks = [int(from_block + step * i) for i in range(0, n_points + 1)]
     balance_series = []
     for blk in blocks:
         total = combined_balance_at(token, addresses, chain, blk, rpc=rpc)
