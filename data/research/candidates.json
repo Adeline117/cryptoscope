@@ -1,0 +1,90 @@
+[
+  {
+    "token": "0x2d61bbbe5ad9a8f18fef35940301fd24f143a72b",
+    "chain": "ethereum",
+    "symbol": "sa1t",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 8.09,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 8.09
+  },
+  {
+    "token": "0xa2b4c0af19cc16a6cfacce81f192b024d625817d",
+    "chain": "ethereum",
+    "symbol": "KISHU",
+    "status": "ok",
+    "operator_cluster_size": 4,
+    "operator_share_pct": 5.76,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 5.76
+  },
+  {
+    "token": "0x44b28991b167582f18ba0259e0173176ca125505",
+    "chain": "ethereum",
+    "symbol": "uPEG",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 7.54,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 7.54
+  },
+  {
+    "token": "0x0001a500a6b18995b03f44bb040a5ffc28e45cb0",
+    "chain": "ethereum",
+    "symbol": "OLAS",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 35.76,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 35.76
+  },
+  {
+    "token": "0x893643f9e232e4e857f278d61641c955589a7a37",
+    "chain": "ethereum",
+    "symbol": "WOKE",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 9.6,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 9.6
+  },
+  {
+    "token": "0x40e3d1a4b2c47d9aa61261f5606136ef73e28042",
+    "chain": "ethereum",
+    "symbol": "SERV",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 23.9,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 23.9
+  },
+  {
+    "token": "0x92d5942f468447f1f21c2092580f15544923b434",
+    "chain": "ethereum",
+    "symbol": "VSTR",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 68.56,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 68.56
+  },
+  {
+    "token": "0x242ecdfd9e7b6532c3c0cb7451ca8ffc9920a4ca",
+    "chain": "ethereum",
+    "symbol": "KOMUGI",
+    "status": "ok",
+    "operator_cluster_size": 1,
+    "operator_share_pct": 5.89,
+    "coordinated_wallets": 0,
+    "coordinated_share_pct": 0.0,
+    "score": 5.89
+  }
+]
