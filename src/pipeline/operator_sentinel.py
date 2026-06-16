@@ -173,22 +173,29 @@ async def run_and_alert() -> int:
     return len(alerts)
 
 
-# BASED operator cluster (9 wallets) — confirmed in data/research/BASED_analysis.md.
-_BASED = (
-    "0x1d28D989F9e3CCb8B15D0cec601734514f958E4D", "bsc", "BASED",
-    ["0xc3526ad0a5fa2d7bac0963904036d8604b13470e", "0x78a0cddf1e0c966d505181b0dfaf505e398d053a",
-     "0x3e5dcdbded6ca3d2a78eb14c307c9ed7a9638c52", "0x40c0e5f38fecacd5d7dbea41cd1c34c8917a25b0",
-     "0x42a99d7dc78415ea0995edd8d5e718495a07a7c1", "0x774922fbb5a9e6d52c14fa9dfa25c16219f91c90",
-     "0x4bdaa8005233f251375212efab1d2ce938d62b78", "0xc4be9808281709d47489ce1e2a5422da29e5506a",
-     "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"],
-)
+# Confirmed operator clusters — see data/research/*_analysis.md.
+_KNOWN_CLUSTERS = [
+    # BASED (9 wallets, hidden distributed Sybil, loaded-and-waiting).
+    ("0x1d28D989F9e3CCb8B15D0cec601734514f958E4D", "bsc", "BASED",
+     ["0xc3526ad0a5fa2d7bac0963904036d8604b13470e", "0x78a0cddf1e0c966d505181b0dfaf505e398d053a",
+      "0x3e5dcdbded6ca3d2a78eb14c307c9ed7a9638c52", "0x40c0e5f38fecacd5d7dbea41cd1c34c8917a25b0",
+      "0x42a99d7dc78415ea0995edd8d5e718495a07a7c1", "0x774922fbb5a9e6d52c14fa9dfa25c16219f91c90",
+      "0x4bdaa8005233f251375212efab1d2ce938d62b78", "0xc4be9808281709d47489ce1e2a5422da29e5506a",
+      "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"]),
+    # ESPORTS / Yooldo Games (3 wallets, 23.9%, held through a +382%/-79% pump-dump
+    # on 06-12/13 without selling — watch for second leg or distribution).
+    ("0xF39e4b21c84e737Df08e2C3b32541d856f508E48", "bsc", "ESPORTS",
+     ["0x99d4b3f50b14bfc67892c472f4053ee3483d87b9", "0xd2dd7b597fd2435b6db61ddf48544fd931e6869f",
+      "0x504ce9e51e508c85a161058c12e970a903d482fc"]),
+]
 
 
 def main():
-    if "--register-based" in sys.argv:
-        s = register(*_BASED)
-        print(f"✅ BASED 已注册哨兵 — 基线: 簇余额 {s['baseline'].get('cluster_balance'):,.0f}, "
-              f"流动性 ${s['baseline'].get('liquidity'):,.0f}, 价格 ${s['baseline'].get('price')}")
+    if "--register-all" in sys.argv or "--register-based" in sys.argv:
+        for cluster in _KNOWN_CLUSTERS:
+            s = register(*cluster)
+            print(f"✅ {cluster[2]} 已注册 — 簇余额 {s['baseline'].get('cluster_balance'):,.0f}, "
+                  f"流动性 ${s['baseline'].get('liquidity'):,.0f}, 价格 ${s['baseline'].get('price')}")
         return
     alerts = check_run()
     if alerts:

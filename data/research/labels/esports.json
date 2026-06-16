@@ -1,0 +1,25 @@
+{
+  "token": "0xf39e4b21c84e737df08e2c3b32541d856f508e48",
+  "chain": "bsc",
+  "symbol": "ESPORTS",
+  "name": "Yooldo Games",
+  "outcome": "pumped_held",
+  "found_by": "operator_hunt",
+  "found_date": "2026-06-15",
+  "operator_funder": "0x64391af2cdc949013accf8e6e4c2be12465eee13",
+  "fund_origin": "Kraken Hot Wallet",
+  "cluster_wallets": 3,
+  "cluster_share_pct": 23.9,
+  "dominant_wallet_pct": 23.1,
+  "serial_operator": true,
+  "shared_tokens": [
+    "ETHE",
+    "比特币",
+    "uBTC",
+    "立马分红",
+    "FourFOX"
+  ],
+  "pump_event": "+382% to $0.30 on 06-12, crashed -79% to $0.06 on 06-13",
+  "cluster_sold_during_pump": false,
+  "note": "Held 215M net flat through the entire pump+crash, zero distribution. Post-pump, back at base. Watching for 2nd leg or distribution."
+}

@@ -38,16 +38,17 @@ _HUNT_CHAINS = {"bsc": "bsc", "solana": "solana"}
 MIN_LIQ, MAX_LIQ = 120_000, 8_000_000
 
 
-def _gather_universe(per_chain: int = 40) -> list[dict]:
-    """Token pairs from GeckoTerminal trending + new + top-volume, in the hunt
-    band. Returns DexScreener pairs (with txns/liquidity), deduped per chain."""
+def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
+    """Token pairs from GeckoTerminal trending + new + top-volume (multiple pages),
+    in the hunt band. Returns DexScreener pairs (with txns/liquidity), deduped."""
     pairs: list[dict] = []
     for net, chain in _HUNT_CHAINS.items():
         addrs: list[str] = []
-        for path in (f"networks/{net}/trending_pools?page=1",
-                     f"networks/{net}/new_pools?page=1",
-                     f"networks/{net}/pools?page=1&sort=h24_volume_usd_desc"):
-            addrs += _gt_base_addresses(path)
+        for pg in range(1, pages + 1):
+            for path in (f"networks/{net}/trending_pools?page={pg}",
+                         f"networks/{net}/new_pools?page={pg}",
+                         f"networks/{net}/pools?page={pg}&sort=h24_volume_usd_desc"):
+                addrs += _gt_base_addresses(path)
         seen, uniq = set(), []
         for a in addrs:
             al = a.lower()

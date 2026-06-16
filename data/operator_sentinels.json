@@ -15,16 +15,38 @@
       "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
     ],
     "baseline": {
-      "price": 0.07811,
-      "liquidity": 307630.79,
-      "vol24": 1977578.15,
+      "price": 0.07574,
+      "liquidity": 300393.93,
+      "vol24": 2017150.6,
       "cluster_balance": 10167894.759644354
     },
     "last": {
-      "price": 0.07811,
-      "liquidity": 307630.79,
-      "vol24": 1977578.15,
+      "price": 0.07574,
+      "liquidity": 300393.93,
+      "vol24": 2017150.6,
       "cluster_balance": 10167894.759644354
+    }
+  },
+  "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
+    "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
+    "chain": "bsc",
+    "symbol": "ESPORTS",
+    "wallets": [
+      "0x99d4b3f50b14bfc67892c472f4053ee3483d87b9",
+      "0xd2dd7b597fd2435b6db61ddf48544fd931e6869f",
+      "0x504ce9e51e508c85a161058c12e970a903d482fc"
+    ],
+    "baseline": {
+      "price": 0.06157,
+      "liquidity": 1307352.37,
+      "vol24": 1623821.93,
+      "cluster_balance": 214578864.43321168
+    },
+    "last": {
+      "price": 0.06157,
+      "liquidity": 1307352.37,
+      "vol24": 1623821.93,
+      "cluster_balance": 214578864.43321168
     }
   }
 }
