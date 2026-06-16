@@ -22,13 +22,14 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08368,
-      "liquidity": 322518.34,
-      "vol24": 2234311.63,
+      "price": 0.08357,
+      "liquidity": 322407.92,
+      "vol24": 2237105.8,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
-    "balanceof_reliable": true
+    "balanceof_reliable": true,
+    "flow_ts": "2026-06-06T10:55:43.000Z"
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
@@ -47,13 +48,14 @@
       "funding": 0.0186
     },
     "last": {
-      "price": 0.06469,
-      "liquidity": 1332670.94,
-      "vol24": 1460782.81,
+      "price": 0.06458,
+      "liquidity": 1331600.6,
+      "vol24": 1470256.72,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0179
+      "funding": 0.017
     },
-    "balanceof_reliable": true
+    "balanceof_reliable": true,
+    "flow_ts": "2026-06-16T01:12:24.000Z"
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
     "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
@@ -84,13 +86,14 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.8304,
-      "liquidity": 715634.61,
-      "vol24": 78420797.99,
+      "price": 0.8087,
+      "liquidity": 706067.03,
+      "vol24": 78263136.71,
       "cluster_balance": 3358831.7858782033,
       "funding": 0.01
     },
-    "balanceof_reliable": true
+    "balanceof_reliable": true,
+    "flow_ts": "2026-06-16T09:20:22.000Z"
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -120,12 +123,13 @@
       "funding": 0.12
     },
     "last": {
-      "price": 0.04772,
-      "liquidity": 2433023.11,
-      "vol24": 1883855.78,
+      "price": 0.04777,
+      "liquidity": 2434629.91,
+      "vol24": 1874641.53,
       "cluster_balance": 86373037.33403534,
-      "funding": 0.1163
+      "funding": 0.1188
     },
-    "balanceof_reliable": true
+    "balanceof_reliable": true,
+    "flow_ts": "2026-06-16T09:22:52.000Z"
   }
 }
