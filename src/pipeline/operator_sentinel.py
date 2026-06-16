@@ -490,6 +490,17 @@ _KNOWN_CLUSTERS = [
       "0xb85b098448b2aac4af96f5bdd9c6c02373a08975", "0x035ae7d933dcbfe617ffba194a88af0c2867b90c",
       "0x604ef94e24a14052cc924a55f49f879757681d4d", "0x33a5e430b626d2b6f93fd5b94159d30a636a0c4b",
       "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"]),
+    # SIREN (bsc) — pumped ~23x to $1.31 then crashed -96%. Top holders are
+    # RE-ACCUMULATING at the bottom (top-15 EOAs 29.7%→37.5% over 30d) = second-leg
+    # build. Tracking the 14 largest non-contract holders (ex-burn) for the relaunch.
+    ("0x997A58129890bBdA032231A52eD1ddC845fc18e1", "bsc", "SIREN",
+     ["0x91dca37856240e5e1906222ec79278b16420dc92", "0x0d0707963952f2fba59dd06f2b425ace40b492fe",
+      "0x4982085c9e2f89f2ecb8131eca71afad896e89cb", "0x7467a1ff2f66933057776ebf8a985613904ece0b",
+      "0x55dd29e6a6d7c49f331493b318b4de57f7ef1b9b", "0x5ef135decb75fa43011ce6c058307bd437e71264",
+      "0x97798387a5ec55988e840e1ded03f53c3c1aa7b8", "0x7e31d70f38b9f873ace22be146385805d9c5c2b2",
+      "0x4df6b3022ee486cf60f4bea2ec1abbb2d23fbaf9", "0x522fd166904453443b9ed7fb43e622acc804839e",
+      "0xe2aca79c6cad337499c2588972cd5dfd667ae2e6", "0x33279e8df05fd4dcf24eccf7efbe460c8e352ce6",
+      "0x3627e15706126fe66dd7bcfeb96e391298da5763", "0xc58bff59c3480f6371e573634ef269612252e05f"]),
 ]
 
 
