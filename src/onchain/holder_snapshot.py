@@ -325,6 +325,53 @@ _ALCHEMY_NET = {
 }
 
 
+_MORALIS_CHAINS = {1: "eth", 56: "bsc", 8453: "base", 42161: "arbitrum",
+                   10: "optimism", 137: "polygon"}
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def fetch_holders_moralis(
+    token: str, chain_id: int, max_pages: int = 5, timeout: int = 25
+) -> list[dict[str, Any]]:
+    """Token holders via Moralis (free tier) — the ranked owner list with balances.
+    This is the path for BSC and other EVM chains where Alchemy/Etherscan free
+    don't work. Cloudflare blocks the default urllib UA (1010), so a browser UA is
+    required. Paginates by cursor; max_pages*100 holders."""
+    key = os.environ.get("MORALIS_API_KEY")
+    mchain = _MORALIS_CHAINS.get(chain_id)
+    if not key or not mchain:
+        return []
+    holders: list[dict[str, Any]] = []
+    cursor = None
+    zero = "0x0000000000000000000000000000000000000000"
+    try:
+        for _ in range(max_pages):
+            url = (f"https://deep-index.moralis.io/api/v2.2/erc20/{token}/owners"
+                   f"?chain={mchain}&order=DESC&limit=100")
+            if cursor:
+                url += f"&cursor={cursor}"
+            req = urllib.request.Request(
+                url, headers={"X-API-Key": key, "accept": "application/json",
+                              "User-Agent": _BROWSER_UA})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode())
+            for r in data.get("result", []):
+                addr = (r.get("owner_address") or "").lower()
+                try:
+                    bal = float(r.get("balance_formatted") or 0)
+                except (ValueError, TypeError):
+                    bal = 0.0
+                if addr and addr != zero and bal > 0:
+                    holders.append({"address": addr, "balance": round(bal, 8)})
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+    except Exception as e:
+        logger.warning("moralis_holders_failed", token=token, error=str(e))
+    return holders
+
+
 def fetch_holders_evm(
     token: str, chain_id: int = 1, max_pages: int = 25, timeout: int = 25
 ) -> list[dict[str, Any]]:
@@ -335,7 +382,16 @@ def fetch_holders_evm(
     holder set, not just recent transactors. Caps at `max_pages` for very large
     tokens (logged when truncated). Falls back to Etherscan recent-window if no
     Alchemy key. Best-effort: returns [] on total failure.
+
+    Non-ETH chains (BSC etc.) try Moralis first — Alchemy/Etherscan free don't
+    cover them.
     """
+    # Moralis owner list is the reliable free path for non-ETH EVM chains.
+    if chain_id != 1 and os.environ.get("MORALIS_API_KEY"):
+        m = fetch_holders_moralis(token, chain_id, max_pages=min(max_pages, 5), timeout=timeout)
+        if m:
+            return m
+
     key = os.environ.get("ALCHEMY_API_KEY", "")
     net = _ALCHEMY_NET.get(chain_id)
     if key and net:

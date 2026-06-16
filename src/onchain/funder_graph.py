@@ -38,6 +38,47 @@ _EVM_CHAIN_IDS = {
     "arbitrum": 42161, "optimism": 10, "polygon": 137,
 }
 
+# Etherscan's free tier only covers Ethereum mainnet ("Free API access is not
+# supported for this chain" on chainid!=1). For other EVM chains we use Moralis
+# (free tier) when a key is present — this is what lets BSC funder clustering run.
+_MORALIS_CHAINS = {
+    "bsc": "bsc", "base": "base", "arbitrum": "arbitrum",
+    "optimism": "optimism", "polygon": "polygon", "ethereum": "eth", "eth": "eth",
+}
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _fetch_first_funder_moralis(address: str, chain: str, timeout: int = 20) -> str | None:
+    """First incoming native transfer's sender via Moralis (free tier). Covers
+    BSC and other EVM chains Etherscan's free tier locks out. Cloudflare blocks
+    the default urllib UA (error 1010), so a browser UA is required."""
+    key = os.environ.get("MORALIS_API_KEY")
+    mchain = _MORALIS_CHAINS.get(chain)
+    if not key or not mchain:
+        return None
+    url = (f"https://deep-index.moralis.io/api/v2.2/{address}"
+           f"?chain={mchain}&order=ASC&limit=20")
+    try:
+        req = urllib.request.Request(
+            url, headers={"X-API-Key": key, "accept": "application/json",
+                          "User-Agent": _BROWSER_UA})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode())
+        for tx in data.get("result", []):
+            to = (tx.get("to_address") or "").lower()
+            frm = (tx.get("from_address") or "").lower()
+            try:
+                value = int(tx.get("value", "0") or 0)
+            except (ValueError, TypeError):
+                value = 0
+            if to == address.lower() and value > 0 and frm:
+                return frm
+        return None
+    except Exception as e:
+        logger.debug("moralis_funder_failed", address=address, error=str(e))
+        return None
+
 
 def _keys() -> list[str]:
     """Etherscan key pool (ETHERSCAN_API_KEYS csv, else single ETHERSCAN_API_KEY)."""
@@ -202,9 +243,11 @@ def get_funders(
         return {}
 
     keys = _keys()
-    if not is_solana and not keys:
-        return {}
     chain_id = _EVM_CHAIN_IDS.get(chain, 1)
+    # Etherscan free works only for ETH; other EVM chains route through Moralis.
+    use_moralis = (not is_solana and chain_id != 1 and bool(os.environ.get("MORALIS_API_KEY")))
+    if not is_solana and not keys and not use_moralis:
+        return {}
 
     cached = _cache_get(addrs, chain, db_path)
     result: dict[str, str] = {a: f for a, f in cached.items() if f}
@@ -213,6 +256,8 @@ def get_funders(
     for i, addr in enumerate(todo):
         if is_solana:
             funder = _fetch_first_funder_solana(addr)
+        elif use_moralis:
+            funder = _fetch_first_funder_moralis(addr, chain)
         else:
             funder = _fetch_first_funder_evm(addr, chain_id, keys[i % len(keys)])
         _cache_put(addr, chain, funder, db_path)

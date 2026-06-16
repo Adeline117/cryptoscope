@@ -330,10 +330,17 @@ def _contract_addresses_evm(addresses: list[str], chain: str) -> set[str]:
     return out
 
 
-# Chains where first-funder lookup is FREE (Etherscan free = ETH only; Helius =
-# Solana). BSC/others have no free indexer, so funder clustering can't run — those
-# fall back to contract/CEX/similar-balance only and get flagged "needs Arkham".
-_FUNDER_FREE_CHAINS = {"ethereum", "solana", "sol"}
+# Chains where first-funder lookup is FREE: Etherscan free = ETH, Helius = Solana,
+# and Moralis free tier = BSC + other EVM chains (when MORALIS_API_KEY is set).
+# Without Moralis, BSC falls back to contract/CEX/similar-balance only and gets
+# flagged "needs Arkham".
+def _funder_available(chain: str) -> bool:
+    import os
+    if chain in ("ethereum", "solana", "sol"):
+        return True
+    # Non-ETH EVM chains need Moralis for free funder lookups.
+    return bool(os.environ.get("MORALIS_API_KEY")) and chain in (
+        "bsc", "base", "arbitrum", "optimism", "polygon")
 
 
 def effective_concentration_signal(holders: list[dict], token: str, chain: str) -> dict | None:
@@ -376,7 +383,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
     if len(eoa) < 5:
         return None
 
-    funder_free = chain in _FUNDER_FREE_CHAINS
+    funder_free = _funder_available(chain)
     funders = {}
     if funder_free:
         try:
@@ -385,16 +392,39 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         except Exception as e:
             logger.debug("funders_failed", chain=chain, error=str(e))
 
+    # Cluster the EOAs (shared funder + similar balance), then measure the largest
+    # entity as a share of TOTAL supply — NOT of the filtered subset. (Subset-
+    # relative inflates: CREPE's top holder is 27% of the top-38 EOAs but only
+    # 2.5% of supply — not an operator.)
     try:
-        from src.onchain.entity_clustering import effective_concentration
-        res = effective_concentration(eoa, funders=funders or None, top_n=10,
-                                      exclude_share_above=0.9, min_batch_funder=2)
+        from src.onchain.entity_clustering import cluster_addresses, _norm
+        bal_map = {_norm(h["address"]): h["balance"] for h in eoa}
+        mapping = cluster_addresses(
+            [h["address"] for h in eoa], funders or None,
+            balances=bal_map, min_batch_funder=2)
     except Exception as e:
         logger.debug("eff_conc_failed", token=token, error=str(e))
         return None
-    res["funder_complete"] = bool(funders)
-    res["eoa_analyzed"] = len(eoa)
-    return res
+
+    total_supply = sum(h["balance"] for h in pos)
+    if total_supply <= 0:
+        return None
+    entity_bal: dict[str, float] = {}
+    for a, b in bal_map.items():
+        ent = mapping.get(a, a)
+        entity_bal[ent] = entity_bal.get(ent, 0.0) + b
+    largest_entity = max(entity_bal.values()) if entity_bal else 0.0
+    largest_addr = max(bal_map.values()) if bal_map else 0.0
+    eff_pct = round(largest_entity / total_supply * 100, 2)   # share of supply
+    nom_pct = round(largest_addr / total_supply * 100, 2)     # biggest single addr
+    return {
+        "largest_entity_pct": eff_pct,           # biggest hidden entity / supply
+        "largest_address_pct": nom_pct,          # biggest single address / supply
+        "concentration_gap": round(eff_pct - nom_pct, 2),  # clustering uplift
+        "entity_count": len(entity_bal),
+        "eoa_analyzed": len(eoa),
+        "funder_complete": bool(funders),
+    }
 
 
 def onchain_enrich(token: str, chain: str) -> dict | None:
@@ -642,11 +672,14 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
                 c["funder_complete"] = conc.get("funder_complete")
                 lg = conc.get("largest_entity_pct", 0) or 0
                 gap = conc.get("concentration_gap", 0) or 0
-                if conc.get("funder_complete") and lg >= 25:
-                    c["notes"] += f" · ⭐有效集中{lg:.0f}%(单一实体控盘)"
+                # Thresholds are share-of-SUPPLY: one entity holding >=15% of
+                # supply is a controlling operator; a big clustering uplift (gap)
+                # means many small-looking addresses collapse to one (Sybil).
+                if conc.get("funder_complete") and lg >= 15:
+                    c["notes"] += f" · ⭐有效集中{lg:.0f}%供应(单一实体控盘)"
                     c["reasons"].append("effective_concentration")
-                if gap >= 15:
-                    c["notes"] += f" · 隐藏簇(名义→有效+{gap:.0f}点)"
+                if conc.get("funder_complete") and gap >= 8:
+                    c["notes"] += f" · 隐藏簇(单址{conc.get('largest_address_pct',0):.0f}%→实体{lg:.0f}%)"
                     c["reasons"].append("hidden_cluster")
                 if not conc.get("funder_complete") and c["chain"] not in ("ethereum", "solana", "sol"):
                     c["notes"] += " · ⚠️需Arkham(BSC funder未解析)"
