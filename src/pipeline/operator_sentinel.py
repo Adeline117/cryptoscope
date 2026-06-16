@@ -340,7 +340,8 @@ def check_run() -> list[dict]:
                 action = f"⚪ 异动留意 {fstr}"
             alerts.append({"symbol": t["symbol"], "chain": t["chain"],
                            "token": t["token"], "events": fired,
-                           "funding": fund, "action": action})
+                           "funding": fund, "action": action,
+                           "liquidity": cur.get("liquidity")})
             # Log for outcome scoring (does the call actually work?).
             try:
                 from src.pipeline.outcome_tracker import log_alert
@@ -370,6 +371,11 @@ def _format(alerts: list[dict]) -> str:
             lines.append(f"  ⚠️ <b>{kind}</b>: {detail}")
         if a.get("action"):
             lines.append(f"  👉 <b>{a['action']}</b>")
+        if a.get("liquidity"):
+            from src.pipeline.slippage import max_size_for_impact, price_impact
+            lq = a["liquidity"]
+            lines.append(f"  💧 2%滑点内≤${max_size_for_impact(lq,2.0):,.0f} · "
+                         f"$5k单冲击≈{price_impact(lq,5000):.1f}%")
         lines.append(f"  <code>{a['token']}</code>")
     lines.append("\n<i>带止损,薄盘小仓。仅信号,非投资建议。</i>")
     return "\n".join(lines)
@@ -430,8 +436,12 @@ def main():
         for k, t in targets.items():
             lc = t["last"]
             fund = lc.get("funding")
-            fs = (f" · 费率 {fund:+.3f}%/8h{'🔴多拥挤' if fund and fund > 0.03 else ''}"
-                  if fund is not None else "")
+            ftag = ("🔴极端多拥挤(空顺风)" if fund and fund > 0.1 else
+                    "🔴多拥挤" if fund and fund > 0.03 else
+                    "🟢空拥挤(多顺风)" if fund and fund < -0.03 else "")
+            fs = f" · 费率 {fund:+.3f}%/8h{ftag}" if fund is not None else ""
+            sl = t.get("second_leg", "")
+            fs += f" · {sl}" if sl and sl != "—" else ""
             print(f"  {t['symbol']}: 簇 {lc.get('cluster_balance'):,.0f} · "
                   f"流动性 ${lc.get('liquidity'):,.0f} · 价 ${lc.get('price')}{fs}")
 
