@@ -163,12 +163,13 @@ def _rpc(url: str, method: str, params: list, timeout: int = 15) -> dict:
         return json.loads(resp.read().decode())
 
 
-def _fetch_first_funder_solana(address: str, max_pages: int = 3, timeout: int = 15) -> str | None:
+def _fetch_first_funder_solana(address: str, max_pages: int = 2, timeout: int = 15) -> str | None:
     """Return the source of the address's first incoming SOL transfer, or None.
 
     Paginates getSignaturesForAddress back to the oldest signature (fresh
-    accumulation wallets have few txs, so this is cheap), then parses that
-    transaction for the SOL transfer whose destination is the address.
+    accumulation/Sybil wallets have few txs, so 1-2 pages reach the true oldest);
+    capped at max_pages=2 for speed so a Solana scan doesn't crawl (each wallet was
+    ~1-1.5s × pages). Then parses that tx for the SOL transfer to the address.
     """
     rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
     try:

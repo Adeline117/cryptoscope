@@ -1,0 +1,11 @@
+{
+  "symbol": "jellyjelly",
+  "mint": "",
+  "chain": "solana",
+  "outcome": "pending",
+  "found_by": "operator_hunt",
+  "found_date": "2026-06-15",
+  "cluster_share_pct": 20,
+  "concentration_gap": 12,
+  "note": "Solana hidden Sybil cluster, gap +12. SPCX69 verified: 35 wallets one non-CEX funder = 18.7%."
+}

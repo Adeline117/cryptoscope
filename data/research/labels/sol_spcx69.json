@@ -1,0 +1,11 @@
+{
+  "symbol": "SPCX69",
+  "mint": "SPCXwBHVrKpRqMRawL3NNvt1sXP2Yf3edwRbta53N69",
+  "chain": "solana",
+  "outcome": "pending",
+  "found_by": "operator_hunt",
+  "found_date": "2026-06-15",
+  "cluster_share_pct": 18.7,
+  "concentration_gap": 17,
+  "note": "Solana hidden Sybil cluster, gap +17. SPCX69 verified: 35 wallets one non-CEX funder = 18.7%."
+}
