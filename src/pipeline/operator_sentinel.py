@@ -177,6 +177,41 @@ def _price_peak_now(token: str, chain: str) -> tuple[float, float] | None:
         return None
 
 
+def _distribution_history(token: str, chain: str, wallets: list[str]) -> dict:
+    """Has this cluster ever DISTRIBUTED (sold down from a peak)? The n=2 backtest
+    showed detected clusters are often 'accumulate-and-hold believers' who ride
+    pumps AND crashes without selling — following them traps you too. A cluster
+    with a real sell-down in its history is a profit-taking operator (worth
+    following); one that only ever accumulates is a believer (caveat). EVM only."""
+    if chain in ("solana", "sol"):
+        return {"profile": "?", "max_drawdown_pct": None}
+    try:
+        from src.onchain.evm_archive import ArchiveRPC, operator_curve_evm
+        rpc = ArchiveRPC(chain)
+        if not rpc.available():
+            return {"profile": "?", "max_drawdown_pct": None}
+        latest = rpc.latest_block()
+        # ~90d, ~9d spacing (BSC ~28800 blocks/day)
+        c = operator_curve_evm(token, wallets, chain, latest - 90 * 28800, latest,
+                               n_points=10, pause=0.05)
+        bs = (c or {}).get("balance_series") or []
+        if len(bs) < 4:
+            return {"profile": "?", "max_drawdown_pct": None}
+        peak = bs[0]
+        max_dd = 0.0
+        for v in bs:
+            if v > peak:
+                peak = v
+            elif peak > 0:
+                max_dd = max(max_dd, (peak - v) / peak)
+        dd = round(max_dd * 100, 1)
+        profile = "聪明庄(有派发履历)" if dd >= 25 else "信仰者(只吸不卖)"
+        return {"profile": profile, "max_drawdown_pct": dd}
+    except Exception as e:
+        logger.debug("dist_history_failed", token=token, error=str(e))
+        return {"profile": "?", "max_drawdown_pct": None}
+
+
 def assess_second_leg() -> dict:
     """Classify each tracked cluster as a SECOND-LEG candidate: pumped before
     (>=2x at some point), retraced into a buy zone (now <=60% of peak), AND the
@@ -205,7 +240,12 @@ def assess_second_leg() -> dict:
                 verdict = "⚠️操作者已减仓"
         t["second_leg"] = verdict
         t["loaded"] = loaded
-        out[t["symbol"]] = verdict
+        # Operator type: profit-taker vs hold-forever believer (refines how much to
+        # trust a launch signal from this cluster).
+        dh = _distribution_history(t["token"], t["chain"], t["wallets"])
+        t["operator_type"] = dh["profile"]
+        t["max_drawdown_pct"] = dh["max_drawdown_pct"]
+        out[t["symbol"]] = f"{verdict} | {dh['profile']}"
     _save(data)
     return out
 
@@ -423,6 +463,12 @@ def check_run() -> list[dict]:
                     if fund is not None and fund > 0.08:
                         fstr = f"(费率 +{fund:.3f}% 已过热,小心追高)"
                     action += fstr
+                    # n=2 lesson: a believer cluster (never sells) is a weak follow.
+                    ot = t.get("operator_type", "")
+                    if "信仰者" in ot:
+                        action += " ⚠️此簇只吸不卖(信仰者,跟了可能也套)"
+                    elif "聪明庄" in ot:
+                        action += " ✅此簇有派发履历(会套现)"
                 elif "动能熄火" in kinds:                  # rally fizzled, operator idle
                     action = "⚪→🔴 动能熄火,减多/观望(二波未成)"
                 else:
