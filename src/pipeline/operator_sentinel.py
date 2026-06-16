@@ -82,30 +82,43 @@ def _dex(token: str, chain: str) -> dict:
         return {}
 
 
+_FUNDING_CACHE: dict[str, tuple[float, float | None]] = {}
+_FUNDING_TTL = 300  # funding changes every 8h; 5-min cache is plenty (and lets the
+                    # ~20s real-time loop reuse it instead of hammering Gate/MEXC).
+
+
 def _funding_rate(symbol: str) -> float | None:
     """Perp funding rate (%/8h) for {SYMBOL}_USDT — Gate primary, MEXC fallback.
-    Positive = longs crowded (short-favorable + paid); negative = shorts crowded."""
+    Positive = longs crowded (short-favorable + paid); negative = shorts crowded.
+    Cached 5 min."""
     if not symbol:
         return None
+    import time as _t
+    hit = _FUNDING_CACHE.get(symbol)
+    if hit and _t.time() - hit[0] < _FUNDING_TTL:
+        return hit[1]
+    val = None
     try:
         url = f"https://api.gateio.ws/api/v4/futures/usdt/contracts/{symbol}_USDT"
         req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
         with urllib.request.urlopen(req, timeout=12) as r:
             d = json.loads(r.read().decode())
         if isinstance(d, dict) and d.get("funding_rate") is not None:
-            return round(float(d["funding_rate"]) * 100, 4)
+            val = round(float(d["funding_rate"]) * 100, 4)
     except Exception:
         pass
-    try:
-        url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}_USDT"
-        req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(req, timeout=12) as r:
-            d = json.loads(r.read().decode())
-        if isinstance(d, dict) and d.get("data"):
-            return round(float(d["data"].get("fundingRate", 0) or 0) * 100, 4)
-    except Exception:
-        pass
-    return None
+    if val is None:
+        try:
+            url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}_USDT"
+            req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                d = json.loads(r.read().decode())
+            if isinstance(d, dict) and d.get("data"):
+                val = round(float(d["data"].get("fundingRate", 0) or 0) * 100, 4)
+        except Exception:
+            pass
+    _FUNDING_CACHE[symbol] = (_t.time(), val)
+    return val
 
 
 def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None:
