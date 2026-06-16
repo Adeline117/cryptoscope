@@ -2,10 +2,13 @@
   "symbol": "SPCX69",
   "mint": "SPCXwBHVrKpRqMRawL3NNvt1sXP2Yf3edwRbta53N69",
   "chain": "solana",
-  "outcome": "pending",
+  "outcome": "downgraded",
   "found_by": "operator_hunt",
   "found_date": "2026-06-15",
   "cluster_share_pct": 18.7,
   "concentration_gap": 17,
-  "note": "Solana hidden Sybil cluster, gap +17. SPCX69 verified: 35 wallets one non-CEX funder = 18.7%."
+  "note": "35 wallets/18.7% one non-CEX funder, BUT 4-day-old token + funder has 1000+ txs = launch/distribution seeding, not months-long market accumulation like BASED. High gap is real but context downgrades it. Caused the hunt age-floor raise to 14d.",
+  "verdict": "launch-distribution, not stealth accumulation",
+  "age_days": 4,
+  "funder_sigs": "1000+ (active disperser, not focused operator)"
 }

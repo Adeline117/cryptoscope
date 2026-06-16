@@ -78,9 +78,13 @@ def _in_band(pair: dict) -> bool:
     sym = (pair.get("baseToken", {}) or {}).get("symbol", "").upper()
     if sym in _SKIP_SYMBOLS:                  # peg / wrapped major / stablecoin
         return False
-    # Skip brand-new (<2d, no accumulation history) and already-mooned.
+    # Require ESTABLISHED (>=14d). On a freshly-launched token, "many wallets, one
+    # funder" is just launch/distribution seeding (e.g. SPCX69: 4d old, funder had
+    # 1000+ txs = a disperser), NOT stealth accumulation. Real operator-accumulation
+    # plays are old (BASED 78d, ESPORTS 333d, EVAA 257d). This cuts the false
+    # positives where launch mechanics masquerade as a hidden cluster.
     age_ms = pair.get("pairCreatedAt", 0) or 0
-    if age_ms and (time.time() * 1000 - age_ms) < 2 * 86400 * 1000:
+    if age_ms and (time.time() * 1000 - age_ms) < 14 * 86400 * 1000:
         return False
     ch24 = float((pair.get("priceChange", {}) or {}).get("h24", 0) or 0)
     return ch24 <= 60
