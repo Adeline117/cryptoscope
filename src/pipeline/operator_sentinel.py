@@ -525,12 +525,20 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 elif age_h > MAX_MOMENTUM_H:
                     t.pop("momentum", None)  # expire silently
 
-            # Cooldown by DIRECTION: sell-side events are one event; once any fires,
-            # suppress all sell-side for COOLDOWN_MIN (likewise buy-side).
-            # RULE (user directive): NO cooldown on any side — every triggered signal
-            # (买/卖/砸盘/熄火) pushes immediately. Spam is naturally bounded because
-            # `last` advances each cycle, so a condition must keep WORSENING beyond
-            # its threshold to re-fire; a static condition fires once.
+            # PHASE-CHANGE dedup (not a time cooldown): alert only when the
+            # operator's BEHAVIOR changes — start buying / stop / flip to selling /
+            # crash. A persisting same state does NOT re-send the identical message
+            # (fixes 'keeps sending the same thing'). A real new action always fires
+            # immediately (no time delay).
+            if fired:
+                kset = {k for k, _ in fired}
+                phase = ("sell" if kset & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else
+                         "buy" if kset & {"庄在买", "拉升"} else
+                         "stall" if kset & {"庄停手", "动能熄火"} else "other")
+                if phase == t.get("last_phase"):
+                    fired = []           # same phase as last alert → suppress repeat
+                else:
+                    t["last_phase"] = phase
 
             if fired:
                 fund = cur.get("funding")

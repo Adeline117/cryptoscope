@@ -22,13 +22,14 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.0825,
-      "liquidity": 320969.19,
-      "vol24": 2233778.25,
+      "price": 0.08254,
+      "liquidity": 321014.75,
+      "vol24": 2230566.75,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
-    "peak_balance": 10167894.759644354
+    "peak_balance": 10167894.759644354,
+    "flow_ts": "2026-06-06T10:55:43.000Z"
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
@@ -47,13 +48,14 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.06219,
-      "liquidity": 1316589.72,
-      "vol24": 1356356.52,
+      "price": 0.0612,
+      "liquidity": 1308137.62,
+      "vol24": 1399956.21,
       "cluster_balance": 214578864.43321168,
       "funding": 0.005
     },
-    "peak_balance": 214578864.43321168
+    "peak_balance": 214578864.43321168,
+    "flow_ts": "2026-06-16T01:12:24.000Z"
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
     "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
@@ -84,13 +86,14 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.8098,
-      "liquidity": 706511.96,
-      "vol24": 79552734.35,
-      "cluster_balance": 3358345.909024384,
+      "price": 0.8235,
+      "liquidity": 712582.82,
+      "vol24": 79550130.59,
+      "cluster_balance": 3358816.177701286,
       "funding": 0.01
     },
-    "peak_balance": 3358345.909024384
+    "peak_balance": 3358816.177701286,
+    "flow_ts": "2026-06-16T09:06:01.000Z"
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -120,12 +123,13 @@
       "funding": 0.0687
     },
     "last": {
-      "price": 0.05039,
-      "liquidity": 2483089.2,
-      "vol24": 1795243.24,
-      "cluster_balance": 86123480.47513334,
-      "funding": 0.0765
+      "price": 0.04726,
+      "liquidity": 2426729.06,
+      "vol24": 1854974.34,
+      "cluster_balance": 86201807.62156135,
+      "funding": 0.0824
     },
-    "peak_balance": 92090783.05998234
+    "peak_balance": 92090783.05998234,
+    "flow_ts": "2026-06-15T20:42:03.000Z"
   }
 }
