@@ -285,6 +285,15 @@ def check_run() -> list[dict]:
             alerts.append({"symbol": t["symbol"], "chain": t["chain"],
                            "token": t["token"], "events": fired,
                            "funding": fund, "action": action})
+            # Log for outcome scoring (does the call actually work?).
+            try:
+                from src.pipeline.outcome_tracker import log_alert
+                direction = "short" if "做空" in action or "跑" in action else \
+                            "long" if "做多" in action else "none"
+                log_alert(t["token"], t["chain"], t["symbol"],
+                          ",".join(sorted(kinds)), direction, cur.get("price") or 0)
+            except Exception:
+                pass
         # Advance state, but NEVER overwrite a good last value with None — a
         # transient fetch failure must not blind the next comparison (else a drop
         # that happens during the outage is missed). Keep the last known good.

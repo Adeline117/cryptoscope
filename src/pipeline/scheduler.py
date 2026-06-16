@@ -121,6 +121,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="二波候选评估 (已拉+回落+庄满仓)",
     )
 
+    # Resolve alert outcomes hourly → measured hit-rate, feeds calibration.
+    scheduler.add_job(
+        _run_resolve_outcomes,
+        CronTrigger(minute=8),
+        id="resolve_outcomes",
+        name="告警结果结算 (命中率)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -340,6 +348,13 @@ async def _run_second_leg_assess():
     from src.pipeline.operator_sentinel import assess_second_leg
 
     assess_second_leg()
+
+
+async def _run_resolve_outcomes():
+    logger.info("scheduled_resolve_outcomes")
+    from src.pipeline.outcome_tracker import resolve_outcomes
+
+    resolve_outcomes()
 
 
 async def _run_operator_hunt():
