@@ -102,11 +102,36 @@ def is_smart(pnl: dict) -> bool:
             and usd_per_trade >= MIN_USD_PER_TRADE)
 
 
-def find_smart_money(seeds=None, max_candidates: int = 60) -> list[dict]:
-    seeds = seeds or _SEED_PUMPED
+def _existing_candidates(chain: str = "bsc") -> set[tuple[str, str]]:
+    """The pre-curated smart_money_wallets.yaml EVM addresses — validate THESE by
+    realized track record (sidesteps the 'historical swaps too deep' dead-end)."""
+    out = set()
+    try:
+        import yaml
+        d = yaml.safe_load((CONFIG_DIR / "smart_money_wallets.yaml").read_text())
+
+        def walk(o):
+            if isinstance(o, dict):
+                for v in o.values():
+                    yield from walk(v)
+            elif isinstance(o, list):
+                for x in o:
+                    yield from walk(x)
+            elif isinstance(o, str) and o.startswith("0x") and len(o) == 42:
+                yield o.lower()
+        for a in walk(d):
+            out.add((a, chain))
+    except Exception as e:
+        logger.debug("existing_candidates_failed", error=str(e))
+    return out
+
+
+def find_smart_money(seeds=None, max_candidates: int = 120, use_existing: bool = True) -> list[dict]:
     candidates: set[tuple[str, str]] = set()
-    for token, chain in seeds:
-        for w in list(token_traders(token, chain))[:40]:
+    if use_existing:
+        candidates |= _existing_candidates("bsc")   # validate the curated list
+    for token, chain in (seeds or _SEED_PUMPED):
+        for w in list(token_traders(token, chain))[:30]:
             candidates.add((w, chain))
     logger.info("smart_money_candidates", n=len(candidates))
     proven = []

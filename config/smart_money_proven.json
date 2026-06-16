@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "wallet": "0xeb89055e16ae1c1e42ad6770a7344ff5c7b4f31d",
+    "chain": "bsc",
+    "realized_usd": 1590076.651754581,
+    "realized_pct": 31.77,
+    "sells": 659,
+    "trades": 1328
+  },
+  {
+    "wallet": "0xdc894ce5b8c3f57aa44110e8ab0910a0d717ef40",
+    "chain": "bsc",
+    "realized_usd": 435491.70710905996,
+    "realized_pct": 20.15,
+    "sells": 590,
+    "trades": 879
+  },
+  {
+    "wallet": "0x5f9bc316d8473d8c6634bd26f3e0932cd6bf0718",
+    "chain": "bsc",
+    "realized_usd": 403859.53241511696,
+    "realized_pct": 27.39,
+    "sells": 516,
+    "trades": 929
+  }
+]
