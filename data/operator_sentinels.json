@@ -22,14 +22,15 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08167,
-      "liquidity": 319228.03,
-      "vol24": 2219959.21,
+      "price": 0.08157,
+      "liquidity": 318599.94,
+      "vol24": 2213138.91,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
     "second_leg": "未拉过 (满仓待发,如BASED)",
-    "loaded": true
+    "loaded": true,
+    "peak_balance": 10167894.759644354
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
@@ -48,14 +49,15 @@
       "funding": 0.0223
     },
     "last": {
-      "price": 0.06294,
-      "liquidity": 1322878.21,
-      "vol24": 1437022.23,
+      "price": 0.06266,
+      "liquidity": 1319789.25,
+      "vol24": 1426028.07,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0223
+      "funding": 0.021
     },
     "second_leg": "⭐二波候选 (峰值12.5x→已回落, 庄满仓)",
-    "loaded": true
+    "loaded": true,
+    "peak_balance": 214578864.43321168
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
     "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
@@ -86,14 +88,15 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.8199,
-      "liquidity": 711039.0,
-      "vol24": 82112547.11,
-      "cluster_balance": 3275446.0312630488,
+      "price": 0.8612,
+      "liquidity": 729181.82,
+      "vol24": 81866569.73,
+      "cluster_balance": 3334410.640910821,
       "funding": 0.01
     },
     "second_leg": "未拉过 (满仓待发,如BASED)",
-    "loaded": true
+    "loaded": true,
+    "peak_balance": 3334410.640910821
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -123,13 +126,14 @@
       "funding": 0.0632
     },
     "last": {
-      "price": 0.05703,
-      "liquidity": 2595199.7,
-      "vol24": 1750655.94,
+      "price": 0.0573,
+      "liquidity": 2595323.16,
+      "vol24": 1748342.42,
       "cluster_balance": 92090783.05998234,
-      "funding": 0.0632
+      "funding": 0.0644
     },
     "second_leg": "⭐二波候选 (峰值22.8x→已回落, 庄满仓)",
-    "loaded": true
+    "loaded": true,
+    "peak_balance": 92090783.05998234
   }
 }

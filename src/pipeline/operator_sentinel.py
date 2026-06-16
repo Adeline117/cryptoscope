@@ -42,6 +42,8 @@ OP_SELL = 0.015          # cluster balance fell >=1.5% vs last → operator SELL
 OP_BUY = 0.02            # cluster balance rose >=2% vs last → operator BUYING (markup/launch → long)
 SLOW_BLEED = 0.04        # cluster down >=4% from running peak → chunked distribution
 COOLDOWN_MIN = 45        # don't re-fire the same event kind within N minutes
+STALL_FADE = 0.12        # after a buy/launch, price faded >=12% from its high...
+MAX_MOMENTUM_H = 36      # ...within this window, with no fresh operator buying → 动能熄火
 # Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
 CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop
@@ -373,14 +375,39 @@ def check_run() -> list[dict]:
                 if cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
                     fired.append(("放量", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 异动"))
 
+            # ===== STALL: momentum fizzled (proactively report inaction) =====
+            # After a buy/launch, if price faded from its post-buy high AND the
+            # operator stopped adding, the move likely failed — say so (the 3rd
+            # scenario the user wanted; silence shouldn't be the only signal).
+            from datetime import datetime, timezone
+            nowdt = datetime.now(timezone.utc)
+            fk = {k for k, _ in fired}
+            mom = t.get("momentum")
+            if fk & {"庄在买", "拉升"}:
+                t["momentum"] = {"ts": nowdt.isoformat(), "high": cpr or 0}
+            elif mom and cpr:
+                mom["high"] = max(mom.get("high", 0) or 0, cpr)
+                try:
+                    age_h = (nowdt - datetime.fromisoformat(mom["ts"])).total_seconds() / 3600
+                except Exception:
+                    age_h = 0
+                bought = cb is not None and pb and cb > pb
+                faded = mom["high"] > 0 and cpr <= mom["high"] * (1 - STALL_FADE)
+                if faded and not bought and not (fk & {"庄在卖", "阴跌出货", "砸盘", "RUG"}):
+                    fired.append(("动能熄火", f"反弹乏力:价较近高 {(cpr/mom['high']-1)*100:+.0f}%,"
+                                  f"庄停手未续买 → 二波可能黄,多单减/观望"))
+                    t.pop("momentum", None)
+                elif age_h > MAX_MOMENTUM_H:
+                    t.pop("momentum", None)  # expire silently
+
             # Cooldown by DIRECTION: sell-side events are one event; once any fires,
             # suppress all sell-side for COOLDOWN_MIN (likewise buy-side).
             if fired:
-                from datetime import datetime, timezone
                 kinds_all = {k for k, _ in fired}
                 side = "short" if kinds_all & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else \
-                       "long" if kinds_all & {"庄在买", "拉升"} else "neutral"
-                now_iso = datetime.now(timezone.utc)
+                       "long" if kinds_all & {"庄在买", "拉升"} else \
+                       "stall" if "动能熄火" in kinds_all else "neutral"
+                now_iso = nowdt
                 cd = t.get("alert_cooldown", {}) or {}
                 prev = cd.get(side)
                 cooled = False
@@ -411,6 +438,8 @@ def check_run() -> list[dict]:
                     if fund is not None and fund > 0.08:
                         fstr = f"(费率 +{fund:.3f}% 已过热,小心追高)"
                     action += fstr
+                elif "动能熄火" in kinds:                  # rally fizzled, operator idle
+                    action = "⚪→🔴 动能熄火,减多/观望(二波未成)"
                 else:
                     action = f"⚪ 异动留意 {fstr}"
                 alerts.append({"symbol": t["symbol"], "chain": t["chain"],
