@@ -129,6 +129,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="告警结果结算 (命中率)",
     )
 
+    # Majors monitor (BTC/ETH/SOL) → flow + positioning signals every 30 min.
+    scheduler.add_job(
+        _run_majors_monitor,
+        CronTrigger(minute="*/30"),
+        id="majors_monitor",
+        name="大币持仓监控 (费率/OI/多空比 → Telegram)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -355,6 +363,13 @@ async def _run_resolve_outcomes():
     from src.pipeline.outcome_tracker import resolve_outcomes
 
     resolve_outcomes()
+
+
+async def _run_majors_monitor():
+    logger.info("scheduled_majors_monitor")
+    from src.pipeline.majors_monitor import run_and_alert
+
+    await run_and_alert()
 
 
 async def _run_operator_hunt():
