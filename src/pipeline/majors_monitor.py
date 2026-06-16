@@ -167,13 +167,23 @@ def check_run() -> list[dict]:
         a = assess(s, state.get(ccy))
         if flow_sig:
             a["signals"].append(flow_sig)
-            longs = sum(1 for _, _, d in a["signals"] if d == "long")
-            shorts = sum(1 for _, _, d in a["signals"] if d == "short")
-            a["lean"] = "🟢 偏多" if longs > shorts else "🔴 偏空" if shorts > longs else "⚪ 中性"
-        strong = [x for x in a["signals"] if x[2] in ("long", "short")]
-        if len(strong) >= 2 or any(x[2] == "vol" for x in a["signals"]):
+        longs = sum(1 for _, _, d in a["signals"] if d == "long")
+        shorts = sum(1 for _, _, d in a["signals"] if d == "short")
+        a["lean"] = "🟢 偏多" if longs > shorts else "🔴 偏空" if shorts > longs else "⚪ 中性"
+        # CONFLUENCE ONLY: alert when >=2 signals align in one direction with a net
+        # edge >=2 (no offsetting opposite). Single weak signals are noise on
+        # efficient majors — don't cry wolf. (OI 'vol' is context, never a trigger.)
+        net = longs - shorts
+        direction = "long" if net >= 2 else "short" if net <= -2 else None
+        if direction:
             alerts.append({"ccy": ccy, "price": s["price"], "lean": a["lean"],
-                           "signals": a["signals"]})
+                           "signals": a["signals"], "direction": direction})
+            try:
+                from src.pipeline.outcome_tracker import log_alert
+                kinds = ",".join(n for n, _det, d in a["signals"] if d != "vol")
+                log_alert(ccy, "majors", ccy, kinds or "majors", direction, s["price"], 0)
+            except Exception:
+                pass
         state[ccy] = s
     if flow:
         state["_flow"] = flow

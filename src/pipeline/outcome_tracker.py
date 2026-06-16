@@ -67,6 +67,15 @@ def log_alert(token: str, chain: str, symbol: str, kind: str, direction: str,
 def _price(token: str, chain: str) -> float | None:
     import json
     import urllib.request
+    if chain == "majors":   # BTC/ETH/SOL — price via OKX, not DexScreener
+        try:
+            u = f"https://www.okx.com/api/v5/market/ticker?instId={token}-USDT-SWAP"
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                d = json.loads(r.read().decode()).get("data", [])
+            return float(d[0]["last"]) if d else None
+        except Exception:
+            return None
     try:
         u = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
         req = urllib.request.Request(u, headers={"User-Agent": "CryptoScope/1.0"})

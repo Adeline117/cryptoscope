@@ -22,9 +22,9 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08219,
-      "liquidity": 320288.78,
-      "vol24": 2215934.62,
+      "price": 0.08226,
+      "liquidity": 320389.43,
+      "vol24": 2216895.93,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
@@ -49,11 +49,11 @@
       "funding": 0.0223
     },
     "last": {
-      "price": 0.06306,
-      "liquidity": 1320117.87,
-      "vol24": 1406768.57,
+      "price": 0.06283,
+      "liquidity": 1319312.35,
+      "vol24": 1396354.31,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0362
+      "funding": 0.0098
     },
     "second_leg": "⭐二波候选 (峰值12.5x→已回落, 庄满仓)",
     "loaded": true,
@@ -88,11 +88,11 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.8511,
-      "liquidity": 724801.41,
-      "vol24": 81837345.55,
+      "price": 0.8663,
+      "liquidity": 731462.36,
+      "vol24": 81749074.54,
       "cluster_balance": 3356553.9236186184,
-      "funding": 0.01
+      "funding": -0.0093
     },
     "second_leg": "未拉过 (满仓待发,如BASED)",
     "loaded": true,
@@ -126,11 +126,11 @@
       "funding": 0.0632
     },
     "last": {
-      "price": 0.05334,
-      "liquidity": 2526653.17,
-      "vol24": 1760347.35,
+      "price": 0.05148,
+      "liquidity": 2497978.87,
+      "vol24": 1773455.26,
       "cluster_balance": 92090783.05998234,
-      "funding": 0.0836
+      "funding": 0.0631
     },
     "second_leg": "⭐二波候选 (峰值22.8x→已回落, 庄满仓)",
     "loaded": true,
