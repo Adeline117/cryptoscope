@@ -22,13 +22,12 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08254,
-      "liquidity": 321014.75,
-      "vol24": 2230566.75,
+      "price": 0.08249,
+      "liquidity": 320952.13,
+      "vol24": 2206756.9,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
-    "peak_balance": 10167894.759644354,
     "flow_ts": "2026-06-06T10:55:43.000Z"
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
@@ -48,13 +47,12 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.0612,
-      "liquidity": 1308137.62,
-      "vol24": 1399956.21,
+      "price": 0.06326,
+      "liquidity": 1322249.56,
+      "vol24": 1426349.08,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.005
+      "funding": 0.0088
     },
-    "peak_balance": 214578864.43321168,
     "flow_ts": "2026-06-16T01:12:24.000Z"
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
@@ -86,14 +84,13 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.8235,
-      "liquidity": 712582.82,
-      "vol24": 79550130.59,
-      "cluster_balance": 3358816.177701286,
+      "price": 0.824,
+      "liquidity": 712780.51,
+      "vol24": 79030989.61,
+      "cluster_balance": 3358831.7858782033,
       "funding": 0.01
     },
-    "peak_balance": 3358816.177701286,
-    "flow_ts": "2026-06-16T09:06:01.000Z"
+    "flow_ts": "2026-06-16T09:20:22.000Z"
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -123,13 +120,12 @@
       "funding": 0.0687
     },
     "last": {
-      "price": 0.04726,
-      "liquidity": 2426729.06,
-      "vol24": 1854974.34,
-      "cluster_balance": 86201807.62156135,
-      "funding": 0.0824
+      "price": 0.04716,
+      "liquidity": 2424282.76,
+      "vol24": 1883880.82,
+      "cluster_balance": 86343963.29940134,
+      "funding": 0.1087
     },
-    "peak_balance": 92090783.05998234,
-    "flow_ts": "2026-06-15T20:42:03.000Z"
+    "flow_ts": "2026-06-16T09:22:52.000Z"
   }
 }

@@ -454,20 +454,10 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                     when = _seattle(flow["last_buy_ts"]) if flow["last_buy_ts"] else "?"
                     fired.append(("庄在买", f"转账实测 净买 {flow['buy']-flow['sell']:,.0f} "
                                   f"(买{flow['buy']:,.0f}/卖{flow['sell']:,.0f}) · 最后买单 {when}"))
-            elif cb is not None and pb and pb > 0:
-                # ===== FALLBACK: balanceOf delta (fast loop; unreliable on reflection tokens) =====
-                chg = (cb - pb) / pb
-                if chg <= -OP_SELL:
-                    fired.append(("庄在卖", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) 簇减仓"))
-                elif chg >= OP_BUY:
-                    fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) 操作者加仓"))
-            # Slow-bleed (balanceOf-based; skipped when transfer flow is authoritative).
-            if cb is not None and flow is None:
-                peak = max(t.get("peak_balance", 0) or 0, cb, pb or 0)
-                if peak > 0 and cb < peak * (1 - SLOW_BLEED) and "庄在卖" not in {k for k, _ in fired}:
-                    fired.append(("阴跌出货", f"簇较峰值 {(cb/peak-1)*100:+.1f}% ({peak:,.0f}→{cb:,.0f}) "
-                                  f"分批阴跌出货 → 离场/做空"))
-                t["peak_balance"] = peak
+            # NOTE: buy/sell is detected ONLY via transfers (use_transfers=True, the
+            # 5-min scheduler). balanceOf is unreliable on reflection/wash tokens
+            # (EVAA, SIREN) — it drifts/oscillates and spammed phantom 庄在卖 every
+            # 20s cycle. The fast watcher therefore does PRICE moves only (below).
 
             # ===== BACKSTOP: violent price/liquidity moves (if sampling lagged) =====
             cl, pl = cur.get("liquidity"), last.get("liquidity")
