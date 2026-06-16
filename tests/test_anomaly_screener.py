@@ -186,3 +186,23 @@ def test_calibrate_discriminates(tmp_path, monkeypatch):
     res = cw.calibrate(dry=True)
     assert res["status"] == "calibrated"
     assert res["weights"]["smart_money_t1"] > res["weights"]["buy_pressure"]
+
+
+def test_watcher_never_fires_buysell_from_balanceof(tmp_path, monkeypatch):
+    """REGRESSION (root-cure): the 20s watcher (use_transfers=False) must NEVER emit
+    庄在买/庄在卖 from a balanceOf change — balanceOf is unreliable on reflection/wash
+    tokens (caused the SIREN spam). Buy/sell only comes from transfers."""
+    import json
+    import src.pipeline.operator_sentinel as S
+    f = tmp_path / "sent.json"
+    monkeypatch.setattr(S, "SENTINELS_FILE", f)
+    base = {"price": 1.0, "liquidity": 8e5, "vol24": 1e6, "cluster_balance": 1_000_000, "funding": 0.0}
+    f.write_text(json.dumps({"bsc:0xt": {"token": "0xT", "chain": "bsc", "symbol": "T",
+        "wallets": ["0xw"], "baseline": dict(base), "last": dict(base)}}))
+    # Simulate a big balanceOf DROP (would have been a phantom 庄在卖 under the old code)
+    monkeypatch.setattr(S, "_measure",
+        lambda *a, **k: {"price": 1.0, "liquidity": 8e5, "vol24": 1e6,
+                         "cluster_balance": 800_000, "funding": 0.0})
+    alerts = S.check_run(use_transfers=False)
+    kinds = {k for al in alerts for k, _ in al["events"]}
+    assert "庄在卖" not in kinds and "庄在买" not in kinds, f"balanceOf leaked into buy/sell: {kinds}"

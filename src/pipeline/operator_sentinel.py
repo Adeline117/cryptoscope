@@ -240,6 +240,9 @@ def assess_second_leg() -> dict:
                 verdict = "未拉过 (满仓待发,如BASED)"
             elif not loaded:
                 verdict = "⚠️操作者已减仓"
+        # balanceOf-based verdicts can't be trusted on reflection/fee tokens.
+        if t.get("balanceof_reliable") is False:
+            verdict += " ⚠️(balanceOf失真,二波/满仓判断仅供参考)"
         t["second_leg"] = verdict
         t["loaded"] = loaded
         # Operator type: profit-taker vs hold-forever believer (refines how much to
@@ -389,6 +392,32 @@ def cluster_net_flow(token: str, chain: str, wallets: list[str], since_iso: str 
             "last_buy_ts": last_buy, "last_sell_ts": last_sell, "latest_ts": latest_ts}
 
 
+def _balanceof_reliable(token: str, chain: str, wallets: list[str]) -> bool:
+    """Registration health check for the ACTUAL failure mode: balanceOf READS that
+    disagree cycle-to-cycle (rotating free RPCs returning different values, or
+    per-block reflection) — that's what spammed phantom SIREN sells. Read the
+    cluster balance at the SAME block TWICE (rotates RPCs); if the two reads differ
+    materially, balanceOf is unstable for this token → flag so balanceOf-based
+    assessments are caveated. Detection already uses transfers regardless."""
+    if chain in ("solana", "sol"):
+        return True
+    try:
+        from src.onchain.evm_archive import ArchiveRPC, combined_balance_at
+        rpc = ArchiveRPC(chain)
+        if not rpc.available():
+            return True
+        blk = rpc.latest_block()
+        subset = wallets[:6]
+        r1 = combined_balance_at(token, subset, chain, blk, rpc=ArchiveRPC(chain))
+        r2 = combined_balance_at(token, subset, chain, blk, rpc=ArchiveRPC(chain))
+        if r1 <= 0 and r2 <= 0:
+            return True
+        ref = max(r1, r2, 1)
+        return abs(r1 - r2) / ref <= 0.02   # same block, same value expected; drift = unstable
+    except Exception:
+        return True
+
+
 def _measure(token: str, chain: str, wallets: list[str], symbol: str = "") -> dict:
     m = _dex(token, chain)
     m["cluster_balance"] = _cluster_balance(token, chain, wallets)
@@ -401,12 +430,17 @@ def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
     data = _load()
     key = f"{chain}:{token.lower()}"
     state = _measure(token, chain, wallets, symbol)
+    reliable = _balanceof_reliable(token, chain, wallets)
     data[key] = {
         "token": token, "chain": chain, "symbol": symbol,
         "wallets": [w.lower() for w in wallets],
         "baseline": state, "last": state,
+        "balanceof_reliable": reliable,
     }
     _save(data)
+    if not reliable:
+        logger.warning("balanceof_unreliable", symbol=symbol,
+                       note="reflection/fee token — balanceOf-based assessments caveated")
     logger.info("sentinel_registered", symbol=symbol, chain=chain,
                 cluster_balance=state.get("cluster_balance"), liquidity=state.get("liquidity"))
     return data[key]

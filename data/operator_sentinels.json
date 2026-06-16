@@ -15,20 +15,20 @@
       "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
     ],
     "baseline": {
-      "price": 0.08243,
-      "liquidity": 320792.41,
-      "vol24": 2216990.76,
+      "price": 0.08354,
+      "liquidity": 322336.58,
+      "vol24": 2223840.62,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
     "last": {
-      "price": 0.08249,
-      "liquidity": 320952.13,
-      "vol24": 2206756.9,
+      "price": 0.08368,
+      "liquidity": 322518.34,
+      "vol24": 2234311.63,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
-    "flow_ts": "2026-06-06T10:55:43.000Z"
+    "balanceof_reliable": true
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
@@ -40,20 +40,20 @@
       "0x504ce9e51e508c85a161058c12e970a903d482fc"
     ],
     "baseline": {
-      "price": 0.06292,
-      "liquidity": 1323727.32,
-      "vol24": 1351160.34,
+      "price": 0.06418,
+      "liquidity": 1328254.9,
+      "vol24": 1471069.36,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.005
+      "funding": 0.0186
     },
     "last": {
-      "price": 0.06326,
-      "liquidity": 1322249.56,
-      "vol24": 1426349.08,
+      "price": 0.06469,
+      "liquidity": 1332670.94,
+      "vol24": 1460782.81,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0088
+      "funding": 0.0179
     },
-    "flow_ts": "2026-06-16T01:12:24.000Z"
+    "balanceof_reliable": true
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
     "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
@@ -77,20 +77,20 @@
       "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"
     ],
     "baseline": {
-      "price": 0.7927,
-      "liquidity": 698934.14,
-      "vol24": 80078300.02,
-      "cluster_balance": 3358001.269024384,
-      "funding": 0.01
-    },
-    "last": {
-      "price": 0.824,
-      "liquidity": 712780.51,
-      "vol24": 79030989.61,
+      "price": 0.8458,
+      "liquidity": 722377.0,
+      "vol24": 78565927.71,
       "cluster_balance": 3358831.7858782033,
       "funding": 0.01
     },
-    "flow_ts": "2026-06-16T09:20:22.000Z"
+    "last": {
+      "price": 0.8304,
+      "liquidity": 715634.61,
+      "vol24": 78420797.99,
+      "cluster_balance": 3358831.7858782033,
+      "funding": 0.01
+    },
+    "balanceof_reliable": true
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -113,19 +113,19 @@
       "0xc58bff59c3480f6371e573634ef269612252e05f"
     ],
     "baseline": {
-      "price": 0.05086,
-      "liquidity": 2494369.64,
-      "vol24": 1803453.93,
-      "cluster_balance": 92090783.05998234,
-      "funding": 0.0687
+      "price": 0.04772,
+      "liquidity": 2433045.36,
+      "vol24": 1886147.04,
+      "cluster_balance": 86343963.29940134,
+      "funding": 0.12
     },
     "last": {
-      "price": 0.04716,
-      "liquidity": 2424282.76,
-      "vol24": 1883880.82,
-      "cluster_balance": 86343963.29940134,
-      "funding": 0.1087
+      "price": 0.04772,
+      "liquidity": 2433023.11,
+      "vol24": 1883855.78,
+      "cluster_balance": 86373037.33403534,
+      "funding": 0.1163
     },
-    "flow_ts": "2026-06-16T09:22:52.000Z"
+    "balanceof_reliable": true
   }
 }
