@@ -668,6 +668,7 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
             conc = (oc or {}).get("concentration")
             if conc:
                 c["largest_entity_pct"] = conc.get("largest_entity_pct")
+                c["largest_address_pct"] = conc.get("largest_address_pct")
                 c["concentration_gap"] = conc.get("concentration_gap")
                 c["funder_complete"] = conc.get("funder_complete")
                 lg = conc.get("largest_entity_pct", 0) or 0
