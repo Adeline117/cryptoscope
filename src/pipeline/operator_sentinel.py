@@ -49,6 +49,27 @@ LAUNCH_PRICE = 0.25      # price up >=25% vs last check → launch backstop
 LAUNCH_VOL = 3.0         # 24h volume >=3x baseline → volume backstop
 
 
+import contextlib
+
+
+@contextlib.contextmanager
+def _state_lock():
+    """Exclusive cross-process lock so the 20s watcher and 5-min scheduler never
+    corrupt the shared state file with a concurrent read-modify-write (#7)."""
+    import fcntl
+    SENTINELS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lockf = SENTINELS_FILE.with_suffix(".lock")
+    f = open(lockf, "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(f, fcntl.LOCK_UN)
+        finally:
+            f.close()
+
+
 def _load() -> dict:
     if SENTINELS_FILE.exists():
         try:
@@ -60,7 +81,11 @@ def _load() -> dict:
 
 def _save(data: dict) -> None:
     SENTINELS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SENTINELS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    # Atomic write (tmp + replace) so a reader never sees a half-written file.
+    import os
+    tmp = SENTINELS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    os.replace(tmp, SENTINELS_FILE)
 
 
 def _dex(token: str, chain: str) -> dict:
@@ -223,6 +248,52 @@ def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None
         return None
 
 
+_MORALIS_EVM = {"bsc": "bsc", "ethereum": "eth", "base": "base",
+                "arbitrum": "arbitrum", "optimism": "optimism", "polygon": "polygon"}
+
+
+def _classify_outflow(token: str, chain: str, wallets: list[str]) -> str:
+    """On a detected cluster DROP, where did the tokens go? (#2: tell a real SELL
+    from an internal move.) Tokens flowing to the LP pair / router / a CEX =
+    'sell'; to a plain EOA = 'internal' (possibly just reshuffling). Cheap: only
+    called when a drop fires. Samples a few wallets' recent token transfers."""
+    from src.onchain import moralis_client
+    mchain = _MORALIS_EVM.get(chain)
+    if not moralis_client.available() or not mchain:
+        return "?"
+    # Sell venues: the token's LP pairs (DexScreener) — selling sends token there.
+    venues = set()
+    try:
+        import urllib.request
+        u = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
+        req = urllib.request.Request(u, headers={"User-Agent": "CryptoScope/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            pairs = json.loads(r.read().decode())
+        pairs = pairs if isinstance(pairs, list) else pairs.get("pairs", [])
+        for p in pairs:
+            if p.get("pairAddress"):
+                venues.add(p["pairAddress"].lower())
+    except Exception:
+        pass
+    sells = internals = 0
+    for w in wallets[:5]:
+        data = moralis_client.get(
+            f"{w}/erc20/transfers?chain={mchain}&contract_addresses%5B0%5D={token}&order=DESC&limit=8")
+        for tx in (data or {}).get("result", []):
+            if (tx.get("from_address") or "").lower() != w.lower():
+                continue
+            to = (tx.get("to_address") or "").lower()
+            lbl = (tx.get("to_address_label") or "").lower()
+            if to in venues or any(x in lbl for x in ("pancake", "router", "swap",
+                                                       "binance", "okx", "gate", "mexc", "dex")):
+                sells += 1
+            else:
+                internals += 1
+    if sells == 0 and internals == 0:
+        return "?"
+    return "sell" if sells >= internals else "internal"
+
+
 def _measure(token: str, chain: str, wallets: list[str], symbol: str = "") -> dict:
     m = _dex(token, chain)
     m["cluster_balance"] = _cluster_balance(token, chain, wallets)
@@ -248,118 +319,120 @@ def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
 
 def check_run() -> list[dict]:
     """One monitoring pass over all registered targets. Returns fired alerts and
-    persists updated last-seen state."""
-    data = _load()
-    alerts = []
-    for key, t in data.items():
-        cur = _measure(t["token"], t["chain"], t["wallets"], t.get("symbol", ""))
-        last, base = t.get("last", {}), t.get("baseline", {})
-        fired = []
+    persists updated last-seen state. The measure calls (network I/O) run OUTSIDE
+    the lock; only the read-modify-write of state is locked (#7)."""
+    targets = _load()
+    measured = {k: _measure(t["token"], t["chain"], t["wallets"], t.get("symbol", ""))
+                for k, t in targets.items()}
+    with _state_lock():
+        data = _load()  # re-read under lock (another process may have updated)
+        alerts = []
+        for key, t in data.items():
+            cur = measured.get(key)
+            if cur is None:
+                continue
+            last, base = t.get("last", {}), t.get("baseline", {})
+            fired = []
 
-        # ===== PRIMARY: the operator's own action (net position turn) =====
-        cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
-        if cb is not None and pb and pb > 0:
-            chg = (cb - pb) / pb
-            if chg <= -OP_SELL:           # operator SELLING — the earliest exit/short
-                fired.append(("庄在卖", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
-                              f"操作者出货 → 顶部跑/做空,别等价格跌"))
-            elif chg >= OP_BUY:           # operator BUYING — markup/launch begins
-                fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
-                              f"操作者加仓 → 拉升前埋伏/做多"))
-        # Slow-bleed: cumulative drop from the running PEAK catches an operator
-        # distributing in chunks each < OP_SELL that would slip past the step check.
-        if cb is not None:
-            peak = max(t.get("peak_balance", 0) or 0, cb, pb or 0)
-            if peak > 0 and cb < peak * (1 - SLOW_BLEED) and "庄在卖" not in {k for k, _ in fired}:
-                fired.append(("阴跌出货", f"簇较峰值 {(cb/peak-1)*100:+.1f}% ({peak:,.0f}→{cb:,.0f}) "
-                              f"分批阴跌出货 → 离场/做空"))
-            t["peak_balance"] = peak
+            # ===== PRIMARY: the operator's own action (net position turn) =====
+            cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
+            if cb is not None and pb and pb > 0:
+                chg = (cb - pb) / pb
+                if chg <= -OP_SELL:           # operator SELLING — earliest exit/short
+                    venue = _classify_outflow(t["token"], t["chain"], t["wallets"]) \
+                        if t["chain"] not in ("solana", "sol") else "?"
+                    tag = ("确认卖出LP/CEX" if venue == "sell" else
+                           "疑似内部转移(非卖出?)" if venue == "internal" else "簇减仓")
+                    fired.append(("庄在卖", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) {tag}"))
+                elif chg >= OP_BUY:           # operator BUYING — markup/launch begins
+                    fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
+                                  f"操作者加仓 → 拉升前埋伏/做多"))
+            # Slow-bleed: cumulative drop from the running PEAK catches an operator
+            # distributing in chunks each < OP_SELL that slip past the step check.
+            if cb is not None:
+                peak = max(t.get("peak_balance", 0) or 0, cb, pb or 0)
+                if peak > 0 and cb < peak * (1 - SLOW_BLEED) and "庄在卖" not in {k for k, _ in fired}:
+                    fired.append(("阴跌出货", f"簇较峰值 {(cb/peak-1)*100:+.1f}% ({peak:,.0f}→{cb:,.0f}) "
+                                  f"分批阴跌出货 → 离场/做空"))
+                t["peak_balance"] = peak
 
-        # ===== BACKSTOP: violent price/liquidity moves (in case sampling lagged) =====
-        cl, pl = cur.get("liquidity"), last.get("liquidity")
-        if cl is not None and pl and pl > 0 and cl < pl * (1 - RUG_DROP):
-            drop = (pl - cl) / pl * 100
-            fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
+            # ===== BACKSTOP: violent price/liquidity moves (if sampling lagged) =====
+            cl, pl = cur.get("liquidity"), last.get("liquidity")
+            if cl is not None and pl and pl > 0 and cl < pl * (1 - RUG_DROP):
+                drop = (pl - cl) / pl * 100
+                fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
 
-        cpr, ppr = cur.get("price"), last.get("price")
-        if cpr is not None and ppr and ppr > 0 and cpr < ppr * (1 - CRASH_DROP):
-            drop = (ppr - cpr) / ppr * 100
-            fired.append(("砸盘", f"价格 -{drop:.0f}% (${ppr:.4g}→${cpr:.4g}) 急跌(兜底) → 注意"))
-        elif cpr is not None and ppr and ppr > 0 and cpr >= ppr * (1 + LAUNCH_PRICE):
-            fired.append(("拉升", f"价格 +{(cpr/ppr-1)*100:.0f}% 急涨(兜底) → 已在拉"))
-        else:
-            cv, bv = cur.get("vol24"), base.get("vol24")
-            if cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
-                fired.append(("放量", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 异动"))
-
-        # Cooldown by DIRECTION (not kind): 庄在卖/阴跌出货/砸盘 are all the same
-        # sell-side event — once any fires, suppress all sell-side for COOLDOWN_MIN
-        # (and likewise buy-side), so one move isn't reported repeatedly.
-        if fired:
-            from datetime import datetime, timezone
-            kinds_all = {k for k, _ in fired}
-            side = "short" if kinds_all & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else \
-                   "long" if kinds_all & {"庄在买", "拉升"} else "neutral"
-            now_iso = datetime.now(timezone.utc)
-            cd = t.get("alert_cooldown", {}) or {}
-            prev = cd.get(side)
-            cooled = False
-            if prev:
-                try:
-                    cooled = (now_iso - datetime.fromisoformat(prev)).total_seconds() < COOLDOWN_MIN * 60
-                except Exception:
-                    cooled = False
-            if cooled:
-                fired = []
+            cpr, ppr = cur.get("price"), last.get("price")
+            if cpr is not None and ppr and ppr > 0 and cpr < ppr * (1 - CRASH_DROP):
+                drop = (ppr - cpr) / ppr * 100
+                fired.append(("砸盘", f"价格 -{drop:.0f}% (${ppr:.4g}→${cpr:.4g}) 急跌(兜底) → 注意"))
+            elif cpr is not None and ppr and ppr > 0 and cpr >= ppr * (1 + LAUNCH_PRICE):
+                fired.append(("拉升", f"价格 +{(cpr/ppr-1)*100:.0f}% 急涨(兜底) → 已在拉"))
             else:
-                cd[side] = now_iso.isoformat()
-                t["alert_cooldown"] = cd
+                cv, bv = cur.get("vol24"), base.get("vol24")
+                if cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
+                    fired.append(("放量", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 异动"))
 
-        if fired:
-            # Directional call: combine the event with funding (longs-crowded =
-            # short-favorable). Operator pumping → LONG; operator selling / crash →
-            # SHORT. Funding tilts/confirms the bias.
-            fund = cur.get("funding")
-            kinds = {k for k, _ in fired}
-            fstr = f"(费率 {fund:+.3f}%)" if fund is not None else ""
-            if kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG"}:    # operator exiting / dump
-                action = "🔴 顶部跑 / 做空"
-                if fund is not None and fund > 0.03:
-                    fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
-                action += fstr
-            elif kinds & {"庄在买", "拉升"}:          # operator marking up / launch
-                sl = t.get("second_leg", "")
-                if "二波候选" in sl:
-                    action = "🟢🟢 二波启动!最高优先 做多"
+            # Cooldown by DIRECTION: sell-side events are one event; once any fires,
+            # suppress all sell-side for COOLDOWN_MIN (likewise buy-side).
+            if fired:
+                from datetime import datetime, timezone
+                kinds_all = {k for k, _ in fired}
+                side = "short" if kinds_all & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else \
+                       "long" if kinds_all & {"庄在买", "拉升"} else "neutral"
+                now_iso = datetime.now(timezone.utc)
+                cd = t.get("alert_cooldown", {}) or {}
+                prev = cd.get(side)
+                cooled = False
+                if prev:
+                    try:
+                        cooled = (now_iso - datetime.fromisoformat(prev)).total_seconds() < COOLDOWN_MIN * 60
+                    except Exception:
+                        cooled = False
+                if cooled:
+                    fired = []
                 else:
-                    action = "🟢 埋伏 / 做多(跟庄)"
-                if fund is not None and fund > 0.08:
-                    fstr = f"(费率 +{fund:.3f}% 已过热,小心追高)"
-                action += fstr
-            else:                                     # volume-only anomaly
-                action = f"⚪ 异动留意 {fstr}"
-            alerts.append({"symbol": t["symbol"], "chain": t["chain"],
-                           "token": t["token"], "events": fired,
-                           "funding": fund, "action": action,
-                           "liquidity": cur.get("liquidity")})
-            # Log for outcome scoring (does the call actually work?).
-            try:
-                from src.pipeline.outcome_tracker import log_alert
-                direction = "short" if "做空" in action or "跑" in action else \
-                            "long" if "做多" in action else "none"
-                log_alert(t["token"], t["chain"], t["symbol"],
-                          ",".join(sorted(kinds)), direction, cur.get("price") or 0)
-            except Exception:
-                pass
-        # Advance state, but NEVER overwrite a good last value with None — a
-        # transient fetch failure must not blind the next comparison (else a drop
-        # that happens during the outage is missed). Keep the last known good.
-        merged = dict(last)
-        for k, v in cur.items():
-            if v is not None:
-                merged[k] = v
-        t["last"] = merged
-    _save(data)
+                    cd[side] = now_iso.isoformat()
+                    t["alert_cooldown"] = cd
+
+            if fired:
+                fund = cur.get("funding")
+                kinds = {k for k, _ in fired}
+                fstr = f"(费率 {fund:+.3f}%)" if fund is not None else ""
+                if kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG"}:    # operator exiting / dump
+                    action = "🔴 顶部跑 / 做空"
+                    if fund is not None and fund > 0.03:
+                        fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
+                    action += fstr
+                elif kinds & {"庄在买", "拉升"}:          # operator marking up / launch
+                    sl = t.get("second_leg", "")
+                    action = "🟢🟢 二波启动!最高优先 做多" if "二波候选" in sl \
+                        else "🟢 埋伏 / 做多(跟庄)"
+                    if fund is not None and fund > 0.08:
+                        fstr = f"(费率 +{fund:.3f}% 已过热,小心追高)"
+                    action += fstr
+                else:
+                    action = f"⚪ 异动留意 {fstr}"
+                alerts.append({"symbol": t["symbol"], "chain": t["chain"],
+                               "token": t["token"], "events": fired,
+                               "funding": fund, "action": action,
+                               "liquidity": cur.get("liquidity")})
+                try:
+                    from src.pipeline.outcome_tracker import log_alert
+                    direction = "short" if "做空" in action or "跑" in action else \
+                                "long" if "做多" in action else "none"
+                    log_alert(t["token"], t["chain"], t["symbol"],
+                              ",".join(sorted(kinds)), direction,
+                              cur.get("price") or 0, cur.get("liquidity") or 0)
+                except Exception:
+                    pass
+            # Advance state, never overwriting a good value with None (#hardening).
+            merged = dict(last)
+            for k, v in cur.items():
+                if v is not None:
+                    merged[k] = v
+            t["last"] = merged
+        _save(data)
     return alerts
 
 

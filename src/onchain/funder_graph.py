@@ -56,7 +56,7 @@ def _fetch_first_funder_moralis(address: str, chain: str, timeout: int = 20) -> 
     mchain = _MORALIS_CHAINS.get(chain)
     if not moralis_client.available() or not mchain:
         return None
-    data = moralis_client.get(f"{address}?chain={mchain}&order=ASC&limit=20", timeout)
+    data = moralis_client.get(f"{address}?chain={mchain}&order=ASC&limit=50", timeout)
     if not data:
         return None
     for tx in data.get("result", []):

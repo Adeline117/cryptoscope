@@ -423,6 +423,17 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
     largest_addr = max(bal_map.values()) if bal_map else 0.0
     eff_pct = round(largest_entity / total_supply * 100, 2)   # share of supply
     nom_pct = round(largest_addr / total_supply * 100, 2)     # biggest single addr
+    # Dominant funder = the funder whose funded wallets sum to the most balance —
+    # the hunt verifies its fan-out to reject dispersers/launchpads (#3).
+    dominant_funder = None
+    if funders:
+        by_funder: dict[str, float] = {}
+        for a, b in bal_map.items():
+            f = funders.get(a)
+            if f:
+                by_funder[f] = by_funder.get(f, 0.0) + b
+        if by_funder:
+            dominant_funder = max(by_funder, key=by_funder.get)
     return {
         "largest_entity_pct": eff_pct,           # biggest hidden entity / supply
         "largest_address_pct": nom_pct,          # biggest single address / supply
@@ -430,6 +441,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         "entity_count": len(entity_bal),
         "eoa_analyzed": len(eoa),
         "funder_complete": bool(funders),
+        "dominant_funder": dominant_funder,
     }
 
 

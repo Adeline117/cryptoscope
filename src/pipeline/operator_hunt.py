@@ -49,6 +49,41 @@ _SKIP_SYMBOLS = {
 }
 
 
+def _funder_fanout(funder: str, chain: str) -> int | None:
+    """How many distinct addresses this funder seeded — a disperser/launchpad funds
+    many; a focused operator funds a handful (#3). EVM via Moralis (distinct native
+    recipients); Solana via signature-count proxy. None if undeterminable."""
+    if not funder:
+        return None
+    if chain in ("solana", "sol"):
+        import json
+        import os
+        import urllib.request
+        rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+        try:
+            payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "getSignaturesForAddress",
+                                  "params": [funder, {"limit": 1000}]})
+            req = urllib.request.Request(rpc, data=payload.encode(),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                n = len(json.loads(r.read().decode()).get("result", []) or [])
+            return 999 if n >= 900 else min(n, 39)  # 900+ sigs = active disperser
+        except Exception:
+            return None
+    from src.onchain import moralis_client
+    mchain = {"bsc": "bsc", "ethereum": "eth", "base": "base",
+              "arbitrum": "arbitrum", "optimism": "optimism", "polygon": "polygon"}.get(chain)
+    if not mchain or not moralis_client.available():
+        return None
+    data = moralis_client.get(f"{funder}?chain={mchain}&order=ASC&limit=100")
+    if not data:
+        return None
+    recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
+              if (t.get("from_address") or "").lower() == funder.lower()
+              and int(t.get("value", "0") or 0) > 0}
+    return len(recips)
+
+
 def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
     """Token pairs from GeckoTerminal trending + new + top-volume (multiple pages),
     in the hunt band. Returns DexScreener pairs (with txns/liquidity), deduped."""
@@ -142,6 +177,14 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
         # Classify the shape for the operator.
         shape = ("隐藏簇" if gap >= 8 else "单一大户" if la >= 15 and gap < 3
                  else "混合" if lg >= 15 else "分散")
+        # #3: verify the dominant funder is a FOCUSED operator, not a disperser /
+        # launchpad. A funder that seeded >40 distinct addresses is a service, and
+        # its "cluster" is a false positive — downgrade.
+        if shape in ("隐藏簇", "混合") and conc.get("funder_complete"):
+            fanout = _funder_fanout(conc.get("dominant_funder"), chain)
+            if fanout is not None and fanout > 40:
+                shape = f"分发器假阳(funder喂{fanout}+地址)"
+                op_score *= 0.2
         suspects.append({
             "symbol": sym, "chain": chain, "address": addr,
             "liquidity": (p.get("liquidity", {}) or {}).get("usd", 0),

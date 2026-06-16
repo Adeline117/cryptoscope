@@ -36,22 +36,27 @@ def _conn() -> sqlite3.Connection:
     c.execute("""CREATE TABLE IF NOT EXISTS alerts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ts TEXT, token TEXT, chain TEXT, symbol TEXT,
-        kind TEXT, direction TEXT, price0 REAL,
+        kind TEXT, direction TEXT, price0 REAL, liquidity REAL,
         price_4h REAL, price_24h REAL, hit_4h INTEGER, hit_24h INTEGER,
         resolved INTEGER DEFAULT 0)""")
+    # add liquidity column to older DBs
+    cols = {r[1] for r in c.execute("PRAGMA table_info(alerts)").fetchall()}
+    if "liquidity" not in cols:
+        c.execute("ALTER TABLE alerts ADD COLUMN liquidity REAL")
     return c
 
 
 def log_alert(token: str, chain: str, symbol: str, kind: str, direction: str,
-              price0: float) -> None:
-    """Record a fired alert with its entry price + direction ('long'/'short')."""
+              price0: float, liquidity: float = 0) -> None:
+    """Record a fired alert with entry price, direction ('long'/'short') + the pool
+    liquidity (so the hit threshold can require beating slippage — #5)."""
     try:
         c = _conn()
         try:
-            c.execute("INSERT INTO alerts (ts, token, chain, symbol, kind, direction, price0) "
-                      "VALUES (?,?,?,?,?,?,?)",
+            c.execute("INSERT INTO alerts (ts, token, chain, symbol, kind, direction, price0, liquidity) "
+                      "VALUES (?,?,?,?,?,?,?,?)",
                       (datetime.now(timezone.utc).isoformat(), token, chain, symbol,
-                       kind, direction, price0))
+                       kind, direction, price0, liquidity))
             c.commit()
         finally:
             c.close()
@@ -76,14 +81,20 @@ def _price(token: str, chain: str) -> float | None:
         return None
 
 
-def _hit(direction: str, price0: float, price1: float) -> int:
+def _hit(direction: str, price0: float, price1: float, liquidity: float = 0) -> int:
+    """A HIT requires the move to clear BOTH the base 5% AND ~2x the entry slippage
+    on a $5k order — a 'right' call that slippage would have eaten isn't a hit (#5)."""
     if not price0 or not price1:
         return 0
     move = (price1 - price0) / price0
+    threshold = HIT_MOVE
+    if liquidity and liquidity > 0:
+        from src.pipeline.slippage import price_impact
+        threshold = max(HIT_MOVE, 2 * price_impact(liquidity, 5000) / 100)
     if direction == "long":
-        return 1 if move >= HIT_MOVE else 0
+        return 1 if move >= threshold else 0
     if direction == "short":
-        return 1 if move <= -HIT_MOVE else 0
+        return 1 if move <= -threshold else 0
     return 0
 
 
@@ -93,21 +104,21 @@ def resolve_outcomes() -> int:
     c = _conn()
     resolved = 0
     try:
-        rows = c.execute("SELECT id, ts, token, chain, direction, price0, price_4h, price_24h "
+        rows = c.execute("SELECT id, ts, token, chain, direction, price0, liquidity, price_4h, price_24h "
                          "FROM alerts WHERE resolved = 0").fetchall()
-        for rid, ts, token, chain, direction, p0, p4, p24 in rows:
+        for rid, ts, token, chain, direction, p0, liq, p4, p24 in rows:
             age_h = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
             updates = {}
             if p4 is None and age_h >= 4:
                 px = _price(token, chain)
                 if px:
                     updates["price_4h"] = px
-                    updates["hit_4h"] = _hit(direction, p0, px)
+                    updates["hit_4h"] = _hit(direction, p0, px, liq or 0)
             if p24 is None and age_h >= 24:
                 px = _price(token, chain)
                 if px:
                     updates["price_24h"] = px
-                    updates["hit_24h"] = _hit(direction, p0, px)
+                    updates["hit_24h"] = _hit(direction, p0, px, liq or 0)
             done = (p4 is not None or "price_4h" in updates) and \
                    (p24 is not None or "price_24h" in updates)
             if updates:
