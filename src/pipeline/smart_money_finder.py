@@ -36,6 +36,7 @@ MIN_SELLS = 3                 # must actually take profit, not just hold
 MIN_WIN_PCT = 20              # realized profit % floor
 MAX_TRADES = 1500             # above this = market-maker / HFT bot, not directional
 MIN_USD_PER_TRADE = 300       # MMs scalp tiny; a directional whale earns big per trade
+MIN_HOLD_USD = 1000           # forward signal counts only REAL positions, not dust/airdrops
 
 # Seed tokens: ones that demonstrably pumped (the hunting ground for who profited).
 _SEED_PUMPED = [
@@ -171,6 +172,14 @@ def forward_signal(top: int = 30) -> dict:
         d = moralis_client.get(f"wallets/{w['wallet']}/tokens?chain={mchain}")
         for t in (d or {}).get("result", []):
             if t.get("possible_spam") or t.get("native_token"):
+                continue
+            # Only REAL positions — dust/airdrop holdings (a few $ ) are not
+            # 'smart money backing' (this is the Clutch false-positive fix).
+            try:
+                usd = float(t.get("usd_value") or 0)
+            except (ValueError, TypeError):
+                usd = 0
+            if usd < MIN_HOLD_USD:
                 continue
             ca = (t.get("token_address") or "").lower()
             if ca:

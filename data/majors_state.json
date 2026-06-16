@@ -1,31 +1,31 @@
 {
   "BTC": {
     "ccy": "BTC",
-    "price": 66514.9,
-    "ch24": 1.32,
-    "funding": -0.0062,
-    "oi_usd": 2091911996,
+    "price": 66872.0,
+    "ch24": 1.89,
+    "funding": -0.0061,
+    "oi_usd": 2103321572,
     "retail_ls": 1.32
   },
   "ETH": {
     "ccy": "ETH",
-    "price": 1782.19,
-    "ch24": 3.74,
-    "funding": -0.0,
-    "oi_usd": 1287538646,
+    "price": 1802.4,
+    "ch24": 4.8,
+    "funding": -0.0003,
+    "oi_usd": 1293598759,
     "retail_ls": 2.14
   },
   "SOL": {
     "ccy": "SOL",
-    "price": 74.72,
-    "ch24": 4.86,
-    "funding": -0.0043,
-    "oi_usd": 197939409,
+    "price": 75.32,
+    "ch24": 5.67,
+    "funding": -0.0045,
+    "oi_usd": 200192007,
     "retail_ls": 2.2
   },
   "_flow": {
-    "reserve_change_24h": 0.45,
-    "net_flow_pct": -0.87,
-    "reserves_usd": 196633291533
+    "reserve_change_24h": 0.46,
+    "net_flow_pct": -1.43,
+    "reserves_usd": 196636995150
   }
 }

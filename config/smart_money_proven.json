@@ -22,5 +22,61 @@
     "realized_pct": 27.39,
     "sells": 516,
     "trades": 929
+  },
+  {
+    "wallet": "0x3c5083022114ea14fb3d8d06f5931c629c2bedd6",
+    "chain": "bsc",
+    "realized_usd": 6202774.500125332,
+    "realized_pct": 462.72,
+    "sells": 644,
+    "trades": 1172
+  },
+  {
+    "wallet": "0x9631335762e3603d2a7507d84838aa3236d52745",
+    "chain": "bsc",
+    "realized_usd": 1032692.3740532568,
+    "realized_pct": 215.96,
+    "sells": 571,
+    "trades": 970
+  },
+  {
+    "wallet": "0x25c256f6437de6e9ba2c0ded33b87d99bd9de8db",
+    "chain": "bsc",
+    "realized_usd": 632601.7490689305,
+    "realized_pct": 26.37,
+    "sells": 339,
+    "trades": 671
+  },
+  {
+    "wallet": "0x3d06315c94ac30b6061c91caf748fc2db04a89f4",
+    "chain": "bsc",
+    "realized_usd": 484980.6258580282,
+    "realized_pct": 53.38,
+    "sells": 682,
+    "trades": 1051
+  },
+  {
+    "wallet": "0x5b28b4d4c71bef6bebb1735b56ea882752694720",
+    "chain": "bsc",
+    "realized_usd": 475142.04307742417,
+    "realized_pct": 248.19,
+    "sells": 267,
+    "trades": 627
+  },
+  {
+    "wallet": "0x5fb36c08124a78edb09a990f863ba1982580016d",
+    "chain": "bsc",
+    "realized_usd": 268537.4163451127,
+    "realized_pct": 229.03,
+    "sells": 401,
+    "trades": 702
+  },
+  {
+    "wallet": "0x0b3edd0d0bf7c6281a7f8ae5a5630defb94ae78e",
+    "chain": "bsc",
+    "realized_usd": 206509.5502733289,
+    "realized_pct": 72.8,
+    "sells": 400,
+    "trades": 675
   }
 ]

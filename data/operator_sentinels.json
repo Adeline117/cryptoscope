@@ -15,24 +15,20 @@
       "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
     ],
     "baseline": {
-      "price": 0.08167,
-      "liquidity": 319228.03,
-      "vol24": 2219959.21,
+      "price": 0.08243,
+      "liquidity": 320792.41,
+      "vol24": 2216990.76,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
     "last": {
-      "price": 0.08256,
-      "liquidity": 320895.86,
-      "vol24": 2207850.35,
+      "price": 0.0824,
+      "liquidity": 320748.46,
+      "vol24": 2217844.68,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
-    "second_leg": "未拉过 (满仓待发,如BASED)",
-    "loaded": true,
-    "peak_balance": 10167894.759644354,
-    "operator_type": "信仰者(只吸不卖)",
-    "max_drawdown_pct": 0.0
+    "peak_balance": 10167894.759644354
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
@@ -44,24 +40,20 @@
       "0x504ce9e51e508c85a161058c12e970a903d482fc"
     ],
     "baseline": {
-      "price": 0.06294,
-      "liquidity": 1322878.21,
-      "vol24": 1437022.23,
-      "cluster_balance": 214578864.43321168,
-      "funding": 0.0223
-    },
-    "last": {
-      "price": 0.06294,
-      "liquidity": 1320625.33,
-      "vol24": 1360216.82,
+      "price": 0.06292,
+      "liquidity": 1323727.32,
+      "vol24": 1351160.34,
       "cluster_balance": 214578864.43321168,
       "funding": 0.005
     },
-    "second_leg": "⭐二波候选 (峰值12.6x→已回落, 庄满仓)",
-    "loaded": true,
-    "peak_balance": 214578864.43321168,
-    "operator_type": "信仰者(只吸不卖)",
-    "max_drawdown_pct": 4.0
+    "last": {
+      "price": 0.06287,
+      "liquidity": 1323523.38,
+      "vol24": 1350976.63,
+      "cluster_balance": 214578864.43321168,
+      "funding": 0.005
+    },
+    "peak_balance": 214578864.43321168
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
     "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
@@ -85,24 +77,20 @@
       "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"
     ],
     "baseline": {
-      "price": 0.8199,
-      "liquidity": 711039.0,
-      "vol24": 82112547.11,
-      "cluster_balance": 3275446.0312630488,
-      "funding": 0.01
-    },
-    "last": {
-      "price": 0.7902,
-      "liquidity": 697827.43,
-      "vol24": 80370627.94,
+      "price": 0.7927,
+      "liquidity": 698934.14,
+      "vol24": 80078300.02,
       "cluster_balance": 3358001.269024384,
       "funding": 0.01
     },
-    "second_leg": "未拉过 (满仓待发,如BASED)",
-    "loaded": true,
-    "peak_balance": 3358001.269024384,
-    "operator_type": "信仰者(只吸不卖)",
-    "max_drawdown_pct": 0.0
+    "last": {
+      "price": 0.7889,
+      "liquidity": 697266.99,
+      "vol24": 80079764.92,
+      "cluster_balance": 3358001.269024384,
+      "funding": 0.01
+    },
+    "peak_balance": 3358001.269024384
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -125,23 +113,19 @@
       "0xc58bff59c3480f6371e573634ef269612252e05f"
     ],
     "baseline": {
-      "price": 0.05703,
-      "liquidity": 2595199.7,
-      "vol24": 1750655.94,
+      "price": 0.05086,
+      "liquidity": 2494369.64,
+      "vol24": 1803453.93,
       "cluster_balance": 92090783.05998234,
-      "funding": 0.0632
+      "funding": 0.0687
     },
     "last": {
-      "price": 0.0516,
-      "liquidity": 2500551.8,
-      "vol24": 1790988.27,
+      "price": 0.0508,
+      "liquidity": 2493602.28,
+      "vol24": 1804208.94,
       "cluster_balance": 92090783.05998234,
-      "funding": 0.0893
+      "funding": 0.0679
     },
-    "second_leg": "⭐二波候选 (峰值25.2x→已回落, 庄满仓)",
-    "loaded": true,
-    "peak_balance": 92090783.05998234,
-    "operator_type": "信仰者(只吸不卖)",
-    "max_drawdown_pct": 14.0
+    "peak_balance": 92090783.05998234
   }
 }
