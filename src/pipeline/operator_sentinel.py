@@ -39,6 +39,7 @@ DISTRIBUTE_DROP = 0.05   # cluster balance fell >=5% → operator selling
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
 LAUNCH_PRICE = 0.30      # price up >=30% vs baseline → launch underway
 LAUNCH_VOL = 3.0         # 24h volume >=3x baseline → launch underway
+CRASH_DROP = 0.18        # price fell >=18% vs last check → 砸盘 (dump in progress)
 
 
 def _load() -> dict:
@@ -137,6 +138,12 @@ def check_run() -> list[dict]:
             drop = (pl - cl) / pl * 100
             fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
 
+        # CRASH (砸盘) — price dropped sharply vs last check.
+        cpr, ppr = cur.get("price"), last.get("price")
+        if cpr is not None and ppr and ppr > 0 and cpr < ppr * (1 - CRASH_DROP):
+            drop = (ppr - cpr) / ppr * 100
+            fired.append(("砸盘", f"价格 -{drop:.0f}% (${ppr:.4g}→${cpr:.4g}) 急跌 → 注意"))
+
         # LAUNCH — price breakout or volume spike vs baseline.
         cp, bp = cur.get("price"), base.get("price")
         cv, bv = cur.get("vol24"), base.get("vol24")
@@ -187,6 +194,18 @@ _KNOWN_CLUSTERS = [
     ("0xF39e4b21c84e737Df08e2C3b32541d856f508E48", "bsc", "ESPORTS",
      ["0x99d4b3f50b14bfc67892c472f4053ee3483d87b9", "0xd2dd7b597fd2435b6db61ddf48544fd931e6869f",
       "0x504ce9e51e508c85a161058c12e970a903d482fc"]),
+    # EVAA / evaa.finance (15-wallet cluster, 9.9%, non-CEX funder). Accumulated
+    # +54% over 10d INTO a +34% run, then stopped ~10h ago at the top — holding,
+    # not yet distributing. Real project; watch for distribution (砸盘) or 2nd leg.
+    ("0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1", "bsc", "EVAA",
+     ["0xd5da17a84314194e348649c89a65143a061f7190", "0x024ee8dc380ad17d955b07149725d518b5cbba67",
+      "0x8782163068c7cd74d2510768a61135c1e4eb07b3", "0xe92bd58a5c0d84d4af48d8b7d28068bcb7a92f74",
+      "0xbd6f608b9747e564be011960d1e9bd35541e0dbf", "0xcd808e6bb368e06810ce20cccc0209c94f8a22da",
+      "0xe6451016f095835a0d5ef98a5c0092e47ddf0a93", "0x8d17fbfb03a6b7e8fdcfd60f1f9e6c08578ba5d7",
+      "0x24a0d9928a3b6cd13a6210d0ff6d450a080fc266", "0x39927a709eaba03d43c351ea0b1bf4228ce99ade",
+      "0xb85b098448b2aac4af96f5bdd9c6c02373a08975", "0x035ae7d933dcbfe617ffba194a88af0c2867b90c",
+      "0x604ef94e24a14052cc924a55f49f879757681d4d", "0x33a5e430b626d2b6f93fd5b94159d30a636a0c4b",
+      "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"]),
 ]
 
 

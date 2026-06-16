@@ -15,15 +15,15 @@
       "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
     ],
     "baseline": {
-      "price": 0.07574,
-      "liquidity": 300393.93,
-      "vol24": 2017150.6,
+      "price": 0.07674,
+      "liquidity": 303725.37,
+      "vol24": 1989339.84,
       "cluster_balance": 10167894.759644354
     },
     "last": {
-      "price": 0.07649,
-      "liquidity": 302906.11,
-      "vol24": 1997395.75,
+      "price": 0.07674,
+      "liquidity": 303725.37,
+      "vol24": 1989339.84,
       "cluster_balance": 10167894.759644354
     }
   },
@@ -37,16 +37,50 @@
       "0x504ce9e51e508c85a161058c12e970a903d482fc"
     ],
     "baseline": {
-      "price": 0.06157,
-      "liquidity": 1307352.37,
-      "vol24": 1623821.93,
+      "price": 0.06269,
+      "liquidity": 1316717.73,
+      "vol24": 1606734.43,
       "cluster_balance": 214578864.43321168
     },
     "last": {
-      "price": 0.06239,
-      "liquidity": 1314723.22,
-      "vol24": 1613998.74,
+      "price": 0.06269,
+      "liquidity": 1316717.73,
+      "vol24": 1606734.43,
       "cluster_balance": 214578864.43321168
+    }
+  },
+  "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
+    "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
+    "chain": "bsc",
+    "symbol": "EVAA",
+    "wallets": [
+      "0xd5da17a84314194e348649c89a65143a061f7190",
+      "0x024ee8dc380ad17d955b07149725d518b5cbba67",
+      "0x8782163068c7cd74d2510768a61135c1e4eb07b3",
+      "0xe92bd58a5c0d84d4af48d8b7d28068bcb7a92f74",
+      "0xbd6f608b9747e564be011960d1e9bd35541e0dbf",
+      "0xcd808e6bb368e06810ce20cccc0209c94f8a22da",
+      "0xe6451016f095835a0d5ef98a5c0092e47ddf0a93",
+      "0x8d17fbfb03a6b7e8fdcfd60f1f9e6c08578ba5d7",
+      "0x24a0d9928a3b6cd13a6210d0ff6d450a080fc266",
+      "0x39927a709eaba03d43c351ea0b1bf4228ce99ade",
+      "0xb85b098448b2aac4af96f5bdd9c6c02373a08975",
+      "0x035ae7d933dcbfe617ffba194a88af0c2867b90c",
+      "0x604ef94e24a14052cc924a55f49f879757681d4d",
+      "0x33a5e430b626d2b6f93fd5b94159d30a636a0c4b",
+      "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"
+    ],
+    "baseline": {
+      "price": 1.12,
+      "liquidity": 834275.65,
+      "vol24": 80530762.55,
+      "cluster_balance": 2979443.0948527344
+    },
+    "last": {
+      "price": 1.12,
+      "liquidity": 834275.65,
+      "vol24": 80530762.55,
+      "cluster_balance": 2979443.0948527344
     }
   }
 }
