@@ -31,8 +31,9 @@ from src.pipeline.anomaly_screener import (
 
 logger = structlog.get_logger()
 
-# 妖币 hunting grounds: where operators accumulate (BSC strongest, Solana next).
-_HUNT_CHAINS = {"bsc": "bsc", "solana": "solana"}
+# 妖币 hunting grounds: where operators accumulate (BSC strongest, Solana next,
+# Base has an active meme scene). All free-data chains (Moralis/Helius).
+_HUNT_CHAINS = {"bsc": "bsc", "solana": "solana", "base": "base"}
 # Operator sweet spot: established enough to trade, small enough for one entity to
 # control. Too big (>$8M liq) = real project; too small (<$120k) = dead micro-cap.
 MIN_LIQ, MAX_LIQ = 120_000, 8_000_000

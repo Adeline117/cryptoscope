@@ -181,12 +181,35 @@ def assess_second_leg() -> dict:
     return out
 
 
+def _solana_wallet_balance(owner: str, mint: str, rpc: str, timeout: int = 12) -> float:
+    """One wallet's balance of a specific mint — light (no full holder fetch), so
+    a cluster of N wallets is N cheap calls, usable in the ~20s real-time loop."""
+    import json
+    import urllib.request
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "getTokenAccountsByOwner",
+                          "params": [owner, {"mint": mint}, {"encoding": "jsonParsed"}]})
+    try:
+        req = urllib.request.Request(rpc, data=payload.encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            res = json.loads(r.read().decode()).get("result", {}) or {}
+        total = 0.0
+        for acc in res.get("value", []):
+            ta = acc.get("account", {}).get("data", {}).get("parsed", {}).get("info", {}).get("tokenAmount", {})
+            total += float(ta.get("uiAmount") or 0)
+        return total
+    except Exception:
+        return 0.0
+
+
 def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None:
-    """Combined token balance of the operator cluster (free archive eth_call)."""
+    """Combined token balance of the operator cluster — light enough for real-time.
+    Solana: per-wallet getTokenAccountsByOwner (N cheap calls, no full holder fetch).
+    EVM: combined balanceOf via free archive eth_call."""
     if chain in ("solana", "sol"):
-        from src.onchain import holder_snapshot as hs
-        holders = {h["address"]: h.get("balance", 0) for h in hs.fetch_holders_solana(token)}
-        return sum(float(holders.get(w, 0) or 0) for w in wallets)
+        import os
+        rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+        return sum(_solana_wallet_balance(w, token, rpc) for w in wallets)
     try:
         from src.onchain.evm_archive import ArchiveRPC, combined_balance_at
         rpc = ArchiveRPC(chain)

@@ -368,7 +368,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
     if len(pos) < 8:
         return None
     pos.sort(key=lambda h: -h["balance"])
-    top = pos[:50]
+    top = pos[:70]   # deeper than 50 → catches larger Sybil nets (e.g. SIREN's 131)
     is_sol = chain in ("solana", "sol")
 
     # Exclude known CEX.
@@ -394,7 +394,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
     if funder_free:
         try:
             from src.onchain.funder_graph import get_funders
-            funders = get_funders([h["address"] for h in eoa], chain, max_lookups=40)
+            funders = get_funders([h["address"] for h in eoa], chain, max_lookups=65)
         except Exception as e:
             logger.debug("funders_failed", chain=chain, error=str(e))
 

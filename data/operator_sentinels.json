@@ -22,9 +22,9 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.0813,
-      "liquidity": 318293.35,
-      "vol24": 2172928.95,
+      "price": 0.08131,
+      "liquidity": 318309.11,
+      "vol24": 2173152.46,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
@@ -48,9 +48,9 @@
       "funding": 0.0339
     },
     "last": {
-      "price": 0.06401,
-      "liquidity": 1327333.68,
-      "vol24": 1479490.89,
+      "price": 0.06433,
+      "liquidity": 1329409.54,
+      "vol24": 1479379.04,
       "cluster_balance": 214578864.43321168,
       "funding": 0.0213
     },
@@ -86,9 +86,9 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.7137,
-      "liquidity": 663717.78,
-      "vol24": 82591554.51,
+      "price": 0.7138,
+      "liquidity": 663795.43,
+      "vol24": 82582787.85,
       "cluster_balance": 3007789.461469402,
       "funding": 0.01
     },
