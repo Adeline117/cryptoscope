@@ -343,6 +343,77 @@ def _funder_available(chain: str) -> bool:
         "bsc", "base", "arbitrum", "optimism", "polygon")
 
 
+from functools import lru_cache
+
+# A funder that seeded a huge number of distinct wallets — a CEX hot wallet, a
+# launchpad, or a router — is NOT an operator. Clustering everyone it funded into
+# "one entity" is the jellyjelly / USELESS / SPCX69 false positive: a CEX hot wallet
+# doing 1000+ tx/day while sitting on 70k+ SOL got mis-read as a hidden operator
+# controlling 29% of the float. The "cluster" is just retail who all withdrew from
+# the same exchange. Detect it behaviorally and refuse to merge wallets under it.
+_DISPERSER_SIG_CAP = 900       # >=900 sigs in a single 1000-cap lookup = high-freq service
+_DISPERSER_SOL_BAL = 1000.0    # a funder sitting on 1000+ SOL is an exchange, not a 庄
+_DISPERSER_EVM_RECIPIENTS = 40  # an EVM funder that seeded >40 distinct wallets = service
+
+
+@lru_cache(maxsize=4096)
+def _funder_is_disperser(funder: str, chain: str) -> bool:
+    """True if the funder behaves like a CEX/launchpad/router (high-frequency, many
+    recipients, or a large hot-wallet balance) rather than a focused operator. Cached
+    per (funder, chain) — at most a couple network calls per distinct dominant funder.
+    Conservative: on any error it returns False (don't drop a real signal on a flake)."""
+    if not funder:
+        return False
+    # Known CEX hot wallets — cheap, no network.
+    try:
+        from src.onchain.cex_addresses import evm_exchanges, solana_exchanges
+        if chain in ("solana", "sol"):
+            if funder in set(solana_exchanges()):
+                return True
+        elif funder.lower() in {a.lower() for a in evm_exchanges()}:
+            return True
+    except Exception:
+        pass
+    if chain in ("solana", "sol"):
+        import os
+        rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+
+        def _rpc(method, params):
+            req = urllib.request.Request(
+                rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1,
+                                      "method": method, "params": params}).encode(),
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read().decode()).get("result")
+        try:
+            sigs = _rpc("getSignaturesForAddress", [funder, {"limit": 1000}]) or []
+            if len(sigs) >= _DISPERSER_SIG_CAP:
+                return True
+            bal = _rpc("getBalance", [funder])
+            lamports = bal.get("value", 0) if isinstance(bal, dict) else (bal or 0)
+            if lamports and lamports / 1e9 >= _DISPERSER_SOL_BAL:
+                return True
+        except Exception:
+            return False
+        return False
+    # EVM: count distinct native-transfer recipients via Moralis (when available).
+    try:
+        from src.onchain import moralis_client
+        mchain = {"bsc": "bsc", "ethereum": "eth", "base": "base", "arbitrum": "arbitrum",
+                  "optimism": "optimism", "polygon": "polygon"}.get(chain)
+        if not mchain or not moralis_client.available():
+            return False
+        data = moralis_client.get(f"{funder}?chain={mchain}&order=ASC&limit=100")
+        if not data:
+            return False
+        recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
+                  if (t.get("from_address") or "").lower() == funder.lower()
+                  and int(t.get("value", "0") or 0) > 0}
+        return len(recips) > _DISPERSER_EVM_RECIPIENTS
+    except Exception:
+        return False
+
+
 def effective_concentration_signal(holders: list[dict], token: str, chain: str) -> dict | None:
     """The linchpin: does ONE private entity control a big share of the FLOAT,
     hidden across many wallets (Sybil)? This is what separates a real operator
@@ -412,6 +483,38 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         logger.debug("eff_conc_failed", token=token, error=str(e))
         return None
 
+    # CEX/disperser guard at the SOURCE: if the funder(s) that built the largest
+    # entities are high-frequency dispersers (CEX hot wallet / launchpad / router),
+    # their "cluster" is retail-who-withdrew-from-the-same-exchange, not an operator.
+    # Strip those funder edges and re-cluster so the reported concentration is honest
+    # (this is what separates jellyjelly/USELESS/SPCX69 false positives from BASED).
+    funder_dispersers: list[str] = []
+    if funders:
+        by_funder_pre: dict[str, float] = {}
+        for a, b in bal_map.items():
+            f = funders.get(a)
+            if f:
+                by_funder_pre[f] = by_funder_pre.get(f, 0.0) + b
+        # Only profile funders that actually merged ≥2 wallets and dominate balance —
+        # bounded to the top few, so at most a couple network calls per candidate.
+        multi = {f for f in by_funder_pre
+                 if sum(1 for a in bal_map if funders.get(a) == f) >= 2}
+        for f in sorted(multi, key=by_funder_pre.get, reverse=True)[:3]:
+            if _funder_is_disperser(f, chain):
+                funder_dispersers.append(f)
+        if funder_dispersers:
+            drop = set(funder_dispersers)
+            funders_clean = {a: f for a, f in funders.items() if f not in drop}
+            try:
+                mapping = cluster_addresses(
+                    [h["address"] for h in eoa], funders_clean or None,
+                    balances=bal_map, min_batch_funder=2)
+                funders = funders_clean
+                logger.info("disperser_funder_stripped", token=token, chain=chain,
+                            dispersers=len(funder_dispersers))
+            except Exception as e:
+                logger.debug("recluster_failed", token=token, error=str(e))
+
     total_supply = sum(h["balance"] for h in pos)
     if total_supply <= 0:
         return None
@@ -442,6 +545,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         "eoa_analyzed": len(eoa),
         "funder_complete": bool(funders),
         "dominant_funder": dominant_funder,
+        "disperser_funders_stripped": len(funder_dispersers),
     }
 
 

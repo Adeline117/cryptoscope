@@ -1,11 +1,17 @@
 {
   "symbol": "jellyjelly",
-  "mint": "",
+  "mint": "FeR8VBqNRSUD5NtXAj2n3j1dAHkZHfyDktKuLXD4pump",
   "chain": "solana",
-  "outcome": "pending",
+  "outcome": "downgraded",
   "found_by": "operator_hunt",
   "found_date": "2026-06-15",
-  "cluster_share_pct": 20,
-  "concentration_gap": 12,
-  "note": "Solana hidden Sybil cluster, gap +12. SPCX69 verified: 35 wallets one non-CEX funder = 18.7%."
+  "verified_date": "2026-06-16",
+  "cluster_share_pct": 9.6,
+  "concentration_gap": 0,
+  "raw_gap_before_guard": 9.6,
+  "dominant_funder": "APhyMCpYjQ9RdEBn8cs4ifyBXjxAS5JtM3wYpWMJjsY5",
+  "funder_sigs": "1000+ (cap) in a single day = high-frequency disperser",
+  "funder_sol_balance": 376,
+  "note": "503d-old token (NOT a launch like SPCX69), so age did not disqualify. But the dominant funder is a CEX/router hot wallet (1000+ tx/day). The 19.2% 'hidden entity' was just retail who withdrew from the same exchange. After the disperser-funder guard (anomaly_screener._funder_is_disperser), effective concentration collapses to 9.6% = nominal single-address, gap +0. NOT an operator.",
+  "verdict": "CEX-cluster false positive (same trap as SPCX69, USELESS-bonk)"
 }

@@ -136,6 +136,9 @@ def test_effective_concentration_discriminates(monkeypatch):
     # them — funder is the sole discriminator here). Solana skips contract filter.
     holders = [{"address": f"WALLET{i:02d}", "balance": 100 + i * 37} for i in range(20)]
 
+    # Keep hermetic: a real operator funder is NOT a disperser (no live RPC).
+    monkeypatch.setattr(a, "_funder_is_disperser", lambda f, chain: False)
+
     # SIREN-like: all funded by ONE address → cluster into 1 entity.
     monkeypatch.setattr(
         "src.onchain.funder_graph.get_funders",
@@ -152,6 +155,30 @@ def test_effective_concentration_discriminates(monkeypatch):
     )
     crepe = a.effective_concentration_signal(holders, "TOK", "solana")
     assert crepe and crepe["largest_entity_pct"] < 25  # no single controlling entity
+
+
+def test_disperser_funder_collapses_cluster(monkeypatch):
+    """REGRESSION (jellyjelly/USELESS/SPCX69 false positive): when the funder that
+    built the largest 'entity' is a CEX hot wallet / launchpad / router (disperser),
+    its cluster is retail-who-withdrew-from-the-same-exchange, NOT an operator. The
+    signal must strip that funder edge and report honest near-nominal concentration —
+    NOT a fake hidden cluster. (USELESS: a funder with 1000+ tx/day + 72k SOL had
+    mis-clustered 29% of the float.)"""
+    import src.pipeline.anomaly_screener as a
+    holders = [{"address": f"WALLET{i:02d}", "balance": 100 + i * 37} for i in range(20)]
+
+    # All wallets funded by ONE address — but that address is a disperser (CEX).
+    monkeypatch.setattr(
+        "src.onchain.funder_graph.get_funders",
+        lambda addrs, chain, **kw: {h: "CEX_HOTWALLET" for h in addrs},
+    )
+    monkeypatch.setattr(a, "_funder_is_disperser",
+                        lambda f, chain: f == "CEX_HOTWALLET")
+    sig = a.effective_concentration_signal(holders, "TOK", "solana")
+    assert sig and sig["disperser_funders_stripped"] >= 1
+    # Edge stripped → no Sybil merge → gap collapses to ~0 (each wallet stands alone).
+    assert sig["concentration_gap"] < 3, sig
+    assert sig["largest_entity_pct"] < 25  # not a controlling hidden entity
 
 
 def test_score_reasons_weighted():
