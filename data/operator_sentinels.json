@@ -15,16 +15,18 @@
       "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
     ],
     "baseline": {
-      "price": 0.07674,
-      "liquidity": 303725.37,
-      "vol24": 1989339.84,
-      "cluster_balance": 10167894.759644354
+      "price": 0.07718,
+      "liquidity": 305184.46,
+      "vol24": 1994163.05,
+      "cluster_balance": 10167894.759644354,
+      "funding": 0.005
     },
     "last": {
-      "price": 0.07674,
-      "liquidity": 303725.37,
-      "vol24": 1989339.84,
-      "cluster_balance": 10167894.759644354
+      "price": 0.07718,
+      "liquidity": 305190.5,
+      "vol24": 1994054.01,
+      "cluster_balance": 10167894.759644354,
+      "funding": 0.005
     }
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
@@ -37,16 +39,18 @@
       "0x504ce9e51e508c85a161058c12e970a903d482fc"
     ],
     "baseline": {
-      "price": 0.06269,
-      "liquidity": 1316717.73,
-      "vol24": 1606734.43,
-      "cluster_balance": 214578864.43321168
+      "price": 0.06168,
+      "liquidity": 1307453.3,
+      "vol24": 1613607.07,
+      "cluster_balance": 214578864.43321168,
+      "funding": 0.0448
     },
     "last": {
-      "price": 0.06269,
-      "liquidity": 1316717.73,
-      "vol24": 1606734.43,
-      "cluster_balance": 214578864.43321168
+      "price": 0.06168,
+      "liquidity": 1307453.3,
+      "vol24": 1613607.07,
+      "cluster_balance": 214578864.43321168,
+      "funding": 0.0448
     }
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
@@ -72,15 +76,17 @@
     ],
     "baseline": {
       "price": 1.12,
-      "liquidity": 834275.65,
-      "vol24": 80530762.55,
-      "cluster_balance": 2979443.0948527344
+      "liquidity": 834823.32,
+      "vol24": 80844930.97,
+      "cluster_balance": 2979443.0948527344,
+      "funding": 0.01
     },
     "last": {
       "price": 1.12,
-      "liquidity": 834275.65,
-      "vol24": 80530762.55,
-      "cluster_balance": 2979443.0948527344
+      "liquidity": 833486.15,
+      "vol24": 80868127.61,
+      "cluster_balance": 2979443.0948527344,
+      "funding": 0.01
     }
   }
 }

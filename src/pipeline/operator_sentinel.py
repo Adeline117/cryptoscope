@@ -77,6 +77,32 @@ def _dex(token: str, chain: str) -> dict:
         return {}
 
 
+def _funding_rate(symbol: str) -> float | None:
+    """Perp funding rate (%/8h) for {SYMBOL}_USDT — Gate primary, MEXC fallback.
+    Positive = longs crowded (short-favorable + paid); negative = shorts crowded."""
+    if not symbol:
+        return None
+    try:
+        url = f"https://api.gateio.ws/api/v4/futures/usdt/contracts/{symbol}_USDT"
+        req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            d = json.loads(r.read().decode())
+        if isinstance(d, dict) and d.get("funding_rate") is not None:
+            return round(float(d["funding_rate"]) * 100, 4)
+    except Exception:
+        pass
+    try:
+        url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}_USDT"
+        req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            d = json.loads(r.read().decode())
+        if isinstance(d, dict) and d.get("data"):
+            return round(float(d["data"].get("fundingRate", 0) or 0) * 100, 4)
+    except Exception:
+        pass
+    return None
+
+
 def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None:
     """Combined token balance of the operator cluster (free archive eth_call)."""
     if chain in ("solana", "sol"):
@@ -94,9 +120,10 @@ def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None
         return None
 
 
-def _measure(token: str, chain: str, wallets: list[str]) -> dict:
+def _measure(token: str, chain: str, wallets: list[str], symbol: str = "") -> dict:
     m = _dex(token, chain)
     m["cluster_balance"] = _cluster_balance(token, chain, wallets)
+    m["funding"] = _funding_rate(symbol)
     return m
 
 
@@ -104,7 +131,7 @@ def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
     """Snapshot the current state as the baseline and start watching."""
     data = _load()
     key = f"{chain}:{token.lower()}"
-    state = _measure(token, chain, wallets)
+    state = _measure(token, chain, wallets, symbol)
     data[key] = {
         "token": token, "chain": chain, "symbol": symbol,
         "wallets": [w.lower() for w in wallets],
@@ -122,7 +149,7 @@ def check_run() -> list[dict]:
     data = _load()
     alerts = []
     for key, t in data.items():
-        cur = _measure(t["token"], t["chain"], t["wallets"])
+        cur = _measure(t["token"], t["chain"], t["wallets"], t.get("symbol", ""))
         last, base = t.get("last", {}), t.get("baseline", {})
         fired = []
 
@@ -153,8 +180,28 @@ def check_run() -> list[dict]:
             fired.append(("启动", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 放量,可能启动"))
 
         if fired:
+            # Directional call: combine the event with funding (longs-crowded =
+            # short-favorable). Operator pumping → LONG; operator selling / crash →
+            # SHORT. Funding tilts/confirms the bias.
+            fund = cur.get("funding")
+            kinds = {k for k, _ in fired}
+            if kinds & {"派发", "砸盘", "RUG"}:
+                action = "🔴 做空 / 平多"
+                if fund is not None and fund > 0.03:
+                    action += f"(费率 +{fund:.3f}% 多头拥挤,顺风)"
+                elif fund is not None:
+                    action += f"(费率 {fund:+.3f}%)"
+            elif "启动" in kinds:
+                action = "🟢 做多(跟庄启动)"
+                if fund is not None and fund > 0.08:
+                    action += f"(费率 +{fund:.3f}% 已过热,小心追高)"
+                elif fund is not None:
+                    action += f"(费率 {fund:+.3f}%)"
+            else:
+                action = "⚪ 观望"
             alerts.append({"symbol": t["symbol"], "chain": t["chain"],
-                           "token": t["token"], "events": fired})
+                           "token": t["token"], "events": fired,
+                           "funding": fund, "action": action})
         t["last"] = cur  # advance state regardless
     _save(data)
     return alerts
@@ -166,7 +213,10 @@ def _format(alerts: list[dict]) -> str:
         lines.append(f"\n<b>{a['symbol']}</b> [{a['chain']}]")
         for kind, detail in a["events"]:
             lines.append(f"  ⚠️ <b>{kind}</b>: {detail}")
+        if a.get("action"):
+            lines.append(f"  👉 <b>{a['action']}</b>")
         lines.append(f"  <code>{a['token']}</code>")
+    lines.append("\n<i>带止损,薄盘小仓。仅信号,非投资建议。</i>")
     return "\n".join(lines)
 
 
@@ -221,10 +271,14 @@ def main():
         print(_format(alerts).replace("<b>", "").replace("</b>", "").replace("<code>", "").replace("</code>", ""))
     else:
         targets = _load()
-        print(f"哨兵巡检完成 — {len(targets)} 个目标,无触发(派发/rug/启动均未发生)")
+        print(f"哨兵巡检完成 — {len(targets)} 个目标,无触发(派发/rug/砸盘/启动均未发生)")
         for k, t in targets.items():
             lc = t["last"]
-            print(f"  {t['symbol']}: 簇余额 {lc.get('cluster_balance'):,.0f} · 流动性 ${lc.get('liquidity'):,.0f} · 价格 ${lc.get('price')}")
+            fund = lc.get("funding")
+            fs = (f" · 费率 {fund:+.3f}%/8h{'🔴多拥挤' if fund and fund > 0.03 else ''}"
+                  if fund is not None else "")
+            print(f"  {t['symbol']}: 簇 {lc.get('cluster_balance'):,.0f} · "
+                  f"流动性 ${lc.get('liquidity'):,.0f} · 价 ${lc.get('price')}{fs}")
 
 
 if __name__ == "__main__":
