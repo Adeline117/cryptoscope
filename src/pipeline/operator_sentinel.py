@@ -52,7 +52,9 @@ STOP_MIN_S = 900         # ...but never less than 15 min (avoid twitchy)
 STOP_MAX_S = 21600       # ...never more than 6h (avoid waiting forever)
 # Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
-CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop
+CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop (violent)
+PRICE_DD = 0.18          # price down >=18% from a recent high → 急跌 (GRADUAL bleed,
+                         # even if no single cycle dropped 15% — what missed EVAA)
 LAUNCH_PRICE = 0.25      # price up >=25% vs last check → launch backstop
 LAUNCH_VOL = 3.0         # 24h volume >=3x baseline → volume backstop
 
@@ -503,16 +505,11 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 drop = (pl - cl) / pl * 100
                 fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
 
-            cpr, ppr = cur.get("price"), last.get("price")
-            if cpr is not None and ppr and ppr > 0 and cpr < ppr * (1 - CRASH_DROP):
-                drop = (ppr - cpr) / ppr * 100
-                fired.append(("砸盘", f"价格 -{drop:.0f}% (${ppr:.4g}→${cpr:.4g}) 急跌(兜底) → 注意"))
-            elif cpr is not None and ppr and ppr > 0 and cpr >= ppr * (1 + LAUNCH_PRICE):
-                fired.append(("拉升", f"价格 +{(cpr/ppr-1)*100:.0f}% 急涨(兜底) → 已在拉"))
-            else:
-                cv, bv = cur.get("vol24"), base.get("vol24")
-                if cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
-                    fired.append(("放量", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 异动"))
+            # PRICE/volume signals removed by user directive — "only 庄 (operator)
+            # info". The system alerts on the operator's ACTIONS (庄在买/庄在卖/庄停手)
+            # + RUG (liquidity pull = insider action). Pure price moves (砸盘/拉升/
+            # 放量/急跌) are NOT operator info, so they don't alert. EVAA's -35% bleed
+            # correctly produced no alert: the operator did NOT sell (it was retail).
 
             # ===== STALL: momentum fizzled (proactively report inaction) =====
             # After a buy/launch, if price faded from its post-buy high AND the
@@ -569,8 +566,8 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # immediately (no time delay).
             if fired:
                 kset = {k for k, _ in fired}
-                phase = ("sell" if kset & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else
-                         "buy" if kset & {"庄在买", "拉升"} else
+                phase = ("sell" if kset & {"庄在卖", "阴跌出货", "RUG"} else
+                         "buy" if kset & {"庄在买"} else
                          "stall" if kset & {"庄停手", "动能熄火"} else "other")
                 if phase == t.get("last_phase"):
                     fired = []           # same phase as last alert → suppress repeat

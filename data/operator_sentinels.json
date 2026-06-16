@@ -22,9 +22,9 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08331,
-      "liquidity": 322145.78,
-      "vol24": 2238273.13,
+      "price": 0.08285,
+      "liquidity": 321332.73,
+      "vol24": 2230081.88,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
@@ -48,11 +48,11 @@
       "funding": 0.0186
     },
     "last": {
-      "price": 0.0648,
-      "liquidity": 1332341.66,
-      "vol24": 1477812.47,
+      "price": 0.06666,
+      "liquidity": 1344408.71,
+      "vol24": 1489166.31,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0176
+      "funding": 0.0271
     },
     "balanceof_reliable": true,
     "flow_ts": "2026-06-16T01:12:24.000Z"
@@ -86,14 +86,14 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.8261,
-      "liquidity": 713710.05,
-      "vol24": 77848918.58,
+      "price": 0.7259,
+      "liquidity": 669212.2,
+      "vol24": 76605881.21,
       "cluster_balance": 3358831.7858782033,
       "funding": 0.01
     },
     "balanceof_reliable": true,
-    "flow_ts": "2026-06-16T09:20:22.000Z"
+    "flow_ts": "2026-06-16T09:27:01.000Z"
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -123,11 +123,11 @@
       "funding": 0.12
     },
     "last": {
-      "price": 0.0483,
-      "liquidity": 2441491.46,
-      "vol24": 1844443.06,
-      "cluster_balance": 87093782.01990438,
-      "funding": 0.1199
+      "price": 0.04596,
+      "liquidity": 2400752.7,
+      "vol24": 1844124.66,
+      "cluster_balance": 87195774.57128173,
+      "funding": 0.1165
     },
     "balanceof_reliable": true,
     "flow_ts": "2026-06-16T09:22:52.000Z"
