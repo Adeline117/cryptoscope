@@ -202,7 +202,14 @@ def check_run() -> list[dict]:
             alerts.append({"symbol": t["symbol"], "chain": t["chain"],
                            "token": t["token"], "events": fired,
                            "funding": fund, "action": action})
-        t["last"] = cur  # advance state regardless
+        # Advance state, but NEVER overwrite a good last value with None — a
+        # transient fetch failure must not blind the next comparison (else a drop
+        # that happens during the outage is missed). Keep the last known good.
+        merged = dict(last)
+        for k, v in cur.items():
+            if v is not None:
+                merged[k] = v
+        t["last"] = merged
     _save(data)
     return alerts
 
