@@ -44,8 +44,12 @@ SLOW_BLEED = 0.04        # cluster down >=4% from running peak → chunked distr
 COOLDOWN_MIN = 45        # don't re-fire the same event kind within N minutes
 STALL_FADE = 0.12        # after a buy/launch, price faded >=12% from its high...
 MAX_MOMENTUM_H = 36      # ...within this window, with no fresh operator buying → 动能熄火
-STOP_HOURS = 2.0         # operator was buying, then no new buy for N hours → 庄停手
-                         # (EARLY warning: fires BEFORE price fades, not after)
+# 庄停手 is ADAPTIVE per token: silence > STOP_K × the operator's own recent buy
+# cadence = stopped (clamped). A hot buyer (every few min) trips fast; a slow/
+# dormant cluster never false-fires. Needs >=2 recent buys to know the rhythm.
+STOP_K = 4               # stopped = silence > 4× the median recent buy interval
+STOP_MIN_S = 900         # ...but never less than 15 min (avoid twitchy)
+STOP_MAX_S = 21600       # ...never more than 6h (avoid waiting forever)
 # Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
 CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop
@@ -520,17 +524,26 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # ===== 庄停手: operator WAS buying, now idle — EARLY warning, fires
             # BEFORE price fades (the gap the user hit: stop preceded the drop). =====
             if "庄在买" in fk:
+                bt = (t.get("buy_times", []) or [])
+                bt.append(nowdt.isoformat())
+                t["buy_times"] = bt[-6:]            # keep last 6 to gauge cadence
                 t["last_buy_ts"] = nowdt.isoformat()
                 t["stop_alerted"] = False
             elif t.get("last_buy_ts") and not t.get("stop_alerted"):
-                try:
-                    since_buy = (nowdt - datetime.fromisoformat(t["last_buy_ts"])).total_seconds() / 3600
-                except Exception:
-                    since_buy = 0
-                if since_buy >= STOP_HOURS:
-                    fired.append(("庄停手", f"操作者停止加仓 {since_buy:.0f}h(刚还在买)→ "
-                                  f"失去买盘支撑,注意回落,减/观望"))
-                    t["stop_alerted"] = True
+                bt = t.get("buy_times", []) or []
+                if len(bt) >= 2:                    # need a rhythm to judge "stopped"
+                    try:
+                        tt = sorted(datetime.fromisoformat(x) for x in bt)
+                        gaps = sorted((tt[i+1]-tt[i]).total_seconds() for i in range(len(tt)-1))
+                        med = gaps[len(gaps)//2]                       # median buy interval
+                        thresh = min(max(med * STOP_K, STOP_MIN_S), STOP_MAX_S)
+                        since = (nowdt - datetime.fromisoformat(t["last_buy_ts"])).total_seconds()
+                    except Exception:
+                        since = thresh = 0
+                    if since >= thresh > 0:
+                        fired.append(("庄停手", f"停止加仓 {since/60:.0f}分钟(常态约每{med/60:.0f}"
+                                      f"分钟买一次,超{thresh/60:.0f}分钟=停)→ 失去买盘支撑,减/观望"))
+                        t["stop_alerted"] = True
             mom = t.get("momentum")
             if fk & {"庄在买", "拉升"}:
                 t["momentum"] = {"ts": nowdt.isoformat(), "high": cpr or 0}
