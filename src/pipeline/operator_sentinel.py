@@ -40,6 +40,8 @@ SENTINELS_FILE = DATA_DIR / "operator_sentinels.json"
 # FIRST meaningful sell/buy to act BEFORE price has moved, capturing the full move.
 OP_SELL = 0.015          # cluster balance fell >=1.5% vs last → operator SELLING (exit/short NOW)
 OP_BUY = 0.02            # cluster balance rose >=2% vs last → operator BUYING (markup/launch → long)
+SLOW_BLEED = 0.04        # cluster down >=4% from running peak → chunked distribution
+COOLDOWN_MIN = 45        # don't re-fire the same event kind within N minutes
 # Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
 CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop
@@ -264,6 +266,14 @@ def check_run() -> list[dict]:
             elif chg >= OP_BUY:           # operator BUYING — markup/launch begins
                 fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
                               f"操作者加仓 → 拉升前埋伏/做多"))
+        # Slow-bleed: cumulative drop from the running PEAK catches an operator
+        # distributing in chunks each < OP_SELL that would slip past the step check.
+        if cb is not None:
+            peak = max(t.get("peak_balance", 0) or 0, cb, pb or 0)
+            if peak > 0 and cb < peak * (1 - SLOW_BLEED) and "庄在卖" not in {k for k, _ in fired}:
+                fired.append(("阴跌出货", f"簇较峰值 {(cb/peak-1)*100:+.1f}% ({peak:,.0f}→{cb:,.0f}) "
+                              f"分批阴跌出货 → 离场/做空"))
+            t["peak_balance"] = peak
 
         # ===== BACKSTOP: violent price/liquidity moves (in case sampling lagged) =====
         cl, pl = cur.get("liquidity"), last.get("liquidity")
@@ -282,6 +292,29 @@ def check_run() -> list[dict]:
             if cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
                 fired.append(("放量", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 异动"))
 
+        # Cooldown by DIRECTION (not kind): 庄在卖/阴跌出货/砸盘 are all the same
+        # sell-side event — once any fires, suppress all sell-side for COOLDOWN_MIN
+        # (and likewise buy-side), so one move isn't reported repeatedly.
+        if fired:
+            from datetime import datetime, timezone
+            kinds_all = {k for k, _ in fired}
+            side = "short" if kinds_all & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else \
+                   "long" if kinds_all & {"庄在买", "拉升"} else "neutral"
+            now_iso = datetime.now(timezone.utc)
+            cd = t.get("alert_cooldown", {}) or {}
+            prev = cd.get(side)
+            cooled = False
+            if prev:
+                try:
+                    cooled = (now_iso - datetime.fromisoformat(prev)).total_seconds() < COOLDOWN_MIN * 60
+                except Exception:
+                    cooled = False
+            if cooled:
+                fired = []
+            else:
+                cd[side] = now_iso.isoformat()
+                t["alert_cooldown"] = cd
+
         if fired:
             # Directional call: combine the event with funding (longs-crowded =
             # short-favorable). Operator pumping → LONG; operator selling / crash →
@@ -289,7 +322,7 @@ def check_run() -> list[dict]:
             fund = cur.get("funding")
             kinds = {k for k, _ in fired}
             fstr = f"(费率 {fund:+.3f}%)" if fund is not None else ""
-            if kinds & {"庄在卖", "砸盘", "RUG"}:    # operator exiting / dump
+            if kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG"}:    # operator exiting / dump
                 action = "🔴 顶部跑 / 做空"
                 if fund is not None and fund > 0.03:
                     fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
