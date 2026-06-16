@@ -21,9 +21,9 @@
       "cluster_balance": 10167894.759644354
     },
     "last": {
-      "price": 0.07574,
-      "liquidity": 300393.93,
-      "vol24": 2017150.6,
+      "price": 0.07649,
+      "liquidity": 302906.11,
+      "vol24": 1997395.75,
       "cluster_balance": 10167894.759644354
     }
   },
@@ -43,9 +43,9 @@
       "cluster_balance": 214578864.43321168
     },
     "last": {
-      "price": 0.06157,
-      "liquidity": 1307352.37,
-      "vol24": 1623821.93,
+      "price": 0.06239,
+      "liquidity": 1314723.22,
+      "vol24": 1613998.74,
       "cluster_balance": 214578864.43321168
     }
   }

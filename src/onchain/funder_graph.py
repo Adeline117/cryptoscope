@@ -50,34 +50,25 @@ _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 
 
 def _fetch_first_funder_moralis(address: str, chain: str, timeout: int = 20) -> str | None:
-    """First incoming native transfer's sender via Moralis (free tier). Covers
-    BSC and other EVM chains Etherscan's free tier locks out. Cloudflare blocks
-    the default urllib UA (error 1010), so a browser UA is required."""
-    key = os.environ.get("MORALIS_API_KEY")
+    """First incoming native transfer's sender via Moralis (free tier, multi-key
+    rotated). Covers BSC and other EVM chains Etherscan's free tier locks out."""
+    from src.onchain import moralis_client
     mchain = _MORALIS_CHAINS.get(chain)
-    if not key or not mchain:
+    if not moralis_client.available() or not mchain:
         return None
-    url = (f"https://deep-index.moralis.io/api/v2.2/{address}"
-           f"?chain={mchain}&order=ASC&limit=20")
-    try:
-        req = urllib.request.Request(
-            url, headers={"X-API-Key": key, "accept": "application/json",
-                          "User-Agent": _BROWSER_UA})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode())
-        for tx in data.get("result", []):
-            to = (tx.get("to_address") or "").lower()
-            frm = (tx.get("from_address") or "").lower()
-            try:
-                value = int(tx.get("value", "0") or 0)
-            except (ValueError, TypeError):
-                value = 0
-            if to == address.lower() and value > 0 and frm:
-                return frm
+    data = moralis_client.get(f"{address}?chain={mchain}&order=ASC&limit=20", timeout)
+    if not data:
         return None
-    except Exception as e:
-        logger.debug("moralis_funder_failed", address=address, error=str(e))
-        return None
+    for tx in data.get("result", []):
+        to = (tx.get("to_address") or "").lower()
+        frm = (tx.get("from_address") or "").lower()
+        try:
+            value = int(tx.get("value", "0") or 0)
+        except (ValueError, TypeError):
+            value = 0
+        if to == address.lower() and value > 0 and frm:
+            return frm
+    return None
 
 
 def _keys() -> list[str]:
@@ -245,7 +236,8 @@ def get_funders(
     keys = _keys()
     chain_id = _EVM_CHAIN_IDS.get(chain, 1)
     # Etherscan free works only for ETH; other EVM chains route through Moralis.
-    use_moralis = (not is_solana and chain_id != 1 and bool(os.environ.get("MORALIS_API_KEY")))
+    from src.onchain import moralis_client
+    use_moralis = (not is_solana and chain_id != 1 and moralis_client.available())
     if not is_solana and not keys and not use_moralis:
         return {}
 

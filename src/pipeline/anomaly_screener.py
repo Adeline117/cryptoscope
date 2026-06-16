@@ -335,11 +335,11 @@ def _contract_addresses_evm(addresses: list[str], chain: str) -> set[str]:
 # Without Moralis, BSC falls back to contract/CEX/similar-balance only and gets
 # flagged "needs Arkham".
 def _funder_available(chain: str) -> bool:
-    import os
     if chain in ("ethereum", "solana", "sol"):
         return True
-    # Non-ETH EVM chains need Moralis for free funder lookups.
-    return bool(os.environ.get("MORALIS_API_KEY")) and chain in (
+    # Non-ETH EVM chains need Moralis (multi-key rotated) for free funder lookups.
+    from src.onchain import moralis_client
+    return moralis_client.available() and chain in (
         "bsc", "base", "arbitrum", "optimism", "polygon")
 
 

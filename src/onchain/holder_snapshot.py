@@ -338,37 +338,31 @@ def fetch_holders_moralis(
     This is the path for BSC and other EVM chains where Alchemy/Etherscan free
     don't work. Cloudflare blocks the default urllib UA (1010), so a browser UA is
     required. Paginates by cursor; max_pages*100 holders."""
-    key = os.environ.get("MORALIS_API_KEY")
+    from src.onchain import moralis_client
     mchain = _MORALIS_CHAINS.get(chain_id)
-    if not key or not mchain:
+    if not moralis_client.available() or not mchain:
         return []
     holders: list[dict[str, Any]] = []
     cursor = None
     zero = "0x0000000000000000000000000000000000000000"
-    try:
-        for _ in range(max_pages):
-            url = (f"https://deep-index.moralis.io/api/v2.2/erc20/{token}/owners"
-                   f"?chain={mchain}&order=DESC&limit=100")
-            if cursor:
-                url += f"&cursor={cursor}"
-            req = urllib.request.Request(
-                url, headers={"X-API-Key": key, "accept": "application/json",
-                              "User-Agent": _BROWSER_UA})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode())
-            for r in data.get("result", []):
-                addr = (r.get("owner_address") or "").lower()
-                try:
-                    bal = float(r.get("balance_formatted") or 0)
-                except (ValueError, TypeError):
-                    bal = 0.0
-                if addr and addr != zero and bal > 0:
-                    holders.append({"address": addr, "balance": round(bal, 8)})
-            cursor = data.get("cursor")
-            if not cursor:
-                break
-    except Exception as e:
-        logger.warning("moralis_holders_failed", token=token, error=str(e))
+    for _ in range(max_pages):
+        path = f"erc20/{token}/owners?chain={mchain}&order=DESC&limit=100"
+        if cursor:
+            path += f"&cursor={cursor}"
+        data = moralis_client.get(path, timeout)
+        if not data:
+            break
+        for r in data.get("result", []):
+            addr = (r.get("owner_address") or "").lower()
+            try:
+                bal = float(r.get("balance_formatted") or 0)
+            except (ValueError, TypeError):
+                bal = 0.0
+            if addr and addr != zero and bal > 0:
+                holders.append({"address": addr, "balance": round(bal, 8)})
+        cursor = data.get("cursor")
+        if not cursor:
+            break
     return holders
 
 
@@ -387,7 +381,8 @@ def fetch_holders_evm(
     cover them.
     """
     # Moralis owner list is the reliable free path for non-ETH EVM chains.
-    if chain_id != 1 and os.environ.get("MORALIS_API_KEY"):
+    from src.onchain import moralis_client
+    if chain_id != 1 and moralis_client.available():
         m = fetch_holders_moralis(token, chain_id, max_pages=min(max_pages, 5), timeout=timeout)
         if m:
             return m
