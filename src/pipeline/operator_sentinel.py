@@ -338,6 +338,57 @@ def _classify_outflow(token: str, chain: str, wallets: list[str]) -> str:
     return "sell" if sells >= internals else "internal"
 
 
+def _seattle(iso: str) -> str:
+    """UTC ISO timestamp → Seattle (Pacific) clock string for order confirmation."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        t = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(ZoneInfo("America/Los_Angeles"))
+        return t.strftime("%m-%d %H:%M:%S PDT")
+    except Exception:
+        return iso[:19]
+
+
+def cluster_net_flow(token: str, chain: str, wallets: list[str], since_iso: str | None,
+                     max_wallets: int = 8) -> dict | None:
+    """Operator buy/sell via TRANSFERS (ground truth) since `since_iso` — reliable
+    even for reflection/wash tokens where balanceOf lies (EVAA). External→cluster =
+    buy; cluster→external = sell. Returns net + the latest order's Seattle time.
+    EVM via Moralis (bounded wallets, recent transfers only)."""
+    if chain in ("solana", "sol"):
+        return None
+    from src.onchain import moralis_client
+    mchain = _MORALIS_EVM.get(chain)
+    if not moralis_client.available() or not mchain:
+        return None
+    wl = {w.lower() for w in wallets}
+    buy = sell = 0.0
+    last_buy = last_sell = None
+    latest_ts = since_iso or ""
+    for w in list(wl)[:max_wallets]:
+        d = moralis_client.get(
+            f"{w}/erc20/transfers?chain={mchain}&contract_addresses%5B0%5D={token}&order=DESC&limit=25")
+        for r in (d or {}).get("result", []):
+            ts = r.get("block_timestamp", "")
+            if since_iso and ts <= since_iso:
+                break  # DESC → older than last seen, stop this wallet
+            if ts > latest_ts:
+                latest_ts = ts
+            to = (r.get("to_address") or "").lower()
+            frm = (r.get("from_address") or "").lower()
+            val = float(r.get("value_decimal") or 0)
+            if to in wl and frm not in wl:        # external → cluster = buy
+                buy += val
+                if last_buy is None or ts > last_buy:
+                    last_buy = ts
+            elif frm in wl and to not in wl:       # cluster → external = sell
+                sell += val
+                if last_sell is None or ts > last_sell:
+                    last_sell = ts
+    return {"buy": buy, "sell": sell, "net": buy - sell,
+            "last_buy_ts": last_buy, "last_sell_ts": last_sell, "latest_ts": latest_ts}
+
+
 def _measure(token: str, chain: str, wallets: list[str], symbol: str = "") -> dict:
     m = _dex(token, chain)
     m["cluster_balance"] = _cluster_balance(token, chain, wallets)
@@ -361,13 +412,21 @@ def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
     return data[key]
 
 
-def check_run() -> list[dict]:
+def check_run(use_transfers: bool = False) -> list[dict]:
     """One monitoring pass over all registered targets. Returns fired alerts and
-    persists updated last-seen state. The measure calls (network I/O) run OUTSIDE
-    the lock; only the read-modify-write of state is locked (#7)."""
+    persists updated last-seen state. Network I/O runs OUTSIDE the lock (#7).
+
+    use_transfers=True (5-min scheduler): detect buy/sell via TRANSFERS — reliable
+    even for reflection/wash tokens where balanceOf lies (EVAA). False (20s watcher):
+    cheap balanceOf + price only (fast, free, no Moralis)."""
     targets = _load()
     measured = {k: _measure(t["token"], t["chain"], t["wallets"], t.get("symbol", ""))
                 for k, t in targets.items()}
+    flows = {}
+    if use_transfers:
+        flows = {k: cluster_net_flow(t["token"], t["chain"], t["wallets"],
+                                     (t.get("last", {}) or {}).get("flow_ts"))
+                 for k, t in targets.items()}
     with _state_lock():
         data = _load()  # re-read under lock (another process may have updated)
         alerts = []
@@ -378,22 +437,32 @@ def check_run() -> list[dict]:
             last, base = t.get("last", {}), t.get("baseline", {})
             fired = []
 
-            # ===== PRIMARY: the operator's own action (net position turn) =====
             cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
-            if cb is not None and pb and pb > 0:
+            flow = flows.get(key)
+            if flow is not None:
+                # ===== RELIABLE: buy/sell via TRANSFERS (ground truth) + Seattle time =====
+                prev_flow_ts = last.get("flow_ts")
+                t["flow_ts"] = flow["latest_ts"] or prev_flow_ts  # advance incremental cursor
+                if prev_flow_ts is None:
+                    flow = None  # first transfer check = establish baseline, don't alert
+            if flow is not None:
+                if flow["sell"] > 0 and flow["sell"] >= flow["buy"]:
+                    when = _seattle(flow["last_sell_ts"]) if flow["last_sell_ts"] else "?"
+                    fired.append(("庄在卖", f"转账实测 净卖 {flow['sell']-flow['buy']:,.0f} "
+                                  f"(卖{flow['sell']:,.0f}/买{flow['buy']:,.0f}) · 最后卖单 {when}"))
+                elif flow["buy"] > 0 and flow["buy"] > flow["sell"]:
+                    when = _seattle(flow["last_buy_ts"]) if flow["last_buy_ts"] else "?"
+                    fired.append(("庄在买", f"转账实测 净买 {flow['buy']-flow['sell']:,.0f} "
+                                  f"(买{flow['buy']:,.0f}/卖{flow['sell']:,.0f}) · 最后买单 {when}"))
+            elif cb is not None and pb and pb > 0:
+                # ===== FALLBACK: balanceOf delta (fast loop; unreliable on reflection tokens) =====
                 chg = (cb - pb) / pb
-                if chg <= -OP_SELL:           # operator SELLING — earliest exit/short
-                    venue = _classify_outflow(t["token"], t["chain"], t["wallets"]) \
-                        if t["chain"] not in ("solana", "sol") else "?"
-                    tag = ("确认卖出LP/CEX" if venue == "sell" else
-                           "疑似内部转移(非卖出?)" if venue == "internal" else "簇减仓")
-                    fired.append(("庄在卖", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) {tag}"))
-                elif chg >= OP_BUY:           # operator BUYING — markup/launch begins
-                    fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
-                                  f"操作者加仓 → 拉升前埋伏/做多"))
-            # Slow-bleed: cumulative drop from the running PEAK catches an operator
-            # distributing in chunks each < OP_SELL that slip past the step check.
-            if cb is not None:
+                if chg <= -OP_SELL:
+                    fired.append(("庄在卖", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) 簇减仓"))
+                elif chg >= OP_BUY:
+                    fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) 操作者加仓"))
+            # Slow-bleed (balanceOf-based; skipped when transfer flow is authoritative).
+            if cb is not None and flow is None:
                 peak = max(t.get("peak_balance", 0) or 0, cb, pb or 0)
                 if peak > 0 and cb < peak * (1 - SLOW_BLEED) and "庄在卖" not in {k for k, _ in fired}:
                     fired.append(("阴跌出货", f"簇较峰值 {(cb/peak-1)*100:+.1f}% ({peak:,.0f}→{cb:,.0f}) "
@@ -532,9 +601,9 @@ def _format(alerts: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def run_and_alert() -> int:
+async def run_and_alert(use_transfers: bool = False) -> int:
     """Scheduler entry: check + push Telegram on any trigger. Returns alert count."""
-    alerts = check_run()
+    alerts = check_run(use_transfers=use_transfers)
     if alerts:
         from src.distribution.telegram_sender import send_alert
         await send_alert(_format(alerts))

@@ -348,7 +348,7 @@ async def _run_operator_sentinel():
     logger.info("scheduled_operator_sentinel")
     from src.pipeline.operator_sentinel import run_and_alert
 
-    await run_and_alert()
+    await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
 
 
 async def _run_second_leg_assess():
