@@ -96,6 +96,23 @@ def create_scheduler() -> AsyncIOScheduler:
         name="疑似吸筹候选筛选 (market footprint → Telegram)",
     )
 
+    # Operator sentinel → watch confirmed clusters (BASED…) for distribute/rug/
+    # launch every 15 min. Free (archive eth_call + DexScreener).
+    scheduler.add_job(
+        _run_operator_sentinel,
+        CronTrigger(minute="*/15"),
+        id="operator_sentinel",
+        name="操作者哨兵 (派发/rug/启动 → Telegram)",
+    )
+
+    # Operator hunt → actively find NEW hidden-Sybil operators daily.
+    scheduler.add_job(
+        _run_operator_hunt,
+        CronTrigger(hour=3, minute=15),
+        id="operator_hunt",
+        name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -301,6 +318,31 @@ async def _run_anomaly_screen():
     if cands:
         await send_alert(format_candidates(cands))
     logger.info("anomaly_screen_done", candidates=len(cands))
+
+
+async def _run_operator_sentinel():
+    logger.info("scheduled_operator_sentinel")
+    from src.pipeline.operator_sentinel import run_and_alert
+
+    await run_and_alert()
+
+
+async def _run_operator_hunt():
+    logger.info("scheduled_operator_hunt")
+    from src.pipeline.operator_hunt import hunt, format_suspects
+    from src.distribution.telegram_sender import send_alert
+
+    suspects = hunt()
+    strong = [s for s in suspects if s.get("funder_complete")
+              and (s.get("largest_entity_pct", 0) >= 15 or s.get("concentration_gap", 0) >= 8)]
+    if strong:
+        msg = "🎯 <b>操作者猎手 — 控盘嫌疑</b>\n━━━━━━━━━━\n"
+        for s in strong[:8]:
+            msg += (f"<b>{s['symbol']}</b> [{s['chain']}] "
+                    f"实体{s['largest_entity_pct']:.0f}%供应 缺口{s['concentration_gap']:+.0f}\n"
+                    f"<code>{s['address']}</code>\n")
+        await send_alert(msg)
+    logger.info("operator_hunt_done", scanned=len(suspects), strong=len(strong))
 
 
 async def _run_tier1_reports():
