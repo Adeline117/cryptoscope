@@ -333,12 +333,14 @@ async def _run_operator_hunt():
     from src.distribution.telegram_sender import send_alert
 
     suspects = hunt()
+    # Only alert on real hidden-Sybil operators (隐藏簇) or mixed — not single-wallet
+    # team/treasury concentration, and never pegs/majors (filtered upstream).
     strong = [s for s in suspects if s.get("funder_complete")
-              and (s.get("largest_entity_pct", 0) >= 15 or s.get("concentration_gap", 0) >= 8)]
+              and s.get("shape") in ("隐藏簇", "混合")]
     if strong:
-        msg = "🎯 <b>操作者猎手 — 控盘嫌疑</b>\n━━━━━━━━━━\n"
+        msg = "🎯 <b>操作者猎手 — 隐藏控盘嫌疑</b>\n━━━━━━━━━━\n"
         for s in strong[:8]:
-            msg += (f"<b>{s['symbol']}</b> [{s['chain']}] "
+            msg += (f"<b>{s['symbol']}</b> [{s['chain']}] {s.get('shape')} "
                     f"实体{s['largest_entity_pct']:.0f}%供应 缺口{s['concentration_gap']:+.0f}\n"
                     f"<code>{s['address']}</code>\n")
         await send_alert(msg)

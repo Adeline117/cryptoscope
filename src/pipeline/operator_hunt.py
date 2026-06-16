@@ -36,6 +36,16 @@ _HUNT_CHAINS = {"bsc": "bsc", "solana": "solana"}
 # Operator sweet spot: established enough to trade, small enough for one entity to
 # control. Too big (>$8M liq) = real project; too small (<$120k) = dead micro-cap.
 MIN_LIQ, MAX_LIQ = 120_000, 8_000_000
+# A 妖币 operator play is small/mid-cap. Above this it's a major / peg / real
+# project — the "concentration" is custody/treasury, not an operator (this is what
+# made Binance-Peg ETH/BTCB/SOL false-positive).
+MAX_MCAP = 150_000_000
+# Pegs / wrapped majors / stablecoins / staking derivatives — never operator plays.
+_SKIP_SYMBOLS = {
+    "ETH", "WETH", "BTC", "BTCB", "WBTC", "SOL", "BNB", "WBNB", "USDT", "USDC",
+    "BUSD", "DAI", "TUSD", "FDUSD", "USDE", "ETHE", "UBTC", "WSTETH", "STETH",
+    "CBETH", "USD1", "XRP", "ADA", "DOGE", "LTC", "TRX", "LINK", "MATIC", "POL",
+}
 
 
 def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
@@ -61,6 +71,12 @@ def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
 def _in_band(pair: dict) -> bool:
     liq = (pair.get("liquidity", {}) or {}).get("usd", 0) or 0
     if not (MIN_LIQ <= liq <= MAX_LIQ):
+        return False
+    mc = pair.get("marketCap") or pair.get("fdv") or 0
+    if mc and mc > MAX_MCAP:                  # major / peg / real project
+        return False
+    sym = (pair.get("baseToken", {}) or {}).get("symbol", "").upper()
+    if sym in _SKIP_SYMBOLS:                  # peg / wrapped major / stablecoin
         return False
     # Skip brand-new (<2d, no accumulation history) and already-mooned.
     age_ms = pair.get("pairCreatedAt", 0) or 0
@@ -109,10 +125,18 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
         if not conc:
             continue
         lg = conc.get("largest_entity_pct", 0) or 0
+        la = conc.get("largest_address_pct", 0) or 0
         gap = conc.get("concentration_gap", 0) or 0
         fc = conc.get("funder_complete")
-        # Operator score: effective concentration + the hidden-cluster uplift.
-        op_score = (lg if fc else 0) + gap * 2
+        # Operator score weights the HIDDEN-cluster gap heavily — a big nominal→
+        # effective uplift means many small-looking wallets collapse to one entity
+        # (the BASED/Sybil signature, unambiguously an operator). Raw concentration
+        # in a SINGLE visible address (gap≈0) is usually team/treasury, so its
+        # contribution is capped and discounted.
+        op_score = gap * 4 + (min(lg, 30) * 0.5 if fc else 0)
+        # Classify the shape for the operator.
+        shape = ("隐藏簇" if gap >= 8 else "单一大户" if la >= 15 and gap < 3
+                 else "混合" if lg >= 15 else "分散")
         suspects.append({
             "symbol": sym, "chain": chain, "address": addr,
             "liquidity": (p.get("liquidity", {}) or {}).get("usd", 0),
@@ -120,7 +144,7 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
             "largest_entity_pct": lg, "largest_address_pct": conc.get("largest_address_pct", 0),
             "concentration_gap": gap, "entity_count": conc.get("entity_count"),
             "eoa_analyzed": conc.get("eoa_analyzed"), "funder_complete": fc,
-            "op_score": round(op_score, 1),
+            "op_score": round(op_score, 1), "shape": shape,
             "url": p.get("url", ""),
         })
         time.sleep(0.3)
@@ -135,8 +159,9 @@ def format_suspects(suspects: list[dict], top: int = 12) -> str:
         lines.append("本轮无候选(宇宙为空或持币列表都没取到)")
         return "\n".join(lines)
     for i, s in enumerate(suspects[:top], 1):
-        verdict = ("⭐⭐控盘嫌疑" if s["funder_complete"] and s["largest_entity_pct"] >= 15
-                   else "⭐隐藏簇" if s["concentration_gap"] >= 8
+        verdict = ("⭐⭐隐藏控盘" if s.get("shape") == "隐藏簇"
+                   else "⭐单一大户(疑团队)" if s.get("shape") == "单一大户"
+                   else "⭐混合" if s.get("shape") == "混合"
                    else "分散")
         fc = "✅" if s["funder_complete"] else "⚠️"
         lines.append(
@@ -155,7 +180,7 @@ def main():
     print(format_suspects(res))
     if "--push" in sys.argv and res:
         strong = [s for s in res if s["funder_complete"]
-                  and (s["largest_entity_pct"] >= 15 or s["concentration_gap"] >= 8)]
+                  and s.get("shape") in ("隐藏簇", "混合")]
         if strong:
             from src.distribution.telegram_sender import send_alert
             from src.pipeline.anomaly_screener import _run_coro, _esc

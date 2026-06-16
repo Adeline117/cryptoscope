@@ -357,8 +357,14 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
       3. Effective vs nominal concentration. A big gap = many addresses collapse
          to few entities = hidden operator.
     """
+    # Burn / dead addresses: out of circulation, must not count as concentration
+    # (this is what made WKC read as "52.8% one holder" — it was the burn address).
+    _BURN = {"0x0000000000000000000000000000000000000000",
+             "0x000000000000000000000000000000000000dead",
+             "0x0000000000000000000000000000000000000001"}
     pos = [{"address": h["address"], "balance": float(h.get("balance", 0) or 0)}
-           for h in holders if float(h.get("balance", 0) or 0) > 0]
+           for h in holders
+           if float(h.get("balance", 0) or 0) > 0 and str(h["address"]).lower() not in _BURN]
     if len(pos) < 8:
         return None
     pos.sort(key=lambda h: -h["balance"])
