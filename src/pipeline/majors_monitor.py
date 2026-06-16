@@ -39,6 +39,44 @@ RETAIL_SHORT = 0.8      # <= this → over-short (contrarian long)
 OI_SURGE = 0.08         # OI +8% vs last check → leverage building
 
 
+_CEX_SLUGS = ["binance-cex", "okx", "bybit", "bitfinex"]
+
+
+def _llama(slug: str):
+    try:
+        req = urllib.request.Request(f"https://api.llama.fi/protocol/{slug}",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+
+def exchange_flow_24h(price_proxy_ch24: float = 0.0) -> dict | None:
+    """Net 24h exchange-reserve flow across major CEXs (DeFiLlama), PRICE-ADJUSTED:
+    reserves are USD so they move with price; subtracting BTC's 24h change isolates
+    the FLOW. Net outflow (reserves fell more than price) = coins leaving exchanges
+    = accumulation/bullish; net inflow = distribution/bearish. Market-wide overlay."""
+    import time as _t
+    now_sum = past_sum = 0.0
+    for slug in _CEX_SLUGS:
+        d = _llama(slug)
+        tvl = (d or {}).get("tvl", [])
+        if not tvl:
+            continue
+        now = tvl[-1]
+        now_t = now.get("date", 0)
+        past = min(tvl, key=lambda x: abs(x.get("date", 0) - (now_t - 86400)))
+        now_sum += now.get("totalLiquidityUSD", 0) or 0
+        past_sum += past.get("totalLiquidityUSD", 0) or 0
+    if past_sum <= 0:
+        return None
+    reserve_ch = (now_sum / past_sum - 1) * 100
+    net_flow = round(reserve_ch - price_proxy_ch24, 2)  # remove the price effect
+    return {"reserve_change_24h": round(reserve_ch, 2), "net_flow_pct": net_flow,
+            "reserves_usd": round(now_sum)}
+
+
 def _okx(path: str):
     try:
         req = urllib.request.Request(f"https://www.okx.com{path}", headers={"User-Agent": "Mozilla/5.0"})
@@ -108,21 +146,37 @@ def _save(d: dict) -> None:
 
 
 def check_run() -> list[dict]:
-    """Snapshot all majors, assess vs last, return strong-signal alerts."""
+    """Snapshot all majors, assess vs last, return strong-signal alerts. A
+    market-wide exchange-flow overlay (accumulation/distribution) is added to each."""
     state = _load()
+    snaps = {ccy: snapshot(ccy) for ccy in MAJORS}
+    btc_ch = (snaps.get("BTC") or {}).get("ch24", 0) or 0
+    flow = exchange_flow_24h(btc_ch)
+    flow_sig = None
+    if flow:
+        nf = flow["net_flow_pct"]
+        if nf <= -2:
+            flow_sig = ("交易所净流出", f"CEX储备净流出 {nf:+.1f}%(剔价) → 币进冷钱包,机构吸筹(多向)", "long")
+        elif nf >= 2:
+            flow_sig = ("交易所净流入", f"CEX储备净流入 {nf:+.1f}%(剔价) → 币进交易所,派发(空向)", "short")
     alerts = []
     for ccy in MAJORS:
-        s = snapshot(ccy)
+        s = snaps[ccy]
         if not s:
             continue
         a = assess(s, state.get(ccy))
-        # Alert only on a clear directional lean with >=2 confirming signals, or any
-        # leverage/squeeze flag.
+        if flow_sig:
+            a["signals"].append(flow_sig)
+            longs = sum(1 for _, _, d in a["signals"] if d == "long")
+            shorts = sum(1 for _, _, d in a["signals"] if d == "short")
+            a["lean"] = "🟢 偏多" if longs > shorts else "🔴 偏空" if shorts > longs else "⚪ 中性"
         strong = [x for x in a["signals"] if x[2] in ("long", "short")]
         if len(strong) >= 2 or any(x[2] == "vol" for x in a["signals"]):
             alerts.append({"ccy": ccy, "price": s["price"], "lean": a["lean"],
                            "signals": a["signals"]})
         state[ccy] = s
+    if flow:
+        state["_flow"] = flow
     _save(state)
     return alerts
 
@@ -151,8 +205,14 @@ def main():
     print("=" * 60)
     print("大币持仓快照 (BTC/ETH/SOL)")
     print("=" * 60)
+    snaps = {ccy: snapshot(ccy) for ccy in MAJORS}
+    flow = exchange_flow_24h((snaps.get("BTC") or {}).get("ch24", 0) or 0)
+    if flow:
+        nf = flow["net_flow_pct"]
+        tag = ("🟢机构吸筹" if nf <= -2 else "🔴派发" if nf >= 2 else "⚪中性")
+        print(f"\n💰 交易所净流(剔价): {nf:+.1f}% {tag} (总储备 ${flow['reserves_usd']:,.0f})")
     for ccy in MAJORS:
-        s = snapshot(ccy)
+        s = snaps.get(ccy)
         if not s:
             print(f"  {ccy}: 数据获取失败")
             continue

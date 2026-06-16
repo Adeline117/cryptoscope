@@ -1,26 +1,26 @@
 {
   "BTC": {
     "ccy": "BTC",
-    "price": 66336.3,
-    "ch24": 0.96,
+    "price": 66359.8,
+    "ch24": 1.03,
     "funding": -0.006,
-    "oi_usd": 2074389867,
+    "oi_usd": 2075835909,
     "retail_ls": 1.32
   },
   "ETH": {
     "ccy": "ETH",
-    "price": 1774.23,
-    "ch24": 3.21,
+    "price": 1774.64,
+    "ch24": 3.26,
     "funding": 0.0002,
-    "oi_usd": 1293431010,
+    "oi_usd": 1294610767,
     "retail_ls": 2.14
   },
   "SOL": {
     "ccy": "SOL",
-    "price": 74.45,
-    "ch24": 4.32,
-    "funding": -0.0039,
-    "oi_usd": 197490736,
+    "price": 74.58,
+    "ch24": 4.53,
+    "funding": -0.004,
+    "oi_usd": 197937572,
     "retail_ls": 2.2
   }
 }
