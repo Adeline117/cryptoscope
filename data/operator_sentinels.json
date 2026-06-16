@@ -15,16 +15,16 @@
       "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
     ],
     "baseline": {
-      "price": 0.07718,
-      "liquidity": 305184.46,
-      "vol24": 1994163.05,
+      "price": 0.07714,
+      "liquidity": 305059.45,
+      "vol24": 1997191.92,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
     "last": {
-      "price": 0.07718,
-      "liquidity": 305190.5,
-      "vol24": 1994054.01,
+      "price": 0.07714,
+      "liquidity": 305059.45,
+      "vol24": 1997191.92,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     }
@@ -39,18 +39,18 @@
       "0x504ce9e51e508c85a161058c12e970a903d482fc"
     ],
     "baseline": {
-      "price": 0.06168,
-      "liquidity": 1307453.3,
-      "vol24": 1613607.07,
+      "price": 0.06182,
+      "liquidity": 1307726.33,
+      "vol24": 1607723.62,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0448
+      "funding": 0.0339
     },
     "last": {
-      "price": 0.06168,
-      "liquidity": 1307453.3,
-      "vol24": 1613607.07,
+      "price": 0.06182,
+      "liquidity": 1307726.33,
+      "vol24": 1607723.62,
       "cluster_balance": 214578864.43321168,
-      "funding": 0.0448
+      "funding": 0.0339
     }
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
@@ -75,16 +75,16 @@
       "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"
     ],
     "baseline": {
-      "price": 1.12,
-      "liquidity": 834823.32,
-      "vol24": 80844930.97,
+      "price": 1.1,
+      "liquidity": 828501.46,
+      "vol24": 81155733.01,
       "cluster_balance": 2979443.0948527344,
       "funding": 0.01
     },
     "last": {
-      "price": 1.12,
-      "liquidity": 833486.15,
-      "vol24": 80868127.61,
+      "price": 1.1,
+      "liquidity": 828501.46,
+      "vol24": 81155733.01,
       "cluster_balance": 2979443.0948527344,
       "funding": 0.01
     }

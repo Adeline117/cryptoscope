@@ -35,11 +35,16 @@ logger = structlog.get_logger()
 SENTINELS_FILE = DATA_DIR / "operator_sentinels.json"
 
 # Trigger thresholds (vs last-seen for distribute/rug; vs baseline for launch).
-DISTRIBUTE_DROP = 0.05   # cluster balance fell >=5% → operator selling
+# PRIMARY signal = the operator's own action (net position turn). balanceOf is
+# exact (no noise), so even a small move is a real transaction — we trigger on the
+# FIRST meaningful sell/buy to act BEFORE price has moved, capturing the full move.
+OP_SELL = 0.015          # cluster balance fell >=1.5% vs last → operator SELLING (exit/short NOW)
+OP_BUY = 0.02            # cluster balance rose >=2% vs last → operator BUYING (markup/launch → long)
+# Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
-LAUNCH_PRICE = 0.30      # price up >=30% vs baseline → launch underway
-LAUNCH_VOL = 3.0         # 24h volume >=3x baseline → launch underway
-CRASH_DROP = 0.18        # price fell >=18% vs last check → 砸盘 (dump in progress)
+CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop
+LAUNCH_PRICE = 0.25      # price up >=25% vs last check → launch backstop
+LAUNCH_VOL = 3.0         # 24h volume >=3x baseline → volume backstop
 
 
 def _load() -> dict:
@@ -153,31 +158,33 @@ def check_run() -> list[dict]:
         last, base = t.get("last", {}), t.get("baseline", {})
         fired = []
 
-        # DISTRIBUTE — cluster balance dropped vs last seen.
+        # ===== PRIMARY: the operator's own action (net position turn) =====
         cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
-        if cb is not None and pb and pb > 0 and cb < pb * (1 - DISTRIBUTE_DROP):
-            drop = (pb - cb) / pb * 100
-            fired.append(("派发", f"操作者簇余额 -{drop:.0f}% ({pb:,.0f}→{cb:,.0f}) 庄在卖 → 离场"))
+        if cb is not None and pb and pb > 0:
+            chg = (cb - pb) / pb
+            if chg <= -OP_SELL:           # operator SELLING — the earliest exit/short
+                fired.append(("庄在卖", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
+                              f"操作者出货 → 顶部跑/做空,别等价格跌"))
+            elif chg >= OP_BUY:           # operator BUYING — markup/launch begins
+                fired.append(("庄在买", f"簇余额 {chg*100:+.1f}% ({pb:,.0f}→{cb:,.0f}) "
+                              f"操作者加仓 → 拉升前埋伏/做多"))
 
-        # RUG — liquidity collapsed vs last seen.
+        # ===== BACKSTOP: violent price/liquidity moves (in case sampling lagged) =====
         cl, pl = cur.get("liquidity"), last.get("liquidity")
         if cl is not None and pl and pl > 0 and cl < pl * (1 - RUG_DROP):
             drop = (pl - cl) / pl * 100
             fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
 
-        # CRASH (砸盘) — price dropped sharply vs last check.
         cpr, ppr = cur.get("price"), last.get("price")
         if cpr is not None and ppr and ppr > 0 and cpr < ppr * (1 - CRASH_DROP):
             drop = (ppr - cpr) / ppr * 100
-            fired.append(("砸盘", f"价格 -{drop:.0f}% (${ppr:.4g}→${cpr:.4g}) 急跌 → 注意"))
-
-        # LAUNCH — price breakout or volume spike vs baseline.
-        cp, bp = cur.get("price"), base.get("price")
-        cv, bv = cur.get("vol24"), base.get("vol24")
-        if cp and bp and bp > 0 and cp >= bp * (1 + LAUNCH_PRICE):
-            fired.append(("启动", f"价格 +{(cp/bp-1)*100:.0f}% vs 基线 → 庄在拉"))
-        elif cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
-            fired.append(("启动", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 放量,可能启动"))
+            fired.append(("砸盘", f"价格 -{drop:.0f}% (${ppr:.4g}→${cpr:.4g}) 急跌(兜底) → 注意"))
+        elif cpr is not None and ppr and ppr > 0 and cpr >= ppr * (1 + LAUNCH_PRICE):
+            fired.append(("拉升", f"价格 +{(cpr/ppr-1)*100:.0f}% 急涨(兜底) → 已在拉"))
+        else:
+            cv, bv = cur.get("vol24"), base.get("vol24")
+            if cv and bv and bv > 0 and cv >= bv * LAUNCH_VOL:
+                fired.append(("放量", f"24h量 {cv/bv:.1f}x 基线 (${cv:,.0f}) → 异动"))
 
         if fired:
             # Directional call: combine the event with funding (longs-crowded =
@@ -185,20 +192,19 @@ def check_run() -> list[dict]:
             # SHORT. Funding tilts/confirms the bias.
             fund = cur.get("funding")
             kinds = {k for k, _ in fired}
-            if kinds & {"派发", "砸盘", "RUG"}:
-                action = "🔴 做空 / 平多"
+            fstr = f"(费率 {fund:+.3f}%)" if fund is not None else ""
+            if kinds & {"庄在卖", "砸盘", "RUG"}:    # operator exiting / dump
+                action = "🔴 顶部跑 / 做空"
                 if fund is not None and fund > 0.03:
-                    action += f"(费率 +{fund:.3f}% 多头拥挤,顺风)"
-                elif fund is not None:
-                    action += f"(费率 {fund:+.3f}%)"
-            elif "启动" in kinds:
-                action = "🟢 做多(跟庄启动)"
+                    fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
+                action += fstr
+            elif kinds & {"庄在买", "拉升"}:          # operator marking up / launch
+                action = "🟢 埋伏 / 做多(跟庄)"
                 if fund is not None and fund > 0.08:
-                    action += f"(费率 +{fund:.3f}% 已过热,小心追高)"
-                elif fund is not None:
-                    action += f"(费率 {fund:+.3f}%)"
-            else:
-                action = "⚪ 观望"
+                    fstr = f"(费率 +{fund:.3f}% 已过热,小心追高)"
+                action += fstr
+            else:                                     # volume-only anomaly
+                action = f"⚪ 异动留意 {fstr}"
             alerts.append({"symbol": t["symbol"], "chain": t["chain"],
                            "token": t["token"], "events": fired,
                            "funding": fund, "action": action})

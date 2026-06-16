@@ -100,9 +100,9 @@ def create_scheduler() -> AsyncIOScheduler:
     # launch every 15 min. Free (archive eth_call + DexScreener).
     scheduler.add_job(
         _run_operator_sentinel,
-        CronTrigger(minute="*/15"),
+        CronTrigger(minute="*/5"),
         id="operator_sentinel",
-        name="操作者哨兵 (派发/rug/启动 → Telegram)",
+        name="操作者哨兵 (庄买/庄卖/砸盘/rug → Telegram)",
     )
 
     # Operator hunt → actively find NEW hidden-Sybil operators daily.
