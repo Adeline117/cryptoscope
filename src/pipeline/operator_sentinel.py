@@ -44,6 +44,8 @@ SLOW_BLEED = 0.04        # cluster down >=4% from running peak → chunked distr
 COOLDOWN_MIN = 45        # don't re-fire the same event kind within N minutes
 STALL_FADE = 0.12        # after a buy/launch, price faded >=12% from its high...
 MAX_MOMENTUM_H = 36      # ...within this window, with no fresh operator buying → 动能熄火
+STOP_HOURS = 2.0         # operator was buying, then no new buy for N hours → 庄停手
+                         # (EARLY warning: fires BEFORE price fades, not after)
 # Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
 CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop
@@ -422,6 +424,20 @@ def check_run() -> list[dict]:
             from datetime import datetime, timezone
             nowdt = datetime.now(timezone.utc)
             fk = {k for k, _ in fired}
+            # ===== 庄停手: operator WAS buying, now idle — EARLY warning, fires
+            # BEFORE price fades (the gap the user hit: stop preceded the drop). =====
+            if "庄在买" in fk:
+                t["last_buy_ts"] = nowdt.isoformat()
+                t["stop_alerted"] = False
+            elif t.get("last_buy_ts") and not t.get("stop_alerted"):
+                try:
+                    since_buy = (nowdt - datetime.fromisoformat(t["last_buy_ts"])).total_seconds() / 3600
+                except Exception:
+                    since_buy = 0
+                if since_buy >= STOP_HOURS:
+                    fired.append(("庄停手", f"操作者停止加仓 {since_buy:.0f}h(刚还在买)→ "
+                                  f"失去买盘支撑,注意回落,减/观望"))
+                    t["stop_alerted"] = True
             mom = t.get("momentum")
             if fk & {"庄在买", "拉升"}:
                 t["momentum"] = {"ts": nowdt.isoformat(), "high": cpr or 0}
@@ -469,6 +485,8 @@ def check_run() -> list[dict]:
                         action += " ⚠️此簇只吸不卖(信仰者,跟了可能也套)"
                     elif "聪明庄" in ot:
                         action += " ✅此簇有派发履历(会套现)"
+                elif "庄停手" in kinds:                    # operator went idle (early)
+                    action = "⚪→🔴 庄停手,失去买盘支撑 → 减/观望(早期预警)"
                 elif "动能熄火" in kinds:                  # rally fizzled, operator idle
                     action = "⚪→🔴 动能熄火,减多/观望(二波未成)"
                 else:

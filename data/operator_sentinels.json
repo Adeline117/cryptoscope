@@ -22,9 +22,9 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08238,
-      "liquidity": 320590.65,
-      "vol24": 2214097.4,
+      "price": 0.08256,
+      "liquidity": 320890.73,
+      "vol24": 2208365.59,
       "cluster_balance": 10167894.759644354,
       "funding": 0.005
     },
@@ -51,9 +51,9 @@
       "funding": 0.0223
     },
     "last": {
-      "price": 0.06245,
-      "liquidity": 1317057.72,
-      "vol24": 1363179.42,
+      "price": 0.06255,
+      "liquidity": 1316780.85,
+      "vol24": 1359618.38,
       "cluster_balance": 214578864.43321168,
       "funding": 0.005
     },
@@ -92,9 +92,9 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.7911,
-      "liquidity": 698229.83,
-      "vol24": 81026531.94,
+      "price": 0.7837,
+      "liquidity": 694962.0,
+      "vol24": 80463594.23,
       "cluster_balance": 3358001.269024384,
       "funding": 0.01
     },
@@ -132,11 +132,11 @@
       "funding": 0.0632
     },
     "last": {
-      "price": 0.05142,
-      "liquidity": 2497344.47,
-      "vol24": 1799733.63,
+      "price": 0.05167,
+      "liquidity": 2499758.04,
+      "vol24": 1786613.06,
       "cluster_balance": 92090783.05998234,
-      "funding": 0.1012
+      "funding": 0.1087
     },
     "second_leg": "⭐二波候选 (峰值25.2x→已回落, 庄满仓)",
     "loaded": true,
