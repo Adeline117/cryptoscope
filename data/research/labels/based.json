@@ -1,0 +1,12 @@
+{
+  "token": "0x1d28d989f9e3ccb8b15d0cec601734514f958e4d",
+  "chain": "bsc",
+  "symbol": "BASED",
+  "outcome": "pending",
+  "found_by": "operator_hunt",
+  "found_date": "2026-06-15",
+  "operator_funder": "0xfd09a9cc989cd9d7ff0a1cab6af28c677267a2b9",
+  "operator_wallets": 9,
+  "cluster_share_pct": 12.4,
+  "note": "9-wallet Sybil cluster, one non-CEX focused funder. Built 2.4M->10.2M over first 20d, flat/zero-distribution 60d. Loaded-and-waiting."
+}
