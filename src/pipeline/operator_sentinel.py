@@ -407,20 +407,24 @@ def check_run() -> list[dict]:
                 side = "short" if kinds_all & {"庄在卖", "阴跌出货", "砸盘", "RUG"} else \
                        "long" if kinds_all & {"庄在买", "拉升"} else \
                        "stall" if "动能熄火" in kinds_all else "neutral"
-                now_iso = nowdt
-                cd = t.get("alert_cooldown", {}) or {}
-                prev = cd.get(side)
-                cooled = False
-                if prev:
-                    try:
-                        cooled = (now_iso - datetime.fromisoformat(prev)).total_seconds() < COOLDOWN_MIN * 60
-                    except Exception:
-                        cooled = False
-                if cooled:
-                    fired = []
-                else:
-                    cd[side] = now_iso.isoformat()
-                    t["alert_cooldown"] = cd
+                # RULE: buy-side (庄加仓/拉升) bypasses cooldown — alert EVERY add so
+                # active accumulation is tracked live (user directive, all clusters).
+                # Sell/stall stay cooled (act once, no spam).
+                if side != "long":
+                    now_iso = nowdt
+                    cd = t.get("alert_cooldown", {}) or {}
+                    prev = cd.get(side)
+                    cooled = False
+                    if prev:
+                        try:
+                            cooled = (now_iso - datetime.fromisoformat(prev)).total_seconds() < COOLDOWN_MIN * 60
+                        except Exception:
+                            cooled = False
+                    if cooled:
+                        fired = []
+                    else:
+                        cd[side] = now_iso.isoformat()
+                        t["alert_cooldown"] = cd
 
             if fired:
                 fund = cur.get("funding")
