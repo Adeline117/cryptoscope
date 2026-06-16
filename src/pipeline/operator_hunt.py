@@ -95,6 +95,10 @@ def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
                          f"networks/{net}/new_pools?page={pg}",
                          f"networks/{net}/pools?page={pg}&sort=h24_volume_usd_desc"):
                 addrs += _gt_base_addresses(path)
+                # GeckoTerminal free tier ~30 req/min — without spacing the 9-call
+                # burst (3 pages × 3 endpoints) 429s on pages 2-3, starving coverage
+                # to page-1-only (~12 in-band tokens). Pace it to stay under the cap.
+                time.sleep(1.5)
         seen, uniq = set(), []
         for a in addrs:
             al = a.lower()
