@@ -495,11 +495,14 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
             f = funders.get(a)
             if f:
                 by_funder_pre[f] = by_funder_pre.get(f, 0.0) + b
-        # Only profile funders that actually merged ≥2 wallets and dominate balance —
-        # bounded to the top few, so at most a couple network calls per candidate.
+        # Profile EVERY funder that merged ≥2 wallets (ordered by balance) — checking
+        # only the top few leaves residual CEX funders inflating the signal (TOESCOIN:
+        # after stripping 3, the next dominant funder was STILL a disperser, faking a
+        # +8.6 cluster). The set of multi-wallet funders is small and each check is
+        # lru-cached; cap at 12 as a worst-case bound on network calls.
         multi = {f for f in by_funder_pre
                  if sum(1 for a in bal_map if funders.get(a) == f) >= 2}
-        for f in sorted(multi, key=by_funder_pre.get, reverse=True)[:3]:
+        for f in sorted(multi, key=by_funder_pre.get, reverse=True)[:12]:
             if _funder_is_disperser(f, chain):
                 funder_dispersers.append(f)
         if funder_dispersers:
