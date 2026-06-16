@@ -121,6 +121,66 @@ def _funding_rate(symbol: str) -> float | None:
     return val
 
 
+def _price_peak_now(token: str, chain: str) -> tuple[float, float] | None:
+    """(30-day peak close, latest close) from GeckoTerminal daily OHLCV — free."""
+    try:
+        d = _dex(token, chain)  # warms nothing; need pool addr from DexScreener
+        u = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
+        req = urllib.request.Request(u, headers={"User-Agent": "CryptoScope/1.0"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            pairs = json.loads(r.read().decode())
+        pairs = pairs if isinstance(pairs, list) else pairs.get("pairs", [])
+        if not pairs:
+            return None
+        pool = max(pairs, key=lambda x: (x.get("liquidity", {}) or {}).get("usd", 0) or 0).get("pairAddress")
+        gt = "https://api.geckoterminal.com/api/v2/networks/" + \
+             {"bsc": "bsc", "ethereum": "eth", "solana": "solana", "base": "base"}.get(chain, chain) + \
+             f"/pools/{pool}/ohlcv/day?limit=30"
+        req = urllib.request.Request(gt, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=12) as r:
+            rows = json.loads(r.read().decode()).get("data", {}).get("attributes", {}).get("ohlcv_list", [])
+        if not rows:
+            return None
+        closes = [float(x[4]) for x in rows]
+        return max(closes), closes[0]  # ohlcv_list is newest-first
+    except Exception as e:
+        logger.debug("price_peak_failed", token=token, error=str(e))
+        return None
+
+
+def assess_second_leg() -> dict:
+    """Classify each tracked cluster as a SECOND-LEG candidate: pumped before
+    (>=2x at some point), retraced into a buy zone (now <=60% of peak), AND the
+    operator is still loaded (balance >= 90% of baseline = didn't distribute). Such
+    a setup is coiled to re-pump off the same bag — its launch alert is top priority.
+    Stores the verdict on each target. Returns {symbol: verdict}."""
+    data = _load()
+    out = {}
+    for key, t in data.items():
+        pn = _price_peak_now(t["token"], t["chain"])
+        cb = _cluster_balance(t["token"], t["chain"], t["wallets"])
+        base = (t.get("baseline", {}) or {}).get("cluster_balance") or 0
+        loaded = bool(cb is not None and base and cb >= base * 0.9)
+        verdict = "—"
+        if pn:
+            peak, now = pn
+            pumped = peak >= now * 2          # at least doubled at some point
+            pulled_back = now <= peak * 0.6   # retraced >=40% from peak
+            if pumped and pulled_back and loaded:
+                verdict = f"⭐二波候选 (峰值{peak/now:.1f}x→已回落, 庄满仓)"
+            elif pumped and not pulled_back:
+                verdict = "高位 (已拉未回落)"
+            elif not pumped and loaded:
+                verdict = "未拉过 (满仓待发,如BASED)"
+            elif not loaded:
+                verdict = "⚠️操作者已减仓"
+        t["second_leg"] = verdict
+        t["loaded"] = loaded
+        out[t["symbol"]] = verdict
+    _save(data)
+    return out
+
+
 def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None:
     """Combined token balance of the operator cluster (free archive eth_call)."""
     if chain in ("solana", "sol"):
@@ -212,7 +272,11 @@ def check_run() -> list[dict]:
                     fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
                 action += fstr
             elif kinds & {"庄在买", "拉升"}:          # operator marking up / launch
-                action = "🟢 埋伏 / 做多(跟庄)"
+                sl = t.get("second_leg", "")
+                if "二波候选" in sl:
+                    action = "🟢🟢 二波启动!最高优先 做多"
+                else:
+                    action = "🟢 埋伏 / 做多(跟庄)"
                 if fund is not None and fund > 0.08:
                     fstr = f"(费率 +{fund:.3f}% 已过热,小心追高)"
                 action += fstr

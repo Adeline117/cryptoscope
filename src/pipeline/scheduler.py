@@ -113,6 +113,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
     )
 
+    # Second-leg classification → refresh daily (pumped+pulled-back+loaded setups).
+    scheduler.add_job(
+        _run_second_leg_assess,
+        CronTrigger(hour="*/6", minute=5),
+        id="second_leg_assess",
+        name="二波候选评估 (已拉+回落+庄满仓)",
+    )
+
     # --- Platform Report Schedules ---
 
     # Tier 1 platform reports (every 30 minutes)
@@ -325,6 +333,13 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert()
+
+
+async def _run_second_leg_assess():
+    logger.info("scheduled_second_leg_assess")
+    from src.pipeline.operator_sentinel import assess_second_leg
+
+    assess_second_leg()
 
 
 async def _run_operator_hunt():
