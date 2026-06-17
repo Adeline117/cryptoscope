@@ -297,3 +297,34 @@ def test_hunt_round_robin_no_chain_starves():
     assert "solana" in chains, "Solana starved by BSC — round-robin broken"
     # all 5 SOL fit within a 20 budget shared round-robin with BSC
     assert sum(1 for p in sel if p["chainId"] == "solana") == 5
+
+
+def test_holder_growth_rejects_fetch_depth_artifact(tmp_path):
+    """The de-noising linchpin: a token whose snapshot fetch got SHALLOWER (holders
+    collapse) shows top10→~100% as a pure artifact — it must NOT be flagged. A token
+    with STABLE fetch depth and genuinely rising concentration must be flagged."""
+    import sqlite3
+    from src.pipeline.holder_growth_screener import screen_holder_growth
+    db = tmp_path / "hs.db"
+    c = sqlite3.connect(str(db))
+    c.execute("""CREATE TABLE holder_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        token TEXT, chain TEXT, snapshot_at TEXT, holder_count INT, top10_pct REAL,
+        top25_pct REAL, gini REAL, total_supply_observed REAL, holders_json TEXT)""")
+    def snap(tok, ts, hc, t10, gini):
+        c.execute("INSERT INTO holder_snapshots(token,chain,snapshot_at,holder_count,"
+                  "top10_pct,top25_pct,gini,total_supply_observed,holders_json) "
+                  "VALUES(?,?,?,?,?,?,?,?,?)",
+                  (tok, "solana", ts, hc, t10, t10, gini, 1e9, "[]"))
+    # ARTIFACT: holders 800→40 (-95%), top10 40→99 — fetch got shallow, not accumulation.
+    snap("ARTIFACT", "2026-06-16T01:00", 800, 40.0, 0.5)
+    snap("ARTIFACT", "2026-06-16T02:00", 300, 70.0, 0.7)
+    snap("ARTIFACT", "2026-06-16T03:00", 40, 99.0, 0.95)
+    # REAL: holders stable ~250, top10 45→63 — float concentrating into few hands.
+    snap("REAL", "2026-06-16T01:00", 250, 45.0, 0.55)
+    snap("REAL", "2026-06-16T02:00", 248, 55.0, 0.62)
+    snap("REAL", "2026-06-16T03:00", 252, 63.0, 0.68)
+    c.commit(); c.close()
+    cands = screen_holder_growth(db_path=db)
+    toks = {x["token"] for x in cands}
+    assert "REAL" in toks, "fetch-depth-stable rising concentration must be flagged"
+    assert "ARTIFACT" not in toks, "collapsing-fetch artifact must be rejected"

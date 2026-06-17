@@ -113,6 +113,16 @@ def create_scheduler() -> AsyncIOScheduler:
         name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
     )
 
+    # Holder-growth screener → a universe source independent of trending feeds: find
+    # tokens whose float is CONCENTRATING (top10/gini rising, fetch-depth-stable) over
+    # the snapshot history, then confirm with the operator signal (disperser-guarded).
+    scheduler.add_job(
+        _run_holder_growth_screen,
+        CronTrigger(hour="*/6", minute=20),
+        id="holder_growth_screen",
+        name="持币集中度趋势筛 (浮筹被吸 → 操盘确认 → Telegram)",
+    )
+
     # Second-leg classification → refresh daily (pumped+pulled-back+loaded setups).
     scheduler.add_job(
         _run_second_leg_assess,
@@ -390,6 +400,23 @@ async def _run_operator_hunt():
                     f"<code>{s['address']}</code>\n")
         await send_alert(msg)
     logger.info("operator_hunt_done", scanned=len(suspects), strong=len(strong))
+
+
+async def _run_holder_growth_screen():
+    logger.info("scheduled_holder_growth_screen")
+    from src.pipeline.holder_growth_screener import screen_holder_growth, confirm_operators
+    from src.distribution.telegram_sender import send_alert
+
+    cands = screen_holder_growth()
+    confirmed = confirm_operators(cands, top=8)
+    if confirmed:
+        msg = "📈 <b>持币集中度趋势 — 浮筹被吸(非trending)</b>\n━━━━━━━━━━\n"
+        for c in confirmed[:6]:
+            msg += (f"<b>{c['chain']}</b> 实体{c.get('largest_entity_pct',0):.0f}%供应 "
+                    f"缺口{c.get('concentration_gap',0):+.0f} top10+{c['top10_delta']}pp\n"
+                    f"<code>{c['token']}</code>\n")
+        await send_alert(msg)
+    logger.info("holder_growth_done", candidates=len(cands), confirmed=len(confirmed))
 
 
 async def _run_tier1_reports():
