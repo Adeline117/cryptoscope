@@ -23,6 +23,10 @@ logger = structlog.get_logger()
 _BASE = "https://api.covalenthq.com/v1/"
 # Covalent accepts numeric chain ids; map our ints to the canonical chain id it expects.
 _CHAINS = {1: "1", 56: "56", 8453: "8453", 42161: "42161", 10: "10", 137: "137"}
+# An HONEST backend UA: Cloudflare 1010-blocks the bare urllib UA, but Covalent itself
+# 452-rejects browser-stealth UAs ("un-stealth your User-Agent"). A plain identifier
+# passes both. (Same Cloudflare-1010 hurdle as Moralis, opposite resolution.)
+_UA = "CryptoScope/1.0"
 
 
 def key() -> str:
@@ -43,7 +47,8 @@ def get(endpoint: str, timeout: int = 25):
     try:
         req = urllib.request.Request(
             _BASE + endpoint,
-            headers={"Authorization": f"Basic {auth}", "accept": "application/json"})
+            headers={"Authorization": f"Basic {auth}", "accept": "application/json",
+                     "User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode())
     except Exception as e:
@@ -51,10 +56,11 @@ def get(endpoint: str, timeout: int = 25):
         return None
 
 
-def fetch_holders(token: str, chain_id: int, page_size: int = 200,
+def fetch_holders(token: str, chain_id: int, page_size: int = 100,
                   max_pages: int = 3, timeout: int = 25) -> list[dict]:
-    """Ranked token holders with decimal-adjusted balances — the Moralis-owners
-    replacement. token_holders_v2 returns balance (raw) + contract_decimals."""
+    """Ranked (balance-desc) token holders with decimal-adjusted balances — the
+    Moralis-owners replacement. token_holders_v2 returns balance (raw) +
+    contract_decimals. page_size must be >=100 (Covalent rejects smaller)."""
     chain = _CHAINS.get(chain_id)
     if not chain or not available():
         return []
