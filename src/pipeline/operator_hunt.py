@@ -130,6 +130,26 @@ def _in_band(pair: dict) -> bool:
     return ch24 <= 60
 
 
+def _select_targets(pairs: list[dict], max_scan: int) -> list[dict]:
+    """Pick up to max_scan tokens with a per-chain ROUND-ROBIN so no chain starves the
+    others. Taking the first max_scan by gather order let BSC (gathered first) fill the
+    whole budget and Solana/Base never got scanned — the recurring 'Solana crowded out'
+    bug. Sort each chain by liquidity desc, then interleave for a fair share each."""
+    by_chain: dict[str, list] = {}
+    for p in pairs:
+        by_chain.setdefault(p.get("chainId"), []).append(p)
+    for lst in by_chain.values():
+        lst.sort(key=lambda q: -((q.get("liquidity", {}) or {}).get("usd", 0) or 0))
+    out: list[dict] = []
+    i = 0
+    while len(out) < max_scan and any(i < len(lst) for lst in by_chain.values()):
+        for lst in by_chain.values():
+            if i < len(lst) and len(out) < max_scan:
+                out.append(lst[i])
+        i += 1
+    return out
+
+
 def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
     """Scan the universe, run effective concentration on each, rank by operator
     signature. Returns suspects sorted by a concentration score."""
@@ -145,8 +165,11 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
         liq = (p.get("liquidity", {}) or {}).get("usd", 0) or 0
         if key not in best or liq > (best[key].get("liquidity", {}) or {}).get("usd", 0):
             best[key] = p
-    targets = list(best.values())[:max_scan]
-    logger.info("operator_hunt_scan", targets=len(targets))
+    targets = _select_targets(list(best.values()), max_scan)
+    by_chain_n: dict[str, int] = {}
+    for p in targets:
+        by_chain_n[p.get("chainId")] = by_chain_n.get(p.get("chainId"), 0) + 1
+    logger.info("operator_hunt_scan", targets=len(targets), by_chain=by_chain_n)
 
     from src.onchain import holder_snapshot as hs
     suspects = []

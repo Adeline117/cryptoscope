@@ -281,3 +281,19 @@ def test_watcher_never_fires_buysell_from_balanceof(tmp_path, monkeypatch):
     alerts = S.check_run(use_transfers=False)
     kinds = {k for al in alerts for k, _ in al["events"]}
     assert "庄在卖" not in kinds and "庄在买" not in kinds, f"balanceOf leaked into buy/sell: {kinds}"
+
+
+def test_hunt_round_robin_no_chain_starves():
+    """REGRESSION (Solana crowded out): target selection must round-robin across
+    chains so a chain gathered first (BSC) can't fill the whole max_scan budget and
+    starve Solana/Base. 60 BSC + 5 SOL, max_scan=20 → SOL must still be scanned."""
+    from src.pipeline.operator_hunt import _select_targets
+    pairs = [{"chainId": "bsc", "baseToken": {"address": f"0x{i}"},
+              "liquidity": {"usd": 1_000_000 - i}} for i in range(60)]
+    pairs += [{"chainId": "solana", "baseToken": {"address": f"S{i}"},
+               "liquidity": {"usd": 500_000}} for i in range(5)]
+    sel = _select_targets(pairs, 20)
+    chains = {p["chainId"] for p in sel}
+    assert "solana" in chains, "Solana starved by BSC — round-robin broken"
+    # all 5 SOL fit within a 20 budget shared round-robin with BSC
+    assert sum(1 for p in sel if p["chainId"] == "solana") == 5
