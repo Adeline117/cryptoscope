@@ -396,20 +396,35 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
         except Exception:
             return False
         return False
-    # EVM: count distinct native-transfer recipients via Moralis (when available).
+    # EVM: count distinct recipients the funder seeded. Moralis when usable, else
+    # Covalent — WITHOUT this fallback the behavioral guard goes blind when Moralis is
+    # parked (only the CEX-list check survives), so a disperser feeding many wallets
+    # isn't stripped and inflates the cluster. (BANANAS31 exposed this.)
     try:
-        from src.onchain import moralis_client
-        mchain = {"bsc": "bsc", "ethereum": "eth", "base": "base", "arbitrum": "arbitrum",
-                  "optimism": "optimism", "polygon": "polygon"}.get(chain)
-        if not mchain or not moralis_client.available():
-            return False
-        data = moralis_client.get(f"{funder}?chain={mchain}&order=ASC&limit=100")
-        if not data:
-            return False
-        recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
-                  if (t.get("from_address") or "").lower() == funder.lower()
-                  and int(t.get("value", "0") or 0) > 0}
-        return len(recips) > _DISPERSER_EVM_RECIPIENTS
+        from src.onchain import covalent_client, moralis_client
+        if moralis_client.usable():
+            mchain = {"bsc": "bsc", "ethereum": "eth", "base": "base", "arbitrum": "arbitrum",
+                      "optimism": "optimism", "polygon": "polygon"}.get(chain)
+            if not mchain:
+                return False
+            data = moralis_client.get(f"{funder}?chain={mchain}&order=ASC&limit=100")
+            if not data:
+                return False
+            recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
+                      if (t.get("from_address") or "").lower() == funder.lower()
+                      and int(t.get("value", "0") or 0) > 0}
+            return len(recips) > _DISPERSER_EVM_RECIPIENTS
+        if covalent_client.available():
+            cid = {"ethereum": 1, "bsc": 56, "base": 8453}.get(chain)
+            if not cid:
+                return False
+            data = covalent_client.get(f"{cid}/address/{funder}/transactions_v3/page/0/?no-logs=true")
+            items = ((data or {}).get("data") or {}).get("items") or []
+            recips = {(t.get("to_address") or "").lower() for t in items
+                      if (t.get("from_address") or "").lower() == funder.lower()
+                      and int(t.get("value", "0") or 0) > 0}
+            return len(recips) > _DISPERSER_EVM_RECIPIENTS
+        return False
     except Exception:
         return False
 
