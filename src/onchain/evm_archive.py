@@ -25,6 +25,20 @@ import structlog
 logger = structlog.get_logger()
 
 BALANCE_OF = "0x70a08231"  # balanceOf(address) selector
+DECIMALS = "0x313ce567"    # decimals() selector
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+# A browser UA — several keyless public RPCs (publicnode) 403 the default urllib UA.
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/120 Safari/537.36")
+
+# Keyless RPCs that reliably serve eth_getLogs over wide ranges (separate from the
+# archive pool, which is tuned for historical balanceOf). publicnode handles 10k-block
+# getLogs cleanly; this is the Moralis-free path for transfer detection.
+_LOGS_RPCS = {
+    "bsc": ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org"],
+    "ethereum": ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
+    "base": ["https://base-rpc.publicnode.com", "https://base.publicnode.com"],
+}
 
 
 def _default_rpcs(chain: str) -> list[str]:
@@ -65,7 +79,7 @@ class ArchiveRPC:
                 req = urllib.request.Request(
                     rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
                                           "params": params}).encode(),
-                    headers={"Content-Type": "application/json", "User-Agent": "CryptoScope/1.0"},
+                    headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
                 )
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode())
@@ -79,6 +93,64 @@ class ArchiveRPC:
 
     def latest_block(self) -> int:
         return int(self._call("eth_blockNumber", [])["result"], 16)
+
+    def _logs_call(self, method: str, params: list, timeout: int = 20) -> dict:
+        """Call against the keyless LOGS pool (publicnode-first) — used for getLogs /
+        block lookups where we don't need historical archive state."""
+        pool = _LOGS_RPCS.get(self.chain) or self.rpcs
+        last_err = None
+        for rpc in pool:
+            try:
+                req = urllib.request.Request(
+                    rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
+                                          "params": params}).encode(),
+                    headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = json.loads(resp.read().decode())
+                if "error" not in data and data.get("result") is not None:
+                    return data
+                last_err = data.get("error")
+            except Exception as e:
+                last_err = e
+        raise RuntimeError(f"all logs RPCs failed for {self.chain}: {last_err}")
+
+    def logs_head(self) -> int:
+        return int(self._logs_call("eth_blockNumber", [])["result"], 16)
+
+    def get_transfer_logs(self, token: str, from_block: int, to_block: int | str = "latest",
+                          chunk: int = 9000) -> list[dict]:
+        """All Transfer logs for `token` in [from_block, to_block], chunked to respect
+        keyless-RPC range limits. Keyless (publicnode) — no Moralis."""
+        head = self.logs_head() if to_block == "latest" else int(to_block)
+        out: list[dict] = []
+        start = from_block
+        while start <= head:
+            end = min(start + chunk - 1, head)
+            try:
+                r = self._logs_call("eth_getLogs", [{
+                    "address": token, "topics": [TRANSFER_TOPIC],
+                    "fromBlock": hex(start), "toBlock": hex(end)}])
+                out.extend(r.get("result") or [])
+            except Exception as e:
+                logger.debug("get_logs_chunk_failed", chain=self.chain, error=str(e)[:80])
+            start += chunk
+        return out
+
+    def block_time(self, block: int) -> int | None:
+        try:
+            r = self._logs_call("eth_getBlockByNumber", [hex(block), False])
+            ts = (r.get("result") or {}).get("timestamp")
+            return int(ts, 16) if ts else None
+        except Exception:
+            return None
+
+    def token_decimals(self, token: str) -> int:
+        try:
+            r = self._logs_call("eth_call", [{"to": token, "data": DECIMALS}, "latest"])
+            res = r.get("result")
+            return int(res, 16) if res and res != "0x" else 18
+        except Exception:
+            return 18
 
     def balance_of(self, token: str, holder: str, block: int | str = "latest") -> float | None:
         data = BALANCE_OF + holder[2:].lower().rjust(64, "0")

@@ -45,6 +45,14 @@ def available() -> bool:
     return bool(keys())
 
 
+def usable() -> bool:
+    """A key exists that is NOT parked (quota consumed / rate limited this process).
+    available() only says keys are configured; usable() says a request can succeed —
+    gate keyless fallbacks on `not usable()`."""
+    ks = keys()
+    return bool(ks) and any(k not in _dead for k in ks)
+
+
 def get(path: str, timeout: int = 25):
     """GET a Moralis v2.2 path, rotating keys on quota/rate-limit. Returns parsed
     JSON or None. `path` is everything after /api/v2.2/."""

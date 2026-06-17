@@ -328,3 +328,34 @@ def test_holder_growth_rejects_fetch_depth_artifact(tmp_path):
     toks = {x["token"] for x in cands}
     assert "REAL" in toks, "fetch-depth-stable rising concentration must be flagged"
     assert "ARTIFACT" not in toks, "collapsing-fetch artifact must be rejected"
+
+
+def test_evm_rpc_netflow_fallback_when_moralis_parked(monkeypatch):
+    """Moralis-free resilience: when all Moralis keys are parked (quota exhausted),
+    cluster_net_flow must fall back to keyless RPC eth_getLogs and classify cluster
+    buy/sell from Transfer logs (external→cluster=buy, cluster→external=sell)."""
+    import src.pipeline.operator_sentinel as S
+    from src.onchain import moralis_client as mc
+    monkeypatch.setattr(mc, "usable", lambda: False)   # simulate exhausted quota
+
+    TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    W = "0x" + "a" * 40           # cluster wallet
+    EXT = "0x" + "b" * 40         # external (LP/router/retail)
+    def topic(addr): return "0x" + "0" * 24 + addr[2:]
+    def log(frm, to, tokens, blk):
+        return {"topics": [TRANSFER, topic(frm), topic(to)],
+                "data": hex(tokens * 10**18), "blockNumber": hex(blk)}
+
+    class FakeRPC:
+        def __init__(self, chain): pass
+        def logs_head(self): return 1000
+        def token_decimals(self, token): return 18
+        def block_time(self, blk): return 1_780_000_000 + blk
+        def get_transfer_logs(self, token, frm, to, chunk=9000):
+            return [log(EXT, W, 500, 990),   # external→cluster = BUY 500
+                    log(W, EXT, 200, 995)]   # cluster→external = SELL 200
+
+    monkeypatch.setattr("src.onchain.evm_archive.ArchiveRPC", FakeRPC)
+    nf = S.cluster_net_flow("0xtoken", "bsc", [W], "2026-06-16T00:00:00+00:00")
+    assert nf is not None and nf["buy"] == 500 and nf["sell"] == 200, nf
+    assert nf["net"] == 300 and nf["last_buy_ts"] and nf["last_sell_ts"]

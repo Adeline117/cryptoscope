@@ -452,15 +452,82 @@ def _solana_cluster_net_flow(token: str, wallets: list[str], since_iso: str | No
             "latest_ts": _iso(latest_bt) or (since_iso or "")}
 
 
+def _evm_cluster_net_flow_rpc(token: str, chain: str, wallets: list[str],
+                              since_iso: str | None) -> dict | None:
+    """EVM operator buy/sell via direct RPC eth_getLogs — the KEYLESS, Moralis-free
+    path (Moralis free tier exhausts daily and blinds the BSC sentinels). Pull the
+    token's Transfer logs since `since_iso`, filter cluster wallets (external→cluster=
+    buy, cluster→external=sell), net them. Ground truth, same as Moralis but no quota."""
+    from datetime import datetime, timezone
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        rpc = ArchiveRPC(chain)
+        head = rpc.logs_head()
+        # since_iso → fromBlock (BSC/ETH/Base ~ a few s/block; estimate, then cap the
+        # window so a stale baseline can't request a giant range).
+        secs = {"bsc": 3, "ethereum": 12, "base": 2}.get(chain, 3)
+        if since_iso:
+            since_ts = datetime.fromisoformat(since_iso.replace("Z", "+00:00")).timestamp()
+            now = datetime.now(timezone.utc).timestamp()
+            blocks_ago = int((now - since_ts) / secs) + 50
+        else:
+            blocks_ago = 1200
+        blocks_ago = max(50, min(blocks_ago, 28000))   # bound getLogs cost
+        from_block = head - blocks_ago
+        decimals = rpc.token_decimals(token)
+        scale = float(10 ** decimals)
+        wl = {w.lower() for w in wallets}
+        logs = rpc.get_transfer_logs(token, from_block, head)
+        buy = sell = 0.0
+        last_buy_blk = last_sell_blk = None
+        for lg in logs:
+            t = lg.get("topics", [])
+            if len(t) < 3:
+                continue
+            frm = "0x" + t[1][-40:].lower()
+            to = "0x" + t[2][-40:].lower()
+            try:
+                amt = int(lg.get("data", "0x0"), 16) / scale
+            except ValueError:
+                continue
+            blk = int(lg.get("blockNumber", "0x0"), 16)
+            if to in wl and frm not in wl:
+                buy += amt
+                last_buy_blk = blk if last_buy_blk is None else max(last_buy_blk, blk)
+            elif frm in wl and to not in wl:
+                sell += amt
+                last_sell_blk = blk if last_sell_blk is None else max(last_sell_blk, blk)
+
+        def _iso(blk):
+            if not blk:
+                return None
+            ts = rpc.block_time(blk)
+            return datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts else None
+        last_buy = _iso(last_buy_blk)
+        last_sell = _iso(last_sell_blk)
+        latest = max([x for x in (last_buy, last_sell) if x], default=since_iso or "")
+        return {"buy": buy, "sell": sell, "net": buy - sell,
+                "last_buy_ts": last_buy, "last_sell_ts": last_sell, "latest_ts": latest}
+    except Exception as e:
+        logger.debug("evm_rpc_netflow_failed", token=token, chain=chain, error=str(e)[:80])
+        return None
+
+
 def cluster_net_flow(token: str, chain: str, wallets: list[str], since_iso: str | None,
                      max_wallets: int = 8) -> dict | None:
     """Operator buy/sell via TRANSFERS (ground truth) since `since_iso` — reliable
     even for reflection/wash tokens where balanceOf lies (EVAA). External→cluster =
     buy; cluster→external = sell. Returns net + the latest order's Seattle time.
-    EVM via Moralis (bounded wallets, recent transfers only); Solana via Helius/RPC
-    token-balance deltas (no balanceOf — the same root-cure principle as EVM)."""
+    EVM via Moralis (bounded wallets), with a KEYLESS RPC eth_getLogs fallback when
+    Moralis is unavailable (free tier exhausts daily — the fallback keeps the BSC
+    sentinels seeing real flow). Solana via Helius/RPC token-balance deltas. All
+    balanceOf-free — the root-cure principle."""
     if chain in ("solana", "sol"):
         return _solana_cluster_net_flow(token, wallets, since_iso, max_wallets)
+    from src.onchain import moralis_client
+    if not moralis_client.usable():
+        # Moralis quota exhausted / all keys parked → keyless RPC keeps detection alive.
+        return _evm_cluster_net_flow_rpc(token, chain, wallets, since_iso)
     from src.onchain import moralis_client
     mchain = _MORALIS_EVM.get(chain)
     if not moralis_client.available() or not mchain:
