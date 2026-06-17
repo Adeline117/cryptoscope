@@ -382,10 +382,18 @@ def fetch_holders_evm(
     """
     # Moralis owner list is the reliable free path for non-ETH EVM chains.
     from src.onchain import moralis_client
-    if chain_id != 1 and moralis_client.available():
+    if chain_id != 1 and moralis_client.usable():
         m = fetch_holders_moralis(token, chain_id, max_pages=min(max_pages, 5), timeout=timeout)
         if m:
             return m
+
+    # Covalent/GoldRush is the keyed FREE fallback when Moralis is parked/unavailable —
+    # keeps non-ETH holder fetching alive without Moralis' daily quota.
+    from src.onchain import covalent_client
+    if chain_id != 1 and covalent_client.available():
+        c = covalent_client.fetch_holders(token, chain_id, max_pages=min(max_pages, 3), timeout=timeout)
+        if c:
+            return c
 
     key = os.environ.get("ALCHEMY_API_KEY", "")
     net = _ALCHEMY_NET.get(chain_id)

@@ -236,10 +236,13 @@ def get_funders(
 
     keys = _keys()
     chain_id = _EVM_CHAIN_IDS.get(chain, 1)
-    # Etherscan free works only for ETH; other EVM chains route through Moralis.
-    from src.onchain import moralis_client
-    use_moralis = (not is_solana and chain_id != 1 and moralis_client.available())
-    if not is_solana and not keys and not use_moralis:
+    # Etherscan free works only for ETH; other EVM chains route through Moralis, with
+    # Covalent/GoldRush as the keyed free fallback when Moralis is parked/unavailable.
+    from src.onchain import covalent_client, moralis_client
+    use_moralis = (not is_solana and chain_id != 1 and moralis_client.usable())
+    use_covalent = (not is_solana and chain_id != 1 and not use_moralis
+                    and covalent_client.available())
+    if not is_solana and not keys and not use_moralis and not use_covalent:
         return {}
 
     cached = _cache_get(addrs, chain, db_path)
@@ -251,6 +254,8 @@ def get_funders(
             funder = _fetch_first_funder_solana(addr)
         elif use_moralis:
             funder = _fetch_first_funder_moralis(addr, chain)
+        elif use_covalent:
+            funder = covalent_client.first_funder(addr, chain_id)
         else:
             funder = _fetch_first_funder_evm(addr, chain_id, keys[i % len(keys)])
         _cache_put(addr, chain, funder, db_path)

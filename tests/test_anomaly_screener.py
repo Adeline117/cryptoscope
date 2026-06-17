@@ -395,3 +395,33 @@ def test_transfer_buysell_magnitude_gated(tmp_path, monkeypatch):
     alerts = S.check_run(use_transfers=True)
     kinds = {k for al in alerts for k, _ in al["events"]}
     assert "庄在卖" in kinds, "a real 2.2% sell must fire 庄在卖"
+
+
+def test_covalent_holders_and_funder_parse(monkeypatch):
+    """Covalent (Moralis-free fallback) response parsing: holders decimal-adjusted &
+    zero/empty filtered; first_funder = sender of first incoming native-value tx."""
+    from src.onchain import covalent_client as cc
+    monkeypatch.setattr(cc, "key", lambda: "cqt_test")   # make available() True
+    assert cc.available()
+
+    holders_json = {"data": {"items": [
+        {"address": "0xAAA", "balance": "5000000000000000000", "contract_decimals": 18},  # 5.0
+        {"address": "0xBBB", "balance": "2500000000000000000", "contract_decimals": 18},  # 2.5
+        {"address": "0x0000000000000000000000000000000000000000", "balance": "9", "contract_decimals": 18},
+        {"address": "0xCCC", "balance": "0", "contract_decimals": 18},  # zero → filtered
+    ]}}
+    monkeypatch.setattr(cc, "get", lambda ep, timeout=25: holders_json)
+    hs = cc.fetch_holders("0xtoken", 56)
+    assert [(h["address"], h["balance"]) for h in hs] == [("0xaaa", 5.0), ("0xbbb", 2.5)]
+
+    funder_json = {"data": {"items": [
+        {"from_address": "0xFUNDER", "to_address": "0xme", "value": "1000000000000000000"},
+        {"from_address": "0xme", "to_address": "0xother", "value": "5"},
+    ]}}
+    monkeypatch.setattr(cc, "get", lambda ep, timeout=25: funder_json)
+    assert cc.first_funder("0xme", 56) == "0xfunder"
+
+    # no key → unavailable → empty / None (callers fall through cleanly)
+    monkeypatch.setattr(cc, "key", lambda: "")
+    assert not cc.available()
+    assert cc.fetch_holders("0xtoken", 56) == [] and cc.first_funder("0xme", 56) is None
