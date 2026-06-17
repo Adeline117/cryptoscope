@@ -215,6 +215,54 @@ def test_calibrate_discriminates(tmp_path, monkeypatch):
     assert res["weights"]["smart_money_t1"] > res["weights"]["buy_pressure"]
 
 
+def test_solana_cluster_net_flow_nets_internal_moves(monkeypatch):
+    """Solana transfer net-flow (the path that unlocks SOL sentinels, balanceOf-free):
+    an external BUY counts, an external SELL counts, and a cluster→cluster INTERNAL
+    move must net to ZERO per-tx (not be double-counted as buy+sell). Mocks RPC."""
+    import io
+    import json as _json
+    import src.pipeline.operator_sentinel as S
+    W1, W2, MINT = "OWNER_A", "OWNER_B", "MINT_X"
+
+    def _tb(owner, amt):
+        return {"mint": MINT, "owner": owner, "uiTokenAmount": {"uiAmount": amt}}
+
+    # tx1: external BUY → W1 0→500 (counterparty external). tx2: INTERNAL W1 500→200,
+    # W2 0→300 (cluster-internal, net 0). tx3: external SELL → W2 300→100.
+    TX = {
+        "sigBUY":  {"meta": {"preTokenBalances": [_tb(W1, 0)],
+                             "postTokenBalances": [_tb(W1, 500)]}},
+        "sigINT":  {"meta": {"preTokenBalances": [_tb(W1, 500), _tb(W2, 0)],
+                             "postTokenBalances": [_tb(W1, 200), _tb(W2, 300)]}},
+        "sigSELL": {"meta": {"preTokenBalances": [_tb(W2, 300)],
+                             "postTokenBalances": [_tb(W2, 100)]}},
+    }
+    ATA = {W1: "ATA_A", W2: "ATA_B"}
+    # blockTimes after the `since` epoch below (2026-01-01 ≈ 1.767e9), else filtered.
+    SIGS = {"ATA_A": [{"signature": "sigBUY", "blockTime": 1767300000},
+                      {"signature": "sigINT", "blockTime": 1767300100}],
+            "ATA_B": [{"signature": "sigINT", "blockTime": 1767300100},
+                      {"signature": "sigSELL", "blockTime": 1767300200}]}
+
+    def fake_urlopen(req, timeout=15):
+        body = _json.loads(req.data.decode())
+        m, p = body["method"], body["params"]
+        if m == "getTokenAccountsByOwner":
+            res = {"value": [{"pubkey": ATA[p[0]]}]}
+        elif m == "getSignaturesForAddress":
+            res = SIGS.get(p[0], [])
+        elif m == "getTransaction":
+            res = TX.get(p[0])
+        else:
+            res = None
+        return io.BytesIO(_json.dumps({"result": res}).encode())  # BytesIO is a ctx mgr
+
+    monkeypatch.setattr(S.urllib.request, "urlopen", fake_urlopen)
+    nf = S.cluster_net_flow(MINT, "solana", [W1, W2], "2026-01-01T00:00:00+00:00")
+    assert nf["buy"] == 500 and nf["sell"] == 200, nf   # internal move excluded
+    assert nf["net"] == 300
+
+
 def test_watcher_never_fires_buysell_from_balanceof(tmp_path, monkeypatch):
     """REGRESSION (root-cure): the 20s watcher (use_transfers=False) must NEVER emit
     庄在买/庄在卖 from a balanceOf change — balanceOf is unreliable on reflection/wash

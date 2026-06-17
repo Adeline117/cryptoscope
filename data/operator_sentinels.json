@@ -22,14 +22,14 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.08285,
-      "liquidity": 321332.73,
-      "vol24": 2230081.88,
+      "price": 0.07718,
+      "liquidity": 308595.04,
+      "vol24": 1708412.91,
       "cluster_balance": 10167894.759644354,
-      "funding": 0.005
+      "funding": 0.0102
     },
     "balanceof_reliable": true,
-    "flow_ts": "2026-06-06T10:55:43.000Z"
+    "flow_ts": null
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
@@ -48,14 +48,14 @@
       "funding": 0.0186
     },
     "last": {
-      "price": 0.06666,
-      "liquidity": 1344408.71,
-      "vol24": 1489166.31,
-      "cluster_balance": 214578864.43321168,
-      "funding": 0.0271
+      "price": 0.06901,
+      "liquidity": 1348641.96,
+      "vol24": 1732554.71,
+      "cluster_balance": 214513943.85146895,
+      "funding": 0.0715
     },
     "balanceof_reliable": true,
-    "flow_ts": "2026-06-16T01:12:24.000Z"
+    "flow_ts": null
   },
   "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
     "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
@@ -86,14 +86,14 @@
       "funding": 0.01
     },
     "last": {
-      "price": 0.7259,
-      "liquidity": 669212.2,
-      "vol24": 76605881.21,
-      "cluster_balance": 3358831.7858782033,
+      "price": 0.7376,
+      "liquidity": 667577.33,
+      "vol24": 26866418.04,
+      "cluster_balance": 3485356.0583764343,
       "funding": 0.01
     },
     "balanceof_reliable": true,
-    "flow_ts": "2026-06-16T09:27:01.000Z"
+    "flow_ts": null
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -123,13 +123,39 @@
       "funding": 0.12
     },
     "last": {
-      "price": 0.04596,
-      "liquidity": 2400752.7,
-      "vol24": 1844124.66,
-      "cluster_balance": 87195774.57128173,
-      "funding": 0.1165
+      "price": 0.04569,
+      "liquidity": 2379109.64,
+      "vol24": 1491765.05,
+      "cluster_balance": 90248334.42671631,
+      "funding": 0.0639
     },
     "balanceof_reliable": true,
-    "flow_ts": "2026-06-16T09:22:52.000Z"
+    "flow_ts": null
+  },
+  "solana:eg2ymq2aqqjmcibnmtt8erc6tvk9pvpjzcxvvpjz2agu": {
+    "token": "Eg2ymQ2aQqjMcibnmTt8erC6Tvk9PVpJZCxvVPJz2agu",
+    "chain": "solana",
+    "symbol": "PUMPCADE",
+    "wallets": [
+      "4fWfKUDJJzmnUByfBhQ5o3SKG1eMwNwGJGsRxH5mEern",
+      "31iYiwMjW2ycykhZ3B7hEnyLfGugLixymoKMEk1YERvN",
+      "2KRcnF2fJd73vKu3sVL7fvY13XFsxhGaY2HmuZjBR9q3"
+    ],
+    "baseline": {
+      "price": 0.02651,
+      "liquidity": 517838.1,
+      "vol24": 334686.11,
+      "cluster_balance": 100000000.0,
+      "funding": -0.02
+    },
+    "last": {
+      "price": 0.02655,
+      "liquidity": 518095.27,
+      "vol24": 334779.39,
+      "cluster_balance": 100000000.0,
+      "funding": -0.02
+    },
+    "balanceof_reliable": true,
+    "flow_ts": "2026-05-30T02:36:01+00:00"
   }
 }

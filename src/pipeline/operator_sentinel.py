@@ -358,14 +358,109 @@ def _seattle(iso: str) -> str:
         return iso[:19]
 
 
+def _solana_cluster_net_flow(token: str, wallets: list[str], since_iso: str | None,
+                             max_wallets: int = 8, timeout: int = 15) -> dict | None:
+    """Solana operator buy/sell via TRANSFERS (ground truth, balanceOf-free) since
+    `since_iso`. Method: find each cluster wallet's token account (ATA) for the mint,
+    pull its recent signatures (the ATA is always an account key when its balance
+    changes — the owner often isn't, so we key on the ATA to not miss inbound buys),
+    then read each tx's pre/postTokenBalances and sum the cluster's net token delta
+    PER TRANSACTION. Cluster↔cluster internal moves net to zero across the cluster, so
+    a positive tx-net is a real external BUY and a negative one a real SELL. Helius/RPC
+    only — no Moralis, no balanceOf. Returns net + latest order time (matches EVM)."""
+    import os
+    from datetime import datetime, timezone
+    rpc = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+
+    def _call(method, params):
+        req = urllib.request.Request(
+            rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
+                                  "params": params}).encode(),
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode()).get("result")
+
+    since_ts = None
+    if since_iso:
+        try:
+            since_ts = datetime.fromisoformat(since_iso.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            since_ts = None
+    wl = set(wallets)
+    # 1. resolve each owner's ATA(s) for the mint, collect their signatures in window.
+    sig_time: dict[str, int] = {}
+    try:
+        for w in list(wl)[:max_wallets]:
+            accs = (_call("getTokenAccountsByOwner",
+                          [w, {"mint": token}, {"encoding": "jsonParsed"}]) or {}).get("value", [])
+            for acc in accs:
+                ata = acc.get("pubkey")
+                if not ata:
+                    continue
+                for s in (_call("getSignaturesForAddress", [ata, {"limit": 40}]) or []):
+                    bt = s.get("blockTime")
+                    if bt is None or (since_ts and bt <= since_ts):
+                        continue
+                    sig_time[s["signature"]] = bt
+    except Exception as e:
+        logger.debug("sol_netflow_sigs_failed", token=token, error=str(e))
+        return None
+    if not sig_time:
+        return {"buy": 0.0, "sell": 0.0, "net": 0.0, "last_buy_ts": None,
+                "last_sell_ts": None, "latest_ts": since_iso or ""}
+
+    def _cluster_amt(bals):
+        m: dict[str, float] = {}
+        for b in bals or []:
+            if b.get("mint") != token:
+                continue
+            owner = b.get("owner")
+            if owner in wl:
+                m[owner] = m.get(owner, 0.0) + float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+        return m
+
+    buy = sell = 0.0
+    last_buy_bt = last_sell_bt = None
+    latest_bt = 0
+    # 2. per unique tx (newest 60), the cluster's net token delta = external flow.
+    for sig, bt in sorted(sig_time.items(), key=lambda kv: kv[1])[-60:]:
+        try:
+            tx = _call("getTransaction",
+                       [sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+        except Exception:
+            continue
+        if not tx:
+            continue
+        meta = tx.get("meta") or {}
+        pm = _cluster_amt(meta.get("preTokenBalances"))
+        qm = _cluster_amt(meta.get("postTokenBalances"))
+        tx_net = sum(qm.get(o, 0.0) - pm.get(o, 0.0) for o in (set(pm) | set(qm)))
+        if abs(tx_net) < 1e-9:
+            continue
+        latest_bt = max(latest_bt, bt)
+        if tx_net > 0:
+            buy += tx_net
+            last_buy_bt = bt if last_buy_bt is None else max(last_buy_bt, bt)
+        else:
+            sell += -tx_net
+            last_sell_bt = bt if last_sell_bt is None else max(last_sell_bt, bt)
+
+    def _iso(bt):
+        return datetime.fromtimestamp(bt, timezone.utc).isoformat() if bt else None
+    return {"buy": buy, "sell": sell, "net": buy - sell,
+            "last_buy_ts": _iso(last_buy_bt), "last_sell_ts": _iso(last_sell_bt),
+            "latest_ts": _iso(latest_bt) or (since_iso or "")}
+
+
 def cluster_net_flow(token: str, chain: str, wallets: list[str], since_iso: str | None,
                      max_wallets: int = 8) -> dict | None:
     """Operator buy/sell via TRANSFERS (ground truth) since `since_iso` — reliable
     even for reflection/wash tokens where balanceOf lies (EVAA). External→cluster =
     buy; cluster→external = sell. Returns net + the latest order's Seattle time.
-    EVM via Moralis (bounded wallets, recent transfers only)."""
+    EVM via Moralis (bounded wallets, recent transfers only); Solana via Helius/RPC
+    token-balance deltas (no balanceOf — the same root-cure principle as EVM)."""
     if chain in ("solana", "sol"):
-        return None
+        return _solana_cluster_net_flow(token, wallets, since_iso, max_wallets)
     from src.onchain import moralis_client
     mchain = _MORALIS_EVM.get(chain)
     if not moralis_client.available() or not mchain:
@@ -437,9 +532,13 @@ def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
     key = f"{chain}:{token.lower()}"
     state = _measure(token, chain, wallets, symbol)
     reliable = _balanceof_reliable(token, chain, wallets)
+    # EVM addresses are case-insensitive (lowercase for consistent matching); Solana
+    # addresses are base58 and CASE-SENSITIVE — lowercasing them corrupts the cluster.
+    is_sol = chain in ("solana", "sol")
+    norm_wallets = list(wallets) if is_sol else [w.lower() for w in wallets]
     data[key] = {
         "token": token, "chain": chain, "symbol": symbol,
-        "wallets": [w.lower() for w in wallets],
+        "wallets": norm_wallets,
         "baseline": state, "last": state,
         "balanceof_reliable": reliable,
     }
