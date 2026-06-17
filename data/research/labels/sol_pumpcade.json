@@ -1,0 +1,25 @@
+{
+  "symbol": "PUMPCADE",
+  "mint": "Eg2ymQ2aQqjMcibnmTt8erC6Tvk9PVpJZCxvVPJz2agu",
+  "chain": "solana",
+  "outcome": "watching",
+  "found_by": "operator_hunt_solana",
+  "found_date": "2026-06-16",
+  "verified_date": "2026-06-16",
+  "cluster_share_pct": 10.0,
+  "concentration_gap": 3.5,
+  "age_days": 269,
+  "liquidity_usd": 517838,
+  "market_cap_usd": 25578264,
+  "dominant_funder": "2xEda4AjsbeBBajjjyFQtNKhKmAfxJpVbPPGRtAWLffZ",
+  "funder_profile": "focused — fanout 14, 0.7 SOL balance, NOT a CEX/disperser (survived the disperser guard)",
+  "cluster_wallets": [
+    "4fWfKUDJJzmnUByfBhQ5o3SKG1eMwNwGJGsRxH5mEern",
+    "31iYiwMjW2ycykhZ3B7hEnyLfGugLixymoKMEk1YERvN",
+    "2KRcnF2fJd73vKu3sVL7fvY13XFsxhGaY2HmuZjBR9q3"
+  ],
+  "cluster_wallet_pcts": [6.01, 2.50, 1.50],
+  "transfer_evidence": "+100M tokens net accumulation over 30d (last buy 2026-05-30), zero sells — verified via Helius transfer net-flow, not balanceOf",
+  "note": "The single genuine focused-funder cluster surfaced across all BSC+Solana hunts. One non-CEX funder seeded 3 wallets = 10.0% of float on a 269d-old token. Below BASED scale (gap +3.5 vs +10.7) but ~EVAA's concentration (entity 10% vs 11.6%). Registered as the 5th sentinel; monitored on the 5-min reliable transfer path (WS layer is BSC-only). Thesis: operator accumulated and is holding, not distributing — same leading signature as the validated sentinels, unproven on outcome until a pump/dump resolves.",
+  "verdict": "real small hidden cluster, accumulation-and-hold"
+}
