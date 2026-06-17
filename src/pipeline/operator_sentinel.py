@@ -652,13 +652,25 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 if prev_flow_ts is None:
                     flow = None  # first transfer check = establish baseline, don't alert
             if flow is not None:
-                if flow["sell"] > 0 and flow["sell"] >= flow["buy"]:
+                # MAGNITUDE GATE: only a net move that is MEANINGFUL vs the cluster's
+                # holdings counts as 庄在买/庄在卖. Without this, a trivial net flow
+                # (SIREN: 1,882 sold out of 90M held = 0.002%) flips the phase and fires
+                # a phantom 庄在卖 — the exact spam we rooted out, reborn via transfers.
+                # Threshold = OP_SELL/OP_BUY × current cluster balance (same fractions as
+                # the legacy balance-delta path). cb unknown → can't size it → no alert.
+                net_sell = flow["sell"] - flow["buy"]
+                net_buy = flow["buy"] - flow["sell"]
+                sell_min = OP_SELL * cb if cb else None
+                buy_min = OP_BUY * cb if cb else None
+                if sell_min and net_sell >= sell_min:
                     when = _seattle(flow["last_sell_ts"]) if flow["last_sell_ts"] else "?"
-                    fired.append(("庄在卖", f"转账实测 净卖 {flow['sell']-flow['buy']:,.0f} "
+                    pct = net_sell / cb * 100
+                    fired.append(("庄在卖", f"转账实测 净卖 {net_sell:,.0f} (持仓{pct:.1f}%) "
                                   f"(卖{flow['sell']:,.0f}/买{flow['buy']:,.0f}) · 最后卖单 {when}"))
-                elif flow["buy"] > 0 and flow["buy"] > flow["sell"]:
+                elif buy_min and net_buy >= buy_min:
                     when = _seattle(flow["last_buy_ts"]) if flow["last_buy_ts"] else "?"
-                    fired.append(("庄在买", f"转账实测 净买 {flow['buy']-flow['sell']:,.0f} "
+                    pct = net_buy / cb * 100
+                    fired.append(("庄在买", f"转账实测 净买 {net_buy:,.0f} (持仓{pct:.1f}%) "
                                   f"(买{flow['buy']:,.0f}/卖{flow['sell']:,.0f}) · 最后买单 {when}"))
             # NOTE: buy/sell is detected ONLY via transfers (use_transfers=True, the
             # 5-min scheduler). balanceOf is unreliable on reflection/wash tokens

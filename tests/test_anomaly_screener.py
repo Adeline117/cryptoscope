@@ -359,3 +359,39 @@ def test_evm_rpc_netflow_fallback_when_moralis_parked(monkeypatch):
     nf = S.cluster_net_flow("0xtoken", "bsc", [W], "2026-06-16T00:00:00+00:00")
     assert nf is not None and nf["buy"] == 500 and nf["sell"] == 200, nf
     assert nf["net"] == 300 and nf["last_buy_ts"] and nf["last_sell_ts"]
+
+
+def test_transfer_buysell_magnitude_gated(tmp_path, monkeypatch):
+    """REGRESSION (SIREN phantom-sell, transfer edition): a net sell that is TINY vs
+    the cluster's holdings (1,882 sold of 90M = 0.002%) must NOT fire 庄在卖. Only a
+    move >= OP_SELL/OP_BUY × cluster_balance is the operator acting."""
+    import json
+    import src.pipeline.operator_sentinel as S
+    f = tmp_path / "sent.json"
+    monkeypatch.setattr(S, "SENTINELS_FILE", f)
+    base = {"price": 1.0, "liquidity": 8e5, "vol24": 1e6, "cluster_balance": 90_000_000,
+            "funding": 0.0, "flow_ts": "2026-06-16T00:00:00+00:00"}
+    f.write_text(json.dumps({"bsc:0xt": {"token": "0xT", "chain": "bsc", "symbol": "SIREN",
+        "wallets": ["0xw"], "baseline": dict(base), "last": dict(base)}}))
+    monkeypatch.setattr(S, "_measure",
+        lambda *a, **k: {"price": 1.0, "liquidity": 8e5, "vol24": 1e6,
+                         "cluster_balance": 90_000_000, "funding": 0.0})
+    # tiny net sell (1,882 of 90M = 0.002%, far below OP_SELL=1.5%)
+    monkeypatch.setattr(S, "cluster_net_flow",
+        lambda *a, **k: {"buy": 0.0, "sell": 1882.0, "net": -1882.0,
+                         "last_buy_ts": None, "last_sell_ts": "2026-06-17T04:54:00+00:00",
+                         "latest_ts": "2026-06-17T04:54:00+00:00"})
+    alerts = S.check_run(use_transfers=True)
+    kinds = {k for al in alerts for k, _ in al["events"]}
+    assert "庄在卖" not in kinds, f"tiny noise sell leaked into 庄在卖: {kinds}"
+
+    # a REAL sell (2M of 90M = 2.2% >= 1.5%) MUST fire.
+    monkeypatch.setattr(S, "cluster_net_flow",
+        lambda *a, **k: {"buy": 0.0, "sell": 2_000_000.0, "net": -2_000_000.0,
+                         "last_buy_ts": None, "last_sell_ts": "2026-06-17T05:00:00+00:00",
+                         "latest_ts": "2026-06-17T05:00:00+00:00"})
+    f.write_text(json.dumps({"bsc:0xt": {"token": "0xT", "chain": "bsc", "symbol": "SIREN",
+        "wallets": ["0xw"], "baseline": dict(base), "last": dict(base)}}))
+    alerts = S.check_run(use_transfers=True)
+    kinds = {k for al in alerts for k, _ in al["events"]}
+    assert "庄在卖" in kinds, "a real 2.2% sell must fire 庄在卖"
