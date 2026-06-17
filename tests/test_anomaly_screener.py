@@ -425,3 +425,28 @@ def test_covalent_holders_and_funder_parse(monkeypatch):
     monkeypatch.setattr(cc, "key", lambda: "")
     assert not cc.available()
     assert cc.fetch_holders("0xtoken", 56) == [] and cc.first_funder("0xme", 56) is None
+
+
+def test_evm_funder_native_balance_disperser(monkeypatch):
+    """KEYLESS guard (BANANAS31 false positive): an EVM funder sitting on a large native
+    balance (2,204 BNB) is a CEX/whale, not an operator — flagged a disperser via
+    eth_getBalance, works even with Moralis AND Covalent out."""
+    import src.pipeline.anomaly_screener as a
+
+    class FakeRPC:
+        def __init__(self, chain): pass
+        def _logs_call(self, method, params):
+            # 2204 BNB in wei
+            return {"result": hex(int(2204 * 1e18))}
+    monkeypatch.setattr("src.onchain.evm_archive.ArchiveRPC", FakeRPC)
+    a._funder_is_disperser.cache_clear()
+    assert a._funder_is_disperser("0xwhale", "bsc") is True
+
+    class FakeRPCSmall(FakeRPC):
+        def _logs_call(self, method, params):
+            return {"result": hex(int(5 * 1e18))}   # 5 BNB — normal operator funder
+    monkeypatch.setattr("src.onchain.evm_archive.ArchiveRPC", FakeRPCSmall)
+    monkeypatch.setattr("src.onchain.moralis_client.usable", lambda: False)
+    monkeypatch.setattr("src.onchain.covalent_client.available", lambda: False)
+    a._funder_is_disperser.cache_clear()
+    assert a._funder_is_disperser("0xoperator", "bsc") is False

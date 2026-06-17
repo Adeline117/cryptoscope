@@ -354,6 +354,10 @@ from functools import lru_cache
 _DISPERSER_SIG_CAP = 900       # >=900 sigs in a single 1000-cap lookup = high-freq service
 _DISPERSER_SOL_BAL = 1000.0    # a funder sitting on 1000+ SOL is an exchange, not a 庄
 _DISPERSER_EVM_RECIPIENTS = 40  # an EVM funder that seeded >40 distinct wallets = service
+# A funder sitting on a large native balance is a CEX/whale/MM desk, not a focused
+# operator (BANANAS31's funder held 2,204 BNB and Covalent mis-clustered its wallets).
+# Keyless via eth_getBalance — works even when Moralis AND Covalent are out.
+_DISPERSER_EVM_NATIVE = {"bsc": 300.0, "ethereum": 100.0, "base": 100.0}
 
 
 @lru_cache(maxsize=4096)
@@ -396,6 +400,18 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
         except Exception:
             return False
         return False
+    # EVM native-balance check (KEYLESS — works even with Moralis AND Covalent out):
+    # a funder holding a large native balance is a CEX/whale/MM desk, not an operator.
+    native_min = _DISPERSER_EVM_NATIVE.get(chain)
+    if native_min:
+        try:
+            from src.onchain.evm_archive import ArchiveRPC
+            rpc = ArchiveRPC(chain)
+            wei = int(rpc._logs_call("eth_getBalance", [funder, "latest"]).get("result", "0x0"), 16)
+            if wei / 1e18 >= native_min:
+                return True
+        except Exception:
+            pass
     # EVM: count distinct recipients the funder seeded. Moralis when usable, else
     # Covalent — WITHOUT this fallback the behavioral guard goes blind when Moralis is
     # parked (only the CEX-list check survives), so a disperser feeding many wallets
