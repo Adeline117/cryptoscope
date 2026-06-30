@@ -39,8 +39,13 @@ W_MAX, W_MIN = 50, 0
 
 
 def _load_labels() -> dict[tuple[str, str], str]:
-    """(token_lower, chain) -> outcome ('pump'/'dud')."""
-    out = {}
+    """(token_lower, chain) -> outcome ('pump'/'dud').
+
+    On conflict, a price-derived label (source='alert_outcomes') WINS over a
+    legacy/manual file — a loose file can carry a stale outcome (e.g. siren.json
+    tagged SIREN 'pump' before it dumped); the resolved-price label is ground truth."""
+    out: dict[tuple[str, str], str] = {}
+    src: dict[tuple[str, str], str] = {}
     if not LABELS_DIR.exists():
         return out
     for f in LABELS_DIR.glob("*.json"):
@@ -52,7 +57,12 @@ def _load_labels() -> dict[tuple[str, str], str]:
             continue
         tok, chain, outcome = d.get("token"), d.get("chain"), d.get("outcome")
         if tok and chain and outcome in ("pump", "dud"):
-            out[(tok.lower(), chain)] = outcome
+            key = (tok.lower(), chain)
+            this_src = d.get("source")
+            if key in out and src.get(key) == "alert_outcomes" and this_src != "alert_outcomes":
+                continue          # don't let a legacy file override ground truth
+            out[key] = outcome
+            src[key] = this_src
     return out
 
 
@@ -79,9 +89,61 @@ def _emission_reasons() -> dict[tuple[str, str], set[str]]:
     return fired
 
 
+def generate_labels(pump_thr: float = 1.15, dud_thr: float = 0.95) -> dict:
+    """Derive pump/dud labels from RESOLVED outcomes so calibration has data to learn
+    from — the missing plumbing (0 labels existed, so calibrate_weights never ran).
+    Source: alert_outcomes.db (token+chain+price0+price_24h). 24h return >= +15% =
+    pump, <= -5% = dud, in-between skipped (ambiguous). Writes one idempotent label
+    file per token+chain. Labels accrue as the system runs; calibration auto-activates
+    once >=5 pump + >=5 dud exist. (signal_scorecard is symbol-keyed, not address-
+    keyed, so it can't be matched to address-keyed emissions — alert_outcomes is the
+    usable source.)"""
+    import sqlite3
+
+    from src.config import DATA_DIR
+    db = DATA_DIR / "alert_outcomes.db"
+    if not db.exists():
+        return {"written": 0, "reason": "no alert_outcomes.db"}
+    try:
+        conn = sqlite3.connect(str(db))
+        try:
+            rows = conn.execute(
+                "SELECT token, chain, symbol, price0, price_24h FROM alerts "
+                "WHERE resolved=1 AND chain != 'majors' AND price0 > 0 AND price_24h > 0"
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("alert_outcomes_read_failed", error=str(e))
+        return {"written": 0, "reason": str(e)[:60]}
+    by_tok: dict[tuple[str, str], list[float]] = {}
+    sym_of: dict[tuple[str, str], str] = {}
+    for tok, chain, sym, p0, p24 in rows:
+        if not tok or not chain or not p0:
+            continue
+        by_tok.setdefault((tok, chain), []).append(p24 / p0)
+        sym_of[(tok, chain)] = sym or ""
+    LABELS_DIR.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for (tok, chain), rets in by_tok.items():
+        rets.sort()
+        med = rets[len(rets) // 2]                 # median 24h return across its alerts
+        outcome = "pump" if med >= pump_thr else "dud" if med <= dud_thr else None
+        if not outcome:
+            continue
+        (LABELS_DIR / f"{chain}_{tok.lower()}.json").write_text(
+            json.dumps({"token": tok, "chain": chain, "symbol": sym_of.get((tok, chain), ""),
+                        "outcome": outcome, "source": "alert_outcomes",
+                        "ret_24h": round(med, 3)}, ensure_ascii=False))
+        written += 1
+    logger.info("labels_generated", written=written)
+    return {"written": written}
+
+
 def calibrate(dry: bool = False) -> dict:
     from src.pipeline.anomaly_screener import DEFAULT_WEIGHTS
 
+    generate_labels()        # refresh labels from resolved outcomes first
     labels = _load_labels()
     pumps = [k for k, v in labels.items() if v == "pump"]
     duds = [k for k, v in labels.items() if v == "dud"]
