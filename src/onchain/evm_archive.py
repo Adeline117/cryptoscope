@@ -74,6 +74,7 @@ class ArchiveRPC:
         self.rpcs = _default_rpcs(chain)
         self._idx = 0
         self._dec_cache: dict[str, int] = {}
+        self._spb: float | None = None
 
     def available(self) -> bool:
         return bool(self.rpcs)
@@ -150,6 +151,31 @@ class ArchiveRPC:
             return int(ts, 16) if ts else None
         except Exception:
             return None
+
+    # Conservative fallbacks if live measurement fails — still much closer than the
+    # old hardcoded 3s for BSC (post-Maxwell ~0.45-0.75s).
+    _SPB_FALLBACK = {"bsc": 0.75, "ethereum": 12.0, "base": 2.0, "polygon": 2.0}
+
+    def seconds_per_block(self, sample: int = 50000) -> float:
+        """Live-measured seconds/block (cached). A stale hardcoded value (e.g. 3s for
+        BSC, now ~0.45s) makes date→fromBlock estimates land far in the past and
+        under-cover getLogs windows → missed recent transfers (false-zero net flow)."""
+        if self._spb:
+            return self._spb
+        spb = None
+        try:
+            head = self.logs_head()
+            t_now = self.block_time(head)
+            t_old = self.block_time(max(1, head - sample))
+            if t_now and t_old and t_now > t_old:
+                spb = (t_now - t_old) / sample
+        except Exception:
+            spb = None
+        # sanity-bound: reject absurd measurements
+        if not spb or not (0.05 <= spb <= 30):
+            spb = self._SPB_FALLBACK.get(self.chain, 1.0)
+        self._spb = spb
+        return spb
 
     def token_decimals(self, token: str) -> int:
         key = token.lower()

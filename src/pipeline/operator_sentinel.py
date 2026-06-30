@@ -199,22 +199,38 @@ def _distribution_history(token: str, chain: str, wallets: list[str]) -> dict:
         if not rpc.available():
             return {"profile": "?", "max_drawdown_pct": None}
         latest = rpc.latest_block()
-        # ~90d, ~9d spacing (BSC ~28800 blocks/day)
-        c = operator_curve_evm(token, wallets, chain, latest - 90 * 28800, latest,
+        spb = rpc.seconds_per_block()                 # live block time, not hardcoded 28800/day
+        blocks_per_day = max(1, int(86400 / spb))
+        c = operator_curve_evm(token, wallets, chain, latest - 90 * blocks_per_day, latest,
                                n_points=10, pause=0.05)
         bs = (c or {}).get("balance_series") or []
-        if len(bs) < 4:
-            return {"profile": "?", "max_drawdown_pct": None}
-        peak = bs[0]
+        blks = (c or {}).get("block_series") or []
+        # ===== AGE GATE (the MAME false-positive root cause) =====
+        # operator_curve samples balanceOf back 90d; for a token that didn't exist
+        # yet, those samples read 0. Counting pre-existence 0s (and intra-launch LP
+        # noise) as a "held-then-dropped" history fabricated MAME's phantom 71%
+        # "distribution profile" on a 4-day-old token. Judge ONLY over samples where
+        # the cluster actually held, and refuse to judge a too-young token/cluster.
+        nz_idx = [i for i, v in enumerate(bs) if v and v > 0]
+        if len(nz_idx) < 4:
+            return {"profile": "?(数据不足,不可判派发履历)",
+                    "max_drawdown_pct": None, "nonzero_samples": len(nz_idx)}
+        if blks and nz_idx[0] < len(blks):
+            age_days = (latest - blks[nz_idx[0]]) * spb / 86400.0
+            if age_days < 14:
+                return {"profile": f"?(币/簇仅~{age_days:.0f}天,太新不可判派发履历)",
+                        "max_drawdown_pct": None, "age_days": round(age_days, 1)}
+        nz = [bs[i] for i in nz_idx]                  # drawdown over the held period only
+        peak = nz[0]
         max_dd = 0.0
-        for v in bs:
+        for v in nz:
             if v > peak:
                 peak = v
             elif peak > 0:
                 max_dd = max(max_dd, (peak - v) / peak)
         dd = round(max_dd * 100, 1)
         profile = "聪明庄(有派发履历)" if dd >= 25 else "信仰者(只吸不卖)"
-        return {"profile": profile, "max_drawdown_pct": dd}
+        return {"profile": profile, "max_drawdown_pct": dd, "nonzero_samples": len(nz)}
     except Exception as e:
         logger.debug("dist_history_failed", token=token, error=str(e))
         return {"profile": "?", "max_drawdown_pct": None}
@@ -463,16 +479,19 @@ def _evm_cluster_net_flow_rpc(token: str, chain: str, wallets: list[str],
         from src.onchain.evm_archive import ArchiveRPC
         rpc = ArchiveRPC(chain)
         head = rpc.logs_head()
-        # since_iso → fromBlock (BSC/ETH/Base ~ a few s/block; estimate, then cap the
-        # window so a stale baseline can't request a giant range).
-        secs = {"bsc": 3, "ethereum": 12, "base": 2}.get(chain, 3)
+        # since_iso → fromBlock, using LIVE-measured block time (BSC dropped to
+        # ~0.45s; a hardcoded 3s landed fromBlock far in the past and under-covered
+        # the window → missed recent transfers / false-zero flow). Cap by TIME (~2d)
+        # not a fixed block count, so the cap means the same window on any chain.
+        secs = rpc.seconds_per_block()
         if since_iso:
             since_ts = datetime.fromisoformat(since_iso.replace("Z", "+00:00")).timestamp()
             now = datetime.now(timezone.utc).timestamp()
             blocks_ago = int((now - since_ts) / secs) + 50
         else:
-            blocks_ago = 1200
-        blocks_ago = max(50, min(blocks_ago, 28000))   # bound getLogs cost
+            blocks_ago = int(1800 / secs)              # ~30min default
+        cap = int(2 * 86400 / secs)                    # never scan more than ~2 days back
+        blocks_ago = max(50, min(blocks_ago, cap))
         from_block = head - blocks_ago
         decimals = rpc.token_decimals(token)
         scale = float(10 ** decimals)
