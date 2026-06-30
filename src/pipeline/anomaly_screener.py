@@ -36,7 +36,11 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "vol_compression": 12, "consistency": 20, "established": 13,
     # L2 on-chain enrichment
     "cex_outflow": 20, "holders_rising": 25,
-    "smart_money_t1": 35, "smart_money_t2": 25, "smart_money_t3": 15,
+    # Smart-money DOWN-WEIGHTED to confirmation-only: research finds no validated
+    # out-of-sample alpha from following smart-money labels, and ~30% of "worth-
+    # copying" wallets are actually coordinated/manipulative — so it must corroborate
+    # a real operator/concentration signal, never drive a high score on its own.
+    "smart_money_t1": 15, "smart_money_t2": 10, "smart_money_t3": 5,
     "whale_accumulation": 18, "liquidity_rising": 12,
     # L2 effective concentration — the linchpin (one hidden entity controls float)
     "effective_concentration": 45, "hidden_cluster": 30,
