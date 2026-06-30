@@ -48,6 +48,15 @@ _MORALIS_CHAINS = {
 _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
+# Minimum native value (wei) for an incoming transfer to count as REAL funding.
+# `value > 0` is not enough: address-poisoning spam sends dust (observed 2e10 wei =
+# 0.00000002 BNB) from a vanity look-alike of the target — value>0 but not funding.
+# Counting it clusters the VICTIM with the POISONER (the MAME false link). Real gas
+# funding is orders of magnitude larger (the MAME operator's funder sent 60-101 BNB);
+# 1e14 wei (0.0001 native ≈ a few txs of gas) sits 5000x above the dust, far below any
+# genuine funding. Chain-agnostic: poisoning is ~zero-value on every EVM chain.
+MIN_FUNDER_VALUE_WEI = 10**14
+
 
 def _fetch_first_funder_moralis(address: str, chain: str, timeout: int = 20) -> str | None:
     """First incoming native transfer's sender via Moralis (free tier, multi-key
@@ -66,7 +75,7 @@ def _fetch_first_funder_moralis(address: str, chain: str, timeout: int = 20) -> 
             value = int(tx.get("value", "0") or 0)
         except (ValueError, TypeError):
             value = 0
-        if to == address.lower() and value > 0 and frm:
+        if to == address.lower() and value >= MIN_FUNDER_VALUE_WEI and frm:
             return frm
     return None
 
@@ -144,8 +153,10 @@ def _fetch_first_funder_evm(address: str, chain_id: int, key: str, timeout: int 
                 value = int(tx.get("value", "0"))
             except (ValueError, TypeError):
                 value = 0
-            # First incoming funding transfer → `from` is the funder.
-            if to == address.lower() and value > 0 and frm:
+            # First incoming funding transfer → `from` is the funder. Dust-poisoning
+            # spam (value>0 but ~zero) must not count, or the victim clusters with the
+            # poisoner — see MIN_FUNDER_VALUE_WEI.
+            if to == address.lower() and value >= MIN_FUNDER_VALUE_WEI and frm:
                 return frm
         return None
     except Exception as e:

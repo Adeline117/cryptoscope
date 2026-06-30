@@ -78,9 +78,12 @@ def _funder_fanout(funder: str, chain: str) -> int | None:
     data = moralis_client.get(f"{funder}?chain={mchain}&order=DESC&limit=100")
     if not data:
         return None
+    # Count only REAL-value disbursements: dust-poisoning spray (value>0 but ~zero)
+    # would otherwise inflate the fan-out and mislabel a clean funder a disperser.
+    from src.onchain.funder_graph import MIN_FUNDER_VALUE_WEI
     recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
               if (t.get("from_address") or "").lower() == funder.lower()
-              and int(t.get("value", "0") or 0) > 0}
+              and int(t.get("value", "0") or 0) >= MIN_FUNDER_VALUE_WEI}
     return len(recips)
 
 
