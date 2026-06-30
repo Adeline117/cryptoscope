@@ -643,6 +643,7 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             last, base = t.get("last", {}), t.get("baseline", {})
             fired = []
 
+            cpr = cur.get("price")   # current price — used by the momentum/动能熄火 block
             cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
             flow = flows.get(key)
             if flow is not None:
