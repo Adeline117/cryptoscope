@@ -347,11 +347,14 @@ def test_evm_rpc_netflow_fallback_when_moralis_parked(monkeypatch):
                 "data": hex(tokens * 10**18), "blockNumber": hex(blk)}
 
     class FakeRPC:
+        logs_complete = True   # mirror ArchiveRPC: set by get_transfer_logs
         def __init__(self, chain): pass
         def logs_head(self): return 1000
+        def seconds_per_block(self, sample=50000): return 3.0
         def token_decimals(self, token): return 18
         def block_time(self, blk): return 1_780_000_000 + blk
         def get_transfer_logs(self, token, frm, to, chunk=9000):
+            self.logs_complete = True
             return [log(EXT, W, 500, 990),   # external→cluster = BUY 500
                     log(W, EXT, 200, 995)]   # cluster→external = SELL 200
 
