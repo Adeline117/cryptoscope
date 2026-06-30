@@ -730,6 +730,18 @@ def _registration_sanity(token: str, chain: str, wallets: list[str],
                            "非交易型operator,集中度≠坐庄,出货=团队解锁/内幕而非拉砸")
     except Exception:
         cluster_type = None
+    # Solana: a shared feePayer / same Jito-bundle across the cluster wallets is a
+    # high-confidence "one entity" CONFIRMATION (the cleanest Solana cluster edge).
+    bundle_edge = None
+    if chain in ("solana", "sol"):
+        try:
+            from src.onchain.solana_bundle import shared_fee_payer
+            edges = shared_fee_payer(wallets)
+            if edges:
+                bundle_edge = edges[0].get("edge_type")
+                caveats.append(f"✓Solana簇确认:{len(edges)}条同feePayer/bundle边 → 同一实体(高置信)")
+        except Exception:
+            bundle_edge = None
     # Off-chain identity: a real protocol (site/socials/age) behaves differently from
     # an anonymous meme — context the operator view lacked.
     identity = None
@@ -755,7 +767,7 @@ def _registration_sanity(token: str, chain: str, wallets: list[str],
     return {"token_age_days": round(age, 1) if age is not None else None,
             "funder_fanout": fanout, "degen_wallets": degen,
             "cluster_type": cluster_type, "identity": identity, "catalyst": catalyst,
-            "caveats": caveats}
+            "bundle_edge": bundle_edge, "caveats": caveats}
 
 
 def register(token: str, chain: str, symbol: str, wallets: list[str],
