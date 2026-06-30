@@ -311,7 +311,10 @@ def _cluster_balance(token: str, chain: str, wallets: list[str]) -> float | None
         rpc = ArchiveRPC(chain)
         if not rpc.available():
             return None
-        return combined_balance_at(token, wallets, chain, rpc.latest_block(), rpc=rpc)
+        # strict=True: a failed RPC read returns None (UNKNOWN), never a smaller
+        # total — so a flaky node can't manufacture a phantom 庄在卖 / 已减仓.
+        return combined_balance_at(token, wallets, chain, rpc.latest_block(),
+                                   rpc=rpc, strict=True)
     except Exception as e:
         logger.debug("sentinel_balance_failed", token=token, error=str(e))
         return None
@@ -497,6 +500,12 @@ def _evm_cluster_net_flow_rpc(token: str, chain: str, wallets: list[str],
         scale = float(10 ** decimals)
         wl = {w.lower() for w in wallets}
         logs = rpc.get_transfer_logs(token, from_block, head)
+        if not rpc.logs_complete:
+            # A chunk failed — the logs are partial. Returning buy=sell=0 here would
+            # be a false "operator idle / no flow" (the exact mistake that read RPC
+            # outages as "no transfers"). Return None = UNKNOWN; caller won't alert.
+            logger.debug("netflow_incomplete_logs", token=token, chain=chain)
+            return None
         buy = sell = 0.0
         last_buy_blk = last_sell_blk = None
         for lg in logs:

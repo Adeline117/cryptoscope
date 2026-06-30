@@ -75,6 +75,7 @@ class ArchiveRPC:
         self._idx = 0
         self._dec_cache: dict[str, int] = {}
         self._spb: float | None = None
+        self.logs_complete: bool = True   # set by get_transfer_logs; False = partial/failed
 
     def available(self) -> bool:
         return bool(self.rpcs)
@@ -128,9 +129,20 @@ class ArchiveRPC:
     def get_transfer_logs(self, token: str, from_block: int, to_block: int | str = "latest",
                           chunk: int = 9000) -> list[dict]:
         """All Transfer logs for `token` in [from_block, to_block], chunked to respect
-        keyless-RPC range limits. Keyless (publicnode) — no Moralis."""
-        head = self.logs_head() if to_block == "latest" else int(to_block)
+        keyless-RPC range limits. Keyless (publicnode) — no Moralis.
+
+        Sets `self.logs_complete` = whether EVERY chunk succeeded. A failed chunk used
+        to be silently swallowed → callers saw empty/partial logs and concluded
+        "0 transfers / operator idle" from an RPC error (the false-zero that produced
+        most wrong 'no flow' verdicts). Callers MUST check logs_complete before
+        asserting absence of activity."""
+        try:
+            head = self.logs_head() if to_block == "latest" else int(to_block)
+        except Exception:
+            self.logs_complete = False
+            return []
         out: list[dict] = []
+        complete = True
         start = from_block
         while start <= head:
             end = min(start + chunk - 1, head)
@@ -140,8 +152,10 @@ class ArchiveRPC:
                     "fromBlock": hex(start), "toBlock": hex(end)}])
                 out.extend(r.get("result") or [])
             except Exception as e:
+                complete = False   # an RPC error is NOT "no transfers"
                 logger.debug("get_logs_chunk_failed", chain=self.chain, error=str(e)[:80])
             start += chunk
+        self.logs_complete = complete
         return out
 
     def block_time(self, block: int) -> int | None:
@@ -211,14 +225,27 @@ class ArchiveRPC:
 
 
 def combined_balance_at(token: str, addresses: list[str], chain: str,
-                        block: int, rpc: ArchiveRPC | None = None) -> float:
-    """Sum balanceOf for an address set at a given block (one entity's holding)."""
+                        block: int, rpc: ArchiveRPC | None = None,
+                        strict: bool = False) -> float | None:
+    """Sum balanceOf for an address set at a given block (one entity's holding).
+
+    balance_of returns None on RPC error vs 0.0 for a genuinely-empty wallet. The
+    old `if b: total += b` silently dropped BOTH → a failed read made the cluster
+    look smaller → phantom 'distribution' / 庄在卖 on pure RPC flakiness. With
+    strict=True, returns None if ANY read failed (so the caller treats the balance
+    as UNKNOWN rather than understated). Lenient default preserves historical-curve
+    behavior (a missed sample is just skipped)."""
     rpc = rpc or ArchiveRPC(chain)
     total = 0.0
+    failed = False
     for a in addresses:
         b = rpc.balance_of(token, a, block)
-        if b:
-            total += b
+        if b is None:
+            failed = True          # RPC error — NOT a real zero
+            continue
+        total += b
+    if strict and failed:
+        return None
     return total
 
 
