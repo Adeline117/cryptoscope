@@ -706,9 +706,32 @@ def _registration_sanity(token: str, chain: str, wallets: list[str],
                            "非交易型operator,集中度≠坐庄,出货=团队解锁/内幕而非拉砸")
     except Exception:
         cluster_type = None
+    # Off-chain identity: a real protocol (site/socials/age) behaves differently from
+    # an anonymous meme — context the operator view lacked.
+    identity = None
+    try:
+        from src.onchain.token_identity import token_identity
+        idn = token_identity(token, chain)
+        identity = idn.get("profile")
+        if idn.get("profile") == "anon_meme":
+            caveats.append("⚠️匿名meme(无官网/社交、极新): 纯操盘/赌狗盘,叙事支撑为0")
+    except Exception:
+        identity = None
+    # Near-term catalyst: an imminent unlock is a DUMP catalyst (the ESPORTS/KuCoin
+    # class) — surface it so a "loaded operator" isn't read bullishly into an unlock.
+    catalyst = None
+    try:
+        from src.onchain.catalyst_feed import catalyst_for
+        cat = catalyst_for(token, chain)   # contract-address path (symbol optional)
+        if cat.get("has_catalyst"):
+            catalyst = cat.get("detail")
+            caveats.append(f"⚠️临近催化剂({cat.get('window')}): {cat.get('detail')} → 解锁/上市=砸盘窗口")
+    except Exception:
+        catalyst = None
     return {"token_age_days": round(age, 1) if age is not None else None,
             "funder_fanout": fanout, "degen_wallets": degen,
-            "cluster_type": cluster_type, "caveats": caveats}
+            "cluster_type": cluster_type, "identity": identity, "catalyst": catalyst,
+            "caveats": caveats}
 
 
 def register(token: str, chain: str, symbol: str, wallets: list[str],
