@@ -60,6 +60,30 @@ def collect_stats() -> dict:
     snap_latest = _rows("holder_snapshots.db", "SELECT MAX(snapshot_at) FROM holder_snapshots")
     last_snap = snap_latest[0][0] if snap_latest and snap_latest[0][0] else None
 
+    # Stalled/frozen holder feeds — a snapshot source that silently stopped
+    # updating (or serves a cached identical row) makes "latest" lie. Only flag
+    # tokens we are ACTIVELY watching (operator sentinels + live watchlist), so a
+    # real regression like SIREN surfaces without drowning in dormant candidates.
+    stale_snaps = []
+    try:
+        import json as _json
+
+        from src.config import DATA_DIR
+        from src.onchain.holder_snapshot import find_stale_snapshots
+
+        # Operator sentinels are the tokens we monitor CLOSELY — where a frozen
+        # holder feed silently corrupts the analysis (the SIREN 48%-whale ghost).
+        # The watchlist is excluded: it is full of dormant screener entries and
+        # would just re-introduce the noise we scoped out.
+        watched: list[str] = []
+        sf = DATA_DIR / "operator_sentinels.json"
+        if sf.exists():
+            watched += [v.get("token") for v in _json.loads(sf.read_text()).values()
+                        if v.get("token")]
+        stale_snaps = find_stale_snapshots(tokens=watched) if watched else []
+    except Exception:
+        stale_snaps = []
+
     # Tokens with enough history to fire the signal (>=4 snapshots in window)
     ready = _scalar(
         "holder_snapshots.db",
@@ -112,7 +136,11 @@ def collect_stats() -> dict:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "snapshots": {"total": snap_total, "tokens": snap_tokens,
-                      "signal_ready_tokens": ready, "last_snapshot_at": last_snap},
+                      "signal_ready_tokens": ready, "last_snapshot_at": last_snap,
+                      "stale_count": len(stale_snaps),
+                      "stale": [{"token": s["token"], "chain": s["chain"],
+                                 "reason": s["reason"], "age_hours": s["age_hours"]}
+                                for s in stale_snaps[:8]]},
         "signals": {"by_type": signals, "pending_price_checks": sig_pending},
         "watchlist_active": watch_active,
         "funders": {"cached": funders_cached, "resolved": funders_resolved},
@@ -153,6 +181,11 @@ def format_report(stats: dict) -> str:
     L.append(f"  总快照: {snap['total']}  |  追踪 token: {snap['tokens']}")
     L.append(f"  够历史可出信号的 token (≥4快照): {snap['signal_ready_tokens']}")
     L.append(f"  最近快照: {snap['last_snapshot_at'] or '尚无'}")
+    if snap.get("stale_count"):
+        L.append(f"  ⚠️ 数据冻结/停更: {snap['stale_count']} 个 token (该token的持币数据不可信)")
+        for st in snap.get("stale", []):
+            age = f"{st['age_hours']}h" if st.get("age_hours") is not None else "?"
+            L.append(f"    {st['token'][:16]}… [{st['chain']}] {st['reason']} · 距今 {age}")
     L.append("")
     L.append("🎯 信号")
     if s["signals"]["by_type"]:
@@ -194,7 +227,8 @@ def format_telegram(stats: dict) -> str:
         f"━━━━━━━━━━━━━━\n"
         f"📸 快照 {snap['total']} 条 · {snap['tokens']} 个 token\n"
         f"   可出信号(≥4快照): <b>{snap['signal_ready_tokens']}</b>\n"
-        f"🎯 累计信号 {sigs} 条\n"
+        + (f"   ⚠️ 数据冻结/停更: <b>{snap['stale_count']}</b> 个 token\n" if snap.get("stale_count") else "")
+        + f"🎯 累计信号 {sigs} 条\n"
         f"👁 观察名单 {s['watchlist_active']}\n"
         f"🔎 筛选器追踪 {s.get('screener',{}).get('tracked',0)} · 持续候选 {len(s.get('screener',{}).get('top_recurring',[]))}\n"
         f"🏷 标签 拉盘{s.get('labels',{}).get('pump',0)}/横死{s.get('labels',{}).get('dud',0)}\n"

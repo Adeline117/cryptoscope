@@ -193,6 +193,129 @@ def get_snapshots(
     return [dict(zip(cols, r)) for r in rows]
 
 
+# --------------------------------------------------------------------------
+# Freshness guard — catch a holder-data source that has silently STALLED (stops
+# producing new rows) or FROZEN (keeps writing byte-identical cached metrics).
+# Both make the "latest snapshot" lie: SIREN's froze ~2026-06-18 with identical
+# rows, and a stale top-holder list invented a 48% "whale" that was long gone.
+# Pure read + clock injection so it is unit-testable.
+# --------------------------------------------------------------------------
+
+# A snapshot cadence is ~6h; 3 consecutive misses (~18h) means the feed stalled.
+STALE_AFTER_H = 18.0
+# N consecutive byte-identical metric rows = the source is serving a frozen cache.
+FROZEN_RUNS = 3
+
+
+def _parse_iso(ts: str) -> datetime | None:
+    try:
+        d = datetime.fromisoformat(ts)
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def snapshot_freshness(
+    token: str,
+    chain: str,
+    *,
+    stale_after_h: float = STALE_AFTER_H,
+    frozen_runs: int = FROZEN_RUNS,
+    now: datetime | None = None,
+    db_path: Path = DB_PATH,
+) -> dict[str, Any]:
+    """Verdict on whether a token's holder snapshots can be trusted as CURRENT.
+
+    Returns {stale, reason, age_hours, latest, identical_run, n}. `stale=True`
+    means do NOT trust the latest snapshot's holder list / concentration —
+    either the feed stopped (age > stale_after_h) or it is serving a frozen
+    cache (the last `frozen_runs` rows are byte-identical). Never raises.
+    """
+    now = now or datetime.now(timezone.utc)
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            """SELECT snapshot_at, holder_count, top10_pct, top25_pct, gini,
+                      total_supply_observed
+               FROM holder_snapshots WHERE token = ? AND chain = ?
+               ORDER BY snapshot_at DESC LIMIT ?""",
+            (token, chain, max(frozen_runs, 1)),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return {"stale": True, "reason": "no_snapshots", "age_hours": None,
+                "latest": None, "identical_run": 0, "n": 0}
+
+    latest_ts = rows[0][0]
+    latest_dt = _parse_iso(latest_ts)
+    age_h = (now - latest_dt).total_seconds() / 3600.0 if latest_dt else None
+
+    # Count leading run of byte-identical metric rows (newest-first).
+    sig0 = tuple(rows[0][1:])
+    identical_run = 1
+    for r in rows[1:]:
+        if tuple(r[1:]) == sig0:
+            identical_run += 1
+        else:
+            break
+
+    if age_h is not None and age_h > stale_after_h:
+        return {"stale": True, "reason": "stalled", "age_hours": round(age_h, 1),
+                "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
+    if identical_run >= frozen_runs:
+        return {"stale": True, "reason": "frozen", "age_hours": round(age_h, 1) if age_h is not None else None,
+                "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
+    return {"stale": False, "reason": "fresh", "age_hours": round(age_h, 1) if age_h is not None else None,
+            "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
+
+
+# A token snapshotted only a handful of times is a one-shot screener candidate
+# that is SUPPOSED to go dormant — flagging it as "stale" is noise. Only a token
+# that was on a real cadence (>= this many snapshots) and then stopped is a
+# genuine feed regression worth surfacing.
+TRACKED_MIN_SNAPSHOTS = 4
+
+
+def find_stale_snapshots(
+    *, tokens: "list[str] | None" = None,
+    stale_after_h: float = STALE_AFTER_H, frozen_runs: int = FROZEN_RUNS,
+    min_snapshots: int = TRACKED_MIN_SNAPSHOTS,
+    now: datetime | None = None, db_path: Path = DB_PATH,
+) -> list[dict[str, Any]]:
+    """Return stalled/frozen feeds worth surfacing (for health).
+
+    If `tokens` is given (the set we are ACTIVELY watching — operator sentinels +
+    live watchlist), only those are checked: a stalled feed for a token we still
+    care about (SIREN) is a real regression, while a screener candidate that went
+    dormant 12 days ago is not. Without an allowlist, falls back to tokens with
+    >= min_snapshots total rows (had a cadence, then stopped).
+    """
+    conn = _connect(db_path)
+    try:
+        all_pairs = conn.execute(
+            "SELECT DISTINCT token, chain FROM holder_snapshots"
+        ).fetchall() if tokens is not None else conn.execute(
+            "SELECT token, chain FROM holder_snapshots "
+            "GROUP BY token, chain HAVING COUNT(*) >= ?", (min_snapshots,),
+        ).fetchall()
+    finally:
+        conn.close()
+    if tokens is not None:
+        want = {t.lower() for t in tokens}
+        rows = [(t, c) for t, c in all_pairs if t.lower() in want]
+    else:
+        rows = all_pairs
+    out = []
+    for token, chain in rows:
+        v = snapshot_freshness(token, chain, stale_after_h=stale_after_h,
+                               frozen_runs=frozen_runs, now=now, db_path=db_path)
+        if v["stale"]:
+            out.append({"token": token, "chain": chain, **v})
+    return out
+
+
 def list_tokens(db_path: Path = DB_PATH) -> list[tuple[str, str]]:
     """Return [(token, chain)] for every token with at least one snapshot."""
     conn = _connect(db_path)
@@ -512,6 +635,24 @@ def snapshot_token(
         holders = fetch_holders_evm(token, chain_ids.get(chain, 1))
 
     if not holders:
-        logger.info("snapshot_skipped_no_holders", token=token, chain=chain)
+        # Fetch produced nothing → no new row. That silently AGES the latest
+        # snapshot; if it is already past the stall threshold, shout (this is the
+        # exact SIREN failure: feed died, latest froze, stale data read as truth).
+        fresh = snapshot_freshness(token, chain, db_path=db_path)
+        if fresh["stale"] and fresh["reason"] in ("stalled", "no_snapshots"):
+            logger.warning("holder_snapshot_stalled", token=token, chain=chain,
+                           age_hours=fresh["age_hours"], latest=fresh["latest"],
+                           note="holder feed returned no data and the latest snapshot is stale — do NOT trust it")
+        else:
+            logger.info("snapshot_skipped_no_holders", token=token, chain=chain)
         return None
-    return save_snapshot(token, chain, holders, db_path=db_path)
+    result = save_snapshot(token, chain, holders, db_path=db_path)
+    # Source may keep returning a frozen cache (rows saved, but identical). Detect
+    # a run of byte-identical metrics and warn so a cached feed can't masquerade
+    # as live data.
+    fresh = snapshot_freshness(token, chain, db_path=db_path)
+    if fresh["reason"] == "frozen":
+        logger.warning("holder_snapshot_frozen", token=token, chain=chain,
+                       identical_run=fresh["identical_run"],
+                       note="holder source returned identical metrics for consecutive snapshots — likely a frozen cache")
+    return result
