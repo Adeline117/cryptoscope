@@ -216,8 +216,13 @@ class ArchiveRPC:
         try:
             r = self._call("eth_call", [{"to": token, "data": data}, blk])
             res = r.get("result")
+            # An EMPTY result ("0x"/null) is a SOFT failure (rate-limited node returns
+            # no data without raising) — NOT a real zero. A genuinely-empty wallet
+            # returns 64 hex zeros ("0x000…0"), which falls through to int()=0 below.
+            # Returning 0.0 here let a flaky read collapse the cluster to 0 → phantom
+            # total-dump 庄在卖 (strict=True only caught hard exceptions, not this).
             if not res or res == "0x":
-                return 0.0
+                return None
             return int(res, 16) / float(10 ** self.token_decimals(token))
         except Exception as e:
             logger.debug("balance_of_failed", token=token, holder=holder, error=str(e))
