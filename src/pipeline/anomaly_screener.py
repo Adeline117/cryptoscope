@@ -456,6 +456,27 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
         return False
 
 
+def _cluster_confidence(conc: dict) -> int:
+    """0-100 confidence that the dominant entity is a COORDINATED single-entity
+    operator cluster — the "not binary" upgrade. PURE (no network): synthesized from
+    evidence effective_concentration_signal already computed. Research disciplines
+    baked in: (a) the Sybil clustering UPLIFT (gap) is the strongest coordination
+    signal, weighted highest; (b) cluster size = sample support; (c) incomplete
+    funder data CAPS confidence (incomplete ≠ confident); (d) deliberately does NOT
+    use funder-rarity/fan-out — verified to misfire on our MULTI-TOKEN operators
+    (SIREN's funder funds 89 addrs across tokens → looks like a disperser)."""
+    lg = conc.get("largest_entity_pct") or 0           # control share of supply
+    gap = conc.get("concentration_gap") or 0           # nominal→effective uplift (Sybil)
+    n = len(conc.get("dominant_cluster_wallets") or [])  # coordinated wallet count
+    score = (min(lg, 30) * 0.8        # control → up to 24
+             + min(gap, 25) * 1.6     # Sybil uplift (strongest) → up to 40
+             + min(n, 15) * 2.4)      # sample/coordination → up to 36
+    conf = min(100, int(round(score)))
+    if not conc.get("funder_complete"):   # couldn't verify the funding graph
+        conf = min(conf, 45)
+    return conf
+
+
 def effective_concentration_signal(holders: list[dict], token: str, chain: str) -> dict | None:
     """The linchpin: does ONE private entity control a big share of the FLOAT,
     hidden across many wallets (Sybil)? This is what separates a real operator
@@ -588,7 +609,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
                 by_funder[f] = by_funder.get(f, 0.0) + b
         if by_funder:
             dominant_funder = max(by_funder, key=by_funder.get)
-    return {
+    out = {
         "largest_entity_pct": eff_pct,           # biggest hidden entity / supply
         "largest_address_pct": nom_pct,          # biggest single address / supply
         "concentration_gap": round(eff_pct - nom_pct, 2),  # clustering uplift
@@ -599,6 +620,8 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         "dominant_cluster_wallets": dominant_cluster_wallets,
         "disperser_funders_stripped": len(funder_dispersers),
     }
+    out["cluster_confidence"] = _cluster_confidence(out)
+    return out
 
 
 def onchain_enrich(token: str, chain: str) -> dict | None:
