@@ -57,6 +57,14 @@ PRICE_DD = 0.18          # price down >=18% from a recent high → 急跌 (GRADU
                          # even if no single cycle dropped 15% — what missed EVAA)
 LAUNCH_PRICE = 0.25      # price up >=25% vs last check → launch backstop
 LAUNCH_VOL = 3.0         # 24h volume >=3x baseline → volume backstop
+# ===== 控浮筹型点火 (the MAME class) =====
+# A high-control operator (e.g. MAME: 44.5% frozen, ~5% float) marks up by RESTRICTING
+# the sellable float, NOT by buying — so cluster-balance watching misses the ignition.
+# These two are operator-ATTRIBUTABLE on a controlled-float token (no independent buyer
+# of size exists), so they fit the "only 庄 info" rule — both are GATED on the cluster
+# not being the seller, so a retail-driven move never trips them.
+FLOAT_TIGHTEN = 0.15     # LP token float fell >=15% vs last (cluster not selling) → 浮筹收紧 (pre-ignition)
+BREAKOUT_UP = 0.12       # price broke >=12% above its running peak (cluster flat/up) → 控盘突破 (ignition)
 
 
 import contextlib
@@ -113,6 +121,7 @@ def _dex(token: str, chain: str) -> dict:
             "price": float(p.get("priceUsd") or 0),
             "liquidity": float((p.get("liquidity", {}) or {}).get("usd", 0) or 0),
             "vol24": float((p.get("volume", {}) or {}).get("h24", 0) or 0),
+            "pair": p.get("pairAddress"),   # deepest LP — its token balance = the tradable float
         }
     except Exception as e:
         logger.debug("sentinel_dex_failed", token=token, error=str(e))
@@ -614,9 +623,24 @@ def _balanceof_reliable(token: str, chain: str, wallets: list[str]) -> bool:
         return True
 
 
+def _lp_float(token: str, chain: str, pair: str | None) -> float | None:
+    """The deepest LP's token balance = the tradable float. For a high-control operator
+    that marks up by RESTRICTING float (MAME class), a shrinking float is the ignition
+    tell that cluster-balance watching misses. EVM only (archive balanceOf); None if
+    undeterminable."""
+    if not pair or chain in ("solana", "sol"):
+        return None
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        return ArchiveRPC(chain).balance_of(token, pair, "latest")
+    except Exception:
+        return None
+
+
 def _measure(token: str, chain: str, wallets: list[str], symbol: str = "") -> dict:
     m = _dex(token, chain)
     m["cluster_balance"] = _cluster_balance(token, chain, wallets)
+    m["float_lp"] = _lp_float(token, chain, m.get("pair"))
     m["funding"] = _funding_rate(symbol)
     return m
 
@@ -836,11 +860,30 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 drop = (pl - cl) / pl * 100
                 fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
 
-            # PRICE/volume signals removed by user directive — "only 庄 (operator)
-            # info". The system alerts on the operator's ACTIONS (庄在买/庄在卖/庄停手)
-            # + RUG (liquidity pull = insider action). Pure price moves (砸盘/拉升/
-            # 放量/急跌) are NOT operator info, so they don't alert. EVAA's -35% bleed
-            # correctly produced no alert: the operator did NOT sell (it was retail).
+            # ===== 控浮筹型点火 (the MAME class) — operator-attributable, so it fits
+            # the "only 庄 info" rule. A high-control operator marks up by tightening the
+            # float, NOT by buying, so 庄在买 never fires; these catch that. Both are
+            # GATED on the cluster NOT being the seller (cb >= pb), so a retail-driven
+            # move can't trip them. Not a rug (RUG already handled above). =====
+            not_selling = (cb is not None and pb is not None and cb >= pb * 0.99)
+            fl, pf = cur.get("float_lp"), last.get("float_lp")
+            if not_selling and fl is not None and pf and pf > 0 \
+                    and fl < pf * (1 - FLOAT_TIGHTEN) and not (cl and pl and cl < pl * (1 - RUG_DROP)):
+                tg = (pf - fl) / pf * 100
+                fired.append(("浮筹收紧", f"可交易浮筹 -{tg:.0f}% ({pf:,.0f}→{fl:,.0f}枚) 且庄未卖 "
+                              "→ 操盘方在锁浮筹/吸走流通 = 拉升前兆,埋伏"))
+            # Controlled breakout: price clears its running peak while the cluster holds.
+            peak = last.get("price_peak") or base.get("price") or 0
+            if not_selling and cpr and peak and cpr > peak * (1 + BREAKOUT_UP):
+                fired.append(("控盘突破", f"价突破前高 +{(cpr/peak-1)*100:.0f}% (${peak:.5f}→${cpr:.5f}) "
+                              "且庄满仓未卖 → 控盘式拉升点火,做多"))
+            t["price_peak"] = max(peak, cpr or 0)   # advance running peak
+
+            # PRICE/volume signals are otherwise OFF by user directive — "only 庄 info".
+            # The system alerts on the operator's ACTIONS (庄在买/庄在卖/庄停手) + RUG +
+            # the controlled-float ignition above (operator-attributable on a token whose
+            # float the cluster controls). PURE retail price moves (砸盘/急跌/放量 with no
+            # operator action) still do NOT alert — EVAA's -35% retail bleed stays silent.
 
             # ===== STALL: momentum fizzled (proactively report inaction) =====
             # After a buy/launch, if price faded from its post-buy high AND the
@@ -898,7 +941,7 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             if fired:
                 kset = {k for k, _ in fired}
                 phase = ("sell" if kset & {"庄在卖", "阴跌出货", "RUG"} else
-                         "buy" if kset & {"庄在买"} else
+                         "buy" if kset & {"庄在买", "控盘突破", "浮筹收紧"} else
                          "stall" if kset & {"庄停手", "动能熄火"} else "other")
                 if phase == t.get("last_phase"):
                     fired = []           # same phase as last alert → suppress repeat
@@ -914,7 +957,7 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                     if fund is not None and fund > 0.03:
                         fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
                     action += fstr
-                elif kinds & {"庄在买", "拉升"}:          # operator marking up / launch
+                elif kinds & {"庄在买", "拉升", "控盘突破", "浮筹收紧"}:   # operator marking up / launch
                     sl = t.get("second_leg", "")
                     action = "🟢🟢 二波启动!最高优先 做多" if "二波候选" in sl \
                         else "🟢 埋伏 / 做多(跟庄)"
