@@ -866,8 +866,12 @@ def screen_universe(queries: list[str] | None = None, max_out: int = 15) -> list
 
         for c in cands:
             if c["score"] >= 80:
+                # effective_top_pct must hold the REAL effective concentration
+                # (share of supply), not the screener score — the column was being
+                # fed c["score"] (hence impossible "198%" values).
                 watchlist.add_to_watchlist(c["address"], c["chain"],
-                                           c.get("score", 0), symbol=c.get("symbol", ""))
+                                           c.get("largest_entity_pct") or 0,
+                                           symbol=c.get("symbol", ""))
     except Exception as e:
         logger.debug("watchlist_add_failed", error=str(e))
 
