@@ -75,7 +75,10 @@ def _funder_fanout(funder: str, chain: str) -> int | None:
               "arbitrum": "arbitrum", "optimism": "optimism", "polygon": "polygon"}.get(chain)
     if not mchain or not moralis_client.available():
         return None
-    data = moralis_client.get(f"{funder}?chain={mchain}&order=ASC&limit=100")
+    # DESC (recent activity), not ASC: a month-old funder's OLDEST 100 txns are its
+    # own funding-in (received USDT, sent no native yet) → ASC counted 0 recipients and
+    # silently cleared a real disperser (MAME's funder). Recent disbursement is the tell.
+    data = moralis_client.get(f"{funder}?chain={mchain}&order=DESC&limit=100")
     if not data:
         return None
     recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
