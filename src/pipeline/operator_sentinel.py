@@ -693,8 +693,22 @@ def _registration_sanity(token: str, chain: str, wallets: list[str],
                 caveats.append(f"⚠️{spray}个钱包近100笔刷>=15种代币: serial-degen特征,非纪律单仓operator")
     except Exception:
         degen = None
+    # Entity composition: a cluster that is mostly multisig/treasury/contract is
+    # TEAM/CUSTODY control (ESPORTS: owner Safe + treasury), not a trading operator
+    # you can "follow"; flag it so its concentration isn't read as an operator setup.
+    cluster_type = None
+    try:
+        from src.onchain.entity_classify import classify_cluster
+        cc = classify_cluster(wallets, chain)
+        cluster_type = cc["summary"]
+        if cc["eoa_share_of_members"] < 0.34 and cc["counts"]:
+            caveats.append(f"⚠️簇构成 {cc['summary']}: 多为多签/金库/合约=团队/托管控制,"
+                           "非交易型operator,集中度≠坐庄,出货=团队解锁/内幕而非拉砸")
+    except Exception:
+        cluster_type = None
     return {"token_age_days": round(age, 1) if age is not None else None,
-            "funder_fanout": fanout, "degen_wallets": degen, "caveats": caveats}
+            "funder_fanout": fanout, "degen_wallets": degen,
+            "cluster_type": cluster_type, "caveats": caveats}
 
 
 def register(token: str, chain: str, symbol: str, wallets: list[str],
