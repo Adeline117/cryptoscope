@@ -408,7 +408,9 @@ async def _run_operator_hunt():
     if strong:
         msg = "🎯 <b>操作者猎手 — 隐藏控盘嫌疑</b>\n━━━━━━━━━━\n"
         for s in strong[:8]:
-            msg += (f"<b>{s['symbol']}</b> [{s['chain']}] {s.get('shape')} "
+            conf = s.get("cluster_confidence")
+            conf_str = f" 置信{conf}" if conf is not None else ""
+            msg += (f"<b>{s['symbol']}</b> [{s['chain']}] {s.get('shape')}{conf_str} "
                     f"实体{s['largest_entity_pct']:.0f}%供应 缺口{s['concentration_gap']:+.0f}\n"
                     f"<code>{s['address']}</code>\n")
         await send_alert(msg)

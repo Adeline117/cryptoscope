@@ -222,6 +222,7 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
             "largest_entity_pct": lg, "largest_address_pct": conc.get("largest_address_pct", 0),
             "concentration_gap": gap, "entity_count": conc.get("entity_count"),
             "eoa_analyzed": conc.get("eoa_analyzed"), "funder_complete": fc,
+            "cluster_confidence": conc.get("cluster_confidence"),   # 0-100 (informational)
             "op_score": round(op_score, 1), "shape": shape,
             "dominant_funder": conc.get("dominant_funder"),
             "wallets": conc.get("dominant_cluster_wallets") or [],
