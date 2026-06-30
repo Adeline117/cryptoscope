@@ -73,6 +73,7 @@ class ArchiveRPC:
         self.chain = chain
         self.rpcs = _default_rpcs(chain)
         self._idx = 0
+        self._dec_cache: dict[str, int] = {}
 
     def available(self) -> bool:
         return bool(self.rpcs)
@@ -151,20 +152,33 @@ class ArchiveRPC:
             return None
 
     def token_decimals(self, token: str) -> int:
+        key = token.lower()
+        if key in self._dec_cache:
+            return self._dec_cache[key]
         try:
             r = self._logs_call("eth_call", [{"to": token, "data": DECIMALS}, "latest"])
             res = r.get("result")
-            return int(res, 16) if res and res != "0x" else 18
+            dec = int(res, 16) if res and res != "0x" else 18
         except Exception:
-            return 18
+            dec = 18
+        # Sanity-clamp: a bogus read must never silently mis-scale balances.
+        if not (0 <= dec <= 36):
+            dec = 18
+        self._dec_cache[key] = dec
+        return dec
 
     def balance_of(self, token: str, holder: str, block: int | str = "latest") -> float | None:
+        # Scale by the token's ACTUAL decimals — hardcoding /1e18 understated every
+        # non-18-decimal token (many BSC tokens are 9), which collapsed the sentinel's
+        # magnitude gate (sell_min = OP_SELL*cb ≈ 0) and fired phantom 庄在卖.
         data = BALANCE_OF + holder[2:].lower().rjust(64, "0")
         blk = block if isinstance(block, str) else hex(block)
         try:
             r = self._call("eth_call", [{"to": token, "data": data}, blk])
             res = r.get("result")
-            return int(res, 16) / 1e18 if res and res != "0x" else 0.0
+            if not res or res == "0x":
+                return 0.0
+            return int(res, 16) / float(10 ** self.token_decimals(token))
         except Exception as e:
             logger.debug("balance_of_failed", token=token, holder=holder, error=str(e))
             return None
