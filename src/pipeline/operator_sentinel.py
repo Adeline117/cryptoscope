@@ -805,10 +805,24 @@ def check_run(use_transfers: bool = False) -> list[dict]:
     measured = {k: _measure(t["token"], t["chain"], t["wallets"], t.get("symbol", ""))
                 for k, t in targets.items()}
     flows = {}
+    cex_flows: dict = {}
     if use_transfers:
         flows = {k: cluster_net_flow(t["token"], t["chain"], t["wallets"],
                                      (t.get("last", {}) or {}).get("flow_ts"))
                  for k, t in targets.items()}
+        # CEX deposit-flow = the #1 LEADING dump signal: an operator cluster sending
+        # tokens to an exchange deposit address precedes the sell by minutes-hours.
+        # Only on the 5-min transfer pass (it's a getLogs scan). Pass the measured
+        # cluster_balance so it doesn't re-fetch.
+        try:
+            from src.onchain.cex_flow import cex_outflow_signal
+            cex_flows = {k: cex_outflow_signal(
+                t["token"], t["chain"], t["wallets"],
+                (t.get("last", {}) or {}).get("flow_ts"),
+                cluster_balance=(measured.get(k) or {}).get("cluster_balance"))
+                for k, t in targets.items()}
+        except Exception as e:
+            logger.debug("cex_flow_pass_failed", error=str(e)[:80])
     with _state_lock():
         data = _load()  # re-read under lock (another process may have updated)
         alerts = []
@@ -821,6 +835,13 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 return
             last, base = t.get("last", {}), t.get("baseline", {})
             fired = []
+
+            # CEX deposit-flow — LEADING dump signal (operator → exchange deposit
+            # precedes the sell). Only when the scan completed (incomplete = unknown).
+            cxf = cex_flows.get(key)
+            if cxf and cxf.get("has_signal") and cxf.get("complete"):
+                fired.append(("CEX充值", f"操盘簇向交易所充值 {cxf.get('cex_outflow', 0):,.0f}"
+                              f"(持仓{cxf.get('pct_of_cluster', 0):.0f}%) → 即将砸盘,逃命/做空"))
 
             cpr = cur.get("price")   # current price — used by the momentum/动能熄火 block
             cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
@@ -943,7 +964,7 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # immediately (no time delay).
             if fired:
                 kset = {k for k, _ in fired}
-                phase = ("sell" if kset & {"庄在卖", "阴跌出货", "RUG"} else
+                phase = ("sell" if kset & {"庄在卖", "阴跌出货", "RUG", "CEX充值"} else
                          "buy" if kset & {"庄在买", "控盘突破", "浮筹收紧"} else
                          "stall" if kset & {"庄停手", "动能熄火"} else "other")
                 if phase == t.get("last_phase"):
@@ -955,7 +976,7 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 fund = cur.get("funding")
                 kinds = {k for k, _ in fired}
                 fstr = f"(费率 {fund:+.3f}%)" if fund is not None else ""
-                if kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG"}:    # operator exiting / dump
+                if kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG", "CEX充值"}:    # operator exiting / dump
                     action = "🔴 顶部跑 / 做空"
                     if fund is not None and fund > 0.03:
                         fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
