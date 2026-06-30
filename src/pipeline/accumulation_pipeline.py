@@ -137,6 +137,15 @@ def _build_series(token: str, chain: str) -> dict | None:
     if not history:
         return None
 
+    # Freshness gate (enforce, don't just report): a stalled/frozen holder feed makes
+    # the latest snapshot a ghost — the SIREN "48% whale that was long gone" case.
+    # Building a concentration/divergence signal on it is worse than no signal.
+    fresh = hs.snapshot_freshness(token, chain)
+    if fresh.get("stale"):
+        logger.debug("series_skipped_stale_snapshot", token=token, chain=chain,
+                     reason=fresh.get("reason"), age_hours=fresh.get("age_hours"))
+        return None
+
     # Collect every address seen across snapshots, resolve funders once.
     from src.onchain.entity_clustering import _norm
 
