@@ -13,14 +13,58 @@ false exit signal.
 from __future__ import annotations
 
 
+# BSC CEX hot/deposit wallets — sourced from Dune labels.owner_addresses (verified,
+# not guessed) and FILTERED to real exchanges: DEX aggregators (bitget_dex_aggregator)
+# and bridges (StarGate) were deliberately excluded — a transfer to a router/bridge is
+# a swap/bridge, NOT a CEX deposit, so labeling them CEX would false-fire the dump
+# signal. whale_tracker's set is ETH-centric; this lifts cex_flow's recall on BSC,
+# our main chain (operator→CEX-deposit is the #1 leading dump signal).
+BSC_CEX_SUPPLEMENT: dict[str, str] = {
+    "0x4aefa39caeadd662ae31ab0ce7c8c2c9c0a013e8": "Binance",
+    "0x25681ab599b4e2ceea31f8b498052c53fc2d74db": "Binance",
+    "0xef7fb88f709ac6148c07d070bc71d252e8e13b92": "Binance",
+    "0x07b664c8af37eddaa7e3b6030ed1f494975e9dfb": "Binance",
+    "0xaba2d404c5c41da5964453a368aff2604ae80a14": "Binance",
+    "0x43684d03d81d3a4c70da68febdd61029d426f042": "Binance",
+    "0xe7804c37c13166ff0b37f5ae0bb07a3aebb6e245": "Binance",
+    "0x34ea4138580435b5a521e460035edb19df1938c1": "Binance",
+    "0xc9ebc59a7590e52b0904817f172ac82fc66a530b": "Coinbase",
+    "0x829e3c7781a6ac8cd864cd8437a664ec07da75a8": "Coinbase",
+    "0xe7178ad747f2c12ab1f8332e61cf6e756815d5c6": "Kraken",
+    "0xb604f2d512eaa32e06f1ac40362bc9157ce5da96": "Kraken",
+    "0xa861678bee80035114b47615142e9302139a8c32": "Kraken",
+    "0xadae2f3b0db76cb3eafe76a8bf99b93f099c140a": "Kraken",
+    "0xf72d20ff0972a36b01412cddda0bb1ba1a9d3d93": "Kraken",
+    "0xc538f3351e0b8d3ed53402ea8f316898c160ca29": "Kraken",
+    "0xfa820671257a3bf42379c7c4deeaf2f05500a3e4": "Kraken",
+    "0xa40dfee99e1c85dc97fdc594b16a460717838703": "Kraken",
+    "0x00d3c53b1ec47932c25595ba2e53e9db20fc7364": "Kraken",
+    "0xe62e39a62672b54928ec3bce10fd0368a628afbc": "Kraken",
+    "0xa39fed0345d617370b740d63e0a019a202b04f2e": "Kraken",
+    "0xed9b8f05224b881a222ece2e20bd2f4bdb71d0f8": "Kraken",
+    "0xb3be595ab898568567d08b3f179443a19e034d50": "Kraken",
+    "0xf4dd9bc7ae7ae04502ec85fb9f4ee0463e905b20": "Kraken",
+    "0x2c04af9362797bdc4b182e29e0c58440411a4481": "Kraken",
+    "0x6a68d4acff1a1dacc80e4ae653543e0d2402803e": "Kraken",
+    "0x8af3827a41c26c7f32c81e93bb66e837e0210d5c": "Kraken",
+    "0x0162cd2ba40e23378bf0fd41f919e1be075f025f": "MEXC",
+    "0xdf90c9b995a3b10a5b8570a47101e6c6a29eb945": "MEXC",
+    "0xb86f1061e0d79e8319339d5fdbb187d4e7ad3300": "MEXC",
+    "0xc2149f0d56e227e39077bf4d592f6314098f3b29": "MEXC",
+}
+
+
 def evm_exchanges() -> dict[str, str]:
-    """EVM exchange addresses (lowercased) → label, from whale_tracker."""
+    """EVM exchange addresses (lowercased) → label: whale_tracker (ETH-centric) +
+    the Dune-sourced BSC supplement."""
+    out = dict(BSC_CEX_SUPPLEMENT)
     try:
         from src.collectors.whale_tracker import WhaleTrackerCollector
 
-        return {a.lower(): n for a, n in WhaleTrackerCollector.KNOWN_EXCHANGES.items()}
+        out.update({a.lower(): n for a, n in WhaleTrackerCollector.KNOWN_EXCHANGES.items()})
     except Exception:
-        return {}
+        pass
+    return out
 
 
 # Major Solana CEX hot/deposit wallets (publicly labeled on Solana explorers).
