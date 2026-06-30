@@ -812,10 +812,13 @@ def check_run(use_transfers: bool = False) -> list[dict]:
     with _state_lock():
         data = _load()  # re-read under lock (another process may have updated)
         alerts = []
-        for key, t in data.items():
+        # Per-target isolation: one token raising must NOT abort the whole pass and
+        # blind every other sentinel. The body lives in a nested fn (same indent, so
+        # it's unchanged — continue→return); the loop below runs it under try/except.
+        def _check_one(key, t):
             cur = measured.get(key)
             if cur is None:
-                continue
+                return
             last, base = t.get("last", {}), t.get("baseline", {})
             fired = []
 
@@ -995,6 +998,13 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 if v is not None:
                     merged[k] = v
             t["last"] = merged
+
+        for key, t in data.items():
+            try:
+                _check_one(key, t)
+            except Exception as e:
+                logger.warning("sentinel_target_failed",
+                               symbol=(t or {}).get("symbol", key), error=str(e)[:100])
         _save(data)
     return alerts
 
