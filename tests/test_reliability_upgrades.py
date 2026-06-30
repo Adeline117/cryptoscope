@@ -105,9 +105,21 @@ def test_balance_of_respects_18_decimals(monkeypatch):
 
 
 @pytest.mark.parametrize("res", ["0x", "", None])
-def test_balance_of_empty_result_is_zero(monkeypatch, res):
+def test_balance_of_empty_result_is_none_not_zero(monkeypatch, res):
+    # An empty/null RPC result is a SOFT failure (rate-limited node), NOT a real
+    # zero — must return None so a flaky read can't collapse the cluster to 0 and
+    # fire a phantom total-dump 庄在卖. (A genuinely-empty wallet returns 64 hex
+    # zeros, tested separately below.)
     rpc = ArchiveRPC("ethereum")
     monkeypatch.setattr(rpc, "_call", lambda *a, **k: {"result": res})
+    monkeypatch.setattr(rpc, "token_decimals", lambda token: 18)
+    assert rpc.balance_of("0xtoken", "0x" + "ef" * 20) is None
+
+
+def test_balance_of_real_zero_balance(monkeypatch):
+    # 64 hex zeros = a genuinely-empty wallet → 0.0 (distinct from the soft-fail None).
+    rpc = ArchiveRPC("ethereum")
+    monkeypatch.setattr(rpc, "_call", lambda *a, **k: {"result": "0x" + "0" * 64})
     monkeypatch.setattr(rpc, "token_decimals", lambda token: 18)
     assert rpc.balance_of("0xtoken", "0x" + "ef" * 20) == 0.0
 
