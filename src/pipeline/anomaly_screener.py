@@ -456,6 +456,18 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
         return False
 
 
+# Confirmed MULTI-TOKEN operator funders — exempt from the disperser strip. A real
+# operator that runs several 妖币 funds its own wallets across many tokens, so by raw
+# fan-out it looks like a disperser (SIREN/EVAA family 0x6596da8b funds 89 addrs) and
+# gets wrongly stripped → the operator's cluster collapses (the false-negative a live
+# regression exposed). Curated allow-list (the pro approach) protects known operators
+# without weakening the CEX/launchpad strip. See memory funder-rarity-doesnt-transfer.
+KNOWN_OPERATOR_FUNDERS = {
+    "0x6596da8b65995d5feacff8c2936f0b7a2051b0d0",  # SIREN/EVAA/SKYAI family root
+    "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161",  # SIREN secondary
+}
+
+
 def _cluster_confidence(conc: dict) -> int:
     """0-100 confidence that the dominant entity is a COORDINATED single-entity
     operator cluster — the "not binary" upgrade. PURE (no network): synthesized from
@@ -566,6 +578,8 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         multi = {f for f in by_funder_pre
                  if sum(1 for a in bal_map if funders.get(a) == f) >= 2}
         for f in sorted(multi, key=by_funder_pre.get, reverse=True)[:12]:
+            if f.lower() in KNOWN_OPERATOR_FUNDERS:
+                continue  # confirmed multi-token operator — never strip as disperser
             if _funder_is_disperser(f, chain):
                 funder_dispersers.append(f)
         if funder_dispersers:
