@@ -220,12 +220,71 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
             "concentration_gap": gap, "entity_count": conc.get("entity_count"),
             "eoa_analyzed": conc.get("eoa_analyzed"), "funder_complete": fc,
             "op_score": round(op_score, 1), "shape": shape,
+            "dominant_funder": conc.get("dominant_funder"),
+            "wallets": conc.get("dominant_cluster_wallets") or [],
             "url": p.get("url", ""),
         })
         time.sleep(0.3)
 
     suspects.sort(key=lambda s: -s["op_score"])
     return suspects
+
+
+def auto_promote(suspects: list[dict], max_promote: int = 3) -> list[dict]:
+    """STRICT auto-registration: a hunt suspect becomes a sentinel ONLY if it clears
+    EVERY hard gate — the boundary that lets the daily hunt seed sentinels without
+    re-introducing the MAME false positive (4-day, disperser-funded, degen play).
+
+    Gates (ALL required): operator shape (隐藏簇/混合), funder resolved + focused
+    (the disperser downgrade already neutered fan-out>40), token age >= 14d, cluster
+    is mostly trading EOAs (not team multisig/treasury), identity not anon-meme, and
+    a PROVEN distribution history (聪明庄 — has actually pumped→sold before). Returns
+    the promoted records. Conservative by design: most suspects won't qualify."""
+    from src.onchain.entity_classify import classify_cluster
+    from src.onchain.token_identity import token_identity
+    from src.pipeline.operator_sentinel import (
+        _distribution_history, _load, _token_age_days, register)
+
+    existing = _load()
+    promoted: list[dict] = []
+    for s in suspects:
+        if len(promoted) >= max_promote:
+            break
+        chain, token = s.get("chain"), s.get("address")
+        wallets = s.get("wallets") or []
+        if not token or len(wallets) < 1:
+            continue
+        if f"{chain}:{str(token).lower()}" in existing:
+            continue
+        if s.get("shape") not in ("隐藏簇", "混合") or not s.get("funder_complete"):
+            continue
+        age = _token_age_days(token, chain)
+        if age is None or age < 14:                       # kills the MAME class
+            continue
+        try:                                              # mostly trading EOAs?
+            if classify_cluster(wallets, chain).get("eoa_share_of_members", 0) < 0.5:
+                continue
+        except Exception:
+            continue
+        try:                                              # not an anonymous meme
+            if token_identity(token, chain).get("profile") == "anon_meme":
+                continue
+        except Exception:
+            pass
+        try:                                              # PROVEN profit-taker
+            if "聪明庄" not in (_distribution_history(token, chain, wallets).get("profile") or ""):
+                continue
+        except Exception:
+            continue
+        try:
+            register(token, chain, s.get("symbol", ""), wallets, funder=s.get("dominant_funder"))
+            promoted.append({"symbol": s.get("symbol"), "token": token, "chain": chain,
+                             "wallets": len(wallets), "age_days": round(age, 1)})
+            logger.info("auto_promoted_sentinel", symbol=s.get("symbol"),
+                        token=token, chain=chain, age_days=round(age, 1))
+        except Exception as e:
+            logger.debug("auto_promote_failed", token=token, error=str(e)[:80])
+    return promoted
 
 
 def format_suspects(suspects: list[dict], top: int = 12) -> str:

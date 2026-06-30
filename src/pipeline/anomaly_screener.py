@@ -565,6 +565,12 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         entity_bal[ent] = entity_bal.get(ent, 0.0) + b
     largest_entity = max(entity_bal.values()) if entity_bal else 0.0
     largest_addr = max(bal_map.values()) if bal_map else 0.0
+    # Member wallets of the dominant entity — needed to actually register a sentinel
+    # (auto-promote). Without this the hunt only knew the % but not WHICH wallets.
+    largest_entity_id = max(entity_bal, key=entity_bal.get) if entity_bal else None
+    dominant_cluster_wallets = sorted(
+        (a for a in bal_map if mapping.get(a, a) == largest_entity_id),
+        key=lambda a: bal_map.get(a, 0.0), reverse=True) if largest_entity_id else []
     eff_pct = round(largest_entity / total_supply * 100, 2)   # share of supply
     nom_pct = round(largest_addr / total_supply * 100, 2)     # biggest single addr
     # Dominant funder = the funder whose funded wallets sum to the most balance —
@@ -586,6 +592,7 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         "eoa_analyzed": len(eoa),
         "funder_complete": bool(funders),
         "dominant_funder": dominant_funder,
+        "dominant_cluster_wallets": dominant_cluster_wallets,
         "disperser_funders_stripped": len(funder_dispersers),
     }
 

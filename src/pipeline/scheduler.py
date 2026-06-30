@@ -384,10 +384,23 @@ async def _run_majors_monitor():
 
 async def _run_operator_hunt():
     logger.info("scheduled_operator_hunt")
-    from src.pipeline.operator_hunt import hunt, format_suspects
+    from src.pipeline.operator_hunt import auto_promote, hunt
     from src.distribution.telegram_sender import send_alert
 
     suspects = hunt()
+    # STRICT auto-promotion: any suspect clearing EVERY hard gate (age>=14d, focused
+    # funder, mostly-EOA cluster, non-anon identity, proven 聪明庄 history) is
+    # registered as a sentinel automatically — closes the manual hunt→sentinel gap
+    # without re-admitting the MAME class.
+    try:
+        promoted = auto_promote(suspects)
+        if promoted:
+            pm = "🤖 <b>自动晋升哨兵(过全部硬门)</b>\n━━━━━━━━━━\n" + "\n".join(
+                f"<b>{p['symbol']}</b> [{p['chain']}] {p['wallets']}钱包 · {p['age_days']:.0f}天"
+                for p in promoted)
+            await send_alert(pm)
+    except Exception as e:
+        logger.debug("auto_promote_job_failed", error=str(e)[:80])
     # Only alert on real hidden-Sybil operators (隐藏簇) or mixed — not single-wallet
     # team/treasury concentration, and never pegs/majors (filtered upstream).
     strong = [s for s in suspects if s.get("funder_complete")
