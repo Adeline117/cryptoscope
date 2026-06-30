@@ -190,6 +190,13 @@ def accumulation_footprint(pair: dict) -> dict | None:
       - VOLATILITY COMPRESSION: recent price range tightening (coiling).
       - CONSISTENCY across m5/h1/h6; volume vs liquidity; established age.
     """
+    # Blue-chip / stablecoin / wrapped / LST veto: their concentration is custody or
+    # treasury, never an operator — this is what flooded the watchlist with LINK /
+    # WBTC / USDT / RLUSD / weETH. Reject before scoring (cheap, symbol-based).
+    from src.onchain.token_registry import is_non_operator
+    if is_non_operator((pair.get("baseToken", {}) or {}).get("symbol")):
+        return None
+
     txns = pair.get("txns", {}) or {}
     pc = pair.get("priceChange", {}) or {}
     vol = pair.get("volume", {}) or {}

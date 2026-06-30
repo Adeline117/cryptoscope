@@ -28,10 +28,8 @@ TARGETS_FILE = Path("data/backtest_targets.json")
 SAMPLES_FILE = Path("data/backtest_samples.json")
 
 # Infrastructure / stablecoins / wrapped assets — never accumulation targets.
-EXCLUDE_SYMBOLS = {
-    "WETH", "USDC", "USDT", "DAI", "CBBTC", "WBTC", "ETH", "USDS",
-    "EURC", "WSTETH", "CBETH", "RETH", "USDBC",
-}
+# Single source of truth shared with the screener + operator hunt.
+from src.onchain.token_registry import NON_OPERATOR_SYMBOLS as EXCLUDE_SYMBOLS
 
 
 def load_targets() -> list[dict]:

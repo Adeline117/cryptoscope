@@ -42,11 +42,8 @@ MIN_LIQ, MAX_LIQ = 120_000, 8_000_000
 # made Binance-Peg ETH/BTCB/SOL false-positive).
 MAX_MCAP = 150_000_000
 # Pegs / wrapped majors / stablecoins / staking derivatives — never operator plays.
-_SKIP_SYMBOLS = {
-    "ETH", "WETH", "BTC", "BTCB", "WBTC", "SOL", "BNB", "WBNB", "USDT", "USDC",
-    "BUSD", "DAI", "TUSD", "FDUSD", "USDE", "ETHE", "UBTC", "WSTETH", "STETH",
-    "CBETH", "USD1", "XRP", "ADA", "DOGE", "LTC", "TRX", "LINK", "MATIC", "POL",
-}
+# Single source of truth shared with the accumulation screener + backtest.
+from src.onchain.token_registry import NON_OPERATOR_SYMBOLS as _SKIP_SYMBOLS
 
 
 def _funder_fanout(funder: str, chain: str) -> int | None:
