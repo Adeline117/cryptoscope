@@ -612,12 +612,95 @@ def _measure(token: str, chain: str, wallets: list[str], symbol: str = "") -> di
     return m
 
 
-def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
-    """Snapshot the current state as the baseline and start watching."""
+_SANITY_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _token_age_days(token: str, chain: str) -> float | None:
+    """Days since the token's oldest DEX pair (DexScreener, keyless). Age-blindness was
+    the MAME root cause; surfacing age at the registration boundary lets a too-young
+    target be flagged before its (unmeasurable) operator-history signals fool us."""
+    import json
+    import time
+    import urllib.request
+    ds = {"bsc": "bsc", "ethereum": "ethereum", "eth": "ethereum", "base": "base",
+          "solana": "solana", "sol": "solana", "arbitrum": "arbitrum",
+          "optimism": "optimism", "polygon": "polygon"}.get(chain, chain)
+    try:
+        req = urllib.request.Request(
+            f"https://api.dexscreener.com/latest/dex/tokens/{token}",
+            headers={"User-Agent": _SANITY_UA})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            pairs = (json.loads(r.read().decode()) or {}).get("pairs") or []
+        created = [p.get("pairCreatedAt") for p in pairs
+                   if p.get("pairCreatedAt") and p.get("chainId") == ds]
+        created = created or [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]
+        if not created:
+            return None
+        return max(0.0, (time.time() - min(created) / 1000.0) / 86400.0)
+    except Exception:
+        return None
+
+
+def _registration_sanity(token: str, chain: str, wallets: list[str],
+                         funder: str | None = None) -> dict:
+    """Cheap pre-registration 'health panel' — the boundary guard MAME bypassed. hunt()
+    already gates discovery on token age (>=14d) and funder fan-out (disperser), but
+    register() ran NONE of it, so a hand-picked 4-day disperser-funded serial-degen play
+    became the 'highest-conviction' sentinel. We CAVEAT, not block — a fresh token can
+    still be a real play; it just must not borrow an operator-history edge it can't have.
+    Returns the panel + human-readable caveats stored on the sentinel record."""
+    caveats: list[str] = []
+    age = _token_age_days(token, chain)
+    if age is not None and age < 14:
+        caveats.append(f"⚠️币龄仅~{age:.0f}天: 派发履历/隐藏簇等历史型信号在此不可测,"
+                       "信心须来自实时流/集中度而非operator履历")
+    fanout = None
+    if funder:
+        try:
+            from src.pipeline.operator_hunt import _funder_fanout
+            fanout = _funder_fanout(funder, chain)
+        except Exception:
+            fanout = None
+        if fanout is not None and fanout > 40:
+            caveats.append(f"⚠️funder喂了{fanout}+地址: 是分发器/launchpad,'专属funder=真庄'不成立")
+    # Wallet behaviour: a disciplined single-bag operator trades few tokens; a wallet
+    # born on launch day spraying 15+ micro-memes is the MAME serial-degen profile.
+    degen = None
+    try:
+        from src.onchain import moralis_client
+        mc = {"bsc": "bsc", "ethereum": "eth", "base": "base", "arbitrum": "arbitrum",
+              "optimism": "optimism", "polygon": "polygon"}.get(chain)
+        if mc and moralis_client.usable():
+            spray = 0
+            for w in wallets[:4]:
+                d = moralis_client.get(f"{w}/erc20/transfers?chain={mc}&limit=100")
+                toks = {x.get("token_symbol") for x in (d or {}).get("result", [])
+                        if x.get("token_symbol")}
+                if len(toks) >= 15:
+                    spray += 1
+            degen = spray
+            if spray:
+                caveats.append(f"⚠️{spray}个钱包近100笔刷>=15种代币: serial-degen特征,非纪律单仓operator")
+    except Exception:
+        degen = None
+    return {"token_age_days": round(age, 1) if age is not None else None,
+            "funder_fanout": fanout, "degen_wallets": degen, "caveats": caveats}
+
+
+def register(token: str, chain: str, symbol: str, wallets: list[str],
+             funder: str | None = None) -> dict:
+    """Snapshot the current state as the baseline and start watching.
+
+    Runs a cheap sanity panel (token age / funder fan-out / wallet profile) at the
+    registration boundary and stores its caveats on the record. Caveats DON'T block
+    (a fresh token can be a real play) but ensure a young / disperser-funded / serial-
+    degen target can never again masquerade as a proven operator — the MAME post-mortem."""
     data = _load()
     key = f"{chain}:{token.lower()}"
     state = _measure(token, chain, wallets, symbol)
     reliable = _balanceof_reliable(token, chain, wallets)
+    sanity = _registration_sanity(token, chain, wallets, funder=funder)
     # EVM addresses are case-insensitive (lowercase for consistent matching); Solana
     # addresses are base58 and CASE-SENSITIVE — lowercasing them corrupts the cluster.
     is_sol = chain in ("solana", "sol")
@@ -627,13 +710,17 @@ def register(token: str, chain: str, symbol: str, wallets: list[str]) -> dict:
         "wallets": norm_wallets,
         "baseline": state, "last": state,
         "balanceof_reliable": reliable,
+        "sanity": sanity,
     }
     _save(data)
     if not reliable:
         logger.warning("balanceof_unreliable", symbol=symbol,
                        note="reflection/fee token — balanceOf-based assessments caveated")
+    for c in sanity["caveats"]:
+        logger.warning("sentinel_registration_caveat", symbol=symbol, note=c)
     logger.info("sentinel_registered", symbol=symbol, chain=chain,
-                cluster_balance=state.get("cluster_balance"), liquidity=state.get("liquidity"))
+                cluster_balance=state.get("cluster_balance"), liquidity=state.get("liquidity"),
+                caveats=len(sanity["caveats"]))
     return data[key]
 
 
