@@ -52,7 +52,10 @@ _CG_CONTRACT = "https://api.coingecko.com/api/v3/coins/{platform}/contract/{addr
 _CG_PRICE = "https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
 
 # How near-term an unlock has to be to count as a catalyst.
-_DEFAULT_WINDOW_DAYS = 14
+# Research: ~90% of unlocks are net-negative and the drawdown BEGINS ~30 days
+# before the cliff (front-run), accelerating in the final week. So look ahead 30d,
+# not 14 — the dump pressure starts well before the unlock date.
+_DEFAULT_WINDOW_DAYS = 30
 # An unlock below this share of (max) supply is noise, not a dump catalyst.
 _MIN_UNLOCK_PCT = 0.5
 
@@ -369,12 +372,17 @@ def catalyst_for(token: str, chain: str, symbol: str | None = None) -> dict:
             result["kinds"].append("unlock")
             nxt = material[0]
             soonest_days = nxt["days_until"]
+            # Timing band (front-run dynamics): the final week is the acute window,
+            # but pressure builds across the ~30d run-up — so flag both.
+            sev = ("imminent" if soonest_days <= 7
+                   else "front-run-window" if soonest_days <= 30 else "watch")
+            result["severity"] = sev
             pct = nxt.get("pct_of_max_supply")
             pct_str = f" ({pct}% of max supply)" if pct is not None else ""
             usd = nxt.get("usd")
             usd_str = f" ~${usd:,.0f}" if usd else ""
             details.append(
-                f"unlock {nxt['date']} (in {nxt['days_until']}d): "
+                f"unlock {nxt['date']} (in {nxt['days_until']}d, {sev}): "
                 f"{nxt.get('category') or 'tokens'}{pct_str}{usd_str} — DUMP risk"
             )
 
