@@ -35,7 +35,13 @@ _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 # archive pool, which is tuned for historical balanceOf). publicnode handles 10k-block
 # getLogs cleanly; this is the Moralis-free path for transfer detection.
 _LOGS_RPCS = {
-    "bsc": ["https://bsc-rpc.publicnode.com", "https://bsc.drpc.org"],
+    # NodeReal + bloXroute lead: live-tested to serve eth_getLogs over a 9000-block
+    # range (publicnode now 403s and drpc 408s on BSC, which silently blinded the
+    # transfer-based 庄买/庄卖 detection — flow_ts never advanced). Keep the old two
+    # as last-resort fallbacks.
+    "bsc": ["https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3",
+            "https://bsc.rpc.blxrbdn.com",
+            "https://bsc-rpc.publicnode.com", "https://bsc.drpc.org"],
     "ethereum": ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
     "base": ["https://base-rpc.publicnode.com", "https://base.publicnode.com"],
 }
