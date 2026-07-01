@@ -376,17 +376,22 @@ async def _run_funder_watch():
     logger.info("scheduled_funder_watch")
     from src.onchain.funder_watch import check_new_fundees
 
-    hits = check_new_fundees()
-    if hits:
+    res = check_new_fundees()
+    shells = res.get("shell_candidates", [])
+    new_f = res.get("new_fundees", [])
+    # Alert ONLY on convergence (>=2 fresh wallets on one new token) — the real
+    # shell signal. Bare new fundees are noisy at this funder's high fan-out.
+    if shells:
         from src.distribution.telegram_sender import send_alert
 
-        msg = "🕵️ <b>多币庄源头动了 — 疑似开新壳</b>\n━━━━━━━━━━\n"
-        for h in hits[:12]:
-            msg += (f"<b>{h['label']}</b> 出资人给新地址转 gas\n"
-                    f"新钱包 <code>{h['to']}</code>\n"
-                    f"时间 {h['ts']}\n"
-                    f"→ 查该地址是否在吸筹某新币(可能是下一个壳)\n\n")
+        msg = "🚨 <b>多币庄疑似开新壳(钱包收敛)</b>\n━━━━━━━━━━\n"
+        for s in shells[:8]:
+            msg += (f"<b>{s['label']}</b>\n"
+                    f"{len(set(s['holders']))} 个新钱包同时吸 <b>{s['symbol']}</b>\n"
+                    f"<code>{s['token']}</code>\n"
+                    f"→ 疑似下一个壳正在装弹,深查持币/funder\n\n")
         await send_alert(msg)
+    logger.info("funder_watch_done", new_fundees=len(new_f), shell_candidates=len(shells))
 
 
 async def _run_second_leg_assess():
