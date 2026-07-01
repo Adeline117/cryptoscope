@@ -127,6 +127,30 @@ def run() -> dict:
         except Exception as e:
             total += 1; _check(f"{name} bundle检查", False, f"err {str(e)[:50]}")
 
+    print("=== 6. cluster_confidence(纯函数,装弹操盘应打高分)===")
+    # The gap this closes: all our KNOWN cases are post-distribution → score low, so
+    # we'd never SEEN confidence rank a loaded operator high. It can't be shown on a
+    # live loaded operator (we have none on hand), but the scoring LOGIC is validated
+    # here: a loaded coordinated cluster scores high, dispersed/uncoordinated low.
+    from src.pipeline.anomaly_screener import _cluster_confidence as _cc
+    loaded = _cc(dict(largest_entity_pct=30, concentration_gap=25,
+                      dominant_cluster_wallets=list(range(15)), funder_complete=True))
+    siren_like = _cc(dict(largest_entity_pct=20, concentration_gap=15,
+                          dominant_cluster_wallets=list(range(14)), funder_complete=True))
+    dispersed = _cc(dict(largest_entity_pct=8, concentration_gap=2,
+                         dominant_cluster_wallets=list(range(2)), funder_complete=True))
+    whale = _cc(dict(largest_entity_pct=25, concentration_gap=0,
+                     dominant_cluster_wallets=[1], funder_complete=True))
+    capped = _cc(dict(largest_entity_pct=30, concentration_gap=25,
+                      dominant_cluster_wallets=list(range(15)), funder_complete=False))
+    total += 1; passed += _check("装弹操盘应≥80", loaded >= 80, str(loaded))
+    total += 1; passed += _check("SIREN型真庄应≥60", siren_like >= 60, str(siren_like))
+    total += 1; passed += _check("派发后/分散应≤30", dispersed <= 30, str(dispersed))
+    total += 1; passed += _check("单一巨鲸(无协同)应≤40", whale <= 40, str(whale))
+    total += 1; passed += _check("funder不全应封顶≤45", capped <= 45, str(capped))
+    total += 1; passed += _check("区分:装弹>SIREN型>分散", loaded > siren_like > dispersed,
+                                 f"{loaded}>{siren_like}>{dispersed}")
+
     print(f"\n=== 混淆(小N，N={total}）: {passed}/{total} 正确 ({passed/max(total,1)*100:.0f}%) ===")
     print("注：N小，非统计显著；这是'已知案例上系统分类对不对'的诚实回放。")
     return {"passed": passed, "total": total}
