@@ -87,27 +87,58 @@ def _funder_fanout(funder: str, chain: str) -> int | None:
     return len(recips)
 
 
+# Dune blockchain -> our hunt chain, for the paid discovery path. dex.trades is
+# EVM-only (no Solana), so Solana always falls through to GeckoTerminal below.
+_DUNE_EVM = {"bnb": "bsc", "base": "base"}
+
+
+def _gt_universe_chain(net: str, chain: str, per_chain: int, pages: int) -> list[dict]:
+    """GeckoTerminal discovery for one chain (free tier). Fallback path."""
+    addrs: list[str] = []
+    for pg in range(1, pages + 1):
+        for path in (f"networks/{net}/trending_pools?page={pg}",
+                     f"networks/{net}/new_pools?page={pg}",
+                     f"networks/{net}/pools?page={pg}&sort=h24_volume_usd_desc"):
+            addrs += _gt_base_addresses(path)
+            # Free tier ~30 req/min — pace the burst or pages 2-3 429 and coverage
+            # collapses to page-1-only (~12 in-band tokens).
+            time.sleep(1.5)
+    seen, uniq = set(), []
+    for a in addrs:
+        al = a.lower()
+        if al not in seen:
+            seen.add(al); uniq.append(a)
+    return _dexscreener_tokens(chain, uniq[:per_chain])
+
+
 def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
-    """Token pairs from GeckoTerminal trending + new + top-volume (multiple pages),
-    in the hunt band. Returns DexScreener pairs (with txns/liquidity), deduped."""
+    """Candidate token pairs in the hunt band, enriched via DexScreener, deduped.
+
+    Discovery source, in priority order:
+      1. Dune dex.trades (paid, rate-limit-free) for EVM chains (bsc/base) — replaces
+         the GeckoTerminal free tier that 429s and starves multi-chain coverage.
+      2. GeckoTerminal free tier for Solana (dex.trades has no Solana) and as a
+         fallback for any EVM chain Dune couldn't cover this run.
+    """
     pairs: list[dict] = []
+    dune_covered: set[str] = set()
+    try:
+        from src.onchain.dune_client import available as _dune_available
+        from src.onchain.dune_client import top_dex_tokens
+        if _dune_available():
+            by_chain = top_dex_tokens(_DUNE_EVM, per_chain=max(per_chain, 120))
+            for chain, addrs in by_chain.items():
+                if addrs:
+                    pairs.extend(_dexscreener_tokens(chain, addrs[:per_chain]))
+                    dune_covered.add(chain)
+    except Exception as e:
+        logger.debug("dune_universe_failed", error=str(e)[:100])
+
+    # GeckoTerminal for Solana + any EVM chain Dune missed (fallback).
     for net, chain in _HUNT_CHAINS.items():
-        addrs: list[str] = []
-        for pg in range(1, pages + 1):
-            for path in (f"networks/{net}/trending_pools?page={pg}",
-                         f"networks/{net}/new_pools?page={pg}",
-                         f"networks/{net}/pools?page={pg}&sort=h24_volume_usd_desc"):
-                addrs += _gt_base_addresses(path)
-                # GeckoTerminal free tier ~30 req/min — without spacing the 9-call
-                # burst (3 pages × 3 endpoints) 429s on pages 2-3, starving coverage
-                # to page-1-only (~12 in-band tokens). Pace it to stay under the cap.
-                time.sleep(1.5)
-        seen, uniq = set(), []
-        for a in addrs:
-            al = a.lower()
-            if al not in seen:
-                seen.add(al); uniq.append(a)
-        pairs.extend(_dexscreener_tokens(chain, uniq[:per_chain]))
+        if chain in dune_covered:
+            continue
+        pairs.extend(_gt_universe_chain(net, chain, per_chain, pages))
     return pairs
 
 

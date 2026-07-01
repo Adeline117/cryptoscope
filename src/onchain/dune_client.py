@@ -83,6 +83,56 @@ def run_sql(sql: str, *, query_id: int | None = None, poll_s: int = 5,
     return []
 
 
+# Main quote/major tokens to exclude from volume-ranked discovery — they dominate
+# DEX volume but are never the operator target. Downstream filters would drop them
+# anyway, but excluding here stops them from eating the top-N candidate slots.
+_QUOTE_MAJORS = (
+    # BNB chain
+    "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",  # WBNB
+    "0x55d398326f99059ff775485246999027b3197955",  # USDT
+    "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",  # USDC
+    "0xe9e7cea3dedca5984780bafc599bd69add087d56",  # BUSD
+    "0x2170ed0880ac9a755fd29b2688956bd959f933f8",  # ETH
+    "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c",  # BTCB
+    # Base
+    "0x4200000000000000000000000000000000000006",  # WETH
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",  # USDC
+    "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca",  # USDbC
+)
+
+
+def top_dex_tokens(chain_map: dict[str, str] | None = None, hours: int = 24,
+                   per_chain: int = 120, query_id: int | None = None) -> dict[str, list[str]]:
+    """Volume-ranked candidate tokens per chain from dex.trades — a paid, rate-limit-
+    free replacement for the GeckoTerminal free-tier discovery that 429s and starves
+    coverage. EVM-only (dex.trades has no Solana). Returns {hunt_chain: [address,...]}.
+
+    chain_map maps Dune blockchain -> our hunt chain id, e.g. {'bnb':'bsc','base':'base'}.
+    Majors/quote tokens are excluded so they don't eat the top-N slots; everything
+    else (age, liquidity band, non-operator veto) is left to the hunt's own filters."""
+    chain_map = chain_map or {"bnb": "bsc", "base": "base"}
+    quotes = ", ".join(_QUOTE_MAJORS)
+    duned = "', '".join(chain_map.keys())
+    rows = run_sql(
+        f"select blockchain, token_bought_address as token, sum(amount_usd) as vol "
+        f"from dex.trades "
+        f"where block_time > now() - interval '{int(hours)}' hour "
+        f"and blockchain in ('{duned}') and amount_usd between 100 and 5000000 "
+        f"and token_bought_address not in ({quotes}) "
+        f"group by 1, 2 having sum(amount_usd) > 50000 "
+        f"order by blockchain, vol desc",
+        query_id=query_id)
+    _skip = {"0x0000000000000000000000000000000000000000",
+             "0x000000000000000000000000000000000000dead"}
+    out: dict[str, list[str]] = {v: [] for v in chain_map.values()}
+    for r in rows:
+        hunt_chain = chain_map.get(r.get("blockchain"))
+        tok = (r.get("token") or "").lower()
+        if hunt_chain and tok and tok not in _skip and len(out[hunt_chain]) < per_chain:
+            out[hunt_chain].append(tok)
+    return out
+
+
 def bsc_cex_addresses(query_id: int | None = 7852861) -> dict[str, str]:
     """Verified BSC exchange hot/deposit wallets from Dune labels, with routers and
     bridges FILTERED OUT (they are not CEX deposits). Returns {address_lower: label}.
