@@ -81,6 +81,13 @@ def run() -> dict:
         elif c["truth"] == "real_operator":
             ok = "聪明庄" in prof                  # old real operator → has distribution history
             total += 1; passed += _check(f"{name} 应判'聪明庄'", ok, prof)
+        elif c["truth"] == "team_custody":
+            # The RIGHT dump signal for our BSC universe: our micro-caps sell INTO
+            # the DEX pool (not CEX deposits — verified via Dune all-history). So
+            # the fire we validate is cluster distribution, not cex_flow. ESPORTS
+            # team cluster dumped -> distribution_history must register it.
+            ok = "聪明庄" in prof
+            total += 1; passed += _check(f"{name} 砸盘应被派发履历抓到", ok, prof)
 
     print("=== 3. 实体分类(团队簇=托管非交易庄)===")
     for name, c in CASES.items():
