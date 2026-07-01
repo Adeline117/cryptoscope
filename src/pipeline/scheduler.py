@@ -113,6 +113,15 @@ def create_scheduler() -> AsyncIOScheduler:
         name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
     )
 
+    # Funder watch → the multi-token operator family root (0x6596da8b…). New fundee =
+    # 庄 seeding a fresh shell wallet, earlier than any concentration signal.
+    scheduler.add_job(
+        _run_funder_watch,
+        CronTrigger(minute="*/30"),
+        id="funder_watch",
+        name="多币庄源头监控 (出资人给新地址转钱 → Telegram)",
+    )
+
     # Holder-growth screener → a universe source independent of trending feeds: find
     # tokens whose float is CONCENTRATING (top10/gini rising, fetch-depth-stable) over
     # the snapshot history, then confirm with the operator signal (disperser-guarded).
@@ -359,6 +368,25 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+
+
+async def _run_funder_watch():
+    """Watch the multi-token operator family's FUNDER (0x6596da8b…). A new fundee =
+    the 庄 seeding a fresh shell wallet — the earliest possible launch signal."""
+    logger.info("scheduled_funder_watch")
+    from src.onchain.funder_watch import check_new_fundees
+
+    hits = check_new_fundees()
+    if hits:
+        from src.distribution.telegram_sender import send_alert
+
+        msg = "🕵️ <b>多币庄源头动了 — 疑似开新壳</b>\n━━━━━━━━━━\n"
+        for h in hits[:12]:
+            msg += (f"<b>{h['label']}</b> 出资人给新地址转 gas\n"
+                    f"新钱包 <code>{h['to']}</code>\n"
+                    f"时间 {h['ts']}\n"
+                    f"→ 查该地址是否在吸筹某新币(可能是下一个壳)\n\n")
+        await send_alert(msg)
 
 
 async def _run_second_leg_assess():
