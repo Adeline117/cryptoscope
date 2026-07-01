@@ -251,6 +251,21 @@ def create_scheduler() -> AsyncIOScheduler:
         name="GitHub Weekly Star Digest",
     )
 
+    # 用户只要妖币(操盘检测)通知,不要新闻/报告/宏观/GitHub/大币推送。
+    # 移除这些非妖币任务;妖币检测器(哨兵/猎手/源头/吸筹/持币趋势/二波)保留。
+    _NON_YAOBI_JOBS = {
+        "daily_pipeline", "weekly_pipeline", "highlight_2h", "majors_monitor",
+        "tier1_platform_reports", "tier2_platform_reports", "tier3plus_platform_reports",
+        "glassnode_weekly_check", "coinshares_weekly_check", "coinmetrics_weekly_check",
+        "daily_macro_snapshot", "regulatory_scan",
+        "github_star_hourly", "github_discovery", "github_weekly_digest",
+    }
+    for _jid in _NON_YAOBI_JOBS:
+        try:
+            scheduler.remove_job(_jid)
+        except Exception:
+            pass
+
     return scheduler
 
 
