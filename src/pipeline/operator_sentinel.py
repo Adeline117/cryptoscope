@@ -40,6 +40,7 @@ SENTINELS_FILE = DATA_DIR / "operator_sentinels.json"
 # FIRST meaningful sell/buy to act BEFORE price has moved, capturing the full move.
 OP_SELL = 0.015          # cluster balance fell >=1.5% vs last → operator SELLING (exit/short NOW)
 OP_BUY = 0.02            # cluster balance rose >=2% vs last → operator BUYING (markup/launch → long)
+BLEED_STEP = 5.0         # slow-bleed: alert each extra 5% below BASELINE (dribble evasion)
 SLOW_BLEED = 0.04        # cluster down >=4% from running peak → chunked distribution
 COOLDOWN_MIN = 45        # don't re-fire the same event kind within N minutes
 STALL_FADE = 0.12        # after a buy/launch, price faded >=12% from its high...
@@ -889,6 +890,27 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # 5-min scheduler). balanceOf is unreliable on reflection/wash tokens
             # (EVAA, SIREN) — it drifts/oscillates and spammed phantom 庄在卖 every
             # 20s cycle. The fast watcher therefore does PRICE moves only (below).
+
+            # ===== SLOW-BLEED: cumulative distribution vs BASELINE. The per-window
+            # magnitude gate above (1.5% per tick) is evadable by dribbling out below
+            # it forever — SKYAI audit found -0.26%/12h in 35 small transfers, invisible
+            # to every existing gate. This fires each time the cluster is another
+            # BLEED_STEP% below baseline. First evaluation ARMS at the current drop
+            # (no alert) so pre-existing, already-reported distribution (SIREN -24%)
+            # doesn't rehash as news. Gated on balanceof_reliable — reflection drift
+            # must not manufacture a phantom bleed. =====
+            bb = base.get("cluster_balance")
+            if (cb is not None and bb and bb > 0 and t.get("balanceof_reliable", True)
+                    and "庄在卖" not in {k for k, _ in fired}):
+                drop_pct = (bb - cb) / bb * 100
+                armed = t.get("bleed_alerted_pct")
+                if armed is None:
+                    t["bleed_alerted_pct"] = max(0.0, drop_pct)   # arm, don't alert
+                elif drop_pct >= armed + BLEED_STEP:
+                    fired.append(("慢滴漏", f"簇持仓较基线 -{drop_pct:.1f}% "
+                                  f"({bb:,.0f}→{cb:,.0f}) — 单窗口量级门下的缓慢派发,"
+                                  "累计已显著 → 庄在阴跌出货"))
+                    t["bleed_alerted_pct"] = drop_pct
 
             # ===== BACKSTOP: violent price/liquidity moves (if sampling lagged) =====
             cl, pl = cur.get("liquidity"), last.get("liquidity")
