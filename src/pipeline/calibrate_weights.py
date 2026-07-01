@@ -89,6 +89,26 @@ def _emission_reasons() -> dict[tuple[str, str], set[str]]:
     return fired
 
 
+def _sentinel_clusters() -> dict[tuple[str, str], list[str]]:
+    """(token_lower, chain) -> operator wallets, from the sentinel registry. Lets
+    auto-generated alert_outcomes labels carry a cluster so run_labeled_validation
+    can reconstruct the operator curve (else they're outcome-only, unusable there)."""
+    from src.config import DATA_DIR
+    reg = DATA_DIR / "operator_sentinels.json"
+    if not reg.exists():
+        return {}
+    try:
+        d = json.loads(reg.read_text())
+    except Exception:
+        return {}
+    out: dict[tuple[str, str], list[str]] = {}
+    for s in (d.values() if isinstance(d, dict) else d):
+        tok, chain, w = s.get("token"), s.get("chain"), s.get("wallets")
+        if tok and chain and w:
+            out[(tok.lower(), chain)] = w
+    return out
+
+
 def generate_labels(pump_thr: float = 1.15, dud_thr: float = 0.95) -> dict:
     """Derive pump/dud labels from RESOLVED outcomes so calibration has data to learn
     from — the missing plumbing (0 labels existed, so calibrate_weights never ran).
@@ -124,6 +144,7 @@ def generate_labels(pump_thr: float = 1.15, dud_thr: float = 0.95) -> dict:
         by_tok.setdefault((tok, chain), []).append(p24 / p0)
         sym_of[(tok, chain)] = sym or ""
     LABELS_DIR.mkdir(parents=True, exist_ok=True)
+    clusters = _sentinel_clusters()            # attach operator wallets where we have them
     written = 0
     for (tok, chain), rets in by_tok.items():
         rets.sort()
@@ -131,10 +152,13 @@ def generate_labels(pump_thr: float = 1.15, dud_thr: float = 0.95) -> dict:
         outcome = "pump" if med >= pump_thr else "dud" if med <= dud_thr else None
         if not outcome:
             continue
+        rec = {"token": tok, "chain": chain, "symbol": sym_of.get((tok, chain), ""),
+               "outcome": outcome, "source": "alert_outcomes", "ret_24h": round(med, 3)}
+        ops = clusters.get((tok.lower(), chain))
+        if ops:                                    # makes the label usable by run_labeled_validation
+            rec["operators"] = ops
         (LABELS_DIR / f"{chain}_{tok.lower()}.json").write_text(
-            json.dumps({"token": tok, "chain": chain, "symbol": sym_of.get((tok, chain), ""),
-                        "outcome": outcome, "source": "alert_outcomes",
-                        "ret_24h": round(med, 3)}, ensure_ascii=False))
+            json.dumps(rec, ensure_ascii=False))
         written += 1
     logger.info("labels_generated", written=written)
     return {"written": written}

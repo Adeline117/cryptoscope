@@ -20,7 +20,11 @@ LABELS_DIR = Path("data/research/labels")
 
 
 def _load_labels() -> list[dict]:
-    out = []
+    # Dedup by (token, chain): a token can have both a manual file and an
+    # auto-generated alert_outcomes file with CONFLICTING outcomes (e.g. SIREN
+    # manual=pump vs objective 24h=dud). Prefer the price-derived alert_outcomes
+    # label — same rule calibrate_weights uses — so one token counts once, objectively.
+    by_key: dict[tuple[str, str], dict] = {}
     for f in sorted(LABELS_DIR.glob("*.json")):
         if f.name.startswith("_"):
             continue
@@ -28,10 +32,15 @@ def _load_labels() -> list[dict]:
             d = json.loads(f.read_text())
         except Exception:
             continue
-        if d.get("operators") and d.get("token") and d.get("chain"):
-            d["_file"] = str(f)
-            out.append(d)
-    return out
+        if not (d.get("operators") and d.get("token") and d.get("chain")):
+            continue
+        d["_file"] = str(f)
+        key = (d["token"].lower(), d["chain"])
+        prev = by_key.get(key)
+        if prev and prev.get("source") == "alert_outcomes" and d.get("source") != "alert_outcomes":
+            continue                             # keep the objective one already stored
+        by_key[key] = d
+    return list(by_key.values())
 
 
 def _verdict_for(label: dict) -> dict:
