@@ -12,88 +12,73 @@
       "0x774922fbb5a9e6d52c14fa9dfa25c16219f91c90",
       "0x4bdaa8005233f251375212efab1d2ce938d62b78",
       "0xc4be9808281709d47489ce1e2a5422da29e5506a",
-      "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3"
+      "0x6908518e91b83a05a51b8961d1c5667b2e9bc4a3",
+      "0x4982085c9e2f89f2ecb8131eca71afad896e89cb",
+      "0x87da463dd642d22d064f9b5752a315ee9021489d",
+      "0xb9f4054454ba698055894364115c1423cd531b63",
+      "0x2d33feea1ab2eb617d3f1950b21317abc4d01056",
+      "0x19fca8f97f01002d31217435a9fcd2af19f3ed63",
+      "0xfd09a9cc989cd9d7ff0a1cab6af28c677267a2b9"
     ],
     "baseline": {
-      "price": 0.08354,
-      "liquidity": 322336.58,
-      "vol24": 2223840.62,
-      "cluster_balance": 10167894.759644354,
-      "funding": 0.005
+      "price": 0.1276,
+      "liquidity": 126236.55,
+      "vol24": 1287724.65,
+      "pair": "0x07b7556Ede0f9a6a7d155A78Bc0573f531001A57",
+      "cluster_balance": 20922736.366886962,
+      "float_lp": 67074.2525588508,
+      "funding": 0.0272
     },
     "last": {
-      "price": 0.07718,
-      "liquidity": 308595.04,
-      "vol24": 1708412.91,
-      "cluster_balance": 10167894.759644354,
-      "funding": 0.0102
+      "price": 0.1276,
+      "liquidity": 126236.55,
+      "vol24": 1287724.65,
+      "pair": "0x07b7556Ede0f9a6a7d155A78Bc0573f531001A57",
+      "cluster_balance": 20922736.366886962,
+      "float_lp": 60271.587644968036,
+      "funding": 0.0272
     },
     "balanceof_reliable": true,
-    "flow_ts": null
+    "sanity": {
+      "token_age_days": 93.7,
+      "funder_fanout": null,
+      "degen_wallets": null,
+      "cluster_type": "eoa×14 multisig×1",
+      "identity": "real_project",
+      "catalyst": null,
+      "bundle_edge": null,
+      "caveats": []
+    },
+    "flow_ts": null,
+    "price_peak": 0.1279
   },
   "bsc:0xf39e4b21c84e737df08e2c3b32541d856f508e48": {
     "token": "0xF39e4b21c84e737Df08e2C3b32541d856f508E48",
     "chain": "bsc",
     "symbol": "ESPORTS",
     "wallets": [
-      "0x99d4b3f50b14bfc67892c472f4053ee3483d87b9",
-      "0xd2dd7b597fd2435b6db61ddf48544fd931e6869f",
-      "0x504ce9e51e508c85a161058c12e970a903d482fc"
+      "0x49a0c2366936b115d6877438175ee4b97d6dab7c",
+      "0x1552160b3c36492f17cc9c468a082f9e6cc1f1e3"
     ],
     "baseline": {
-      "price": 0.06418,
-      "liquidity": 1328254.9,
-      "vol24": 1471069.36,
-      "cluster_balance": 214578864.43321168,
-      "funding": 0.0186
+      "price": 0.02776,
+      "liquidity": 975713.4,
+      "vol24": 28302.8,
+      "cluster_balance": 236238916.47024685,
+      "funding": 0.0532
     },
     "last": {
-      "price": 0.06901,
-      "liquidity": 1348641.96,
-      "vol24": 1732554.71,
-      "cluster_balance": 214513943.85146895,
-      "funding": 0.0715
+      "price": 0.02556,
+      "liquidity": 958919.45,
+      "vol24": 17429.32,
+      "cluster_balance": 236238916.47024685,
+      "funding": 0.0517,
+      "pair": "0x5Bb59Bb9371cBeC158eD602d5f3CF1AD1c9B4462",
+      "float_lp": 7481123.2860524105
     },
     "balanceof_reliable": true,
-    "flow_ts": null
-  },
-  "bsc:0xaa036928c9c0df07d525b55ea8ee690bb5a628c1": {
-    "token": "0xaa036928c9c0Df07d525B55ea8EE690Bb5a628C1",
-    "chain": "bsc",
-    "symbol": "EVAA",
-    "wallets": [
-      "0xd5da17a84314194e348649c89a65143a061f7190",
-      "0x024ee8dc380ad17d955b07149725d518b5cbba67",
-      "0x8782163068c7cd74d2510768a61135c1e4eb07b3",
-      "0xe92bd58a5c0d84d4af48d8b7d28068bcb7a92f74",
-      "0xbd6f608b9747e564be011960d1e9bd35541e0dbf",
-      "0xcd808e6bb368e06810ce20cccc0209c94f8a22da",
-      "0xe6451016f095835a0d5ef98a5c0092e47ddf0a93",
-      "0x8d17fbfb03a6b7e8fdcfd60f1f9e6c08578ba5d7",
-      "0x24a0d9928a3b6cd13a6210d0ff6d450a080fc266",
-      "0x39927a709eaba03d43c351ea0b1bf4228ce99ade",
-      "0xb85b098448b2aac4af96f5bdd9c6c02373a08975",
-      "0x035ae7d933dcbfe617ffba194a88af0c2867b90c",
-      "0x604ef94e24a14052cc924a55f49f879757681d4d",
-      "0x33a5e430b626d2b6f93fd5b94159d30a636a0c4b",
-      "0x4306d7db991e3eb70d0a1f10e1c92f17a987f24f"
-    ],
-    "baseline": {
-      "price": 0.8458,
-      "liquidity": 722377.0,
-      "vol24": 78565927.71,
-      "cluster_balance": 3358831.7858782033,
-      "funding": 0.01
-    },
-    "last": {
-      "price": 0.7376,
-      "liquidity": 667577.33,
-      "vol24": 26866418.04,
-      "cluster_balance": 3485356.0583764343,
-      "funding": 0.01
-    },
-    "balanceof_reliable": true,
-    "flow_ts": null
+    "flow_ts": null,
+    "price_peak": 0.02776
   },
   "bsc:0x997a58129890bbda032231a52ed1ddc845fc18e1": {
     "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
@@ -123,14 +108,17 @@
       "funding": 0.12
     },
     "last": {
-      "price": 0.04569,
-      "liquidity": 2379109.64,
-      "vol24": 1491765.05,
-      "cluster_balance": 90248334.42671631,
-      "funding": 0.0639
+      "price": 0.0352,
+      "liquidity": 2070344.68,
+      "vol24": 132732.9,
+      "cluster_balance": 65650333.95842942,
+      "funding": 0.005,
+      "pair": "0xb2AF49dBF526054FAf19602860A5E298a79F3D05",
+      "float_lp": 20314707.853946883
     },
     "balanceof_reliable": true,
-    "flow_ts": null
+    "flow_ts": null,
+    "price_peak": 0.04772
   },
   "solana:eg2ymq2aqqjmcibnmtt8erc6tvk9pvpjzcxvvpjz2agu": {
     "token": "Eg2ymQ2aQqjMcibnmTt8erC6Tvk9PVpJZCxvVPJz2agu",
@@ -149,13 +137,83 @@
       "funding": -0.02
     },
     "last": {
-      "price": 0.02655,
-      "liquidity": 518095.27,
-      "vol24": 334779.39,
+      "price": 0.02259,
+      "liquidity": 499830.14,
+      "vol24": 162814.49,
       "cluster_balance": 100000000.0,
-      "funding": -0.02
+      "funding": -0.02,
+      "pair": "FKfRK3WdaGXokysR1fPGgCDEeGkV1b1YYnX9ykVpG3JG"
     },
     "balanceof_reliable": true,
-    "flow_ts": "2026-05-30T02:36:01+00:00"
+    "flow_ts": "2026-05-30T02:36:01+00:00",
+    "price_peak": 0.02651
+  },
+  "bsc:0x92aa03137385f18539301349dcfc9ebc923ffb10": {
+    "token": "0x92aa03137385F18539301349dcfC9EbC923fFb10",
+    "chain": "bsc",
+    "symbol": "SKYAI",
+    "wallets": [
+      "0xc882b111a75c0c657fc507c04fbfcd2cc984f071",
+      "0x0d0707963952f2fba59dd06f2b425ace40b492fe"
+    ],
+    "baseline": {
+      "price": 0.1188,
+      "liquidity": 7709846.18,
+      "vol24": 9328471.48,
+      "cluster_balance": 377879125.67095506,
+      "funding": 0.005
+    },
+    "last": {
+      "price": 0.103,
+      "liquidity": 7175407.79,
+      "vol24": 5649064.66,
+      "cluster_balance": 376380687.15365505,
+      "funding": 0.005,
+      "pair": "0xbC42145d5A574EDe9b8860FCa2A49EB7B239Efa5",
+      "float_lp": 34797408.69488448
+    },
+    "balanceof_reliable": true,
+    "flow_ts": "2026-07-01T22:47:09+00:00",
+    "price_peak": 0.1188
+  },
+  "bsc:0xe92f7fe3eaf61df28b7b75f3faab199333c42302": {
+    "token": "0xe92F7Fe3EAf61DF28b7B75f3FaAB199333c42302",
+    "chain": "bsc",
+    "symbol": "MAME",
+    "wallets": [
+      "0x095d868f05d2c93c2677e80b8dfd0966455b5181",
+      "0x79f5b4950d49ae3a0b8c22d6233341150f8cdee0",
+      "0xb819eea709aca3646033c2494f5f7f65e875d712",
+      "0xaf25489fccc2578b059ca0ad4e6d46b2defdf415"
+    ],
+    "baseline": {
+      "price": 0.01066,
+      "liquidity": 986700.12,
+      "vol24": 529959.48,
+      "cluster_balance": 445360432.8767384,
+      "funding": 0.02
+    },
+    "last": {
+      "price": 0.008765,
+      "liquidity": 896259.58,
+      "vol24": 176157.0,
+      "cluster_balance": 444127126.75696594,
+      "funding": 0.02,
+      "pair": "0x924F1a4422a89900FAaFa3F886721FDCcD6e086a",
+      "float_lp": 51108627.25929657
+    },
+    "balanceof_reliable": true,
+    "sanity": {
+      "token_age_days": 8.6,
+      "funder_fanout": 6,
+      "degen_wallets": 3,
+      "cluster_type": "eoa×4",
+      "caveats": [
+        "⚠️币龄仅~9天: 派发履历/隐藏簇等历史型信号在此不可测,信心须来自实时流/集中度而非operator履历",
+        "⚠️3个钱包近100笔刷>=15种代币: serial-degen特征,非纪律单仓operator"
+      ]
+    },
+    "flow_ts": null,
+    "price_peak": 0.01066
   }
 }

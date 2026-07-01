@@ -25,6 +25,10 @@ logger = structlog.get_logger()
 # Multi-token operator family roots. Add more as they're identified.
 WATCHED_FUNDERS = {
     "0x6596da8b65995d5feacff8c2936f0b7a2051b0d0": "SIREN/EVAA/SKYAI family",
+    # Second family root: funded SIREN-cluster wallet 0x4982085c…, which was found
+    # holding 1.26M BASED exactly in the BASED Sybil cluster's uniform band — the
+    # family's positioning in new plays flows through this root too.
+    "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161": "SIREN family root #2 (→BASED link)",
 }
 
 _STATE = DATA_DIR / "funder_watch.json"
