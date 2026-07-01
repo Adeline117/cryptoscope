@@ -56,14 +56,27 @@ BSC_CEX_SUPPLEMENT: dict[str, str] = {
 
 def evm_exchanges() -> dict[str, str]:
     """EVM exchange addresses (lowercased) → label: whale_tracker (ETH-centric) +
-    the Dune-sourced BSC supplement."""
+    the Dune-sourced BSC supplement.
+
+    If whale_tracker can't import (it pulls in the async collector stack), we LOG
+    rather than swallow: the ETH CEX set silently collapsing to BSC-only would
+    quietly zero the #1 dump signal's ETH coverage — exactly the failure≠0 trap.
+    We still return the BSC supplement so BSC detection is unaffected."""
     out = dict(BSC_CEX_SUPPLEMENT)
     try:
         from src.collectors.whale_tracker import WhaleTrackerCollector
 
         out.update({a.lower(): n for a, n in WhaleTrackerCollector.KNOWN_EXCHANGES.items()})
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            import structlog
+
+            structlog.get_logger().warning(
+                "evm_exchanges_eth_set_unavailable",
+                error=str(e)[:100],
+                note="ETH CEX labels degraded to BSC-only — check env deps")
+        except Exception:
+            pass
     return out
 
 
