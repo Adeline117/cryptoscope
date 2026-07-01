@@ -95,7 +95,20 @@ def run() -> dict:
             ok = eoa_share >= 0.5                 # mostly trading EOAs
             total += 1; passed += _check(f"{name} 应识别为交易EOA簇", ok, f"{cc['summary']} eoa={eoa_share}")
 
-    print("=== 4. Solana bundle(团队分配=同实体)===")
+    print("=== 4. CEX分类(is_cex_address, 纯函数)===")
+    from src.onchain.cex_flow import is_cex_address
+    known_binance = "0x4aefa39caeadd662ae31ab0ce7c8c2c9c0a013e8"  # Dune-verified BSC Binance
+    total += 1; passed += _check("已知Binance热钱包应=CEX", is_cex_address(known_binance, "bsc"),
+                                  "True" if is_cex_address(known_binance, "bsc") else "False")
+    dead = "0x000000000000000000000000000000000000dead"
+    total += 1; passed += _check("随机地址应≠CEX", not is_cex_address(dead, "bsc"),
+                                  "False" if not is_cex_address(dead, "bsc") else "True")
+    # NOTE: cex_flow *firing* on a real operator→CEX dump is NOT yet positively
+    # validated. The ESPORTS custody cluster (multisig+contract) never deposits
+    # directly — it disperses to EOAs that deposit. Validating a fire needs those
+    # downstream EOAs; documented gap, not a passing assertion here.
+
+    print("=== 5. Solana bundle(团队分配=同实体)===")
     for name, c in CASES.items():
         if c["chain"] not in ("solana", "sol"):
             continue
