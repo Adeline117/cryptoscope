@@ -50,25 +50,71 @@ def _req(method: str, path: str, body: dict | None = None, timeout: int = 25) ->
         return None
 
 
+def _query_cache_path():
+    from src.config import DATA_DIR
+    return DATA_DIR / "dune_query_cache.json"
+
+
+def _cached_query_id(sql: str) -> int | None:
+    import hashlib
+    h = hashlib.sha256(sql.encode()).hexdigest()[:24]
+    try:
+        cache = json.loads(_query_cache_path().read_text())
+        return cache.get(h)
+    except Exception:
+        return None
+
+
+def _store_query_id(sql: str, qid: int) -> None:
+    import hashlib
+    h = hashlib.sha256(sql.encode()).hexdigest()[:24]
+    p = _query_cache_path()
+    try:
+        cache = json.loads(p.read_text()) if p.exists() else {}
+    except Exception:
+        cache = {}
+    cache[h] = qid
+    try:
+        p.write_text(json.dumps(cache))
+    except Exception:
+        pass
+
+
 def run_sql(sql: str, *, query_id: int | None = None, poll_s: int = 5,
             max_polls: int = 18) -> list[dict]:
     """Run an ad-hoc SQL query on Dune and return result rows (or [] on failure).
 
-    Reuses a query_id if given (PATCH the SQL) to avoid hitting the private-query
-    cap; otherwise creates a public query. Never raises."""
+    Reuses a query_id if given (PATCH the SQL). Without one, looks up a local
+    sql-hash → query_id cache first (repeat runs of the same SQL — scheduled label
+    sweeps, coverage audits — must not create a new public query each time, which
+    litters the account and risks the creation cap); cache miss creates a public
+    query and stores it. Never raises."""
     if not available():
         return []
     qid = query_id
+    if qid is None:
+        qid = _cached_query_id(sql)     # same SQL → same query, just re-execute
     if qid is None:
         created = _req("POST", "/query",
                        {"name": "cryptoscope_adhoc", "query_sql": sql, "is_private": False})
         qid = (created or {}).get("query_id")
         if not qid:
             return []
-    else:
+        _store_query_id(sql, qid)
+    elif query_id is not None:
         _req("PATCH", f"/query/{qid}", {"query_sql": sql})
     ex = _req("POST", f"/query/{qid}/execute")
     eid = (ex or {}).get("execution_id")
+    if not eid and query_id is None:
+        # cached query may have been deleted on Dune's side — recreate once
+        created = _req("POST", "/query",
+                       {"name": "cryptoscope_adhoc", "query_sql": sql, "is_private": False})
+        qid = (created or {}).get("query_id")
+        if not qid:
+            return []
+        _store_query_id(sql, qid)
+        ex = _req("POST", f"/query/{qid}/execute")
+        eid = (ex or {}).get("execution_id")
     if not eid:
         return []
     for _ in range(max_polls):
@@ -133,6 +179,37 @@ def top_dex_tokens(chain_map: dict[str, str] | None = None, hours: int = 24,
     return out
 
 
+_ERC20_TABLES = {56: "erc20_bnb", 8453: "erc20_base", 1: "erc20_ethereum"}
+
+
+def reconstruct_holders(token: str, chain_id: int, decimals: int = 18,
+                        limit: int = 100) -> list[dict]:
+    """Holder list reconstructed from full transfer-history net flows on Dune —
+    the provider-independent LAST fallback (during the 2026-07 sentinel audit,
+    Alchemy 403'd and Moralis+Covalent returned empty simultaneously; this path
+    was the only one standing, and its sums matched live balance_of exactly).
+    Returns [{address, balance}] like the other fetchers; [] on failure/unknown chain.
+    Slow (~1-3 min full-history aggregation) — for audits/fallback, not hot paths."""
+    table = _ERC20_TABLES.get(chain_id)
+    if not table or not available():
+        return []
+    tok = token.lower()
+    rows = run_sql(
+        "with flows as ("
+        "select \"to\" as addr, cast(value as double)/1e%d as amt "
+        "from %s.evt_Transfer where contract_address = %s "
+        "union all "
+        "select \"from\" as addr, -cast(value as double)/1e%d as amt "
+        "from %s.evt_Transfer where contract_address = %s) "
+        "select addr, sum(amt) as bal from flows "
+        "where addr != 0x0000000000000000000000000000000000000000 "
+        "group by 1 having sum(amt) > 0 order by bal desc limit %d"
+        % (decimals, table, tok, decimals, table, tok, limit),
+        poll_s=6, max_polls=40)
+    return [{"address": str(r["addr"]).lower(), "balance": float(r["bal"])}
+            for r in rows if r.get("addr")]
+
+
 def bsc_cex_addresses(query_id: int | None = 7852861) -> dict[str, str]:
     """Verified BSC exchange hot/deposit wallets from Dune labels, with routers and
     bridges FILTERED OUT (they are not CEX deposits). Returns {address_lower: label}.
@@ -144,7 +221,10 @@ def bsc_cex_addresses(query_id: int | None = 7852861) -> dict[str, str]:
         "lower(owner_key) like '%gate%' or lower(owner_key) like '%mexc%' or "
         "lower(owner_key) like '%bitget%' or lower(owner_key) like '%kucoin%' or "
         "lower(owner_key) like '%bybit%' or lower(owner_key) like '%htx%' or "
-        "lower(owner_key) like '%kraken%' or lower(owner_key) like '%coinbase%') limit 200",
+        "lower(owner_key) like '%huobi%' or lower(owner_key) like '%crypto_com%' or "
+        "lower(owner_key) like '%bitfinex%' or lower(owner_key) like '%upbit%' or "
+        "lower(owner_key) like '%bithumb%' or lower(owner_key) like '%bitmart%' or "
+        "lower(owner_key) like '%kraken%' or lower(owner_key) like '%coinbase%') limit 1500",
         query_id=query_id)
     out: dict[str, str] = {}
     for r in rows:
