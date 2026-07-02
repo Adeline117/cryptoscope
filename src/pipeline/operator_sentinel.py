@@ -900,16 +900,28 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # doesn't rehash as news. Gated on balanceof_reliable — reflection drift
             # must not manufacture a phantom bleed. =====
             bb = base.get("cluster_balance")
-            if (cb is not None and bb and bb > 0 and t.get("balanceof_reliable", True)
-                    and "庄在卖" not in {k for k, _ in fired}):
-                drop_pct = (bb - cb) / bb * 100
+            drop_pct = None
+            src_note = ""
+            if bb and bb > 0 and "庄在卖" not in {k for k, _ in fired}:
+                if t.get("balanceof_reliable", True):
+                    if cb is not None:
+                        drop_pct = (bb - cb) / bb * 100
+                        src_note = f"({bb:,.0f}→{cb:,.0f})"
+                elif flow is not None:
+                    # Reflection/tax tokens: balanceOf drifts, so the bleed source is
+                    # CUMULATIVE transfer net-sold instead (each tick's flow window is
+                    # incremental via the flow_ts cursor, so summing them is exact).
+                    cum = t.get("cum_net_sold", 0.0) + (flow["sell"] - flow["buy"])
+                    t["cum_net_sold"] = cum
+                    drop_pct = cum / bb * 100
+                    src_note = f"(转账累计净卖 {cum:,.0f})"
+            if drop_pct is not None:
                 armed = t.get("bleed_alerted_pct")
                 if armed is None:
                     t["bleed_alerted_pct"] = max(0.0, drop_pct)   # arm, don't alert
                 elif drop_pct >= armed + BLEED_STEP:
-                    fired.append(("慢滴漏", f"簇持仓较基线 -{drop_pct:.1f}% "
-                                  f"({bb:,.0f}→{cb:,.0f}) — 单窗口量级门下的缓慢派发,"
-                                  "累计已显著 → 庄在阴跌出货"))
+                    fired.append(("慢滴漏", f"簇持仓较基线 -{drop_pct:.1f}% {src_note}"
+                                  " — 单窗口量级门下的缓慢派发,累计已显著 → 庄在阴跌出货"))
                     t["bleed_alerted_pct"] = drop_pct
 
             # ===== BACKSTOP: violent price/liquidity moves (if sampling lagged) =====
