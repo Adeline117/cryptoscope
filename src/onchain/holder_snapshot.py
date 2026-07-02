@@ -567,7 +567,26 @@ def fetch_holders_evm(
             logger.warning("evm_alchemy_fetch_failed", token=token, error=str(e))
             # fall through to Etherscan
 
-    return _fetch_holders_evm_etherscan(token, chain_id, timeout)
+    es = _fetch_holders_evm_etherscan(token, chain_id, timeout)
+    if es:
+        return es
+
+    # LAST fallback: Dune full-history net-flow reconstruction. During the 2026-07
+    # audit Alchemy 403'd and Moralis+Covalent went empty at the same time — this
+    # was the only path standing (and cross-checked exact vs balance_of). Slow
+    # (~1-3 min) but it means holder data can no longer go completely blind.
+    try:
+        from src.onchain.dune_client import reconstruct_holders
+        from src.onchain.evm_archive import ArchiveRPC
+        chain_name = {56: "bsc", 8453: "base", 1: "ethereum"}.get(chain_id)
+        dec = ArchiveRPC(chain_name).token_decimals(token) if chain_name else 18
+        d = reconstruct_holders(token, chain_id, decimals=dec)
+        if d:
+            logger.info("holders_via_dune_reconstruction", token=token, count=len(d))
+        return d
+    except Exception as e:
+        logger.debug("dune_holder_fallback_failed", token=token, error=str(e)[:80])
+        return []
 
 
 def _fetch_holders_evm_etherscan(token: str, chain_id: int, timeout: int = 20) -> list[dict[str, Any]]:
