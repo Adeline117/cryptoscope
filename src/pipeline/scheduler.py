@@ -113,7 +113,34 @@ def create_scheduler() -> AsyncIOScheduler:
         name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
     )
 
-    # Funder watch → the multi-token operator family root (0x6596da8b…). New fundee =
+    # Cluster coverage → weekly Dune holder reconstruction per sentinel; alerts on
+    # untracked big EOAs / reconstruction drift (the manual audit, institutionalized).
+    scheduler.add_job(
+        _run_cluster_coverage,
+        CronTrigger(day_of_week="tue", hour=4, minute=0),
+        id="cluster_coverage",
+        name="簇覆盖周检 (Dune反推 vs 哨兵簇 → Telegram)",
+    )
+
+    # CEX label refresh → weekly full pull of verified BSC exchange labels.
+    scheduler.add_job(
+        _run_cex_label_refresh,
+        CronTrigger(day_of_week="mon", hour=4, minute=0),
+        id="cex_label_refresh",
+        name="CEX标签周刷新 (Dune → 本地缓存)",
+    )
+
+    # Label verify → daily contamination sweep of every trusted operator address
+    # against Dune labels (the check that would have caught Gate.io-in-SIREN weeks
+    # earlier). Cheap: one batched Dune query.
+    scheduler.add_job(
+        _run_label_verify,
+        CronTrigger(hour=4, minute=30),
+        id="label_verify",
+        name="实体标签验证 (受信地址≠交易所/桥 → Telegram)",
+    )
+
+    # Funder watch → verified operator roots. New fundee convergence =
     # 庄 seeding a fresh shell wallet, earlier than any concentration signal.
     scheduler.add_job(
         _run_funder_watch,
@@ -383,6 +410,70 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+
+
+async def _run_cluster_coverage():
+    """Weekly: Dune-reconstruct each BSC sentinel's holder list; alert on untracked
+    big EOAs (the ESPORTS-20%-whale class) and cross-check drift (reflection)."""
+    logger.info("scheduled_cluster_coverage")
+    from src.ops.cluster_coverage import run_audit
+
+    results = run_audit()
+    problems = [r for r in results if not r["verified"] or r["blind"] or
+                (r["drift_pct"] is not None and r["drift_pct"] > 2)]
+    if problems:
+        from src.distribution.telegram_sender import send_alert
+
+        msg = "🔍 <b>簇覆盖周检 — 需要处理</b>\n━━━━━━━━━━\n"
+        for r in problems[:8]:
+            if not r["verified"]:
+                msg += f"<b>{r['symbol']}</b>: Dune反推失败 — 完整性未验证\n"
+                continue
+            if r["drift_pct"] is not None and r["drift_pct"] > 2:
+                msg += f"<b>{r['symbol']}</b>: 推算vs链上偏差 {r['drift_pct']}%(反射/税币?)\n"
+            for b in r["blind"][:4]:
+                msg += (f"<b>{r['symbol']}</b> 未盯大额EOA {b['share']}%: "
+                        f"<code>{b['address']}</code>\n")
+        await send_alert(msg)
+    logger.info("cluster_coverage_done", tokens=len(results), problems=len(problems))
+
+
+async def _run_cex_label_refresh():
+    """Weekly: pull the full verified BSC exchange-label set from Dune into
+    data/cex_labels_bsc.json (offline-first cache merged by evm_exchanges)."""
+    logger.info("scheduled_cex_label_refresh")
+    import json
+
+    from src.config import DATA_DIR
+    from src.onchain.dune_client import bsc_cex_addresses
+
+    labels = bsc_cex_addresses()
+    if labels:                       # failure ≠ empty: never overwrite with nothing
+        (DATA_DIR / "cex_labels_bsc.json").write_text(json.dumps(labels, ensure_ascii=False))
+        logger.info("cex_labels_refreshed", count=len(labels))
+    else:
+        logger.warning("cex_label_refresh_failed", note="kept previous cache")
+
+
+async def _run_label_verify():
+    """Daily contamination sweep: any address the system TRUSTS as an operator
+    entity that carries an exchange/bridge label = poisoned entity model (the
+    Gate.io-in-SIREN-cluster class of error, institutionalized as a check)."""
+    logger.info("scheduled_label_verify")
+    from src.onchain.label_verify import sweep
+
+    res = sweep()
+    if res["hits"]:
+        from src.distribution.telegram_sender import send_alert
+
+        msg = "🧪 <b>实体污染告警 — 受信地址带交易所/桥标签</b>\n━━━━━━━━━━\n"
+        for h in res["hits"][:10]:
+            msg += (f"<code>{h['address']}</code>\n"
+                    f"  身份: {h['role']} → 实为 <b>{h['label']}</b> ({h['source']})\n"
+                    f"  → 从簇/白名单中剔除并重审相关结论\n\n")
+        await send_alert(msg)
+    logger.info("label_verify_done", checked=res["checked"],
+                hits=len(res["hits"]), complete=res["complete"])
 
 
 async def _run_funder_watch():

@@ -64,15 +64,34 @@ BSC_CEX_SUPPLEMENT: dict[str, str] = {
 }
 
 
+def _cached_dune_labels() -> dict[str, str]:
+    """Dune-refreshed BSC exchange labels (data/cex_labels_bsc.json, written by the
+    weekly scheduler job). Offline-first: one batched Dune pull → local file →
+    every classifier gets the full label set with zero latency. Missing/corrupt
+    file just means we fall back to the hardcoded supplement."""
+    try:
+        import json
+
+        from src.config import DATA_DIR
+        p = DATA_DIR / "cex_labels_bsc.json"
+        if p.exists():
+            d = json.loads(p.read_text())
+            return {str(k).lower(): str(v) for k, v in d.items() if k and v}
+    except Exception:
+        pass
+    return {}
+
+
 def evm_exchanges() -> dict[str, str]:
     """EVM exchange addresses (lowercased) → label: whale_tracker (ETH-centric) +
-    the Dune-sourced BSC supplement.
+    the Dune-sourced BSC supplement + the weekly-refreshed Dune label cache.
 
     If whale_tracker can't import (it pulls in the async collector stack), we LOG
     rather than swallow: the ETH CEX set silently collapsing to BSC-only would
     quietly zero the #1 dump signal's ETH coverage — exactly the failure≠0 trap.
     We still return the BSC supplement so BSC detection is unaffected."""
     out = dict(BSC_CEX_SUPPLEMENT)
+    out.update(_cached_dune_labels())
     try:
         from src.collectors.whale_tracker import WhaleTrackerCollector
 
