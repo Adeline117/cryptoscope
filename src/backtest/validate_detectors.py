@@ -29,8 +29,10 @@ CASES = {
     },
     "SIREN (真操盘,已派发)": {
         "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1", "chain": "bsc",
+        # 2026-07-01: second wallet swapped — 0x0d0707… turned out to be Gate.io's
+        # hot wallet (Dune label), silently sitting in this case as an "operator EOA".
         "wallets": ["0x91dca37856240e5e1906222ec79278b16420dc92",
-                    "0x0d0707963952f2fba59dd06f2b425ace40b492fe"],
+                    "0x7467a1ff2f66933057776ebf8a985613904ece0b"],
         "truth": "real_operator",
     },
     "EVAA (真操盘,撤池)": {
