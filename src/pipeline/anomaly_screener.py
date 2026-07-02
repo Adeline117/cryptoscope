@@ -458,14 +458,16 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
 
 # Confirmed MULTI-TOKEN operator funders — exempt from the disperser strip. A real
 # operator that runs several 妖币 funds its own wallets across many tokens, so by raw
-# fan-out it looks like a disperser (SIREN/EVAA family 0x6596da8b funds 89 addrs) and
-# gets wrongly stripped → the operator's cluster collapses (the false-negative a live
-# regression exposed). Curated allow-list (the pro approach) protects known operators
-# without weakening the CEX/launchpad strip. See memory funder-rarity-doesnt-transfer.
-KNOWN_OPERATOR_FUNDERS = {
-    "0x6596da8b65995d5feacff8c2936f0b7a2051b0d0",  # SIREN/EVAA/SKYAI family root
-    "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161",  # SIREN secondary
-}
+# fan-out it looks like a disperser and gets wrongly stripped.
+#
+# HARD LESSON (2026-07-01 audit): the two addresses previously allow-listed here
+# ("SIREN family roots" 0x6596da8b / 0x631fc1ea) turned out to be Gate.io and
+# Binance HOT WALLETS (Dune labels). Exempting them treated every wallet funded by
+# a Gate.io/Binance withdrawal as one entity — a production false-cluster
+# amplifier. The disperser strip was RIGHT about them all along. Rule now: an
+# address may enter this set ONLY after checking Dune labels.owner_addresses (and
+# our CEX list) proves it is NOT an exchange.
+KNOWN_OPERATOR_FUNDERS: set[str] = set()
 
 
 def _cluster_confidence(conc: dict) -> int:

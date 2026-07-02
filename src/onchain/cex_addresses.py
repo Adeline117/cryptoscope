@@ -51,6 +51,16 @@ BSC_CEX_SUPPLEMENT: dict[str, str] = {
     "0xdf90c9b995a3b10a5b8570a47101e6c6a29eb945": "MEXC",
     "0xb86f1061e0d79e8319339d5fdbb187d4e7ad3300": "MEXC",
     "0xc2149f0d56e227e39077bf4d592f6314098f3b29": "MEXC",
+    # Unmasked 2026-07-01 (Dune labels.owner_addresses) during the sentinel audit.
+    # These four masqueraded as OPERATOR wallets/funders for weeks: 0x6596da8b was
+    # "the SIREN/EVAA family root" (it's Gate.io), 0x631fc1ea "family root #2"
+    # (Binance), 0x4982085c "the family's cross-token wallet" (MEXC inventory),
+    # 0x0d0707 sat inside the SIREN cluster (Gate.io). Keeping them labeled kills
+    # that whole class of false entity-links at the classification layer.
+    "0x6596da8b65995d5feacff8c2936f0b7a2051b0d0": "Gate.io",
+    "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io",
+    "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161": "Binance",
+    "0x4982085c9e2f89f2ecb8131eca71afad896e89cb": "MEXC",
 }
 
 

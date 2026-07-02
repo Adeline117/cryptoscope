@@ -22,13 +22,16 @@ from src.onchain.funder_graph import _MORALIS_CHAINS, MIN_FUNDER_VALUE_WEI
 
 logger = structlog.get_logger()
 
-# Multi-token operator family roots. Add more as they're identified.
+# Multi-token operator roots. HARD RULE (2026-07-01 audit): verify against Dune
+# labels.owner_addresses BEFORE adding — the two previous "SIREN family roots"
+# turned out to be Gate.io and Binance hot wallets (a CEX hot wallet funds
+# thousands of withdrawal wallets; watching it = watching exchange traffic).
 WATCHED_FUNDERS = {
-    "0x6596da8b65995d5feacff8c2936f0b7a2051b0d0": "SIREN/EVAA/SKYAI family",
-    # Second family root: funded SIREN-cluster wallet 0x4982085c…, which was found
-    # holding 1.26M BASED exactly in the BASED Sybil cluster's uniform band — the
-    # family's positioning in new plays flows through this root too.
-    "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161": "SIREN family root #2 (→BASED link)",
+    # BASED's cluster funder: a multisig that seeded all 9 uniform-band wallets and
+    # itself holds 5.17M BASED (#3 holder). No exchange label on Dune — a genuine
+    # operator root. If it seeds fresh wallets that converge on a new token, that
+    # is the next shell.
+    "0xfd09a9cc989cd9d7ff0a1cab6af28c677267a2b9": "BASED operator funder (multisig)",
 }
 
 _STATE = DATA_DIR / "funder_watch.json"
