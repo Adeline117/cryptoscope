@@ -141,3 +141,59 @@ def scan_cex_deposits(chains: tuple[str, ...] = ("ethereum", "bsc", "base", "arb
 
     hits.sort(key=lambda h: -(h.get("pct_of_cluster") or 0))
     return hits
+
+
+def scan_accumulation(chains: tuple[str, ...] = ("ethereum", "bsc", "base", "arbitrum"),
+                      min_confidence: int = 55, limit: int | None = None) -> list[dict]:
+    """Accumulation-anomaly (LONG / 埋伏) scan over the perp universe. For each coin,
+    run effective_concentration_signal — the hidden-coordinated-holding detector
+    (CEX/contracts already excluded, cluster_confidence validated 27/27) — and flag
+    coins where a coordinated entity holds a meaningful, high-confidence share = a
+    'someone is quietly building here' setup worth a small patient position.
+
+    ⚠️ PARKED — DO NOT WIRE TO ALERTS on the perp universe. Verified 2026-07: on
+    large CEX-listed coins, high concentration = the ISSUER/foundation/staking, not
+    a hidden accumulator. Top hit was OKB at 93% (that's OKX holding its own exchange
+    token), SSV/AT = foundation holdings. These are structural, not "someone building
+    to pump" — false positives for a long setup. The concentration detector that
+    finds micro-cap operators finds issuers on large caps. Confirms the original
+    caution: on-chain structure does not predict pumps on established coins. Kept for
+    reuse (e.g. a filtered small-cap sub-universe with issuer labels) but not run.
+
+    Returns [{symbol, chain, address, largest_entity_pct, concentration_gap,
+    cluster_confidence, wallets}] by confidence desc."""
+    from src.onchain.holder_snapshot import fetch_holders_evm
+    from src.onchain.perp_universe import load
+    from src.pipeline.anomaly_screener import effective_concentration_signal
+
+    _CHAIN_ID = {"ethereum": 1, "bsc": 56, "base": 8453, "arbitrum": 42161}
+    universe = [(s, r) for s, r in load().items() if r["chain"] in chains]
+    if limit:
+        universe = universe[:limit]
+    hits: list[dict] = []
+
+    for symbol, rec in universe:
+        chain, addr = rec["chain"], rec["address"]
+        cid = _CHAIN_ID.get(chain)
+        try:
+            holders = fetch_holders_evm(addr, chain_id=cid, max_pages=4) or []
+            if not holders:
+                continue
+            conc = effective_concentration_signal(holders, addr, chain)
+        except Exception:
+            continue
+        if not conc:
+            continue
+        conf = conc.get("cluster_confidence") or 0
+        if conf < min_confidence:
+            continue
+        hits.append({
+            "symbol": symbol, "chain": chain, "address": addr,
+            "largest_entity_pct": conc.get("largest_entity_pct"),
+            "concentration_gap": conc.get("concentration_gap"),
+            "cluster_confidence": conf,
+            "wallets": conc.get("dominant_cluster_wallets") or [],
+        })
+
+    hits.sort(key=lambda h: -h["cluster_confidence"])
+    return hits
