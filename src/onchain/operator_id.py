@@ -29,45 +29,125 @@ _BURN = {"0x0000000000000000000000000000000000000000",
          "0x0000000000000000000000000000000000000001"}
 
 
+_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+_ETHERSCAN_CHAINID = {"ethereum": 1}          # free Etherscan V2 = ETH only (BSC/Base need paid)
+
+
+def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 60):
+    """Full transfer history via Etherscan V2 getLogs (free = ETH only). Returns
+    (inflow, net) per wallet, or (None, None) on failure. Fast (~1k logs/2s)."""
+    import json
+    import os
+    import urllib.request
+    from collections import defaultdict
+    keys = [k.strip() for k in os.environ.get("ETHERSCAN_API_KEYS", "").split(",") if k.strip()]
+    if not keys:
+        return None, None
+    inflow, net = defaultdict(float), defaultdict(float)
+    frm, scale = 0, float(10 ** decimals)
+    for p in range(max_pages):
+        u = (f"https://api.etherscan.io/v2/api?chainid={chainid}&module=logs&action=getLogs"
+             f"&address={token}&topic0={_TRANSFER_TOPIC}&fromBlock={frm}&toBlock=latest"
+             f"&page=1&offset=1000&apikey={keys[p % len(keys)]}")
+        try:
+            r = json.loads(urllib.request.urlopen(
+                urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=25
+            ).read().decode())
+        except Exception:
+            return (inflow, net) if inflow else (None, None)
+        res = r.get("result")
+        if not isinstance(res, list) or not res:
+            break
+        for lg in res:
+            tp = lg.get("topics", [])
+            if len(tp) < 3:
+                continue
+            a_from = "0x" + tp[1][-40:].lower()
+            a_to = "0x" + tp[2][-40:].lower()
+            try:
+                amt = int(lg.get("data", "0x0"), 16) / scale
+            except (ValueError, TypeError):
+                continue
+            inflow[a_to] += amt
+            net[a_to] += amt
+            net[a_from] -= amt
+        if len(res) < 1000:
+            break
+        frm = int(res[-1]["blockNumber"], 16) + 1
+    return inflow, net
+
+
+def _events_moralis(token: str, chain: str, decimals: int, max_pages: int = 30):
+    """Full transfer history via Moralis (covers BSC, where free Etherscan can't).
+    Returns (inflow, net) per wallet or (None, None)."""
+    from collections import defaultdict
+
+    from src.onchain import moralis_client
+    mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
+    if not moralis_client.usable() or not mchain:
+        return None, None
+    inflow, net = defaultdict(float), defaultdict(float)
+    cursor, scale, got = None, float(10 ** decimals), False
+    for _ in range(max_pages):
+        path = f"erc20/{token}/transfers?chain={mchain}&limit=100" + (f"&cursor={cursor}" if cursor else "")
+        d = moralis_client.get(path)
+        if not d:
+            break
+        rows = d.get("result", []) if isinstance(d, dict) else []
+        for t in rows:
+            got = True
+            try:
+                amt = float(t.get("value", 0)) / scale
+            except (ValueError, TypeError):
+                continue
+            a_to = (t.get("to_address") or "").lower()
+            a_from = (t.get("from_address") or "").lower()
+            if a_to:
+                inflow[a_to] += amt
+                net[a_to] += amt
+            if a_from:
+                net[a_from] -= amt
+        cursor = d.get("cursor") if isinstance(d, dict) else None
+        if not cursor:
+            break
+    return (inflow, net) if got else (None, None)
+
+
 def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
-    """Per-wallet total-inflow vs net-now over full history (Dune). Flags wallets that
-    took in a lot but hold little now = accumulated-then-distributed (exited operator).
-    Returns {available, exited, holding} — available=False on Dune failure (UNKNOWN,
-    not 'none')."""
-    from src.onchain.cex_addresses import evm_exchanges
-    from src.onchain.dune_client import available, run_sql
-
-    table = _ERC20.get(chain)
-    if not table or not available():
-        return {"available": False, "exited": [], "holding": []}
+    """Per-wallet total-inflow vs net-now over full history — DUNE-FREE. Flags wallets
+    that took in a lot but hold ~nothing now = accumulated-then-distributed (exited
+    operator), the fingerprint the current snapshot can't see. Source: Etherscan V2
+    (ETH) / Moralis (BSC). Candidates are entity-FILTERED (a wallet that took a lot
+    and dumped could be the LP/deployer/MM/CEX, not an operator). available=False on
+    fetch failure → UNKNOWN, never 'none'."""
     tok = token.lower()
-    rows = run_sql(
-        "with t as ("
-        "select \"to\" as a, cast(value as double)/1e%d as amt, 1 as sgn "
-        "from %s.evt_Transfer where contract_address = %s "
-        "union all "
-        "select \"from\", cast(value as double)/1e%d, -1 "
-        "from %s.evt_Transfer where contract_address = %s) "
-        "select a, sum(case when sgn=1 then amt else 0 end) as total_in, "
-        "sum(sgn*amt) as net_now from t group by 1 "
-        "order by total_in desc limit 60" % (decimals, table, tok, decimals, table, tok),
-        poll_s=6, max_polls=50)
-    if not rows:
-        return {"available": False, "exited": [], "holding": []}   # Dune failed → UNKNOWN
+    inflow = net = None
+    cid = _ETHERSCAN_CHAINID.get(chain)
+    if cid:
+        inflow, net = _events_etherscan(tok, cid, decimals)
+    if inflow is None:
+        inflow, net = _events_moralis(tok, chain, decimals)
+    if not inflow:
+        return {"available": False, "exited": [], "holding": []}
 
+    from src.onchain.cex_addresses import evm_exchanges
+    from src.onchain.entity_classify import classify_address
     cex = evm_exchanges()
+    ranked = sorted(inflow.items(), key=lambda kv: -kv[1])[:40]
     exited, holding = [], []
-    for r in rows:
-        a = str(r.get("a", "")).lower()
-        tin = float(r.get("total_in") or 0)
-        net = float(r.get("net_now") or 0)
+    for a, tin in ranked:
         if a in _BURN or a in cex or tin <= 0:
             continue
-        dist_ratio = 1 - max(net, 0) / tin       # how much of what they took in is gone
-        rec = {"address": a, "total_in": tin, "net_now": net, "distributed": round(dist_ratio, 2)}
-        if dist_ratio >= 0.7 and tin > 0:        # took in a lot, dumped most → exited op
+        # exclude LP/router/vesting/deployer contracts — only EOAs/multisigs are operators
+        if classify_address(a, chain).get("type") in ("contract",):
+            continue
+        nn = net.get(a, 0.0)
+        dist = 1 - max(nn, 0) / tin
+        rec = {"address": a, "total_in": round(tin), "net_now": round(nn),
+               "distributed": round(dist, 2)}
+        if dist >= 0.7:
             exited.append(rec)
-        elif net > 0 and dist_ratio < 0.3:        # took in a lot, still holds → live whale/op
+        elif nn > 0 and dist < 0.3:
             holding.append(rec)
     return {"available": True, "exited": exited[:15], "holding": holding[:15]}
 
