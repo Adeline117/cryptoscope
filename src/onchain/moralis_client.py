@@ -70,6 +70,11 @@ def get(path: str, timeout: int = 25):
             if e.code in (401, 429):       # quota consumed / rate limited → park key
                 _dead.add(k)
                 last_err = f"{e.code} (key parked)"
+                # Visible warning when we've now parked EVERY key = quota exhausted,
+                # so callers don't mistake the resulting None for 'no data' (resets daily).
+                if all(kk in _dead for kk in all_keys):
+                    logger.warning("moralis_quota_exhausted",
+                                   note=f"HTTP {e.code} — all Moralis keys parked (daily quota); resets daily")
                 continue
             last_err = str(e)
             break

@@ -199,9 +199,9 @@ def identify_operator(token: str, chain: str) -> dict:
                            f"{big['total_in']:,.0f}, 现存比{1-big['distributed']:.0%})= 操盘已离场")
     elif not hist.get("available"):
         out["verdict"] = "unknown"
-        out["evidence"] = ("当前无隐藏簇,但历史台账不可得(Dune不可用)→ "
-                           "'拉盘前吸筹后离场'未验证,不能断言无庄")
-        out["caveats"].append("历史维度缺失 = 结论未完成")
+        out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
+                           "Etherscan不覆盖该链)→ '拉盘前吸筹后离场'未验证,不能断言无庄")
+        out["caveats"].append("历史维度缺失 = 结论未完成(换源/额度恢复后重跑)")
     else:
         # current dispersed AND history checked with no exited-accumulator
         lg = conc.get("largest_entity_pct") or 0
