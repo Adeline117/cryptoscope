@@ -34,7 +34,14 @@ def available() -> bool:
     return bool(os.environ.get("DUNE_API_KEY"))
 
 
+# Set when Dune returns 402 (execution credits exhausted) so callers/logs can tell
+# "out of credits" apart from "query returned no rows" — the failure≠silent-zero rule
+# (a swallowed 402 was misdiagnosed all session as "Dune down / timing out").
+CREDITS_EXHAUSTED = False
+
+
 def _req(method: str, path: str, body: dict | None = None, timeout: int = 25) -> dict | None:
+    global CREDITS_EXHAUSTED
     key = os.environ.get("DUNE_API_KEY")
     if not key:
         return None
@@ -45,6 +52,14 @@ def _req(method: str, path: str, body: dict | None = None, timeout: int = 25) ->
             headers={"X-Dune-Api-Key": key, "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 402:
+            CREDITS_EXHAUSTED = True
+            logger.warning("dune_credits_exhausted", path=path,
+                           note="HTTP 402 — Dune execution credits used up; NOT 'no data'")
+        else:
+            logger.warning("dune_http_error", path=path, code=e.code)
+        return None
     except Exception as e:
         logger.debug("dune_req_failed", path=path, error=str(e)[:80])
         return None
