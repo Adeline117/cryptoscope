@@ -113,6 +113,15 @@ def create_scheduler() -> AsyncIOScheduler:
         name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
     )
 
+    # Perp universe → weekly rebuild of the shortable/longable coin set (perp
+    # markets mapped to on-chain contracts) that the dump/accumulation scans run on.
+    scheduler.add_job(
+        _run_perp_universe_refresh,
+        CronTrigger(day_of_week="sun", hour=3, minute=30),
+        id="perp_universe_refresh",
+        name="永续宇宙周刷新 (可做空/做多的币 → 合约映射)",
+    )
+
     # Cluster coverage → weekly Dune holder reconstruction per sentinel; alerts on
     # untracked big EOAs / reconstruction drift (the manual audit, institutionalized).
     scheduler.add_job(
@@ -410,6 +419,16 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+
+
+async def _run_perp_universe_refresh():
+    """Weekly: rebuild the perp→contract universe (the shortable/longable coin set
+    the dump-precursor and accumulation signals scan). Slow-changing."""
+    logger.info("scheduled_perp_universe_refresh")
+    from src.onchain.perp_universe import refresh
+
+    m = refresh()
+    logger.info("perp_universe_done", mapped=len(m))
 
 
 async def _run_cluster_coverage():
