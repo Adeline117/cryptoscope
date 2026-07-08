@@ -29,12 +29,12 @@
 "funding": 0.0057
 },
 "last": {
-"price": 0.08742,
-"liquidity": 251759.84,
-"vol24": 877848.55,
+"price": 0.08774,
+"liquidity": 252255.6,
+"vol24": 880579.53,
 "pair": "0x07b7556Ede0f9a6a7d155A78Bc0573f531001A57",
 "cluster_balance": 19659014.20399599,
-"float_lp": 1557122.177668734,
+"float_lp": 1525410.1575964212,
 "funding": 0.005
 },
 "balanceof_reliable": true,
@@ -76,11 +76,11 @@
 "last": {
 "price": 0.0156,
 "liquidity": 900939.76,
-"vol24": 12528.12,
+"vol24": 12521.22,
 "pair": "0x5Bb59Bb9371cBeC158eD602d5f3CF1AD1c9B4462",
 "cluster_balance": 413887837.11258936,
 "float_lp": 7495534.090951891,
-"funding": 0.0904
+"funding": 0.0956
 },
 "balanceof_reliable": true,
 "sanity": {
@@ -126,13 +126,13 @@
 "funding": 0.1135
 },
 "last": {
-"price": 0.0273,
-"liquidity": 1920062.45,
-"vol24": 229596.01,
+"price": 0.02729,
+"liquidity": 1919779.19,
+"vol24": 227676.57,
 "pair": "0xb2AF49dBF526054FAf19602860A5E298a79F3D05",
 "cluster_balance": 44826811.78143148,
-"float_lp": 23988363.123747844,
-"funding": 0.0812
+"float_lp": 23988634.297103886,
+"funding": 0.0847
 },
 "balanceof_reliable": true,
 "sanity": {
@@ -167,9 +167,9 @@
 "funding": -0.02
 },
 "last": {
-"price": 0.01956,
-"liquidity": 467644.93,
-"vol24": 142887.99,
+"price": 0.01951,
+"liquidity": 467414.93,
+"vol24": 144497.99,
 "cluster_balance": 100000000.0,
 "funding": -0.02,
 "pair": "FKfRK3WdaGXokysR1fPGgCDEeGkV1b1YYnX9ykVpG3JG"
@@ -197,12 +197,12 @@
 "funding": 0.005
 },
 "last": {
-"price": 0.03382,
-"liquidity": 4199208.44,
-"vol24": 5606174.73,
+"price": 0.03409,
+"liquidity": 4216561.35,
+"vol24": 5587882.45,
 "pair": "0xbC42145d5A574EDe9b8860FCa2A49EB7B239Efa5",
 "cluster_balance": 79641741.38218607,
-"float_lp": 62079355.542600535,
+"float_lp": 61835406.47068858,
 "funding": 0.005
 },
 "balanceof_reliable": true,
@@ -239,13 +239,13 @@
 "funding": 0.02
 },
 "last": {
-"price": 0.007344,
-"liquidity": 836473.23,
-"vol24": 441699.76,
+"price": 0.007347,
+"liquidity": 836711.86,
+"vol24": 439305.99,
 "cluster_balance": 311810366.42624587,
 "funding": -0.0127,
 "pair": "0x924F1a4422a89900FAaFa3F886721FDCcD6e086a",
-"float_lp": 56943187.11460672
+"float_lp": 56938413.331816435
 },
 "balanceof_reliable": true,
 "sanity": {
@@ -286,13 +286,13 @@
 "funding": 0.2712
 },
 "last": {
-"price": 2.66,
-"liquidity": 351389.41,
-"vol24": 10516954.5,
+"price": 2.73,
+"liquidity": 353142.23,
+"vol24": 10493168.6,
 "pair": "0x26deB24a2623Cf54452Ab5183E2C34551831D54d",
 "cluster_balance": 17736941.38105214,
-"float_lp": 27941.198061012732,
-"funding": 0.1036
+"float_lp": 27713.635681278705,
+"funding": 0.1071
 },
 "balanceof_reliable": true,
 "sanity": {
@@ -307,11 +307,11 @@
 "⚠️2个钱包近100笔刷>=15种代币: serial-degen特征,非纪律单仓operator"
 ]
 },
-"price_peak": 2.71,
+"price_peak": 2.73,
 "bleed_alerted_pct": 0.0,
 "flow_ts": null,
 "last_phase": "buy",
-"entity_kind": "team_treasury",
-"note": "4/7多签团队金库,行为=信仰者只吸不卖(回撤13.5%);非庄。盯的是金库万一开始派发=利空。+660%那波是真项目催化,非操盘拉盘。"
+"entity_kind": "unknown_pending_historical",
+"note": "判决=unknown。当前持币榜无隐藏簇(gap0)、top是金库多签(信仰者只吸不卖);但\"拉盘前吸筹后离场的庄\"未验证(Dune历史台账当时不可用)。不得断言\"无庄\"。Dune恢复后跑 identify_operator 补历史维度。"
 }
 }
