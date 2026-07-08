@@ -80,3 +80,64 @@ def scan_unlocks(within_days: int = 30, limit: int | None = None) -> list[dict]:
 
     hits.sort(key=_rank)
     return hits
+
+
+def scan_cex_deposits(chains: tuple[str, ...] = ("ethereum", "bsc", "base", "arbitrum"),
+                      top_n: int = 10, min_share: float = 2.0,
+                      limit: int | None = None) -> list[dict]:
+    """Dump precursor on infrastructure WE control: for each perp coin, take its top
+    non-exchange non-contract holders (team/treasury/whales) and check whether they
+    are moving tokens TO a CEX deposit address (cex_flow). A confirmed
+    big-holder → CEX deposit precedes the sell = short candidate.
+
+    EVM only (cex_flow's Solana path is separate). Returns hits soonest-strongest:
+      [{symbol, chain, address, holder, pct, cex_outflow, pct_of_holder, detail}]
+    """
+    from src.onchain.cex_addresses import evm_exchanges
+    from src.onchain.cex_flow import cex_outflow_signal
+    from src.onchain.entity_classify import classify_address
+    from src.onchain.holder_snapshot import fetch_holders_evm
+    from src.onchain.perp_universe import load
+
+    _CHAIN_ID = {"ethereum": 1, "bsc": 56, "base": 8453, "arbitrum": 42161}
+    universe = [(s, r) for s, r in load().items() if r["chain"] in chains]
+    if limit:
+        universe = universe[:limit]
+    cex = evm_exchanges()
+    hits: list[dict] = []
+
+    for symbol, rec in universe:
+        chain, addr = rec["chain"], rec["address"]
+        cid = _CHAIN_ID.get(chain)
+        try:
+            holders = fetch_holders_evm(addr, chain_id=cid, max_pages=3) or []
+        except Exception:
+            continue
+        if not holders:
+            continue
+        holders.sort(key=lambda h: -float(h.get("balance", 0) or 0))
+        supply = sum(float(h.get("balance", 0) or 0) for h in holders[:50]) or 1
+        # significant NON-exchange, NON-contract holders = the movers worth watching
+        watch = []
+        for h in holders[:top_n]:
+            a = str(h.get("address", "")).lower()
+            bal = float(h.get("balance", 0) or 0)
+            share = bal / supply * 100
+            if a in cex or share < min_share:
+                continue
+            if classify_address(a, chain).get("type") in ("eoa", "multisig"):
+                watch.append((a, share))
+        if not watch:
+            continue
+        cxf = cex_outflow_signal(addr, chain, [a for a, _ in watch])
+        if cxf.get("has_signal") and cxf.get("complete"):
+            hits.append({
+                "symbol": symbol, "chain": chain, "address": addr,
+                "watched_holders": len(watch),
+                "cex_outflow": cxf.get("cex_outflow"),
+                "pct_of_cluster": cxf.get("pct_of_cluster"),
+                "detail": cxf.get("detail", ""),
+            })
+
+    hits.sort(key=lambda h: -(h.get("pct_of_cluster") or 0))
+    return hits

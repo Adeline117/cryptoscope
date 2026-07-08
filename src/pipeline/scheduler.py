@@ -122,6 +122,15 @@ def create_scheduler() -> AsyncIOScheduler:
         name="永续宇宙周刷新 (可做空/做多的币 → 合约映射)",
     )
 
+    # Perp CEX-deposit scan → daily dump-precursor sweep over shortable coins.
+    # ~60 min; runs at a quiet hour. Own infra, not a third-party feed.
+    scheduler.add_job(
+        _run_perp_cex_scan,
+        CronTrigger(hour=5, minute=0),
+        id="perp_cex_scan",
+        name="永续做空前兆 (大户→CEX充值 → Telegram)",
+    )
+
     # Cluster coverage → weekly Dune holder reconstruction per sentinel; alerts on
     # untracked big EOAs / reconstruction drift (the manual audit, institutionalized).
     scheduler.add_job(
@@ -419,6 +428,27 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+
+
+async def _run_perp_cex_scan():
+    """Daily: dump-precursor scan over the perp (shortable) universe — top holders
+    moving to CEX deposits. Runs on our own validated infra (holders + cex_flow),
+    not a third-party feed. ~60 min for the full EVM set; quiet baseline is normal."""
+    logger.info("scheduled_perp_cex_scan")
+    from src.pipeline.perp_scanner import scan_cex_deposits
+
+    hits = scan_cex_deposits()
+    if hits:
+        from src.distribution.telegram_sender import send_alert
+
+        msg = "📉 <b>做空前兆 — 永续币大户→CEX充值</b>\n━━━━━━━━━━\n"
+        for h in hits[:10]:
+            pct = ("%.1f%%" % h["pct_of_cluster"]) if h.get("pct_of_cluster") else "?"
+            msg += (f"<b>{h['symbol']}</b> [{h['chain']}] 大户向交易所充值 "
+                    f"{(h.get('cex_outflow') or 0):,.0f} (持仓{pct})\n"
+                    f"→ 砸盘前兆,考虑做空(带止损,仅信号)\n\n")
+        await send_alert(msg)
+    logger.info("perp_cex_scan_done", hits=len(hits))
 
 
 async def _run_perp_universe_refresh():
