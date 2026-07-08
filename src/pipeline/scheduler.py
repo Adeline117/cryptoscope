@@ -122,6 +122,15 @@ def create_scheduler() -> AsyncIOScheduler:
         name="永续宇宙周刷新 (可做空/做多的币 → 合约映射)",
     )
 
+    # Holder snapshots → daily, builds our OWN holder history for tracked tokens so
+    # exited-operator detection becomes a local before/after diff (Dune-independent).
+    scheduler.add_job(
+        _run_holder_snapshots,
+        CronTrigger(hour=6, minute=30),
+        id="holder_snapshots",
+        name="持币快照 (攒本地历史 → 未来抓离场庄,不依赖Dune)",
+    )
+
     # Perp CEX-deposit scan → daily dump-precursor sweep over shortable coins.
     # ~60 min; runs at a quiet hour. Own infra, not a third-party feed.
     scheduler.add_job(
@@ -428,6 +437,43 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+
+
+async def _run_holder_snapshots():
+    """Daily: snapshot top holders of every tracked token (sentinels + perp universe)
+    into holder_snapshots.db. Builds OUR OWN history so 'who held big before a run
+    and dumped into it' becomes a LOCAL before/after diff — Dune-independent
+    exited-operator detection for everything we start watching now."""
+    logger.info("scheduled_holder_snapshots")
+    import json
+
+    from src.config import DATA_DIR
+    from src.onchain.holder_snapshot import fetch_holders_evm, save_snapshot
+    from src.onchain.perp_universe import load as perp_load
+
+    _CID = {"bsc": 56, "ethereum": 1, "base": 8453, "arbitrum": 42161}
+    targets: dict[tuple, None] = {}
+    try:
+        reg = json.loads((DATA_DIR / "operator_sentinels.json").read_text())
+        for s in reg.values():
+            if s.get("chain") in _CID:
+                targets[(s["token"].lower(), s["chain"])] = None
+    except Exception:
+        pass
+    for sym, rec in perp_load().items():
+        if rec["chain"] in _CID:
+            targets[(rec["address"], rec["chain"])] = None
+
+    saved = 0
+    for (tok, chain) in targets:
+        try:
+            h = fetch_holders_evm(tok, chain_id=_CID[chain], max_pages=4)
+            if h:
+                save_snapshot(tok, chain, h)
+                saved += 1
+        except Exception as e:
+            logger.debug("snapshot_failed", token=tok, error=str(e)[:60])
+    logger.info("holder_snapshots_done", tokens=len(targets), saved=saved)
 
 
 async def _run_perp_cex_scan():
