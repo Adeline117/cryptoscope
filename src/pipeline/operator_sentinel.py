@@ -53,6 +53,7 @@ STOP_MIN_S = 900         # ...but never less than 15 min (avoid twitchy)
 STOP_MAX_S = 21600       # ...never more than 6h (avoid waiting forever)
 # Price/liquidity are only a BACKSTOP — catch a violent move if balance sampling lags.
 RUG_DROP = 0.30          # liquidity fell >=30% → LP pull / rug
+RUG_PRICE_CONFIRM = 0.12  # ...but ONLY a rug if price ALSO fell >=12% (else thin-pool noise)
 CRASH_DROP = 0.15        # price fell >=15% vs last check → 砸盘 backstop (violent)
 PRICE_DD = 0.18          # price down >=18% from a recent high → 急跌 (GRADUAL bleed,
                          # even if no single cycle dropped 15% — what missed EVAA)
@@ -925,10 +926,19 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                     t["bleed_alerted_pct"] = drop_pct
 
             # ===== BACKSTOP: violent price/liquidity moves (if sampling lagged) =====
+            # A real LP pull/rug craters liquidity AND price together and does NOT
+            # recover. On a thin pool ($250k BASED) a single normal swap swings
+            # liquidity ±30% with price flat — that tripped phantom RUG (short) alerts
+            # alternating with 浮筹收紧 (long). Require PRICE to also drop materially so
+            # liquidity oscillation on a thin pool can't fake a rug.
             cl, pl = cur.get("liquidity"), last.get("liquidity")
-            if cl is not None and pl and pl > 0 and cl < pl * (1 - RUG_DROP):
+            ppr = last.get("price")
+            price_drop = ((ppr - cpr) / ppr) if (ppr and cpr and ppr > 0) else 0
+            if (cl is not None and pl and pl > 0 and cl < pl * (1 - RUG_DROP)
+                    and price_drop >= RUG_PRICE_CONFIRM):
                 drop = (pl - cl) / pl * 100
-                fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 疑似抽池 → 逃命"))
+                fired.append(("RUG", f"流动性 -{drop:.0f}% (${pl:,.0f}→${cl:,.0f}) 且价-{price_drop*100:.0f}% "
+                              "→ 抽池/rug,逃命"))
 
             # ===== 控浮筹型点火 (the MAME class) — operator-attributable, so it fits
             # the "only 庄 info" rule. A high-control operator marks up by tightening the
