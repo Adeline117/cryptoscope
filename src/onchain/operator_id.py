@@ -77,40 +77,42 @@ def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 
     return inflow, net
 
 
-def _events_moralis(token: str, chain: str, decimals: int, max_pages: int = 30):
-    """Full transfer history via Moralis (covers BSC, where free Etherscan can't).
-    Returns (inflow, net) per wallet or (None, None)."""
+def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int = 60):
+    """EARLY-accumulation inflow per wallet via Moralis, walking OLDEST-first
+    (order=ASC). A busy token's full history is too big to page newest-first (can't
+    reach genesis) — but we don't need it: who accumulated in the token's EARLY life
+    is the operator-accumulation window; whether they EXITED is then a cheap current-
+    balance lookup (done by the caller). Returns {wallet: early_inflow} or None."""
+    import time
     from collections import defaultdict
 
     from src.onchain import moralis_client
     mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
     if not moralis_client.usable() or not mchain:
-        return None, None
-    inflow, net = defaultdict(float), defaultdict(float)
+        return None
+    inflow: dict[str, float] = defaultdict(float)
     cursor, scale, got = None, float(10 ** decimals), False
-    for _ in range(max_pages):
-        path = f"erc20/{token}/transfers?chain={mchain}&limit=100" + (f"&cursor={cursor}" if cursor else "")
+    for pg in range(max_pages):
+        if pg:
+            time.sleep(0.25)
+        path = (f"erc20/{token}/transfers?chain={mchain}&order=ASC&limit=100"
+                + (f"&cursor={cursor}" if cursor else ""))
         d = moralis_client.get(path)
         if not d:
             break
-        rows = d.get("result", []) if isinstance(d, dict) else []
-        for t in rows:
+        for t in (d.get("result", []) if isinstance(d, dict) else []):
             got = True
             try:
                 amt = float(t.get("value", 0)) / scale
             except (ValueError, TypeError):
                 continue
             a_to = (t.get("to_address") or "").lower()
-            a_from = (t.get("from_address") or "").lower()
             if a_to:
                 inflow[a_to] += amt
-                net[a_to] += amt
-            if a_from:
-                net[a_from] -= amt
         cursor = d.get("cursor") if isinstance(d, dict) else None
         if not cursor:
             break
-    return (inflow, net) if got else (None, None)
+    return inflow if got else None
 
 
 def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
@@ -121,27 +123,44 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     and dumped could be the LP/deployer/MM/CEX, not an operator). available=False on
     fetch failure → UNKNOWN, never 'none'."""
     tok = token.lower()
-    inflow = net = None
     cid = _ETHERSCAN_CHAINID.get(chain)
-    if cid:
-        inflow, net = _events_etherscan(tok, cid, decimals)
-    if inflow is None:
-        inflow, net = _events_moralis(tok, chain, decimals)
-    if not inflow:
-        return {"available": False, "exited": [], "holding": []}
+    inflow, net = (_events_etherscan(tok, cid, decimals) if cid else (None, None))
+
+    if inflow is not None and net is not None:
+        # ETH: full block-walk gives complete inflow AND net → use net directly.
+        # Completeness guard: negative net among top holders = partial pull → refuse.
+        ranked = sorted(inflow.items(), key=lambda kv: -kv[1])
+        if [a for a, _ in ranked[:40] if net.get(a, 0) < -max(1.0, 1e-6 * (inflow.get(a) or 0))]:
+            logger.warning("historical_ledger_incomplete", token=token, note="partial ETH window")
+            return {"available": False, "exited": [], "holding": [], "incomplete": True}
+        net_of = lambda a: net.get(a, 0.0)
+    else:
+        # BSC/other: early-accumulation window (oldest-first) + CURRENT balance to
+        # decide exit — avoids needing the (too-large) full history.
+        inflow = _early_inflow_moralis(tok, chain, decimals)
+        if not inflow:
+            return {"available": False, "exited": [], "holding": []}
+        from src.onchain.evm_archive import ArchiveRPC
+        rpc = ArchiveRPC(chain)
+        ranked = sorted(inflow.items(), key=lambda kv: -kv[1])
+        _bal_cache: dict[str, float] = {}
+
+        def net_of(a):
+            if a not in _bal_cache:
+                b = rpc.balance_of(token, a)
+                _bal_cache[a] = b if b is not None else 0.0
+            return _bal_cache[a]
 
     from src.onchain.cex_addresses import evm_exchanges
     from src.onchain.entity_classify import classify_address
     cex = evm_exchanges()
-    ranked = sorted(inflow.items(), key=lambda kv: -kv[1])[:40]
     exited, holding = [], []
-    for a, tin in ranked:
+    for a, tin in ranked[:40]:
         if a in _BURN or a in cex or tin <= 0:
             continue
-        # exclude LP/router/vesting/deployer contracts — only EOAs/multisigs are operators
-        if classify_address(a, chain).get("type") in ("contract",):
+        if classify_address(a, chain).get("type") in ("contract",):   # LP/router/vesting
             continue
-        nn = net.get(a, 0.0)
+        nn = net_of(a)
         dist = 1 - max(nn, 0) / tin
         rec = {"address": a, "total_in": round(tin), "net_now": round(nn),
                "distributed": round(dist, 2)}

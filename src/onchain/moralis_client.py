@@ -55,32 +55,41 @@ def usable() -> bool:
 
 def get(path: str, timeout: int = 25):
     """GET a Moralis v2.2 path, rotating keys on quota/rate-limit. Returns parsed
-    JSON or None. `path` is everything after /api/v2.2/."""
+    JSON or None. `path` is everything after /api/v2.2/.
+
+    429 (RATE limit) is transient — back off and retry the SAME key a few times
+    (deep pagination trips it; permanently parking the key there was aborting whole
+    full-history pulls mid-way). 401 (quota/plan) is terminal — park the key."""
+    import time
     all_keys = keys()
     live = [k for k in all_keys if k not in _dead] or all_keys
     last_err = None
     for k in live:
-        try:
-            req = urllib.request.Request(
-                _BASE + path,
-                headers={"X-API-Key": k, "accept": "application/json", "User-Agent": _UA})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode())
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 429):       # quota consumed / rate limited → park key
-                _dead.add(k)
-                last_err = f"{e.code} (key parked)"
-                # Visible warning when we've now parked EVERY key = quota exhausted,
-                # so callers don't mistake the resulting None for 'no data' (resets daily).
-                if all(kk in _dead for kk in all_keys):
-                    logger.warning("moralis_quota_exhausted",
-                                   note=f"HTTP {e.code} — all Moralis keys parked (daily quota); resets daily")
-                continue
-            last_err = str(e)
-            break
-        except Exception as e:
-            last_err = str(e)
-            break
+        for attempt in range(4):
+            try:
+                req = urllib.request.Request(
+                    _BASE + path,
+                    headers={"X-API-Key": k, "accept": "application/json", "User-Agent": _UA})
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return json.loads(r.read().decode())
+            except urllib.error.HTTPError as e:
+                if e.code == 429:              # rate limited → back off, retry same key
+                    last_err = "429 (rate limited, backing off)"
+                    time.sleep(0.6 * (attempt + 1))
+                    continue
+                if e.code == 401:              # quota/plan → terminal, park key
+                    _dead.add(k)
+                    last_err = "401 (key parked)"
+                    if all(kk in _dead for kk in all_keys):
+                        logger.warning("moralis_quota_exhausted",
+                                       note="HTTP 401 — all Moralis keys parked (quota/plan)")
+                    break
+                last_err = str(e)
+                break
+            except Exception as e:
+                last_err = str(e)
+                break
+        # exhausted this key's attempts (429 retries or a break) → try next key
     if last_err:
         logger.debug("moralis_request_failed", path=path[:60], error=str(last_err)[:80])
     return None
