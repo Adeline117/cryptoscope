@@ -201,21 +201,43 @@ def identify_operator(token: str, chain: str) -> dict:
         out["historical"] = {"available": False, "exited": [], "holding": []}
         out["caveats"].append(f"historical failed: {str(e)[:60]}")
 
+    # Price context — the sell-vs-move discriminator. A mass SELL (real exit) sends
+    # tokens INTO the LP pool → price craters. If wallets emptied but price is NOT
+    # down, the tokens were MOVED wallet-to-wallet (rotation/obfuscation), NOT sold —
+    # the operator likely still controls them via other addresses. Without this gate,
+    # "balance→0" was wrongly read as "exited" (the EVAA catch: +660%, price intact,
+    # yet 15 wallets 'fully distributed' — impossible if they'd actually sold).
+    px_change = None
+    try:
+        from src.pipeline.operator_sentinel import _dex
+        dx = _dex(token, chain)
+        px_change = dx.get("h24")   # recent trend; a real mass exit shows big negative
+    except Exception:
+        pass
+    out["current"]["price_change_24h"] = px_change
+
     conf = conc.get("cluster_confidence") or 0
     hist = out["historical"]
     exited = hist.get("exited") or []
-    # Verdict logic — the whole point is NOT to collapse to a story the evidence
-    # doesn't support. Current-snapshot silence + unavailable history = UNKNOWN.
+    price_crashed = (px_change is not None and px_change <= -25)
     if conf >= 55:
         out["verdict"] = "live_operator"
         out["confidence"] = conf
         out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}"
-    elif hist.get("available") and exited:
+    elif hist.get("available") and exited and price_crashed:
         out["verdict"] = "exited_operator"
         out["confidence"] = min(90, 40 + 10 * len(exited))
         big = max(exited, key=lambda e: e["total_in"])
-        out["evidence"] = (f"{len(exited)}个钱包大量吸入后已派发≥70%(最大吸入"
-                           f"{big['total_in']:,.0f}, 现存比{1-big['distributed']:.0%})= 操盘已离场")
+        out["evidence"] = (f"{len(exited)}个钱包吸入后派发≥70% 且价24h{px_change:.0f}% "
+                           f"(最大吸入{big['total_in']:,.0f})= 操盘卖出离场")
+    elif hist.get("available") and exited and not price_crashed:
+        # accumulation gone from wallets BUT price intact = MOVED not sold
+        out["verdict"] = "operator_present_rotating"
+        out["confidence"] = min(85, 45 + 8 * len(exited))
+        big = max(exited, key=lambda e: e["total_in"])
+        out["evidence"] = (f"{len(exited)}个早期重仓钱包已清空(最大{big['total_in']:,.0f}) "
+                           f"但价格未崩(24h{px_change}) → 币是转走非卖出 = 操盘换钱包/仍控盘,未离场")
+        out["caveats"].append("需追转出去向确认:转LP/CEX=真卖,转EOA=换钱包(操盘仍在)")
     elif not hist.get("available"):
         out["verdict"] = "unknown"
         out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
