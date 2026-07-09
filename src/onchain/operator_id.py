@@ -240,6 +240,79 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
     return agg
 
 
+def _wallet_outflow_map(token: str, chain: str, wallet: str, max_pages: int = 6) -> dict:
+    """{to_lower: amount} for `wallet`'s outbound `token` transfers (Moralis DESC)."""
+    import time
+    from collections import defaultdict
+
+    from src.onchain import moralis_client
+    mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
+    if not mchain:
+        return {}
+    out: dict[str, float] = defaultdict(float)
+    cursor, tl = None, token.lower()
+    for pg in range(max_pages):
+        if pg:
+            time.sleep(0.25)
+        path = f"{wallet}/erc20/transfers?chain={mchain}&order=DESC&limit=100" + (f"&cursor={cursor}" if cursor else "")
+        d = moralis_client.get(path)
+        if not d:
+            break
+        for t in (d.get("result", []) if isinstance(d, dict) else []):
+            if (t.get("address") or t.get("token_address") or "").lower() != tl:
+                continue
+            if (t.get("from_address") or "").lower() != wallet.lower():
+                continue
+            try:
+                amt = float(t.get("value_decimal") or (float(t.get("value", 0)) / 1e18))
+            except (ValueError, TypeError):
+                amt = 0.0
+            to = (t.get("to_address") or "").lower()
+            if to:
+                out[to] += amt
+        cursor = d.get("cursor") if isinstance(d, dict) else None
+        if not cursor:
+            break
+    return out
+
+
+def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict,
+                       depth: int = 2, max_wallets: int = 25) -> dict:
+    """Follow the rotation frontier: emptied operator wallets → their MOVE
+    destinations → recurse (bounded). Aggregate where the stack ULTIMATELY goes:
+    sold (→pool/CEX anywhere in the frontier) vs still parked in fresh EOAs (held/
+    dormant). Answers 'the rotated stack — did it eventually get sold, or is it a
+    loaded threat sitting in new wallets?'"""
+    from src.onchain.entity_classify import classify_address
+    seen = set(w.lower() for w in seed)
+    frontier = list(seen)
+    sold = 0.0
+    parked_terminal = 0.0
+    visited_edges = 0
+    for lvl in range(depth):
+        nxt = []
+        for w in frontier:
+            if visited_edges >= max_wallets:
+                break
+            visited_edges += 1
+            for to, amt in _wallet_outflow_map(token, chain, w).items():
+                if to in pairs or to in cex:
+                    sold += amt                      # reached a sell venue → sold
+                elif classify_address(to, chain).get("type") == "contract":
+                    sold += amt * 0                  # contract: ignore (LP/staking ambiguous)
+                elif to not in seen:
+                    seen.add(to)
+                    if lvl < depth - 1:
+                        nxt.append(to)               # keep chasing
+                    else:
+                        parked_terminal += amt       # frontier edge: parked in a wallet
+        frontier = nxt
+        if not frontier:
+            break
+    return {"sold_via_frontier": round(sold), "parked_in_wallets": round(parked_terminal),
+            "wallets_walked": visited_edges}
+
+
 def identify_operator(token: str, chain: str) -> dict:
     """The canonical verdict. Never raises. Shape:
       {verdict, confidence, current:{...}, historical:{...}, evidence, caveats}
@@ -330,8 +403,17 @@ def identify_operator(token: str, chain: str) -> dict:
         elif moved_internal >= 0.5 * total_out:
             out["verdict"] = "present_rotating_confirmed"
             out["confidence"] = min(85, 50 + 5 * resolved_n)
-            out["evidence"] = (f"{len(exited)}个钱包清空,转出{moved_internal/total_out*100:.0f}%回流簇内成员 "
-                               f"= 换钱包/仍控盘(正向证据),未卖出")
+            # Rotation-frontier: chase the moved stack downstream — was it ULTIMATELY
+            # sold, or is it a loaded threat parked in fresh wallets?
+            fr = _rotation_frontier(token, chain, [e["address"] for e in exited[:8]], pairs, cex)
+            out["current"]["rotation_frontier"] = fr
+            tail = ""
+            if fr["sold_via_frontier"] > 2 * fr["parked_in_wallets"] and fr["sold_via_frontier"] > 0:
+                tail = f" · 但下游frontier已卖{fr['sold_via_frontier']:,.0f} = 换钱包后正在出货"
+            elif fr["parked_in_wallets"] > 0:
+                tail = f" · 下游{fr['parked_in_wallets']:,.0f}仍停在新钱包 = 装弹威胁,随时可能砸"
+            out["evidence"] = (f"{len(exited)}个钱包清空,转出{moved_internal/total_out*100:.0f}%回流簇内 "
+                               f"= 换钱包/仍控盘,未卖出{tail}")
         else:
             # mostly to plain fresh EOAs — could be rotation OR sold-via-intermediary
             out["verdict"] = "indeterminate_emptied"
