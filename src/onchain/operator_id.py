@@ -171,13 +171,20 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     for a, tin in ranked[:40]:
         if a in _BURN or a in cex or tin <= 0:
             continue
-        if classify_address(a, chain).get("type") in ("contract",):   # LP/router/vesting
+        # F6 (red-team): a real trading operator is confidently EOA; 'unknown' (getCode
+        # flake / BSC RPC down) must not let an LP/bridge/migration lock into the exited
+        # path. Keep multisig (Safe operators) — only drop contract/unknown.
+        if classify_address(a, chain).get("type") in ("contract", "unknown"):
             continue
         nn = net_of(a)
         dist = 1 - max(nn, 0) / tin
         rec = {"address": a, "total_in": round(tin), "net_now": round(nn),
                "distributed": round(dist, 2)}
-        if dist >= 0.7:
+        # F4 (red-team dead-zone fix): 0.35–0.7 was in NEITHER list → the verdict fell
+        # through to 'treasury' (a big-residual mid-distributor like SIREN mislabeled
+        # passive). Anything that has shed >=35% of what it took in goes through the
+        # exit referee so real distribution is seen.
+        if dist >= 0.35:
             exited.append(rec)
         elif nn > 0 and dist < 0.3:
             holding.append(rec)
@@ -315,33 +322,40 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
     loaded threat sitting in new wallets?'"""
     from src.onchain.entity_classify import classify_address
     sell_venues = pairs | _infra(chain)["routers"] | set(cex)
+    # F1 (red-team determinism fix): deterministic ordered worklist + weight-priority
+    # cap. The old `list(set(...))` was PYTHONHASHSEED-random and the count-cap then
+    # stopped after a hash-random subset → EVAA flipped rotating↔churn between runs.
+    # Now: at each level sort candidates by (-amount, address) and take the top-K by
+    # VALUE, so the dropped tail is the lowest-value wallets that can't move the verdict.
     seen = set(w.lower() for w in seed)
-    frontier = list(seen)
+    frontier = sorted(seen)
     sold = 0.0
     parked_terminal = 0.0
-    visited_edges = 0
+    to_contract = 0.0
+    walked = 0
     for lvl in range(depth):
-        nxt = []
-        for w in frontier:
-            if visited_edges >= max_wallets:
-                break
-            visited_edges += 1
+        level_dests: dict[str, float] = {}
+        for w in frontier[:max_wallets]:
+            walked += 1
             for to, amt in _wallet_outflow_map(token, chain, w).items():
-                if to in sell_venues:
-                    sold += amt                      # reached a sell venue → sold
-                elif classify_address(to, chain).get("type") == "contract":
-                    sold += amt * 0                  # contract: ignore (LP/staking ambiguous)
-                elif to not in seen:
-                    seen.add(to)
-                    if lvl < depth - 1:
-                        nxt.append(to)               # keep chasing
-                    else:
-                        parked_terminal += amt       # frontier edge: parked in a wallet
-        frontier = nxt
+                level_dests[to] = level_dests.get(to, 0.0) + amt
+        nxt = []
+        for to, amt in sorted(level_dests.items(), key=lambda kv: (-kv[1], kv[0])):
+            if to in sell_venues:
+                sold += amt
+            elif classify_address(to, chain).get("type") == "contract":
+                to_contract += amt                   # explicit bucket, not silent 0
+            elif to not in seen:
+                seen.add(to)
+                if lvl < depth - 1:
+                    nxt.append(to)
+                else:
+                    parked_terminal += amt
+        frontier = sorted(nxt)[:max_wallets]         # deterministic, value-independent order OK (already netted)
         if not frontier:
             break
     return {"sold_via_frontier": round(sold), "parked_in_wallets": round(parked_terminal),
-            "wallets_walked": visited_edges}
+            "to_contract": round(to_contract), "wallets_walked": walked}
 
 
 def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
@@ -441,19 +455,28 @@ def identify_operator(token: str, chain: str) -> dict:
         out["confidence"] = min(78, 45 + int(lg))
         out["evidence"] = (f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应(链上余额已核实>0),"
                            f"早期未大规模离场 = 操盘装弹持有(拉盘候选)")
-    elif hist.get("available") and len(holding) >= 3 and sum_hold >= max(sum_exit_in, 1):
-        # LOADED-LIVE fix (BASED): the coordinated cluster still HOLDS more than it
-        # emptied — an operator loaded and sitting, not one that left. Checked BEFORE
-        # the emptied-wallet path so a live loaded cluster isn't read as 'indeterminate'.
+    elif (hist.get("available") and len(holding) >= 5 and sum_hold > 1.5 * sum_exit_in
+          and _cluster_holds_onchain(token, chain, [h["address"] for h in holding])):
+        # LOADED-LIVE (BASED): a coordinated set still HOLDS clearly more than it emptied.
+        # F3 (red-team): raised the bar (>=5 wallets, sum_hold > 1.5x emptied, not the
+        # old max(...,1) floor) + RPC-verified live balances so 3 retail diamond-hands
+        # holding a token can't fabricate a loaded operator.
         out["verdict"] = "loaded_live_operator"
-        out["confidence"] = min(80, 45 + 6 * len(holding))
+        out["confidence"] = min(80, 45 + 5 * len(holding))
         out["evidence"] = (f"{len(holding)}个早期重仓钱包仍持有(合计{sum_hold:,.0f} > "
                            f"已清空{sum_exit_in:,.0f}) = 操盘装弹持有,未离场未派发")
     elif hist.get("available") and exited:
         # SELL-vs-MOVE REFEREE (destination-grounded, replaces the price guess).
         # For the emptied early-heavy wallets, trace WHERE their tokens went.
         from src.onchain.cex_addresses import evm_exchanges
-        member_set = {e["address"] for e in exited} | {e["address"] for e in (hist.get("holding") or [])}
+        # F5 (red-team circularity fix): a destination counts as an INTERNAL MOVE only
+        # if it's in the funder-verified cluster (dominant_cluster_wallets), NOT merely
+        # any early-cohort wallet. Otherwise unrelated early snipers trading among
+        # themselves read as 'rotation' — the MAME false-positive mechanism. Cohort
+        # wallets NOT in the verified cluster fall to move_eoa (indeterminate), not move.
+        verified_cluster = {a.lower() for a in (conc.get("dominant_cluster_wallets") or [])}
+        member_set = verified_cluster or (
+            {e["address"] for e in exited} | {e["address"] for e in (hist.get("holding") or [])})
         pairs = _token_pairs(token, chain)
         cex = evm_exchanges()
         tot = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
