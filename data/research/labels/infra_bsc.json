@@ -1,0 +1,20 @@
+{
+  "routers": {
+    "0x10ed43c718714eb63d5aa57b78b54704e256024e": "PancakeSwap V2 Router",
+    "0x13f4ea83d0bd40e75c8222255bc855a974568dd4": "PancakeSwap V3 Router",
+    "0x1b81d678ffb9c0263b24a97847620c99d213eb14": "PancakeSwap SmartRouter",
+    "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch Router",
+    "0xdef1c0ded9bec7f1a1670819833240f027b25eff": "0x/Matcha",
+    "0x111111125421ca6dc452d289314280a0f8842a65": "1inch V6",
+    "0x2a5c54c625220cb2166c94dd9329be1f8785977d": "OpenOcean"
+  },
+  "bridges": {
+    "0x8731d54e9d02c286767d56ac03e8037c07e01e98": "Stargate",
+    "0x1a44076050125825900e736c501f859c50fe728c": "LayerZero"
+  },
+  "disperse": {"0xd152f549545093347a162dce210e7293f1452150": "Disperse.app"},
+  "burn": {
+    "0x0000000000000000000000000000000000000000": "zero",
+    "0x000000000000000000000000000000000000dead": "dead"
+  }
+}

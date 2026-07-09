@@ -1,0 +1,20 @@
+{
+  "routers": {
+    "0x7a250d5630b4cf539739df2c5dacb4c659f2488d": "Uniswap V2 Router",
+    "0xe592427a0aece92de3edee1f18e0157c05861564": "Uniswap V3 Router",
+    "0x66a9893cc07d91d95644aedd05d03f95e1dba8af": "Uniswap Universal Router",
+    "0x1111111254eeb25477b68fb85ed929f73a960582": "1inch Router",
+    "0xdef1c0ded9bec7f1a1670819833240f027b25eff": "0x/Matcha"
+  },
+  "bridges": {
+    "0x8731d54e9d02c286767d56ac03e8037c07e01e98": "Stargate",
+    "0x1a44076050125825900e736c501f859c50fe728c": "LayerZero"
+  },
+  "disperse": {
+    "0xd152f549545093347a162dce210e7293f1452150": "Disperse.app"
+  },
+  "burn": {
+    "0x0000000000000000000000000000000000000000": "zero",
+    "0x000000000000000000000000000000000000dead": "dead"
+  }
+}

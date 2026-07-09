@@ -29,6 +29,19 @@ _BURN = {"0x0000000000000000000000000000000000000000",
          "0x0000000000000000000000000000000000000001"}
 
 
+# Verdicts that must NEVER auto-register a sentinel (spec process-gate): unproven or
+# non-operator states. identify_operator is the only intended promotion path.
+NON_PROMOTABLE = {"too_young_to_judge", "indeterminate_emptied", "none", "dispersed",
+                  "treasury_only", "unknown"}
+
+
+def promotable(verdict: dict, min_confidence: int = 55) -> bool:
+    """Whether a verdict may promote to a tracked sentinel. Gates out unproven /
+    non-operator / low-confidence states — no register() bypass (MAME lesson)."""
+    return (verdict.get("verdict") not in NON_PROMOTABLE
+            and (verdict.get("confidence") or 0) >= min_confidence)
+
+
 _TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 _ETHERSCAN_CHAINID = {"ethereum": 1}          # free Etherscan V2 = ETH only (BSC/Base need paid)
 
@@ -171,6 +184,21 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     return {"available": True, "exited": exited[:15], "holding": holding[:15]}
 
 
+def _infra(chain: str) -> dict:
+    """Router/bridge/disperse/burn labels (destination classification). Routers ARE
+    sell venues — a sell usually routes THROUGH the router, not straight to the pair,
+    so missing them undercounts sells."""
+    import json
+
+    from src.config import DATA_DIR
+    try:
+        d = json.loads((DATA_DIR / "research" / "labels" / f"infra_{chain}.json").read_text())
+        return {"routers": set(d.get("routers", {})), "bridges": set(d.get("bridges", {})),
+                "disperse": set(d.get("disperse", {})), "burn": set(d.get("burn", {}))}
+    except Exception:
+        return {"routers": set(), "bridges": set(), "disperse": set(), "burn": set()}
+
+
 def _token_pairs(token: str, chain: str) -> set[str]:
     """LP pair addresses (sell-into-pool destinations) from DexScreener + total liq."""
     import json
@@ -202,6 +230,8 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
     mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
     if not mchain:
         return {}
+    infra = _infra(chain)
+    sell_venues = pairs | infra["routers"]      # routers ARE sell venues
     agg = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
            "to_contract": 0.0, "resolved": False}
     cursor = None
@@ -224,7 +254,7 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
             except (ValueError, TypeError):
                 amt = 0.0
             to = (t.get("to_address") or "").lower()
-            if to in pairs:
+            if to in sell_venues:
                 agg["sell_dex"] += amt
             elif to in cex:
                 agg["sell_cex"] += amt
@@ -284,6 +314,7 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
     dormant). Answers 'the rotated stack — did it eventually get sold, or is it a
     loaded threat sitting in new wallets?'"""
     from src.onchain.entity_classify import classify_address
+    sell_venues = pairs | _infra(chain)["routers"] | set(cex)
     seen = set(w.lower() for w in seed)
     frontier = list(seen)
     sold = 0.0
@@ -296,7 +327,7 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
                 break
             visited_edges += 1
             for to, amt in _wallet_outflow_map(token, chain, w).items():
-                if to in pairs or to in cex:
+                if to in sell_venues:
                     sold += amt                      # reached a sell venue → sold
                 elif classify_address(to, chain).get("type") == "contract":
                     sold += amt * 0                  # contract: ignore (LP/staking ambiguous)
