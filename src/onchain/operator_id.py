@@ -171,6 +171,75 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     return {"available": True, "exited": exited[:15], "holding": holding[:15]}
 
 
+def _token_pairs(token: str, chain: str) -> set[str]:
+    """LP pair addresses (sell-into-pool destinations) from DexScreener + total liq."""
+    import json
+    import urllib.request
+    pairs: set[str] = set()
+    try:
+        req = urllib.request.Request(
+            f"https://api.dexscreener.com/latest/dex/tokens/{token}",
+            headers={"User-Agent": "Mozilla/5.0"})
+        d = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+        for p in (d.get("pairs") or []):
+            pa = (p.get("pairAddress") or "").lower()
+            if pa:
+                pairs.add(pa)
+    except Exception:
+        pass
+    return pairs
+
+
+def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
+                       pairs: set, cex: dict, max_pages: int = 6) -> dict:
+    """Where did `wallet` send `token`? Classify each destination (SELL vs MOVE) —
+    the sell-vs-move referee. Sold: → LP pair / CEX. Moved: → cluster member (internal)
+    or a plain EOA (rotation-unproven). Returns aggregate amounts by class."""
+    import time
+
+    from src.onchain import moralis_client
+    from src.onchain.entity_classify import classify_address
+    mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
+    if not mchain:
+        return {}
+    agg = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
+           "to_contract": 0.0, "resolved": False}
+    cursor = None
+    tl = token.lower()
+    for pg in range(max_pages):
+        if pg:
+            time.sleep(0.25)
+        path = f"{wallet}/erc20/transfers?chain={mchain}&order=DESC&limit=100" + (f"&cursor={cursor}" if cursor else "")
+        d = moralis_client.get(path)
+        if not d:
+            break
+        for t in (d.get("result", []) if isinstance(d, dict) else []):
+            if (t.get("address") or t.get("token_address") or "").lower() != tl:
+                continue
+            if (t.get("from_address") or "").lower() != wallet.lower():
+                continue
+            agg["resolved"] = True
+            try:
+                amt = float(t.get("value_decimal") or (float(t.get("value", 0)) / 1e18))
+            except (ValueError, TypeError):
+                amt = 0.0
+            to = (t.get("to_address") or "").lower()
+            if to in pairs:
+                agg["sell_dex"] += amt
+            elif to in cex:
+                agg["sell_cex"] += amt
+            elif to in member_set:
+                agg["move_member"] += amt
+            elif classify_address(to, chain).get("type") == "contract":
+                agg["to_contract"] += amt
+            else:
+                agg["move_eoa"] += amt
+        cursor = d.get("cursor") if isinstance(d, dict) else None
+        if not cursor:
+            break
+    return agg
+
+
 def identify_operator(token: str, chain: str) -> dict:
     """The canonical verdict. Never raises. Shape:
       {verdict, confidence, current:{...}, historical:{...}, evidence, caveats}
@@ -201,48 +270,76 @@ def identify_operator(token: str, chain: str) -> dict:
         out["historical"] = {"available": False, "exited": [], "holding": []}
         out["caveats"].append(f"historical failed: {str(e)[:60]}")
 
-    # Price context — the sell-vs-move discriminator. A mass SELL (real exit) sends
-    # tokens INTO the LP pool → price craters. If wallets emptied but price is NOT
-    # down, the tokens were MOVED wallet-to-wallet (rotation/obfuscation), NOT sold —
-    # the operator likely still controls them via other addresses. Without this gate,
-    # "balance→0" was wrongly read as "exited" (the EVAA catch: +660%, price intact,
-    # yet 15 wallets 'fully distributed' — impossible if they'd actually sold).
-    px_change = None
+    # AGE GATE (MAME fix): a token too young has no pump→distribute lifecycle to
+    # judge — youth routes out BEFORE the operator taxonomy so a busy young token is
+    # never cornered into an operator label.
     try:
-        from src.pipeline.operator_sentinel import _dex
-        dx = _dex(token, chain)
-        px_change = dx.get("h24")   # recent trend; a real mass exit shows big negative
+        from src.pipeline.operator_sentinel import _token_age_days
+        age = _token_age_days(token, chain)
     except Exception:
-        pass
-    out["current"]["price_change_24h"] = px_change
+        age = None
+    out["current"]["token_age_days"] = age
 
     conf = conc.get("cluster_confidence") or 0
     hist = out["historical"]
     exited = hist.get("exited") or []
-    price_crashed = (px_change is not None and px_change <= -25)
+
+    if age is not None and age < 14 and conf < 55:
+        out["verdict"] = "too_young_to_judge"
+        out["confidence"] = 0
+        out["evidence"] = f"代币仅{age:.0f}天(<14d):拉盘→派发生命周期无法计算,不下操盘定性"
+        out["caveats"].append("年龄门:<14d非可判")
+        return out
+
     if conf >= 55:
         out["verdict"] = "live_operator"
         out["confidence"] = conf
         out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}"
-    elif hist.get("available") and exited and price_crashed:
-        out["verdict"] = "exited_operator"
-        out["confidence"] = min(90, 40 + 10 * len(exited))
-        big = max(exited, key=lambda e: e["total_in"])
-        out["evidence"] = (f"{len(exited)}个钱包吸入后派发≥70% 且价24h{px_change:.0f}% "
-                           f"(最大吸入{big['total_in']:,.0f})= 操盘卖出离场")
-    elif hist.get("available") and exited and not price_crashed:
-        # INV-3 (adversarial-verify fix): wallets emptied + price intact means the
-        # tokens were NOT sold — but "not sold" does NOT prove "rotated/still present".
-        # Absent POSITIVE move-proof (destination re-converges to the cluster / a
-        # long-term holder), the honest state is indeterminate: transferred out, but
-        # sold-vs-moved unresolved. Do NOT narrate "operator still here" without it.
-        out["verdict"] = "indeterminate_emptied"
-        out["confidence"] = 30
-        big = max(exited, key=lambda e: e["total_in"])
-        out["evidence"] = (f"{len(exited)}个早期重仓钱包已清空(最大{big['total_in']:,.0f}) "
-                           f"且价格未崩 → 币转走了但既无卖出证据也无换钱包正向证据 = 无法判定")
-        out["caveats"].append("待追转出去向(块锚定):转LP/CEX+价跌=卖出离场;回流簇=换钱包仍在;"
-                              "featureless新EOA=不可判。现阶段不得断言操盘去留")
+    elif hist.get("available") and exited:
+        # SELL-vs-MOVE REFEREE (destination-grounded, replaces the price guess).
+        # For the emptied early-heavy wallets, trace WHERE their tokens went.
+        from src.onchain.cex_addresses import evm_exchanges
+        member_set = {e["address"] for e in exited} | {e["address"] for e in (hist.get("holding") or [])}
+        pairs = _token_pairs(token, chain)
+        cex = evm_exchanges()
+        tot = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
+               "to_contract": 0.0}
+        resolved_n = 0
+        for e in exited[:8]:                       # bounded
+            a = _exit_destinations(token, chain, e["address"], member_set, pairs, cex)
+            if a.get("resolved"):
+                resolved_n += 1
+                for kk in tot:
+                    tot[kk] += a.get(kk, 0.0)
+        sold = tot["sell_dex"] + tot["sell_cex"]
+        moved_internal = tot["move_member"]
+        moved_eoa = tot["move_eoa"]
+        total_out = sold + moved_internal + moved_eoa + tot["to_contract"]
+        out["current"]["exit_destinations"] = {**tot, "resolved_wallets": resolved_n}
+
+        if resolved_n == 0 or total_out <= 0:
+            out["verdict"] = "indeterminate_emptied"
+            out["confidence"] = 25
+            out["evidence"] = f"{len(exited)}个早期重仓钱包已清空,但转出去向取数失败 → 卖/移不可判"
+            out["caveats"].append("去向未解析 = 不得断言操盘去留")
+        elif sold >= 0.5 * total_out:
+            out["verdict"] = "exited_by_selling"
+            out["confidence"] = min(85, 50 + 5 * resolved_n)
+            out["evidence"] = (f"{len(exited)}个早期重仓钱包清空,转出{sold/total_out*100:.0f}%进"
+                               f"LP池/CEX(卖{sold:,.0f}) = 操盘卖出离场")
+        elif moved_internal >= 0.5 * total_out:
+            out["verdict"] = "present_rotating_confirmed"
+            out["confidence"] = min(85, 50 + 5 * resolved_n)
+            out["evidence"] = (f"{len(exited)}个钱包清空,转出{moved_internal/total_out*100:.0f}%回流簇内成员 "
+                               f"= 换钱包/仍控盘(正向证据),未卖出")
+        else:
+            # mostly to plain fresh EOAs — could be rotation OR sold-via-intermediary
+            out["verdict"] = "indeterminate_emptied"
+            out["confidence"] = 35
+            out["evidence"] = (f"{len(exited)}个钱包清空,转出主要去向为普通新EOA"
+                               f"(EOA{moved_eoa:,.0f}/合约{tot['to_contract']:,.0f}),"
+                               f"卖出仅{sold:,.0f} → 卖vs换钱包不可判(需块锚定追踪)")
+            out["caveats"].append("去向多为featureless新EOA:自托管vs换钱包vs中介卖出,N=1不可判")
     elif not hist.get("available"):
         out["verdict"] = "unknown"
         out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
