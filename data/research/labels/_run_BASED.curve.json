@@ -1,0 +1,31 @@
+{
+  "status": "complete",
+  "symbol": "BASED",
+  "chain": "bsc",
+  "series": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    745311.1661,
+    10167894.7596,
+    10167894.7596,
+    11490243.7395
+  ],
+  "verdict": {
+    "verdict": "accumulation",
+    "share_start_pct": 0.0,
+    "share_peak_pct": 11490243.74,
+    "share_end_pct": 11490243.74,
+    "rose_to_peak": true,
+    "decelerating_saturation": false,
+    "distributed_after_peak": false,
+    "operator_addresses_seen": "9/9",
+    "pre_peak_slope": 893892.576
+  }
+}

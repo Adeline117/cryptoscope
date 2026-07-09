@@ -6,26 +6,26 @@
     0.0,
     0.0,
     0.0,
-    0.0,
-    0.0,
-    109437454.964,
-    109437454.964,
-    109437454.964,
-    139729789.9144,
-    144784125.5158,
-    144784125.5158,
-    144784125.5158,
-    0.0
+    3276956.2802,
+    14707474.1227,
+    10089224.1885,
+    17704806.1837,
+    9098996.4768,
+    5919408.9554,
+    15702069.9024,
+    16822764.4132,
+    16735380.8258,
+    65650333.9584
   ],
   "verdict": {
-    "verdict": "accumulation_then_distribution",
+    "verdict": "accumulation",
     "share_start_pct": 0.0,
-    "share_peak_pct": 144784125.52,
-    "share_end_pct": 0.0,
+    "share_peak_pct": 65650333.96,
+    "share_end_pct": 65650333.96,
     "rose_to_peak": true,
     "decelerating_saturation": false,
-    "distributed_after_peak": true,
-    "operator_addresses_seen": "16/16",
-    "pre_peak_slope": 19794562.144
+    "distributed_after_peak": false,
+    "operator_addresses_seen": "14/14",
+    "pre_peak_slope": 3096587.628
   }
 }

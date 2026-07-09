@@ -231,13 +231,18 @@ def identify_operator(token: str, chain: str) -> dict:
         out["evidence"] = (f"{len(exited)}个钱包吸入后派发≥70% 且价24h{px_change:.0f}% "
                            f"(最大吸入{big['total_in']:,.0f})= 操盘卖出离场")
     elif hist.get("available") and exited and not price_crashed:
-        # accumulation gone from wallets BUT price intact = MOVED not sold
-        out["verdict"] = "operator_present_rotating"
-        out["confidence"] = min(85, 45 + 8 * len(exited))
+        # INV-3 (adversarial-verify fix): wallets emptied + price intact means the
+        # tokens were NOT sold — but "not sold" does NOT prove "rotated/still present".
+        # Absent POSITIVE move-proof (destination re-converges to the cluster / a
+        # long-term holder), the honest state is indeterminate: transferred out, but
+        # sold-vs-moved unresolved. Do NOT narrate "operator still here" without it.
+        out["verdict"] = "indeterminate_emptied"
+        out["confidence"] = 30
         big = max(exited, key=lambda e: e["total_in"])
         out["evidence"] = (f"{len(exited)}个早期重仓钱包已清空(最大{big['total_in']:,.0f}) "
-                           f"但价格未崩(24h{px_change}) → 币是转走非卖出 = 操盘换钱包/仍控盘,未离场")
-        out["caveats"].append("需追转出去向确认:转LP/CEX=真卖,转EOA=换钱包(操盘仍在)")
+                           f"且价格未崩 → 币转走了但既无卖出证据也无换钱包正向证据 = 无法判定")
+        out["caveats"].append("待追转出去向(块锚定):转LP/CEX+价跌=卖出离场;回流簇=换钱包仍在;"
+                              "featureless新EOA=不可判。现阶段不得断言操盘去留")
     elif not hist.get("available"):
         out["verdict"] = "unknown"
         out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
