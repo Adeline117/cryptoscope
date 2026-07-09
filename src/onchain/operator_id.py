@@ -365,6 +365,9 @@ def identify_operator(token: str, chain: str) -> dict:
     except Exception as e:
         out["caveats"].append(f"current-graph failed: {str(e)[:60]}")
         conc = {}
+    # expose the cluster ADDRESSES so callers (sentinel registration) can act on a
+    # verdict — counts alone aren't registrable.
+    out["current"]["cluster_wallets"] = list(conc.get("dominant_cluster_wallets") or [])
 
     try:
         from src.onchain.evm_archive import ArchiveRPC
