@@ -226,11 +226,14 @@ def _token_pairs(token: str, chain: str) -> set[str]:
 
 
 def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
-                       pairs: set, cex: dict, max_pages: int = 6) -> dict:
+                       pairs: set, cex: dict, max_pages: int = 6,
+                       seed_funders: set | None = None) -> dict:
     """Where did `wallet` send `token`? Classify each destination (SELL vs MOVE) —
-    the sell-vs-move referee. Sold: → LP pair / CEX. Moved: → cluster member (internal)
-    or a plain EOA (rotation-unproven). Returns aggregate amounts by class."""
+    the sell-vs-move referee. Sold: → LP pair / CEX. Moved: → cluster member OR (F10)
+    a wallet sharing an operator seed-funder = same-entity rotation; else plain EOA
+    (rotation-unproven). Returns aggregate amounts by class."""
     import time
+    from collections import defaultdict
 
     from src.onchain import moralis_client
     from src.onchain.entity_classify import classify_address
@@ -241,6 +244,7 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
     sell_venues = pairs | infra["routers"]      # routers ARE sell venues
     agg = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
            "to_contract": 0.0, "resolved": False}
+    eoa_dests: dict = defaultdict(float)        # deferred: funder-checked at end (F10)
     cursor = None
     tl = token.lower()
     for pg in range(max_pages):
@@ -270,10 +274,26 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
             elif classify_address(to, chain).get("type") == "contract":
                 agg["to_contract"] += amt
             else:
-                agg["move_eoa"] += amt
+                eoa_dests[to] += amt              # defer: funder-check below
         cursor = d.get("cursor") if isinstance(d, dict) else None
         if not cursor:
             break
+    # F10: an EOA destination that shares an operator SEED FUNDER is same-entity
+    # rotation (move_member), not an unknown EOA — automates the manual EVAA trace.
+    if eoa_dests and seed_funders:
+        try:
+            from src.onchain.funder_graph import get_funders
+            fmap = get_funders(list(eoa_dests), chain)
+        except Exception:
+            fmap = {}
+        for to, amt in eoa_dests.items():
+            if str(fmap.get(to) or "").lower() in seed_funders:
+                agg["move_member"] += amt
+            else:
+                agg["move_eoa"] += amt
+    else:
+        for amt in eoa_dests.values():
+            agg["move_eoa"] += amt
     return agg
 
 
@@ -469,21 +489,34 @@ def identify_operator(token: str, chain: str) -> dict:
         # SELL-vs-MOVE REFEREE (destination-grounded, replaces the price guess).
         # For the emptied early-heavy wallets, trace WHERE their tokens went.
         from src.onchain.cex_addresses import evm_exchanges
-        # F5 (red-team circularity fix): a destination counts as an INTERNAL MOVE only
-        # if it's in the funder-verified cluster (dominant_cluster_wallets), NOT merely
-        # any early-cohort wallet. Otherwise unrelated early snipers trading among
-        # themselves read as 'rotation' — the MAME false-positive mechanism. Cohort
-        # wallets NOT in the verified cluster fall to move_eoa (indeterminate), not move.
+        # F5 (circularity): a destination is an INTERNAL MOVE only if funder-verified,
+        # not merely any early-cohort wallet.
         verified_cluster = {a.lower() for a in (conc.get("dominant_cluster_wallets") or [])}
         member_set = verified_cluster or (
             {e["address"] for e in exited} | {e["address"] for e in (hist.get("holding") or [])})
+        # F10-core (red-team): compute the SEED operator funders once, so a rotation
+        # destination that shares an operator funder counts as a same-entity MOVE —
+        # automating the manual EVAA funder-trace (dest funded by 0x661213676e = still
+        # the operator). CEX/disperser funders are voided (they link unrelated wallets).
+        seed_funders = set()
+        try:
+            from src.onchain.funder_graph import get_funders
+            cexset = evm_exchanges()
+            fmap = get_funders([e["address"] for e in exited[:6]], chain)
+            for f in fmap.values():
+                fl = str(f or "").lower()
+                if fl and fl not in cexset:
+                    seed_funders.add(fl)
+        except Exception:
+            pass
         pairs = _token_pairs(token, chain)
         cex = evm_exchanges()
         tot = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
                "to_contract": 0.0}
         resolved_n = 0
         for e in exited[:8]:                       # bounded
-            a = _exit_destinations(token, chain, e["address"], member_set, pairs, cex)
+            a = _exit_destinations(token, chain, e["address"], member_set, pairs, cex,
+                                   seed_funders=seed_funders)
             if a.get("resolved"):
                 resolved_n += 1
                 for kk in tot:
