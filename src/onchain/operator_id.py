@@ -344,6 +344,28 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
             "wallets_walked": visited_edges}
 
 
+def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
+    """INV-4 / SYN fix: confirm the snapshot-derived cluster ACTUALLY holds on-chain
+    (balance_of > 0) before calling it loaded. SYN's snapshot said '5 wallets hold
+    10%' but all 5 had a real zero balance = stale/mid-transit snapshot. A loaded
+    verdict on a cluster that holds nothing is a false positive."""
+    if not wallets:
+        return False
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        rpc = ArchiveRPC(chain)
+        total = 0.0
+        got = False
+        for w in wallets[:10]:
+            b = rpc.balance_of(token, w)
+            if b is not None:
+                got = True
+                total += b
+        return got and total > 0
+    except Exception:
+        return False
+
+
 def identify_operator(token: str, chain: str) -> dict:
     """The canonical verdict. Never raises. Shape:
       {verdict, confidence, current:{...}, historical:{...}, evidence, caveats}
@@ -409,17 +431,16 @@ def identify_operator(token: str, chain: str) -> dict:
         out["verdict"] = "live_operator"
         out["confidence"] = conf
         out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}"
-    elif dom >= 5 and lg >= 10:
-        # LOADED-LIVE via the CURRENT holder graph (BASED fix): a coordinated CLUSTER
-        # (>=5 wallets, not a single whale/treasury) holds a meaningful share of LIVE
-        # supply RIGHT NOW. The >=5-wallet gate is the discriminator: BASED = 9-wallet
-        # Sybil cluster loaded now (12.6%/9), vs EVAA/SIREN/MAME = 1-2 dominant wallets
-        # (treasury/whale, not a loaded operator cluster). Judged on the CURRENT cluster,
-        # independent of what unrelated early-cohort wallets churned.
+    elif dom >= 5 and lg >= 10 and _cluster_holds_onchain(token, chain, conc.get("dominant_cluster_wallets") or []):
+        # LOADED-LIVE via the CURRENT holder graph (BASED): a coordinated CLUSTER
+        # (>=5 wallets, not a single whale) holds a meaningful share of LIVE supply.
+        # INV-4 GUARD (SYN catch): the concentration signal comes from a fetched holder
+        # list that can be STALE — _cluster_holds_onchain RPC-verifies live balances>0
+        # before calling it loaded (SYN's "5 wallets/10%" held 0 on-chain = false).
         out["verdict"] = "loaded_live_operator"
         out["confidence"] = min(78, 45 + int(lg))
-        out["evidence"] = (f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应,早期未大规模离场 "
-                           f"= 操盘装弹持有(拉盘候选)")
+        out["evidence"] = (f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应(链上余额已核实>0),"
+                           f"早期未大规模离场 = 操盘装弹持有(拉盘候选)")
     elif hist.get("available") and len(holding) >= 3 and sum_hold >= max(sum_exit_in, 1):
         # LOADED-LIVE fix (BASED): the coordinated cluster still HOLDS more than it
         # emptied — an operator loaded and sitting, not one that left. Checked BEFORE
