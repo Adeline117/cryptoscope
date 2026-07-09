@@ -395,10 +395,36 @@ def identify_operator(token: str, chain: str) -> dict:
         out["caveats"].append("年龄门:<14d非可判")
         return out
 
+    holding = hist.get("holding") or []
+    sum_hold = sum(h.get("net_now", 0) for h in holding)
+    sum_exit_in = sum(e.get("total_in", 0) for e in exited)
+
+    lg = conc.get("largest_entity_pct") or 0
+    dom = out["current"].get("dominant_wallets") or 0
+
     if conf >= 55:
         out["verdict"] = "live_operator"
         out["confidence"] = conf
         out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}"
+    elif dom >= 5 and lg >= 10:
+        # LOADED-LIVE via the CURRENT holder graph (BASED fix): a coordinated CLUSTER
+        # (>=5 wallets, not a single whale/treasury) holds a meaningful share of LIVE
+        # supply RIGHT NOW. The >=5-wallet gate is the discriminator: BASED = 9-wallet
+        # Sybil cluster loaded now (12.6%/9), vs EVAA/SIREN/MAME = 1-2 dominant wallets
+        # (treasury/whale, not a loaded operator cluster). Judged on the CURRENT cluster,
+        # independent of what unrelated early-cohort wallets churned.
+        out["verdict"] = "loaded_live_operator"
+        out["confidence"] = min(78, 45 + int(lg))
+        out["evidence"] = (f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应,早期未大规模离场 "
+                           f"= 操盘装弹持有(拉盘候选)")
+    elif hist.get("available") and len(holding) >= 3 and sum_hold >= max(sum_exit_in, 1):
+        # LOADED-LIVE fix (BASED): the coordinated cluster still HOLDS more than it
+        # emptied — an operator loaded and sitting, not one that left. Checked BEFORE
+        # the emptied-wallet path so a live loaded cluster isn't read as 'indeterminate'.
+        out["verdict"] = "loaded_live_operator"
+        out["confidence"] = min(80, 45 + 6 * len(holding))
+        out["evidence"] = (f"{len(holding)}个早期重仓钱包仍持有(合计{sum_hold:,.0f} > "
+                           f"已清空{sum_exit_in:,.0f}) = 操盘装弹持有,未离场未派发")
     elif hist.get("available") and exited:
         # SELL-vs-MOVE REFEREE (destination-grounded, replaces the price guess).
         # For the emptied early-heavy wallets, trace WHERE their tokens went.
@@ -432,27 +458,40 @@ def identify_operator(token: str, chain: str) -> dict:
             out["evidence"] = (f"{len(exited)}个早期重仓钱包清空,转出{sold/total_out*100:.0f}%进"
                                f"LP池/CEX(卖{sold:,.0f}) = 操盘卖出离场")
         elif moved_internal >= 0.5 * total_out:
-            out["verdict"] = "present_rotating_confirmed"
-            out["confidence"] = min(85, 50 + 5 * resolved_n)
-            # Rotation-frontier: chase the moved stack downstream — was it ULTIMATELY
-            # sold, or is it a loaded threat parked in fresh wallets?
+            # moved-to-member → follow the frontier: PARKED (loaded threat) = real
+            # rotation; SOLD downstream = distribution/churn, NOT a loaded operator.
             fr = _rotation_frontier(token, chain, [e["address"] for e in exited[:8]], pairs, cex)
             out["current"]["rotation_frontier"] = fr
-            tail = ""
-            if fr["sold_via_frontier"] > 2 * fr["parked_in_wallets"] and fr["sold_via_frontier"] > 0:
-                tail = f" · 但下游frontier已卖{fr['sold_via_frontier']:,.0f} = 换钱包后正在出货"
-            elif fr["parked_in_wallets"] > 0:
-                tail = f" · 下游{fr['parked_in_wallets']:,.0f}仍停在新钱包 = 装弹威胁,随时可能砸"
-            out["evidence"] = (f"{len(exited)}个钱包清空,转出{moved_internal/total_out*100:.0f}%回流簇内 "
-                               f"= 换钱包/仍控盘,未卖出{tail}")
+            if fr["parked_in_wallets"] > fr["sold_via_frontier"] and fr["parked_in_wallets"] > 0:
+                out["verdict"] = "present_rotating_confirmed"   # EVAA: parked = loaded threat
+                out["confidence"] = min(85, 50 + 5 * resolved_n)
+                out["evidence"] = (f"{len(exited)}个钱包清空,{moved_internal/total_out*100:.0f}%回流簇内且"
+                                   f"下游{fr['parked_in_wallets']:,.0f}仍停新钱包 = 换钱包装弹,随时可砸")
+            elif fr["sold_via_frontier"] > 0:
+                # rotated then dumped downstream — distribution, and if no still-holding
+                # coordinated cluster this is more likely CHURN than an operator (MAME).
+                out["verdict"] = "distributing_or_churn"
+                out["confidence"] = 45
+                out["evidence"] = (f"{len(exited)}个钱包清空,回流簇内但下游已卖{fr['sold_via_frontier']:,.0f} "
+                                   f"→ 派发或散户刷币(非装弹操盘);无仍持有的协同簇=倾向churn")
+                out["caveats"].append("需genesis/degen判别区分'操盘派发'vs'散户churn'")
+            else:
+                out["verdict"] = "indeterminate_emptied"
+                out["confidence"] = 30
+                out["evidence"] = f"{len(exited)}个钱包清空回流簇内,下游去向未解析 → 不可判"
+        elif sold >= 0.2 * total_out or sold >= 10_000_000:
+            # DISTRIBUTING fix (SIREN): meaningful selling into pool/CEX = distribution
+            # even if some also moved. A real bleed doesn't need a 50% majority.
+            out["verdict"] = "distributing"
+            out["confidence"] = min(75, 45 + 5 * resolved_n)
+            out["evidence"] = (f"{len(exited)}个钱包清空,已向LP池/CEX卖出{sold:,.0f}"
+                               f"({sold/total_out*100:.0f}%) = 操盘在派发出货")
         else:
-            # mostly to plain fresh EOAs — could be rotation OR sold-via-intermediary
             out["verdict"] = "indeterminate_emptied"
             out["confidence"] = 35
             out["evidence"] = (f"{len(exited)}个钱包清空,转出主要去向为普通新EOA"
-                               f"(EOA{moved_eoa:,.0f}/合约{tot['to_contract']:,.0f}),"
-                               f"卖出仅{sold:,.0f} → 卖vs换钱包不可判(需块锚定追踪)")
-            out["caveats"].append("去向多为featureless新EOA:自托管vs换钱包vs中介卖出,N=1不可判")
+                               f"(EOA{moved_eoa:,.0f}),卖出仅{sold:,.0f} → 卖vs换钱包不可判")
+            out["caveats"].append("去向多为featureless新EOA:自托管vs换钱包vs中介卖出,不可判")
     elif not hist.get("available"):
         out["verdict"] = "unknown"
         out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
