@@ -122,6 +122,15 @@ def create_scheduler() -> AsyncIOScheduler:
         name="永续宇宙周刷新 (可做空/做多的币 → 合约映射)",
     )
 
+    # Operator-ID push → daily, runs the verified identify_operator on sentinels and
+    # pushes actionable operator verdicts (loaded=pump / distributing=dump) to Telegram.
+    scheduler.add_job(
+        _run_operator_id_push,
+        CronTrigger(hour=7, minute=0),
+        id="operator_id_push",
+        name="操盘判决推送 (loaded/distributing → Telegram)",
+    )
+
     # Holder snapshots → daily, builds our OWN holder history for tracked tokens so
     # exited-operator detection becomes a local before/after diff (Dune-independent).
     scheduler.add_job(
@@ -437,6 +446,43 @@ async def _run_operator_sentinel():
     from src.pipeline.operator_sentinel import run_and_alert
 
     await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+
+
+async def _run_operator_id_push():
+    """Daily: run the verified identify_operator on tracked sentinels and PUSH the
+    actionable verdicts to Telegram — loaded_live/live = pump-watch, distributing/
+    exited/rotating = dump-threat. Non-actionable (indeterminate/churn/too_young) are
+    NOT pushed (noise)."""
+    logger.info("scheduled_operator_id_push")
+    import json
+
+    from src.config import DATA_DIR
+    from src.onchain.operator_id import identify_operator
+
+    PUMP = {"loaded_live_operator", "live_operator"}
+    DUMP = {"distributing", "exited_by_selling", "present_rotating_confirmed"}
+    EVM = {"bsc", "ethereum", "base", "arbitrum"}
+    try:
+        reg = json.loads((DATA_DIR / "operator_sentinels.json").read_text())
+    except Exception:
+        return
+    lines = []
+    for s in reg.values():
+        if s.get("chain") not in EVM:
+            continue
+        try:
+            r = identify_operator(s["token"], s["chain"])
+        except Exception:
+            continue
+        v, c = r["verdict"], r["confidence"]
+        if v in PUMP and c >= 55:
+            lines.append(f"🟢 <b>{s['symbol']}</b> 装弹活庄(拉盘预警) conf{c}\n  {r['evidence'][:70]}")
+        elif v in DUMP and c >= 55:
+            lines.append(f"🔴 <b>{s['symbol']}</b> 派发/换钱包(砸盘预警) conf{c}\n  {r['evidence'][:70]}")
+    if lines:
+        from src.distribution.telegram_sender import send_alert
+        await send_alert("🎯 <b>操盘判决(identify_operator)</b>\n━━━━━━━━━━\n" + "\n\n".join(lines[:12]))
+    logger.info("operator_id_push_done", pushed=len(lines))
 
 
 async def _run_holder_snapshots():
