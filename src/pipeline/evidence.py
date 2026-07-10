@@ -324,5 +324,97 @@ def report(db_path=None, with_base_rate: bool = True) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- kill line
+
+# The bet: "event-precursor" alarms (things that happen at a MOMENT) carry timing
+# information that the standing verdict does not. Standing-state verdicts are excluded
+# on principle — SIREN replayed `distributing` at every block for 240 days, so a state
+# can never be early to anything.
+EVENT_KINDS = {"CEX充值前兆", "CEX充值", "授权路由", "注入gas", "庄在卖", "RUG", "阴跌出货"}
+TARGET_EVENTS = 120        # to separate a true 55% from a ~30% base rate at ~80% power
+KILL_LIFT_CI_UPPER = 1.2   # if the 95% upper bound is below this, there is no edge
+
+
+def _shortable_tokens() -> set[str]:
+    """Tokens that actually have a perpetual future — the ONLY ones a short thesis can
+    be tested on. Empty set on failure (and the caller must say so, not assume all)."""
+    try:
+        from src.onchain.perp_universe import load as perp_load
+        return {r["address"].lower() for r in perp_load().values() if r.get("address")}
+    except Exception:
+        return set()
+
+
+def kill_line(db_path=None) -> str:
+    """Progress toward a VERDICT ON THE SYSTEM ITSELF, with a pre-committed stop rule.
+
+    Declared in advance so it cannot be moved once the number is inconvenient:
+      - accrue TARGET_EVENTS independent event-episodes ON SHORTABLE COINS;
+      - if the 95% upper bound on lift is below KILL_LIFT_CI_UPPER, the thesis is dead.
+
+    The shortable filter is the whole point. Events on BSC micro-caps cannot be traded
+    short (no perp), so measuring an edge there proves nothing you can act on. The
+    system's detection strength and its monetisation venue are DIFFERENT UNIVERSES,
+    and counting the wrong one would burn months confirming an untradeable edge.
+    """
+    all_eps = [e for e in episodes(db_path)
+               if any(k in EVENT_KINDS for k in str(e["kind"]).split(","))]
+    perp = _shortable_tokens()
+    eps = [e for e in all_eps if e["token"].lower() in perp]
+    untradeable = len(all_eps) - len(eps)
+
+    lines = ["事件抢先 — 死线进度(停机规则已预先声明,不得事后移动)", "=" * 66]
+    lines.append(f"目标: {TARGET_EVENTS} 个【可开空标的上的】独立事件;"
+                 f"lift 95% 置信上界 < {KILL_LIFT_CI_UPPER} → 判定无 edge,停止作为交易工具")
+    if not perp:
+        lines.append("⚠️ perp 宇宙加载失败 → 无法判断哪些事件可交易,不做任何统计。")
+        return "\n".join(lines)
+
+    lines.append(f"可开空事件: {len(eps)}   |   不可开空事件(不计入): {untradeable}")
+    if untradeable and not eps:
+        lines.append("")
+        lines.append("🔴 全部事件都发生在【不能开空的币】上(BSC 小盘妖币无永续合约)。")
+        lines.append("   在这些币上measure出的任何 edge 都无法变现 —— 这是能力与变现场所的")
+        lines.append("   结构性错配,不是数据不足。可交易宇宙的积累速率 = 0/天,判定期 = ∞。")
+        lines.append("")
+        lines.append("   必须先扩大【perp 币上的】事件面,否则这个赌注永远无法判定:")
+        lines.append("   · perp_cex_scan 每日跑满 190 币(当前 0 命中 → 需实测信号密度)")
+        lines.append("   · 把 mobilization(授权/注gas)与 LP 解锁接到 perp 大户上")
+        lines.append("   · 或承认:我们最擅长探测的币,恰恰是不能做空的币")
+        return "\n".join(lines)
+
+    resolved = [e for e in eps if e["resolved"]]
+    k = sum(1 for e in resolved if e["hit_24h"])
+    n = len(resolved)
+    lines.append(f"其中已结算 {n} 个,命中 {k}")
+
+    # How long is this bet? A stop rule you cannot reach is not a stop rule.
+    first, last = min(_ts(e["start_ts"]) for e in eps), max(_ts(e["start_ts"]) for e in eps)
+    span_d = max((last - first).total_seconds() / 86400.0, 1.0)
+    rate = len(eps) / span_d
+    lines.append(f"可交易事件积累速率: {len(eps)} / {span_d:.0f} 天 = {rate:.2f} 个/天")
+    if rate > 0:
+        days = max(TARGET_EVENTS - n, 0) / rate
+        lines.append(f"按此速率,还需 ~{days:.0f} 天(≈{days/30:.1f} 个月)才能判定")
+        if days > 365:
+            lines.append("⚠️ 判定期 >1 年:实践中不可判。扩大事件面,或现在承认不可验证。")
+
+    if n == 0:
+        lines.append("\n尚无已结算的可开空事件 → 无可判定。这不是'无 edge',是'未测量'。")
+        return "\n".join(lines)
+
+    lo, hi = wilson(k, n)
+    lines.append(f"命中率 Wilson 95% CI = [{lo*100:.1f}%, {hi*100:.1f}%]")
+    lines.append(f"进度 {n}/{TARGET_EVENTS} ({100.0 * n / TARGET_EVENTS:.0f}%)")
+    if n < TARGET_EVENTS:
+        lines.append(f"⏳ 样本不足,任何 lift 都不可作为停机依据。继续积累 {TARGET_EVENTS - n} 个。")
+        lines.append("注意:静音推送不影响积累 —— log_alert 照常写库。")
+    else:
+        lines.append("样本达标 → 执行停机规则(对照基准率算 lift,见 report())。")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     print(report())
+    print("\n")
+    print(kill_line())

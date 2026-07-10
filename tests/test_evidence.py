@@ -93,3 +93,43 @@ def test_wilson_is_wide_at_small_n(k, n, lo_max, hi_min):
     lo, hi = wilson(k, n)
     assert lo < lo_max and hi > hi_min
     assert 0.0 <= lo <= hi <= 1.0
+
+
+def test_kill_line_counts_only_shortable_events(tmp_path, monkeypatch):
+    """Events on BSC micro-caps cannot be shorted (no perp). Measuring an edge there
+    proves nothing actionable. Counting them would burn months on the wrong universe.
+    """
+    import src.pipeline.evidence as ev
+    t0 = datetime(2026, 6, 16, 9, 0, tzinfo=timezone.utc)
+    rows = [(t0.isoformat(), "0xbsc", "bsc", "SIREN", "short", "sell", 1, 1),
+            ((t0 + timedelta(days=1)).isoformat(), "0xperp", "ethereum", "PERPCOIN",
+             "short", "arm", 0, 1)]
+    db = _db(tmp_path, rows)
+    for r in rows:
+        pass
+    # only 0xperp has a perpetual future
+    monkeypatch.setattr(ev, "_shortable_tokens", lambda: {"0xperp"})
+    monkeypatch.setattr(ev, "EVENT_KINDS", {"k"})
+    out = ev.kill_line(db)
+    assert "可开空事件: 1" in out
+    assert "不可开空事件(不计入): 1" in out
+
+
+def test_kill_line_refuses_when_no_shortable_events(tmp_path, monkeypatch):
+    import src.pipeline.evidence as ev
+    t0 = datetime(2026, 6, 16, 9, 0, tzinfo=timezone.utc)
+    db = _db(tmp_path, [(t0.isoformat(), "0xbsc", "bsc", "SIREN", "short", "sell", 1, 1)])
+    monkeypatch.setattr(ev, "_shortable_tokens", lambda: {"0xother"})
+    monkeypatch.setattr(ev, "EVENT_KINDS", {"k"})
+    out = ev.kill_line(db)
+    assert "结构性错配" in out and "判定期 = ∞" in out
+    assert "Wilson" not in out          # must not report a hit rate at all
+
+
+def test_kill_line_refuses_when_perp_universe_unavailable(tmp_path, monkeypatch):
+    import src.pipeline.evidence as ev
+    t0 = datetime(2026, 6, 16, 9, 0, tzinfo=timezone.utc)
+    db = _db(tmp_path, [(t0.isoformat(), "0xa", "bsc", "A", "short", "sell", 1, 1)])
+    monkeypatch.setattr(ev, "_shortable_tokens", lambda: set())
+    out = ev.kill_line(db)
+    assert "加载失败" in out and "不做任何统计" in out

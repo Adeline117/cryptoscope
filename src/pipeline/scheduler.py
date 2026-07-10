@@ -538,10 +538,34 @@ async def _run_perp_cex_scan():
     moving to CEX deposits. Runs on our own validated infra (holders + cex_flow),
     not a third-party feed. ~60 min for the full EVM set; quiet baseline is normal."""
     logger.info("scheduled_perp_cex_scan")
+    from src.onchain.operator_id import _token_market
+    from src.pipeline.operator_sentinel import alerts_muted
+    from src.pipeline.outcome_tracker import log_alert
     from src.pipeline.perp_scanner import scan_cex_deposits
 
     hits = scan_cex_deposits()
-    if hits:
+
+    # RECORD EVERY EVENT, ALWAYS. This scan used to push to Telegram and store
+    # nothing — so the perp short thesis could never accumulate the ~120-150
+    # independent events needed to test it. Recording is the whole strategy; the
+    # push is optional and currently muted.
+    logged = 0
+    for h in hits:
+        try:
+            mkt = _token_market(h["address"])
+            px = float(mkt.get("price_usd") or 0) if mkt.get("available") else 0.0
+            liq = float(mkt.get("liquidity_usd") or 0) if mkt.get("available") else 0.0
+            if not px:
+                logger.warning("perp_event_unpriced", symbol=h["symbol"],
+                               note="无价格 → 该事件无法结算,仍记录但不可打分")
+            log_alert(h["address"], h["chain"], h["symbol"], "CEX充值前兆",
+                      "short", px, liq, phase="arm")
+            logged += 1
+        except Exception as e:
+            logger.warning("perp_event_log_failed", symbol=h.get("symbol"),
+                           error=str(e)[:60])
+
+    if hits and not alerts_muted():
         from src.distribution.telegram_sender import send_alert
 
         msg = "📉 <b>做空前兆 — 永续币大户→CEX充值</b>\n━━━━━━━━━━\n"
@@ -551,7 +575,9 @@ async def _run_perp_cex_scan():
                     f"{(h.get('cex_outflow') or 0):,.0f} (持仓{pct})\n"
                     f"→ 砸盘前兆,考虑做空(带止损,仅信号)\n\n")
         await send_alert(msg)
-    logger.info("perp_cex_scan_done", hits=len(hits))
+    elif hits:
+        logger.info("perp_alerts_suppressed_unproven", n=len(hits))
+    logger.info("perp_cex_scan_done", hits=len(hits), logged=logged)
 
 
 async def _run_perp_universe_refresh():
