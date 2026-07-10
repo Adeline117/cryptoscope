@@ -579,7 +579,11 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         # lru-cached; cap at 12 as a worst-case bound on network calls.
         multi = {f for f in by_funder_pre
                  if sum(1 for a in bal_map if funders.get(a) == f) >= 2}
-        for f in sorted(multi, key=by_funder_pre.get, reverse=True)[:12]:
+        # F13: `key=by_funder_pre.get, reverse=True` leaves ties in set-iteration
+        # (hash-random) order, so WHICH 12 funders get disperser-profiled varied
+        # run-to-run — and an unprofiled disperser silently inflates the cluster.
+        # Sort on (-balance, address) for a total, reproducible order.
+        for f in sorted(multi, key=lambda x: (-by_funder_pre[x], x))[:12]:
             if f.lower() in KNOWN_OPERATOR_FUNDERS:
                 continue  # confirmed multi-token operator — never strip as disperser
             if _funder_is_disperser(f, chain):
