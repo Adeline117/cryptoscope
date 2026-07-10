@@ -111,6 +111,21 @@ def check(token: str, chain: str) -> dict:
         if rr.get("lp_all_locked") is False:
             reasons.append((CAUTION, f"LP 未锁定({rr.get('lp_locked_n')}/{rr.get('lp_holders_n')}):可撤池"))
 
+    # ---- deployer track record (AVOIDANCE-ONLY, low coverage) ----
+    # Modern tokens are mostly factory-deployed, so the "creator" is often a shared
+    # bot/factory and this returns unknown for most tokens. It is wired as a red-flag-
+    # only bonus: when it CAN confirm a serial rugger (the dev's prior tokens are all
+    # dead pools), that is a near-certain avoid; otherwise it says nothing. It can
+    # never green-light.
+    try:
+        from src.onchain.deployer_history import deployer_history
+        dh = deployer_history(token, chain)
+        if dh.get("verdict") == "serial_rugger":
+            facts["deployer"] = dh
+            reasons.append((AVOID, f"发币者连续跑路:{dh['reason']}"))
+    except Exception:
+        pass
+
     # ---- pool liveness ----
     mkt = cur.get("market") or {}
     if mkt.get("available"):
