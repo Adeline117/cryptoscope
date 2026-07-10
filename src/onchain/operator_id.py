@@ -359,18 +359,32 @@ def _token_age_onchain(token: str, chain: str) -> float | None:
         return None
 
 
+_INFRA_FILE = {"ethereum": "eth"}     # chain name → label-file suffix
+
+
 def _infra(chain: str) -> dict:
     """Router/bridge/disperse/burn labels (destination classification). Routers ARE
     sell venues — a sell usually routes THROUGH the router, not straight to the pair,
-    so missing them undercounts sells."""
+    so missing them undercounts sells.
+
+    Silent-miss bug (fixed): the file for ethereum is `infra_eth.json`, but the
+    lookup built `infra_ethereum.json` → every ETH label set was EMPTY, so sells
+    routed through Uniswap were scored as move_eoa/to_contract instead of sell_dex,
+    understating distribution on every ETH sentinel. Empty labels are now LOUD."""
     import json
 
     from src.config import DATA_DIR
+    suffix = _INFRA_FILE.get(chain, chain)
     try:
-        d = json.loads((DATA_DIR / "research" / "labels" / f"infra_{chain}.json").read_text())
+        d = json.loads((DATA_DIR / "research" / "labels" / f"infra_{suffix}.json").read_text())
+        if not d.get("routers"):
+            logger.warning("infra_labels_empty", chain=chain,
+                           note="无路由器标签 → 经路由卖出会被低估为move")
         return {"routers": set(d.get("routers", {})), "bridges": set(d.get("bridges", {})),
                 "disperse": set(d.get("disperse", {})), "burn": set(d.get("burn", {}))}
-    except Exception:
+    except Exception as e:
+        logger.warning("infra_labels_missing", chain=chain, error=str(e)[:60],
+                       note="标签文件缺失 → 卖出会被系统性低估")
         return {"routers": set(), "bridges": set(), "disperse": set(), "burn": set()}
 
 
