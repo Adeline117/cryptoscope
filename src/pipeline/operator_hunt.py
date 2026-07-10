@@ -93,16 +93,23 @@ _DUNE_EVM = {"bnb": "bsc", "base": "base"}
 
 
 def _gt_universe_chain(net: str, chain: str, per_chain: int, pages: int) -> list[dict]:
-    """GeckoTerminal discovery for one chain (free tier). Fallback path."""
+    """GeckoTerminal discovery for one chain (free tier). Fallback path.
+
+    This is a 03:15 daily job with no deadline — spend wall-clock to buy coverage.
+    Free tier is ~30 req/min: pace at 2.1s (under the limit, not at it) and retry an
+    empty page once after a cool-off. With Dune 402'd this path IS discovery; a 429'd
+    page silently shrinking the universe is how the hunt starved to ~12 tokens."""
     addrs: list[str] = []
     for pg in range(1, pages + 1):
         for path in (f"networks/{net}/trending_pools?page={pg}",
                      f"networks/{net}/new_pools?page={pg}",
                      f"networks/{net}/pools?page={pg}&sort=h24_volume_usd_desc"):
-            addrs += _gt_base_addresses(path)
-            # Free tier ~30 req/min — pace the burst or pages 2-3 429 and coverage
-            # collapses to page-1-only (~12 in-band tokens).
-            time.sleep(1.5)
+            got = _gt_base_addresses(path)
+            if not got:                      # likely 429 — one cool-off retry
+                time.sleep(12)
+                got = _gt_base_addresses(path)
+            addrs += got
+            time.sleep(2.1)
     seen, uniq = set(), []
     for a in addrs:
         al = a.lower()
@@ -111,7 +118,7 @@ def _gt_universe_chain(net: str, chain: str, per_chain: int, pages: int) -> list
     return _dexscreener_tokens(chain, uniq[:per_chain])
 
 
-def _gather_universe(per_chain: int = 80, pages: int = 2) -> list[dict]:
+def _gather_universe(per_chain: int = 80, pages: int = 4) -> list[dict]:
     """Candidate token pairs in the hunt band, enriched via DexScreener, deduped.
 
     Discovery source, in priority order:
