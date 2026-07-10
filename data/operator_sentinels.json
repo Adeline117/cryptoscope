@@ -29,12 +29,12 @@
       "funding": 0.0057
     },
     "last": {
-      "price": 0.1102,
-      "liquidity": 264819.56,
-      "vol24": 1226487.73,
+      "price": 0.1005,
+      "liquidity": 261764.98,
+      "vol24": 1529658.97,
       "pair": "0x07b7556Ede0f9a6a7d155A78Bc0573f531001A57",
       "cluster_balance": 19659014.20399599,
-      "float_lp": 172992.46616351404,
+      "float_lp": 738953.8137160515,
       "funding": 0.005
     },
     "balanceof_reliable": true,
@@ -74,13 +74,13 @@
       "funding": 0.0669
     },
     "last": {
-      "price": 0.0212,
-      "liquidity": 949119.78,
-      "vol24": 23577.85,
+      "price": 0.0187,
+      "liquidity": 939351.31,
+      "vol24": 23594.67,
       "pair": "0x5Bb59Bb9371cBeC158eD602d5f3CF1AD1c9B4462",
-      "cluster_balance": 425224417.0880702,
-      "float_lp": 7486581.673022511,
-      "funding": 0.0277
+      "cluster_balance": 424789452.72115105,
+      "float_lp": 7490438.716847304,
+      "funding": 0.0303
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -93,7 +93,7 @@
       "bundle_edge": null,
       "caveats": []
     },
-    "flow_ts": "2026-07-09T20:08:11.000Z",
+    "flow_ts": "2026-07-10T03:26:37.000Z",
     "bleed_alerted_pct": 6.168735782981914,
     "price_peak": 0.02537,
     "last_phase": "other"
@@ -126,13 +126,13 @@
       "funding": 0.1135
     },
     "last": {
-      "price": 0.02879,
-      "liquidity": 1965522.73,
-      "vol24": 192783.58,
+      "price": 0.02801,
+      "liquidity": 1962676.17,
+      "vol24": 81451.68,
       "pair": "0xb2AF49dBF526054FAf19602860A5E298a79F3D05",
       "cluster_balance": 44826811.78143148,
-      "float_lp": 23325869.87403449,
-      "funding": 0.1592
+      "float_lp": 23921002.824887134,
+      "funding": 0.005
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -167,9 +167,9 @@
       "funding": -0.02
     },
     "last": {
-      "price": 0.01983,
-      "liquidity": 473883.14,
-      "vol24": 116896.21,
+      "price": 0.01985,
+      "liquidity": 477927.37,
+      "vol24": 126477.43,
       "cluster_balance": 100000000.0,
       "funding": -0.02,
       "pair": "FKfRK3WdaGXokysR1fPGgCDEeGkV1b1YYnX9ykVpG3JG"
@@ -177,8 +177,8 @@
     "balanceof_reliable": true,
     "flow_ts": "2026-05-30T02:36:01+00:00",
     "price_peak": 0.02651,
-    "bleed_alerted_pct": 85.0,
-    "last_phase": "buy"
+    "bleed_alerted_pct": 100.0,
+    "last_phase": "other"
   },
   "bsc:0x92aa03137385f18539301349dcfc9ebc923ffb10": {
     "token": "0x92aa03137385F18539301349dcfC9EbC923fFb10",
@@ -197,12 +197,12 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.03775,
-      "liquidity": 4476343.09,
-      "vol24": 13982052.9,
+      "price": 0.0363,
+      "liquidity": 4414850.6,
+      "vol24": 4103328.64,
       "pair": "0xbC42145d5A574EDe9b8860FCa2A49EB7B239Efa5",
       "cluster_balance": 79641741.38218607,
-      "float_lp": 59276260.84912535,
+      "float_lp": 60656423.65954007,
       "funding": 0.005
     },
     "balanceof_reliable": true,
@@ -239,13 +239,13 @@
       "funding": 0.02
     },
     "last": {
-      "price": 0.007775,
-      "liquidity": 864065.63,
-      "vol24": 681911.35,
+      "price": 0.008811,
+      "liquidity": 925057.12,
+      "vol24": 662853.34,
       "cluster_balance": 307810366.42624587,
-      "funding": -0.02,
+      "funding": -0.014,
       "pair": "0x924F1a4422a89900FAaFa3F886721FDCcD6e086a",
-      "float_lp": 55563755.62943265
+      "float_lp": 52489850.105843514
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -285,13 +285,13 @@
       "funding": 0.0194
     },
     "last": {
-      "price": 2.086,
-      "liquidity": 334297.19,
-      "vol24": 4644064.64,
+      "price": 2.67,
+      "liquidity": 351895.69,
+      "vol24": 4892911.81,
       "pair": "0x26deB24a2623Cf54452Ab5183E2C34551831D54d",
-      "cluster_balance": 17736941.38105214,
-      "float_lp": 31389.163423226342,
-      "funding": 0.0183
+      "cluster_balance": 17233187.96605214,
+      "float_lp": 27944.615280163238,
+      "funding": 0.0621
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -309,9 +309,10 @@
     },
     "entity_kind": "present_rotating_confirmed",
     "note": "funder验证换钱包网络(2026-07-09深查): 枢纽0x661213676e同funder倒仓, 全程未向池/CEX砸盘=装弹威胁。哨兵盯仍持仓的换钱包成员,任一向池/CEX大量转=真砸盘。",
-    "price_peak": 2.13,
-    "flow_ts": "2026-06-20T04:59:50.000Z",
-    "bleed_alerted_pct": 0.0
+    "price_peak": 2.67,
+    "flow_ts": "2026-06-16T18:09:37.000Z",
+    "bleed_alerted_pct": 0.0,
+    "last_phase": "buy"
   },
   "ethereum:0x6ee2f71049dde9a93b7c0ee1091b72acf9b46810": {
     "token": "0x6ee2f71049dde9a93b7c0ee1091b72acf9b46810",
@@ -341,12 +342,12 @@
       "funding": null
     },
     "last": {
-      "price": 0.007693,
-      "liquidity": 188603.46,
-      "vol24": 1667.88,
+      "price": 0.007656,
+      "liquidity": 188092.99,
+      "vol24": 11989.99,
       "pair": "0x99543A3DcF169C8E442cC5ba1CB978FF1dF2a8Be",
       "cluster_balance": 4771337018.494153,
-      "float_lp": 16543720.527236229,
+      "float_lp": 16723720.134057794,
       "funding": null
     },
     "balanceof_reliable": true,
@@ -365,7 +366,7 @@
     "entity_kind": "live_operator",
     "note": "identify_operator判决 live_operator/conf74 (2026-07-09扫描入册): 当前隐藏簇 cluster_confidence=74",
     "bleed_alerted_pct": 0.0,
-    "price_peak": 0.007693,
+    "price_peak": 0.007676,
     "flow_ts": "2026-07-07T22:27:59.000Z"
   },
   "ethereum:0xb2089a7069861c8d90c8da3aacab8e9188c0c531": {
@@ -399,9 +400,9 @@
       "funding": null
     },
     "last": {
-      "price": 0.0246,
-      "liquidity": 5631042.84,
-      "vol24": 638663.31,
+      "price": 0.02479,
+      "liquidity": 5653551.58,
+      "vol24": 629810.04,
       "pair": "0xeaca4ad2d0132b25b790921c2ce047373ae94467e15957a0e218df23dadfc4b2",
       "cluster_balance": 434021143.27484566,
       "float_lp": 0.0,
@@ -420,11 +421,12 @@
         "⚠️1个钱包近100笔刷>=15种代币: serial-degen特征,非纪律单仓operator"
       ]
     },
-    "entity_kind": "loaded_live_operator",
-    "note": "identify_operator判决 loaded_live_operator/conf80 (2026-07-09扫描入册): 15个早期重仓钱包仍持有(合计1,654,896,566 > 已清空0) = 操盘装弹持有,未离场未派发",
+    "entity_kind": "falsified_ghost_holders",
+    "note": "2026-07-10 复核: 入册判决基于【截断的 holder 重建】(链上 balanceOf=0 的幽灵余额)。链上核实后 conf 26/16、dom=1 → 无协同簇。判决作废,降级为观察,不作为做空依据。",
     "bleed_alerted_pct": 0.0,
-    "price_peak": 0.0246,
-    "flow_ts": "2026-06-27T18:59:59.000Z"
+    "price_peak": 0.02479,
+    "flow_ts": "2026-06-27T18:59:59.000Z",
+    "verdict_retracted": true
   },
   "ethereum:0xb10cc888cb2cce7036f4c7ecad8a57da16161338": {
     "token": "0xb10cc888cb2cce7036f4c7ecad8a57da16161338",
@@ -457,9 +459,9 @@
       "funding": null
     },
     "last": {
-      "price": 0.02146,
-      "liquidity": 6898953.4,
-      "vol24": 642659.76,
+      "price": 0.02151,
+      "liquidity": 6907319.37,
+      "vol24": 636117.35,
       "pair": "0x18c85fdb568efe0a6b96b4c36b33aa16d5ecc40739e274a8a2a7fa87a0e51162",
       "cluster_balance": 678235088.7943534,
       "float_lp": null,
@@ -478,11 +480,12 @@
         "⚠️1个钱包近100笔刷>=15种代币: serial-degen特征,非纪律单仓operator"
       ]
     },
-    "entity_kind": "loaded_live_operator",
-    "note": "identify_operator判决 loaded_live_operator/conf80 (2026-07-09扫描入册): 15个早期重仓钱包仍持有(合计964,506,219 > 已清空453,943,810) = 操盘装弹持有,未离场未派发",
+    "entity_kind": "falsified_ghost_holders",
+    "note": "2026-07-10 复核: 入册判决基于【截断的 holder 重建】(链上 balanceOf=0 的幽灵余额)。链上核实后 conf 26/16、dom=1 → 无协同簇。判决作废,降级为观察,不作为做空依据。",
     "bleed_alerted_pct": 0.0,
     "price_peak": 0.02157,
-    "flow_ts": "2026-07-07T14:48:11.000Z"
+    "flow_ts": "2026-07-07T14:48:11.000Z",
+    "verdict_retracted": true
   },
   "ethereum:0xab93df617f51e1e415b5b4f8111f122d6b48e55c": {
     "token": "0xab93df617f51e1e415b5b4f8111f122d6b48e55c",
@@ -548,9 +551,9 @@
       "funding": -0.02
     },
     "last": {
-      "price": 0.3784,
-      "liquidity": 4494266.0,
-      "vol24": 515557.97,
+      "price": 0.3834,
+      "liquidity": 4560122.98,
+      "vol24": 759062.0,
       "pair": "0x7c84276e317f128b55bd270dbfba3ef94c84b984c124a1de7c4f72da90bfba45",
       "cluster_balance": 282260051.8505402,
       "float_lp": null,
