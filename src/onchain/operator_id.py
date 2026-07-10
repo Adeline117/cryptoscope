@@ -910,7 +910,14 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
     # Youth only blocks the exited/distribute LIFECYCLE inference (which genuinely
     # needs a pump→distribute history to exist). The old order forced a fast-loaded
     # 9-day operator into `too_young_to_judge`.
-    loaded_cluster = (dom >= 5 and lg >= 10
+    # `largest_entity_pct` is a share of REAL totalSupply only when supply_verified.
+    # Otherwise it is a share of the fetched holder subset — shrink the list and the
+    # number inflates. Gating a loaded verdict on that would manufacture operators out
+    # of small holder lists, which is precisely what the WOO ghost did.
+    supply_ok = bool(conc.get("supply_verified"))
+    if not supply_ok and (lg or dom):
+        out["caveats"].append("supply_unverified:集中度是子集比例而非供应占比,装弹门槛不执行")
+    loaded_cluster = (supply_ok and dom >= 5 and lg >= 10
                       and _cluster_holds_onchain(token, chain, cluster_w, as_of_block))
 
     if conf_q >= 55:
@@ -1124,7 +1131,7 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
         # coordinated-cluster confidence.
         lg = conc.get("largest_entity_pct") or 0
         single_op = False
-        if lg >= 15 and dom < 5 and cluster_w:
+        if supply_ok and lg >= 15 and dom < 5 and cluster_w:
             try:
                 from src.onchain.entity_classify import classify_address
                 single_op = (all(classify_address(w, chain).get("type") == "eoa"

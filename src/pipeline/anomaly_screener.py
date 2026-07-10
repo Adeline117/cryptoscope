@@ -612,7 +612,27 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
             except Exception as e:
                 logger.debug("recluster_failed", token=token, error=str(e))
 
-    total_supply = sum(h["balance"] for h in pos)
+    # DENOMINATOR. This variable was `sum(h["balance"] for h in pos)` — the sum of the
+    # holders we happened to FETCH — while the comment below called the result a
+    # "share of supply" and downstream gates (`lg >= 10`, `lg >= 15`) treated it as
+    # one. It is not: shrink the fetched list and the percentage inflates. The on-chain
+    # holder verification (which keeps only the top ~30 verified wallets) made that
+    # inflation severe. Use the real totalSupply; if it cannot be read, say so and
+    # forbid any percent-of-supply gate downstream rather than quietly using a
+    # subset ratio that looks like one.
+    supply_verified = True
+    total_supply = None
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        if chain in ("ethereum", "bsc", "base", "arbitrum"):
+            total_supply = ArchiveRPC(chain).total_supply(token)
+    except Exception:
+        total_supply = None
+    if not total_supply or total_supply <= 0:
+        supply_verified = False
+        total_supply = sum(h["balance"] for h in pos)
+        logger.warning("supply_unverified", token=token, chain=chain,
+                       note="totalSupply取数失败 → 占比是【子集比例】,不得用于装弹门槛")
     if total_supply <= 0:
         return None
     entity_bal: dict[str, float] = {}
@@ -641,8 +661,11 @@ def effective_concentration_signal(holders: list[dict], token: str, chain: str) 
         if by_funder:
             dominant_funder = max(by_funder, key=by_funder.get)
     out = {
-        "largest_entity_pct": eff_pct,           # biggest hidden entity / supply
-        "largest_address_pct": nom_pct,          # biggest single address / supply
+        # % of REAL totalSupply when supply_verified; otherwise % of the fetched
+        # subset — a different quantity that must never gate a loaded verdict.
+        "largest_entity_pct": eff_pct,
+        "largest_address_pct": nom_pct,
+        "supply_verified": supply_verified,
         "concentration_gap": round(eff_pct - nom_pct, 2),  # clustering uplift
         "entity_count": len(entity_bal),
         "eoa_analyzed": len(eoa),
