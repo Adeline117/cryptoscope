@@ -90,6 +90,31 @@ def _state_lock():
             f.close()
 
 
+_FLOW_CURSOR_MAX_DAYS = 3
+
+
+def _flow_cursor(t: dict) -> str | None:
+    """The incremental transfer cursor, read from where check_run persists it.
+
+    A cursor left stale by a long outage (SIREN's sat 16 days behind) must not be
+    replayed as one window: the whole fortnight's selling would land as a single
+    庄在卖 with a bogus 'net move this tick' magnitude. Too-old → None, i.e. treat
+    this pass as a fresh baseline rather than inventing a giant flow."""
+    from datetime import datetime, timedelta, timezone
+    ts = t.get("flow_ts")
+    if not ts:
+        return None
+    try:
+        seen = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if datetime.now(timezone.utc) - seen > timedelta(days=_FLOW_CURSOR_MAX_DAYS):
+        logger.warning("flow_cursor_stale", symbol=t.get("symbol"), cursor=str(ts),
+                       note="超期游标丢弃,本轮重建基线(不报警)")
+        return None
+    return ts
+
+
 def _load() -> dict:
     if SENTINELS_FILE.exists():
         try:
@@ -821,8 +846,13 @@ def check_run(use_transfers: bool = False) -> list[dict]:
     flows = {}
     cex_flows: dict = {}
     if use_transfers:
+        # CURSOR BUG (fixed): the incremental cursor is WRITTEN to t["flow_ts"] (root)
+        # but was READ from t["last"]["flow_ts"], which nothing ever writes. So
+        # prev_flow_ts was None on every pass → `flow` was forced to None as a
+        # "first-pass baseline" → the transfer-based 庄在卖/庄在买 alarm could NEVER
+        # fire. Read the cursor from where it is actually persisted.
         flows = {k: cluster_net_flow(t["token"], t["chain"], t["wallets"],
-                                     (t.get("last", {}) or {}).get("flow_ts"))
+                                     _flow_cursor(t))
                  for k, t in targets.items()}
         # CEX deposit-flow = the #1 LEADING dump signal: an operator cluster sending
         # tokens to an exchange deposit address precedes the sell by minutes-hours.
@@ -832,11 +862,28 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             from src.onchain.cex_flow import cex_outflow_signal
             cex_flows = {k: cex_outflow_signal(
                 t["token"], t["chain"], t["wallets"],
-                (t.get("last", {}) or {}).get("flow_ts"),
+                _flow_cursor(t),
                 cluster_balance=(measured.get(k) or {}).get("cluster_balance"))
                 for k, t in targets.items()}
         except Exception as e:
             logger.debug("cex_flow_pass_failed", error=str(e)[:80])
+        # MOBILIZATION — the two PRE-dump logistics steps: an operator must gas-fund
+        # its ammo wallets and Approve the DEX router BEFORE it can sell. These fire
+        # hours before 庄在卖 (which is confirmation, not prediction). Escalation
+        # alerts (戒备级), expected to be noisier than 庄在卖 — that's the trade.
+        try:
+            from src.onchain.mobilization import approval_scan, gas_topup_scan
+            mobil = {k: {
+                "appr": approval_scan(t["token"], t["chain"], t["wallets"],
+                                      (t.get("last", {}) or {}).get("mobil_block")),
+                "gas": gas_topup_scan(t["chain"], t["wallets"],
+                                      (t.get("last", {}) or {}).get("native_bal")),
+            } for k, t in targets.items()}
+        except Exception as e:
+            mobil = {}
+            logger.debug("mobilization_pass_failed", error=str(e)[:80])
+    else:
+        mobil = {}
     with _state_lock():
         data = _load()  # re-read under lock (another process may have updated)
         alerts = []
@@ -857,12 +904,35 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 fired.append(("CEX充值", f"操盘簇向交易所充值 {cxf.get('cex_outflow', 0):,.0f}"
                               f"(持仓{cxf.get('pct_of_cluster', 0):.0f}%) → 即将砸盘,逃命/做空"))
 
+            # ===== MOBILIZATION (PRE-dump logistics — the only truly EARLY warnings).
+            # An operator cannot sell without gas in the ammo wallet and a router
+            # Approval. Both precede 庄在卖 by hours. They ARM a wallet; they do not
+            # commit it — so these are 戒备 (escalation), never entry signals.
+            mb = mobil.get(key) or {}
+            ap = mb.get("appr") or {}
+            if ap.get("complete"):
+                t["mobil_block"] = ap.get("to_block")     # only advance on a real scan
+                routers = [a for a in ap.get("approvals", [])
+                           if a["spender_kind"] == "router"]
+                if routers:
+                    who = ", ".join(w["owner"][:10] for w in routers[:3])
+                    fired.append(("授权路由", f"{len(routers)}个操盘钱包授权DEX路由({who}) "
+                                  f"→ 卖出前置动作,进入戒备(授权≠必卖)"))
+            gs = mb.get("gas") or {}
+            if gs.get("armed"):
+                t["native_bal"] = gs.get("balances")
+                tops = gs.get("topups", [])
+                if tops:
+                    who = ", ".join(f"{x['wallet'][:10]}+{x['delta']}" for x in tops[:3])
+                    fired.append(("注入gas", f"{len(tops)}个弹药钱包被注入手续费({who}) "
+                                  f"→ 准备发起交易,砸盘前置动作"))
+
             cpr = cur.get("price")   # current price — used by the momentum/动能熄火 block
             cb, pb = cur.get("cluster_balance"), last.get("cluster_balance")
             flow = flows.get(key)
             if flow is not None:
                 # ===== RELIABLE: buy/sell via TRANSFERS (ground truth) + Seattle time =====
-                prev_flow_ts = last.get("flow_ts")
+                prev_flow_ts = _flow_cursor(t)           # root, where it's persisted
                 t["flow_ts"] = flow["latest_ts"] or prev_flow_ts  # advance incremental cursor
                 if prev_flow_ts is None:
                     flow = None  # first transfer check = establish baseline, don't alert
@@ -1020,7 +1090,11 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # immediately (no time delay).
             if fired:
                 kset = {k for k, _ in fired}
+                # `arm` is its OWN phase: mobilization precedes selling, so it must not
+                # be swallowed by (or collapse into) the sell phase — otherwise the
+                # early warning is suppressed as a "repeat" of the dump it precedes.
                 phase = ("sell" if kset & {"庄在卖", "阴跌出货", "RUG", "CEX充值"} else
+                         "arm" if kset & {"授权路由", "注入gas"} else
                          "buy" if kset & {"庄在买", "控盘突破", "浮筹收紧"} else
                          "stall" if kset & {"庄停手", "动能熄火"} else "other")
                 if phase == t.get("last_phase"):
@@ -1037,6 +1111,11 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                     if fund is not None and fund > 0.03:
                         fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
                     action += fstr
+                elif kinds & {"授权路由", "注入gas"}:      # ARMING — earliest warning
+                    # Deliberately NOT "做空": arming ≠ firing. This buys hours of
+                    # notice at the cost of more false alarms; act by trimming, not
+                    # by opening a position on the alert alone.
+                    action = "🟠 戒备:庄在做砸盘前置动作(装弹上膛) → 减仓/收紧止损,勿追多"
                 elif kinds & {"庄在买", "拉升", "控盘突破", "浮筹收紧"}:   # operator marking up / launch
                     sl = t.get("second_leg", "")
                     action = "🟢🟢 二波启动!最高优先 做多" if "二波候选" in sl \
