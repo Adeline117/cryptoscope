@@ -364,6 +364,37 @@ def test_evm_rpc_netflow_fallback_when_moralis_parked(monkeypatch):
     assert nf["net"] == 300 and nf["last_buy_ts"] and nf["last_sell_ts"]
 
 
+def test_flow_cursor_quiet_cluster_still_alerts(tmp_path, monkeypatch):
+    """REGRESSION: staleness is judged on the SCAN clock, not the TRANSFER clock.
+
+    `flow_ts` is when the cluster last MOVED; `flow_scan_ts` is when we last LOOKED.
+    An operator sitting loaded and quiet for weeks has an ancient flow_ts by
+    definition. Judging staleness on it dropped the cursor every pass -> permanent
+    baseline rebuild -> the cluster went DEAF exactly while it sat loaded. Only a
+    stale SCAN (a real outage) may rebuild the baseline, so a fortnight of selling
+    is never replayed as one bogus tick.
+    """
+    from datetime import datetime, timedelta, timezone
+    import src.pipeline.operator_sentinel as S
+    now = datetime.now(timezone.utc)
+    old_transfer = (now - timedelta(days=30)).isoformat()
+
+    # Quiet cluster: last transfer 30d ago, but we scanned 5 minutes ago.
+    quiet = {"symbol": "Q", "flow_ts": old_transfer,
+             "flow_scan_ts": (now - timedelta(minutes=5)).isoformat()}
+    assert S._flow_cursor(quiet) == old_transfer, "quiet cluster must keep its cursor"
+
+    # Real outage: we haven't scanned in 10 days -> rebuild baseline (no replay).
+    outage = {"symbol": "O", "flow_ts": old_transfer,
+              "flow_scan_ts": (now - timedelta(days=10)).isoformat()}
+    assert S._flow_cursor(outage) is None
+
+    # Legacy state with no scan stamp -> rebuild once, don't guess.
+    assert S._flow_cursor({"symbol": "L", "flow_ts": old_transfer}) is None
+    # No cursor at all -> first pass.
+    assert S._flow_cursor({"symbol": "N"}) is None
+
+
 def test_transfer_buysell_magnitude_gated(tmp_path, monkeypatch):
     """REGRESSION (SIREN phantom-sell, transfer edition): a net sell that is TINY vs
     the cluster's holdings (1,882 sold of 90M = 0.002%) must NOT fire 庄在卖. Only a
@@ -383,7 +414,7 @@ def test_transfer_buysell_magnitude_gated(tmp_path, monkeypatch):
             "funding": 0.0}
     def _target():
         return {"bsc:0xt": {"token": "0xT", "chain": "bsc", "symbol": "SIREN",
-                "wallets": ["0xw"], "flow_ts": recent,
+                "wallets": ["0xw"], "flow_ts": recent, "flow_scan_ts": recent,
                 "baseline": dict(base), "last": dict(base)}}
     f.write_text(json.dumps(_target()))
     monkeypatch.setattr(S, "_measure",

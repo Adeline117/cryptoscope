@@ -90,27 +90,39 @@ def _state_lock():
             f.close()
 
 
-_FLOW_CURSOR_MAX_DAYS = 3
+_FLOW_SCAN_MAX_DAYS = 3
 
 
 def _flow_cursor(t: dict) -> str | None:
     """The incremental transfer cursor, read from where check_run persists it.
 
-    A cursor left stale by a long outage (SIREN's sat 16 days behind) must not be
-    replayed as one window: the whole fortnight's selling would land as a single
-    庄在卖 with a bogus 'net move this tick' magnitude. Too-old → None, i.e. treat
-    this pass as a fresh baseline rather than inventing a giant flow."""
+    Staleness is judged on `flow_scan_ts` (when we last successfully SCANNED), NOT
+    on `flow_ts` (the timestamp of the cluster's last TRANSFER). Those are different
+    clocks and conflating them is a trap: a disciplined operator that simply doesn't
+    trade for a week has an old `flow_ts` by definition, and dropping its cursor
+    would rebuild the baseline every pass — the cluster would be permanently deaf
+    exactly while it sits loaded and quiet.
+
+    What genuinely must not happen is replaying a long OUTAGE as one tick (a
+    fortnight of selling arriving as a single 庄在卖 with a nonsense per-tick
+    magnitude). That is what a stale *scan* means, so that is what we guard.
+    Legacy state with no scan stamp rebuilds the baseline once, then stamps it."""
     from datetime import datetime, timedelta, timezone
     ts = t.get("flow_ts")
     if not ts:
         return None
+    scanned = t.get("flow_scan_ts")
+    if not scanned:
+        logger.info("flow_scan_unstamped", symbol=t.get("symbol"),
+                    note="无扫描时戳(旧状态):本轮重建基线并打戳,下轮起正常告警")
+        return None
     try:
-        seen = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        last_scan = datetime.fromisoformat(str(scanned).replace("Z", "+00:00"))
     except ValueError:
         return None
-    if datetime.now(timezone.utc) - seen > timedelta(days=_FLOW_CURSOR_MAX_DAYS):
-        logger.warning("flow_cursor_stale", symbol=t.get("symbol"), cursor=str(ts),
-                       note="超期游标丢弃,本轮重建基线(不报警)")
+    if datetime.now(timezone.utc) - last_scan > timedelta(days=_FLOW_SCAN_MAX_DAYS):
+        logger.warning("flow_scan_stale", symbol=t.get("symbol"), last_scan=str(scanned),
+                       note="扫描中断超期:重建基线,避免把整段停机重放成一次巨额告警")
         return None
     return ts
 
@@ -932,8 +944,13 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             flow = flows.get(key)
             if flow is not None:
                 # ===== RELIABLE: buy/sell via TRANSFERS (ground truth) + Seattle time =====
+                from datetime import datetime, timezone
                 prev_flow_ts = _flow_cursor(t)           # root, where it's persisted
                 t["flow_ts"] = flow["latest_ts"] or prev_flow_ts  # advance incremental cursor
+                # Stamp the SCAN clock only on a scan that actually returned (flow is
+                # not None). A failed scan leaves the old stamp, so a real outage ages
+                # out and rebuilds the baseline instead of replaying itself.
+                t["flow_scan_ts"] = datetime.now(timezone.utc).isoformat()
                 if prev_flow_ts is None:
                     flow = None  # first transfer check = establish baseline, don't alert
             if flow is not None:
