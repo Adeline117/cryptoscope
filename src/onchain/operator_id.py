@@ -120,7 +120,23 @@ def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 
     return inflow, net, complete
 
 
-def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int = 60):
+def _before(row: dict, as_of_block: int | None) -> bool:
+    """Replay cutoff: is this transfer at or before the as-of block?
+
+    A backtest that sees even one transfer past its own cutoff is measuring hindsight,
+    not prediction. A row with no block_number is UNDATABLE — exclude it under replay
+    (dropping a real row understates activity; including an undated one may leak the
+    future, and only the latter can manufacture a fake edge)."""
+    if as_of_block is None:
+        return True
+    try:
+        return int(row.get("block_number")) <= as_of_block
+    except (TypeError, ValueError):
+        return False
+
+
+def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int = 60,
+                          as_of_block: int | None = None):
     """EARLY-accumulation inflow per wallet via Moralis, walking OLDEST-first
     (order=ASC). A busy token's full history is too big to page newest-first (can't
     reach genesis) — but we don't need it: who accumulated in the token's EARLY life
@@ -143,7 +159,12 @@ def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int 
         d = moralis_client.get(path)
         if not d:
             break
-        for t in (d.get("result", []) if isinstance(d, dict) else []):
+        rows = (d.get("result", []) if isinstance(d, dict) else [])
+        past_cutoff = False
+        for t in rows:
+            if not _before(t, as_of_block):
+                past_cutoff = True       # ASC order → everything after is later too
+                continue
             got = True
             try:
                 amt = float(t.get("value", 0)) / scale
@@ -152,6 +173,8 @@ def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int 
             a_to = (t.get("to_address") or "").lower()
             if a_to:
                 inflow[a_to] += amt
+        if past_cutoff:
+            break                        # oldest-first: no need to page further
         cursor = d.get("cursor") if isinstance(d, dict) else None
         if not cursor:
             break
@@ -236,7 +259,8 @@ def same_entity(a: str, b: str, chain: str, funders: dict | None = None) -> dict
     return {"same": same, "why": why, "jaccard": jac}
 
 
-def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
+def _historical_ledger(token: str, chain: str, decimals: int,
+                       as_of_block: int | None = None) -> dict:
     """Per-wallet total-inflow vs net-now over full history — DUNE-FREE. Flags wallets
     that took in a lot but hold ~nothing now = accumulated-then-distributed (exited
     operator), the fingerprint the current snapshot can't see. Source: Etherscan V2
@@ -245,7 +269,10 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     fetch failure → UNKNOWN, never 'none'."""
     tok = token.lower()
     cid = _ETHERSCAN_CHAINID.get(chain)
-    inflow, net, complete = (_events_etherscan(tok, cid, decimals) if cid
+    # F7 already pins toBlock; under replay the pin IS the cutoff.
+    inflow, net, complete = (_events_etherscan(tok, cid, decimals,
+                                               head=(as_of_block + _CONFIRMATIONS)
+                                               if as_of_block else None) if cid
                              else (None, None, False))
 
     if inflow is not None and complete and not inflow:
@@ -277,9 +304,9 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
             # F7: page-ceiling truncation on a busy ETH token — don't refuse; fall
             # through to the early-window + live-balance path that BSC already uses.
             logger.warning("eth_walk_truncated", token=token, note="falling back to early-window")
-        # BSC/other: early-accumulation window (oldest-first) + CURRENT balance to
-        # decide exit — avoids needing the (too-large) full history.
-        inflow = _early_inflow_moralis(tok, chain, decimals)
+        # BSC/other: early-accumulation window (oldest-first) + balance AT the as-of
+        # block to decide exit — avoids needing the (too-large) full history.
+        inflow = _early_inflow_moralis(tok, chain, decimals, as_of_block=as_of_block)
         if not inflow:
             return {"available": False, "exited": [], "holding": []}
         from src.onchain.evm_archive import ArchiveRPC
@@ -288,8 +315,12 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
         _bal_cache: dict[str, float] = {}
 
         def net_of(a):
+            # THE MAIN REPLAY LEAK: this read was pinned to "latest", so a backtest
+            # replaying block B saw balances as of TODAY — a wallet that emptied after
+            # B looked already-exited at B. Every "exited_by_selling" would then be
+            # trivially foreseen. Under replay, read the balance AT the as-of block.
             if a not in _bal_cache:
-                b = rpc.balance_of(token, a)
+                b = rpc.balance_of(token, a, as_of_block or "latest")
                 _bal_cache[a] = b if b is not None else 0.0
             return _bal_cache[a]
 
@@ -337,10 +368,14 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
             "mm_dropped": mm_dropped, "mm_unchecked": mm_unchecked}
 
 
-def _token_age_onchain(token: str, chain: str) -> float | None:
+def _token_age_onchain(token: str, chain: str, as_of_block: int | None = None) -> float | None:
     """F2: age from the token's FIRST on-chain transfer (Moralis order=ASC, 1 row) —
     reproducible, unlike the network-flaky `_token_age_days` heuristic. Returns days,
-    or None if unresolvable (the caller must branch on that, never fall through)."""
+    or None if unresolvable (the caller must branch on that, never fall through).
+
+    Under replay, age is measured to the AS-OF block's timestamp, not to today — a
+    token that was 3 days old at the replay block must trip the youth gate then, even
+    though it is a year old now."""
     from datetime import datetime, timezone
 
     from src.onchain import moralis_client
@@ -354,9 +389,19 @@ def _token_age_onchain(token: str, chain: str) -> float | None:
         if not ts:
             return None
         t0 = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-        return (datetime.now(timezone.utc) - t0).total_seconds() / 86400.0
     except Exception:
         return None
+    now = datetime.now(timezone.utc)
+    if as_of_block:
+        try:
+            from src.onchain.evm_archive import ArchiveRPC
+            bt = ArchiveRPC(chain).block_time(as_of_block)
+            if not bt:
+                return None          # can't date the cutoff → age UNKNOWN, not "today"
+            now = datetime.fromtimestamp(bt, timezone.utc)
+        except Exception:
+            return None
+    return (now - t0).total_seconds() / 86400.0
 
 
 _INFRA_FILE = {"ethereum": "eth"}     # chain name → label-file suffix
@@ -456,7 +501,8 @@ def _is_terminal(mkt: dict) -> bool:
 def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
                        pairs: set, cex: dict, max_pages: int = 30,
                        seed_funders: set | None = None,
-                       expected_out: float | None = None) -> dict:
+                       expected_out: float | None = None,
+                       as_of_block: int | None = None) -> dict:
     """Where did `wallet` send `token`? Classify each destination (SELL vs MOVE) —
     the sell-vs-move referee. Sold: → LP pair / CEX. Moved: → cluster member OR (F10)
     a wallet sharing an operator seed-funder = same-entity rotation; else plain EOA
@@ -496,6 +542,8 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
             if (t.get("address") or t.get("token_address") or "").lower() != tl:
                 continue
             if (t.get("from_address") or "").lower() != wallet.lower():
+                continue
+            if not _before(t, as_of_block):     # replay cutoff
                 continue
             agg["resolved"] = True
             try:
@@ -544,7 +592,8 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
     return agg
 
 
-def _wallet_outflow_map(token: str, chain: str, wallet: str, max_pages: int = 6) -> dict:
+def _wallet_outflow_map(token: str, chain: str, wallet: str, max_pages: int = 6,
+                        as_of_block: int | None = None) -> dict:
     """{to_lower: amount} for `wallet`'s outbound `token` transfers (Moralis DESC)."""
     import time
     from collections import defaultdict
@@ -567,6 +616,8 @@ def _wallet_outflow_map(token: str, chain: str, wallet: str, max_pages: int = 6)
                 continue
             if (t.get("from_address") or "").lower() != wallet.lower():
                 continue
+            if not _before(t, as_of_block):     # replay cutoff
+                continue
             try:
                 amt = float(t.get("value_decimal") or (float(t.get("value", 0)) / 1e18))
             except (ValueError, TypeError):
@@ -582,7 +633,8 @@ def _wallet_outflow_map(token: str, chain: str, wallet: str, max_pages: int = 6)
 
 def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict,
                        depth: int = 2, max_wallets: int = 25,
-                       seed_funders: set | None = None) -> dict:
+                       seed_funders: set | None = None,
+                       as_of_block: int | None = None) -> dict:
     """Follow the rotation frontier: emptied operator wallets → their MOVE
     destinations → recurse (bounded). Aggregate where the stack ULTIMATELY goes:
     sold (→pool/CEX anywhere in the frontier) vs still parked in fresh EOAs (held/
@@ -613,7 +665,8 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
         level_dests: dict[str, float] = {}
         for w in frontier[:max_wallets]:
             walked += 1
-            for to, amt in _wallet_outflow_map(token, chain, w).items():
+            for to, amt in _wallet_outflow_map(token, chain, w,
+                                               as_of_block=as_of_block).items():
                 level_dests[to] = level_dests.get(to, 0.0) + amt
         nxt = []
         for to, amt in sorted(level_dests.items(), key=lambda kv: (-kv[1], kv[0])):
@@ -650,7 +703,8 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
             "wallets_walked": walked, "terminals": len(terminals)}
 
 
-def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
+def _cluster_holds_onchain(token: str, chain: str, wallets: list,
+                           as_of_block: int | None = None) -> bool:
     """INV-4 / SYN fix: confirm the snapshot-derived cluster ACTUALLY holds on-chain
     (balance_of > 0) before calling it loaded. SYN's snapshot said '5 wallets hold
     10%' but all 5 had a real zero balance = stale/mid-transit snapshot. A loaded
@@ -663,7 +717,7 @@ def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
         total = 0.0
         got = False
         for w in wallets[:10]:
-            b = rpc.balance_of(token, w)
+            b = rpc.balance_of(token, w, as_of_block or "latest")
             if b is not None:
                 got = True
                 total += b
@@ -673,7 +727,8 @@ def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
 
 
 def _cluster_velocity_30d(token: str, chain: str, wallets: list,
-                          total_supply: float | None, days: int = 30) -> dict | None:
+                          total_supply: float | None, days: int = 30,
+                          as_of_block: int | None = None) -> dict | None:
     """F8: is the loaded cluster ACCUMULATING or just sitting there? Net Δ of the
     cluster's combined balance over the last `days`, as % of supply.
 
@@ -694,14 +749,13 @@ def _cluster_velocity_30d(token: str, chain: str, wallets: list,
         spb = rpc.seconds_per_block()
         if not spb or spb <= 0:
             return None
-        head = rpc.latest_block()
+        head = as_of_block if as_of_block else (rpc.latest_block() - _CONFIRMATIONS)
         then = int(head - (days * 86400) / spb)
         if then <= 0:
             return None
         addrs = list(wallets[:8])
         b_then = combined_balance_at(token, addrs, chain, then, rpc=rpc, strict=True)
-        b_now = combined_balance_at(token, addrs, chain, head - _CONFIRMATIONS,
-                                    rpc=rpc, strict=True)
+        b_now = combined_balance_at(token, addrs, chain, head, rpc=rpc, strict=True)
     except Exception:
         return None
     if b_then is None or b_now is None:
@@ -712,28 +766,48 @@ def _cluster_velocity_30d(token: str, chain: str, wallets: list,
             "delta_pct_supply": round(100.0 * delta / total_supply, 2)}
 
 
-def identify_operator(token: str, chain: str) -> dict:
+def identify_operator(token: str, chain: str, as_of_block: int | None = None) -> dict:
     """The canonical verdict. Never raises. Shape:
       {verdict, confidence, current:{...}, historical:{...}, evidence, caveats}
-    verdict ∈ live_operator | exited_operator | treasury | dispersed | unknown."""
+    verdict ∈ live_operator | exited_operator | treasury | dispersed | unknown.
+
+    `as_of_block` REPLAYS the verdict as it would have been at that block — the basis
+    of the walk-forward backtest. Everything downstream is cut off there. Two
+    dimensions genuinely cannot time-travel and are therefore DISABLED under replay
+    rather than silently served stale:
+      - the CURRENT holder graph (`fetch_holders_evm` returns today's holders; there
+        is no historical holder list), so a replayed verdict is historical-ledger-only;
+      - the DexScreener market/terminal gate (today's liquidity and price).
+    Serving either at a past block would leak the future into the backtest and
+    manufacture an edge that does not exist. Replay is honestly weaker than live.
+    """
+    replay = as_of_block is not None
     out = {"token": token, "chain": chain, "verdict": "unknown", "confidence": 0,
-           "current": {}, "historical": {}, "evidence": "", "caveats": []}
-    try:
-        from src.onchain.holder_snapshot import fetch_holders_evm
-        from src.pipeline.anomaly_screener import effective_concentration_signal
-        cid = {"bsc": 56, "ethereum": 1, "base": 8453, "arbitrum": 42161}.get(chain)
-        holders = fetch_holders_evm(token, chain_id=cid, max_pages=8) or []
-        conc = effective_concentration_signal(holders, token, chain) or {}
-        out["current"]["holders_fetched"] = len(holders)
-        out["current"] |= {
-            "cluster_confidence": conc.get("cluster_confidence"),
-            "largest_entity_pct": conc.get("largest_entity_pct"),
-            "concentration_gap": conc.get("concentration_gap"),
-            "dominant_wallets": len(conc.get("dominant_cluster_wallets") or []),
-        }
-    except Exception as e:
-        out["caveats"].append(f"current-graph failed: {str(e)[:60]}")
-        conc = {}
+           "current": {}, "historical": {}, "evidence": "", "caveats": [],
+           "as_of_block": as_of_block}
+    conc: dict = {}
+    if replay:
+        out["current"]["holders_fetched"] = 0
+        out["current"]["current_graph_available"] = False
+        out["caveats"].append(
+            "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账")
+    else:
+        try:
+            from src.onchain.holder_snapshot import fetch_holders_evm
+            from src.pipeline.anomaly_screener import effective_concentration_signal
+            cid = {"bsc": 56, "ethereum": 1, "base": 8453, "arbitrum": 42161}.get(chain)
+            holders = fetch_holders_evm(token, chain_id=cid, max_pages=8) or []
+            conc = effective_concentration_signal(holders, token, chain) or {}
+            out["current"]["holders_fetched"] = len(holders)
+            out["current"] |= {
+                "cluster_confidence": conc.get("cluster_confidence"),
+                "largest_entity_pct": conc.get("largest_entity_pct"),
+                "concentration_gap": conc.get("concentration_gap"),
+                "dominant_wallets": len(conc.get("dominant_cluster_wallets") or []),
+            }
+        except Exception as e:
+            out["caveats"].append(f"current-graph failed: {str(e)[:60]}")
+            conc = {}
     # expose the cluster ADDRESSES so callers (sentinel registration) can act on a
     # verdict — counts alone aren't registrable.
     out["current"]["cluster_wallets"] = list(conc.get("dominant_cluster_wallets") or [])
@@ -741,7 +815,7 @@ def identify_operator(token: str, chain: str) -> dict:
     try:
         from src.onchain.evm_archive import ArchiveRPC
         dec = ArchiveRPC(chain).token_decimals(token)
-        out["historical"] = _historical_ledger(token, chain, dec)
+        out["historical"] = _historical_ledger(token, chain, dec, as_of_block=as_of_block)
     except Exception as e:
         out["historical"] = {"available": False, "exited": [], "holding": []}
         out["caveats"].append(f"historical failed: {str(e)[:60]}")
@@ -750,21 +824,23 @@ def identify_operator(token: str, chain: str) -> dict:
     total_supply = None
     try:
         from src.onchain.evm_archive import ArchiveRPC
-        total_supply = ArchiveRPC(chain).total_supply(token)
+        total_supply = ArchiveRPC(chain).total_supply(token)   # supply is ~static
     except Exception:
         total_supply = None
     if total_supply is None:
         out["caveats"].append("totalSupply取数失败:占比门无法执行(不以0代供应量)")
-    mkt = _token_market(token)
+    # DexScreener is today-only: under replay a "terminal/dead pool" call would be
+    # made with knowledge the past did not have. Disable it rather than back-date it.
+    mkt = {"available": False, "reason": "replay"} if replay else _token_market(token)
     out["current"]["market"] = mkt
-    terminal = _is_terminal(mkt)
+    terminal = False if replay else _is_terminal(mkt)
 
     # ---- age (F2): on-chain-derived, with an EXPLICIT unknown branch ----
     # The old `_token_age_days` was a flaky network call and `age is not None` made the
     # whole youth gate evaporate on a timeout — silently dropping a 5-day token into
     # the operator taxonomy. Unknown age is now its own flagged state, never a
     # fall-through.
-    age = _token_age_onchain(token, chain)
+    age = _token_age_onchain(token, chain, as_of_block=as_of_block)
     age_src = "onchain_first_transfer"
     if age is None:
         try:
@@ -805,7 +881,8 @@ def identify_operator(token: str, chain: str) -> dict:
         """F8: a loaded cluster is only an actionable LONG if it is ACCUMULATING.
         A 6-month-flat fossil and a cluster that added 40% this week were both emitting
         '拉盘候选' — the BASED failure: right state label, useless trade signal."""
-        vel = _cluster_velocity_30d(token, chain, wallets, total_supply)
+        vel = _cluster_velocity_30d(token, chain, wallets, total_supply,
+                                    as_of_block=as_of_block)
         out["current"]["velocity_30d"] = vel
         if vel is None:
             out["verdict"] = "loaded_live_operator"
@@ -834,7 +911,7 @@ def identify_operator(token: str, chain: str) -> dict:
     # needs a pump→distribute history to exist). The old order forced a fast-loaded
     # 9-day operator into `too_young_to_judge`.
     loaded_cluster = (dom >= 5 and lg >= 10
-                      and _cluster_holds_onchain(token, chain, cluster_w))
+                      and _cluster_holds_onchain(token, chain, cluster_w, as_of_block))
 
     if conf_q >= 55:
         out["verdict"] = "live_operator"
@@ -857,7 +934,8 @@ def identify_operator(token: str, chain: str) -> dict:
         return out
     elif (hist.get("available") and len(holding) >= 5 and sum_hold > 1.5 * sum_exit_in
           and hold_pct is not None and hold_pct >= 8
-          and _cluster_holds_onchain(token, chain, [h["address"] for h in holding])):
+          and _cluster_holds_onchain(token, chain, [h["address"] for h in holding],
+                                     as_of_block)):
         # LOADED-LIVE (BASED): a coordinated set still HOLDS clearly more than it emptied.
         # F3 (red-team): >=5 wallets, sum_hold > 1.5x emptied, >=8% of REAL totalSupply
         # (not the old `max(...,1)` floor), + RPC-verified live balances — so retail
@@ -912,7 +990,8 @@ def identify_operator(token: str, chain: str) -> dict:
             # F9: how much this wallet MUST have sent out — the convergence target.
             exp_out = max(e.get("total_in", 0) - max(e.get("net_now", 0), 0), 0.0)
             a = _exit_destinations(token, chain, e["address"], member_set, pairs, cex,
-                                   seed_funders=seed_funders, expected_out=exp_out)
+                                   seed_funders=seed_funders, expected_out=exp_out,
+                                   as_of_block=as_of_block)
             if a.get("resolved"):
                 resolved_n += 1
                 for kk in tot:
@@ -978,7 +1057,8 @@ def identify_operator(token: str, chain: str) -> dict:
             # moved-to-member → follow the frontier: PARKED (loaded threat) = real
             # rotation; SOLD downstream = distribution/churn, NOT a loaded operator.
             fr = _rotation_frontier(token, chain, [e["address"] for e in exited[:8]],
-                                    pairs, cex, seed_funders=seed_funders)
+                                    pairs, cex, seed_funders=seed_funders,
+                                    as_of_block=as_of_block)
             out["current"]["rotation_frontier"] = fr
             # H4: only FUNDER-LINKED terminals are operator ammo. `parked_unlinked` may
             # be an OTC buyer's wallet — counting it as "the operator is still loaded"
@@ -1049,7 +1129,7 @@ def identify_operator(token: str, chain: str) -> dict:
                 from src.onchain.entity_classify import classify_address
                 single_op = (all(classify_address(w, chain).get("type") == "eoa"
                                  for w in cluster_w[:3])
-                             and _cluster_holds_onchain(token, chain, cluster_w))
+                             and _cluster_holds_onchain(token, chain, cluster_w, as_of_block))
             except Exception:
                 single_op = False
         if single_op:
