@@ -540,17 +540,26 @@ def fetch_holders_evm(
     Non-ETH chains (BSC etc.) try Moralis first — Alchemy/Etherscan free don't
     cover them.
     """
-    # Moralis owner list is the reliable free path for non-ETH EVM chains.
+    # Moralis returns OWNER BALANCES directly — the truth, no reconstruction.
+    #
+    # ETH used to be excluded here (`chain_id != 1`), which forced ethereum onto the
+    # Alchemy transfer-netting path below. That path returns the token's EARLIEST
+    # balances when it truncates, and it truncates on any busy token: WOO's top
+    # "holder" showed 50% of supply while balanceOf said 0, and a cluster_confidence
+    # of 56 was built on the ghost. ETH was the ONLY chain exposed, because it was
+    # the only chain denied the direct source.
+    #
+    # Verified 2026-07-10 on WOO: Moralis ETH returns 299 holders, top-5 matching
+    # balanceOf exactly, and agreeing with GoPlus's independent list.
     from src.onchain import moralis_client
-    if chain_id != 1 and moralis_client.usable():
+    if moralis_client.usable():
         m = fetch_holders_moralis(token, chain_id, max_pages=min(max_pages, 5), timeout=timeout)
         if m:
             return m
 
-    # Covalent/GoldRush is the keyed FREE fallback when Moralis is parked/unavailable —
-    # keeps non-ETH holder fetching alive without Moralis' daily quota.
+    # Covalent/GoldRush is the keyed FREE fallback when Moralis is parked/unavailable.
     from src.onchain import covalent_client
-    if chain_id != 1 and covalent_client.available():
+    if covalent_client.available():
         c = covalent_client.fetch_holders(token, chain_id, max_pages=min(max_pages, 3), timeout=timeout)
         if c:
             return c
