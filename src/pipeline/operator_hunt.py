@@ -248,11 +248,29 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
         # #3: verify the dominant funder is a FOCUSED operator, not a disperser /
         # launchpad. A funder that seeded >40 distinct addresses is a service, and
         # its "cluster" is a false positive — downgrade.
+        acq = {"verdict": "unknown"}
         if shape in ("隐藏簇", "混合") and conc.get("funder_complete"):
             fanout = _funder_fanout(conc.get("dominant_funder"), chain)
             if fanout is not None and fanout > 40:
                 shape = f"分发器假阳(funder喂{fanout}+地址)"
                 op_score *= 0.2
+            elif conc.get("supply_verified"):
+                # THE OPERATOR-vs-ISSUER GATE. A funder-linked cluster looks identical
+                # whether it BOUGHT from the market (operator) or was ALLOCATED from
+                # one distributor (team/treasury). Only the first inflow tells them
+                # apart, and every "operator" in a 45-coin survey was an issuer until
+                # this check ran. Discovery is where it matters most.
+                try:
+                    from src.onchain.operator_id import acquisition_mode
+                    acq = acquisition_mode(addr, chain, conc.get("dominant_cluster_wallets") or [])
+                    if acq.get("verdict") == "allocated":
+                        shape = f"发行方分配盘(买{acq['bought']}/分配{acq['allocated']})"
+                        op_score *= 0.15
+                    elif acq.get("verdict") == "bought":
+                        shape = "隐藏簇·从市场买入"     # the real thing, verified
+                        op_score *= 1.5
+                except Exception:
+                    pass
         suspects.append({
             "symbol": sym, "chain": chain, "address": addr,
             "liquidity": (p.get("liquidity", {}) or {}).get("usd", 0),
@@ -264,12 +282,54 @@ def hunt(per_chain: int = 40, max_scan: int = 50) -> list[dict]:
             "op_score": round(op_score, 1), "shape": shape,
             "dominant_funder": conc.get("dominant_funder"),
             "wallets": conc.get("dominant_cluster_wallets") or [],
+            "acquisition": acq.get("verdict"),
+            "supply_verified": conc.get("supply_verified"),
+            "age_days": _pair_age_days(p),
+            "price0": _pair_price(p),
             "url": p.get("url", ""),
         })
         time.sleep(0.3)
 
     suspects.sort(key=lambda s: -s["op_score"])
     return suspects
+
+
+def _pair_age_days(p: dict) -> float | None:
+    import time
+    ms = p.get("pairCreatedAt")
+    return round((time.time() * 1000 - ms) / 86_400_000, 1) if ms else None
+
+
+def _pair_price(p: dict) -> float:
+    try:
+        return float(p.get("priceUsd") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def early_accumulation_candidates(suspects: list[dict], max_age_days: float = 30) -> list[dict]:
+    """The EARLY-CAPTURE shortlist — the only offense angle that survived the night.
+
+    A verified operator accumulating early is distinct from every dead end proven
+    tonight: it is on a TRADEABLE coin (you can buy it), it uses a LEADING event (a
+    coordinated buy, not the standing verdict), and tonight's discriminators make
+    'real operator' separable from issuer/ghost/disperser for the first time.
+
+    Requires ALL of: cluster BOUGHT from the market (not allocated), supply verified,
+    a young token (the operator is still building, not distributing), a real cluster.
+    Honest caveats live with the signal: whether this predicts a pump is UNMEASURED,
+    the prior is low, and the operators detectable on-chain may be the sloppy ones
+    that fail (adverse selection). This list exists to be FORWARD-tracked and killed
+    or confirmed by data — never to be traded on faith.
+    """
+    out = []
+    for s in suspects:
+        if (s.get("acquisition") == "bought"
+                and s.get("supply_verified")
+                and s.get("age_days") is not None and s["age_days"] <= max_age_days
+                and (s.get("concentration_gap") or 0) >= 6):
+            out.append(s)
+    return out
 
 
 def auto_promote(suspects: list[dict], max_promote: int = 3) -> list[dict]:

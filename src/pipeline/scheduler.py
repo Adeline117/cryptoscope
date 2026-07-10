@@ -185,6 +185,17 @@ def create_scheduler() -> AsyncIOScheduler:
         name="永续戒备事件 (授权路由/注gas/LP解锁 → 记录)",
     )
 
+    # Every 6h: the LONG-side early-capture experiment. Scans fresh launches for
+    # verified-bought coordinated accumulation and forward-records candidates. Rare
+    # signature -> needs continuous scanning to accrue any sample; the kill-line
+    # (evidence.py) decides whether it has an edge.
+    scheduler.add_job(
+        _run_early_accumulation,
+        CronTrigger(hour="2,8,14,20", minute=10),
+        id="early_accumulation",
+        name="早期操盘吸筹 (新发币·从市场买入·前向记录)",
+    )
+
     # Cluster coverage → weekly Dune holder reconstruction per sentinel; alerts on
     # untracked big EOAs / reconstruction drift (the manual audit, institutionalized).
     scheduler.add_job(
@@ -614,6 +625,50 @@ async def _run_perp_cex_scan():
     elif hits:
         logger.info("perp_alerts_suppressed_unproven", n=len(hits))
     logger.info("perp_cex_scan_done", hits=len(hits), logged=logged)
+
+
+async def _run_early_accumulation():
+    """The early-capture experiment, forward-tracked. Scans fresh launches, keeps only
+    VERIFIED-BOUGHT coordinated clusters on young tradeable coins, and RECORDS each as
+    a long candidate so its forward return accrues against a base rate. This is the one
+    offense angle that survived the night's falsification — a leading event on coins we
+    can trade, verified real, not the standing verdict that carries no timing.
+
+    Records always (recording is the experiment); pushes only when unmuted. Whether the
+    signature predicts pumps is UNMEASURED — the kill-line decides, not faith."""
+    logger.info("scheduled_early_accumulation")
+    from src.pipeline.operator_hunt import early_accumulation_candidates, hunt
+    from src.pipeline.operator_sentinel import alerts_muted
+    from src.pipeline.outcome_tracker import log_alert
+
+    try:
+        suspects = hunt(per_chain=40, max_scan=50)
+    except Exception as e:
+        logger.warning("early_accumulation_hunt_failed", error=str(e)[:80])
+        return
+    cands = early_accumulation_candidates(suspects)
+    logged = 0
+    for c in cands:
+        if not c.get("price0"):
+            logger.warning("early_cand_unpriced", symbol=c.get("symbol"))
+            continue
+        try:
+            log_alert(c["address"], c["chain"], c.get("symbol", "?"),
+                      "早期操盘吸筹", "long", c["price0"], c.get("liquidity") or 0,
+                      phase="accumulate")
+            logged += 1
+        except Exception:
+            pass
+    if cands and not alerts_muted():
+        from src.distribution.telegram_sender import send_alert
+        msg = "🟢 <b>早期操盘吸筹候选(前向实验)</b>\n━━━━━━━━━━\n"
+        for c in cands[:8]:
+            msg += (f"<b>{c['symbol']}</b> [{c['chain']}] 龄{c.get('age_days')}d "
+                    f"簇持{c.get('largest_entity_pct'):.0f}% 从市场买入\n")
+        msg += "⚠️ 择时未验证、先验低、可能逆向选择。研究彩票,非买入建议。"
+        await send_alert(msg)
+    logger.info("early_accumulation_done", suspects=len(suspects),
+                candidates=len(cands), logged=logged)
 
 
 async def _run_perp_mobilization():
