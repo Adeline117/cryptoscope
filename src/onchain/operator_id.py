@@ -1011,10 +1011,19 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
     loaded_cluster = (supply_ok and dom >= 5 and lg >= 10 and is_operator_acq
                       and _cluster_holds_onchain(token, chain, cluster_w, as_of_block))
 
-    if conf_q >= 55:
+    if conf_q >= 55 and acq.get("verdict") == "allocated":
+        # A funder-linked cluster with high confidence that was ALLOCATED (minted /
+        # single distributor) is a team/treasury, not a trading operator. This path
+        # fired live_operator on MERC and DETO — both issuer allocations — because it
+        # only saw the cluster SHAPE, never how the tokens were acquired.
+        out["verdict"] = "treasury"
+        out["confidence"] = 60
+        out["evidence"] = (f"高置信隐藏簇(conf{conf})但成员为分配/铸造所得"
+                           f"(买{acq['bought']}/分配{acq['allocated']})= 发行方金库,非交易操盘")
+    elif conf_q >= 55:
         out["verdict"] = "live_operator"
         out["confidence"] = conf
-        out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}"
+        out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}(从市场买入)"
     elif loaded_cluster:
         # LOADED-LIVE via the CURRENT holder graph (BASED): a coordinated CLUSTER
         # (>=5 wallets, not a single whale) holds a meaningful share of LIVE supply.
