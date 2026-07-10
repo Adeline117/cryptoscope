@@ -146,7 +146,19 @@ def create_scheduler() -> AsyncIOScheduler:
         _run_perp_cex_scan,
         CronTrigger(hour=5, minute=0),
         id="perp_cex_scan",
-        name="永续做空前兆 (大户→CEX充值 → Telegram)",
+        name="永续做空前兆 (大户→CEX充值 → 记录+可选推送)",
+    )
+
+    # Every 6h: the ACCRUAL ENGINE for the kill-line thesis. Approval/gas/LP-unlock
+    # moments on the 190 shortable coins — the only universe where a short edge can
+    # be monetised. mobilization's lookback is 12h of blocks, so a 6h cadence has
+    # 2x margin; a cursor that still falls outside logs a loud gap_skipped rather
+    # than silently losing events.
+    scheduler.add_job(
+        _run_perp_mobilization,
+        CronTrigger(hour="1,7,13,19", minute=40),
+        id="perp_mobilization",
+        name="永续戒备事件 (授权路由/注gas/LP解锁 → 记录)",
     )
 
     # Cluster coverage → weekly Dune holder reconstruction per sentinel; alerts on
@@ -578,6 +590,59 @@ async def _run_perp_cex_scan():
     elif hits:
         logger.info("perp_alerts_suppressed_unproven", n=len(hits))
     logger.info("perp_cex_scan_done", hits=len(hits), logged=logged)
+
+
+async def _run_perp_mobilization():
+    """Widen the event surface on SHORTABLE coins — the only universe where a short
+    edge can be monetised. Records router-approval / gas-topup / LP-unlock moments
+    for the 190 perp coins so the kill-line thesis can accrue evidence at all.
+
+    Escalation events (phase='arm'), not entry signals: they show capability and
+    preparation, never intent or timing. Recorded always; pushed only when unmuted."""
+    logger.info("scheduled_perp_mobilization")
+    import json
+
+    from src.config import DATA_DIR
+    from src.onchain.operator_id import _token_market
+    from src.pipeline.operator_sentinel import alerts_muted
+    from src.pipeline.outcome_tracker import log_alert
+    from src.pipeline.perp_mobilization import scan_lp_unlock, scan_mobilization
+
+    state_file = DATA_DIR / "perp_mobilization_state.json"
+    try:
+        state = json.loads(state_file.read_text())
+    except Exception:
+        state = {"mobil": {}, "lp": {}}
+
+    events, state["mobil"] = scan_mobilization(prev_state=state.get("mobil"))
+    lp_events, state["lp"] = scan_lp_unlock(prev_state=state.get("lp"))
+    events += lp_events
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(state))
+
+    logged = 0
+    for e in events:
+        try:
+            mkt = _token_market(e["address"])
+            px = float(mkt.get("price_usd") or 0) if mkt.get("available") else 0.0
+            liq = float(mkt.get("liquidity_usd") or 0) if mkt.get("available") else 0.0
+            log_alert(e["address"], e["chain"], e["symbol"], e["kind"],
+                      "short", px, liq, phase="arm")
+            logged += 1
+        except Exception as ex:
+            logger.warning("perp_mobil_log_failed", symbol=e.get("symbol"),
+                           error=str(ex)[:60])
+
+    if events and not alerts_muted():
+        from src.distribution.telegram_sender import send_alert
+        msg = "🟠 <b>戒备 — 永续币大户砸盘前置动作</b>\n━━━━━━━━━━\n"
+        for e in events[:10]:
+            msg += f"<b>{e['symbol']}</b> [{e['chain']}] {e['kind']}\n  {e['detail']}\n\n"
+        msg += "⚠️ 前置动作 ≠ 必砸。减仓/收紧止损,勿据此开仓。"
+        await send_alert(msg)
+    elif events:
+        logger.info("perp_mobil_suppressed_unproven", n=len(events))
+    logger.info("perp_mobilization_done", events=len(events), logged=logged)
 
 
 async def _run_perp_universe_refresh():
