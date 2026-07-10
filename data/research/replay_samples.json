@@ -1,0 +1,77 @@
+[
+ {
+  "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
+  "chain": "bsc",
+  "days_ago": 25,
+  "block": 104318253,
+  "ts": "2026-06-15T05:27:51+00:00",
+  "verdict": "distributing",
+  "confidence": 75,
+  "caveats": [
+   "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账"
+  ],
+  "price0": 0.0526592024216304,
+  "price1": 0.0541915306676547,
+  "ret": 0.029098964199178137
+ },
+ {
+  "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
+  "chain": "bsc",
+  "days_ago": 20,
+  "block": 105277997,
+  "ts": "2026-06-20T05:27:59+00:00",
+  "verdict": "distributing",
+  "confidence": 75,
+  "caveats": [
+   "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账"
+  ],
+  "price0": 0.0408114602968329,
+  "price1": 0.0394614621611356,
+  "ret": -0.033078898081038845
+ },
+ {
+  "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
+  "chain": "bsc",
+  "days_ago": 15,
+  "block": 106237741,
+  "ts": "2026-06-25T05:31:29+00:00",
+  "verdict": "distributing",
+  "confidence": 75,
+  "caveats": [
+   "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账"
+  ],
+  "price0": 0.0357987021589516,
+  "price1": 0.032980238041627,
+  "ret": -0.07873090216539672
+ },
+ {
+  "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
+  "chain": "bsc",
+  "days_ago": 10,
+  "block": 107197485,
+  "ts": "2026-06-30T05:32:19+00:00",
+  "verdict": "distributing",
+  "confidence": 75,
+  "caveats": [
+   "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账"
+  ],
+  "price0": 0.0394571389209889,
+  "price1": 0.0340432941431456,
+  "ret": -0.1372082448421887
+ },
+ {
+  "token": "0x997A58129890bBdA032231A52eD1ddC845fc18e1",
+  "chain": "bsc",
+  "days_ago": 5,
+  "block": 108157229,
+  "ts": "2026-07-05T05:32:51+00:00",
+  "verdict": "distributing",
+  "confidence": 75,
+  "caveats": [
+   "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账"
+  ],
+  "price0": 0.0345649969797699,
+  "price1": 0.0341428690799295,
+  "ret": -0.01221258315420828
+ }
+]
