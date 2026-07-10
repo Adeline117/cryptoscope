@@ -153,6 +153,31 @@ def run() -> dict:
     total += 1; passed += _check("区分:装弹>SIREN型>分散", loaded > siren_like > dispersed,
                                  f"{loaded}>{siren_like}>{dispersed}")
 
+    # ---- LIVE GROUND-TRUTH GATE: holder data must match the chain ----
+    # The ghost-holder bug (ETH holder lists rebuilt from the token's EARLIEST
+    # transfers, returned as current) fabricated two sentinel verdicts and survived
+    # for months. It was found by accident. No unit test can catch it, because the
+    # data source itself lies — only the chain can arbitrate. This gate asks the
+    # chain, on a real token, every run.
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        from src.onchain.holder_snapshot import fetch_holders_evm
+        for sym, tok, cid, chain in [("WOO(eth)", "0x4691937a7508860f876c9c0a2a617e7d9e945d4b", 1, "ethereum"),
+                                     ("SIREN(bsc)", "0x997a58129890bbda032231a52ed1ddc845fc18e1", 56, "bsc")]:
+            hs = fetch_holders_evm(tok, chain_id=cid, max_pages=3) or []
+            rpc = ArchiveRPC(chain)
+            agree = 0
+            for h in hs[:3]:
+                real = rpc.balance_of(tok, h["address"])
+                if real is not None and abs(real - float(h["balance"])) < max(1.0, 0.02 * float(h["balance"])):
+                    agree += 1
+            total += 1
+            passed += _check(f"{sym} holder快照与链上一致(top3)", agree >= 2,
+                             f"{agree}/3 一致 — 不一致=数据源在撒谎(幽灵余额)")
+    except Exception as e:
+        total += 1
+        passed += _check("holder链上一致性网关", False, f"无法执行: {str(e)[:50]}")
+
     print(f"\n=== 混淆(小N，N={total}）: {passed}/{total} 正确 ({passed/max(total,1)*100:.0f}%) ===")
     print("注：N小，非统计显著；这是'已知案例上系统分类对不对'的诚实回放。")
     return {"passed": passed, "total": total}
