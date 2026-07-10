@@ -14,9 +14,33 @@ logger = structlog.get_logger()
 
 
 def create_scheduler() -> AsyncIOScheduler:
-    """Create and configure the scheduler with all pipeline jobs."""
+    """Create and configure the scheduler with all pipeline jobs.
+
+    EXECUTOR STARVATION (fixed): the scheduler ran with APScheduler's defaults, so
+    every job shared one small pool. `operator_sentinel` fires every 5 minutes and
+    takes 6-8, `perp_cex_scan` takes ~60 — they saturated the pool and everything else
+    was silently dropped as a misfire. The logs held **11,240 "was missed by"**
+    warnings, and the evidence resolver (`resolve_outcomes`, hourly) last ran two days
+    ago while the sentinel ran two minutes ago.
+
+    That is what was actually killing the thesis: alerts accrued and were never
+    resolved, so no episode could ever be scored. A silent misfire is indistinguishable
+    from a quiet market — the same disease, this time in the scheduler itself.
+
+    Fixes: a wider thread pool, `coalesce` (a backlog runs once, not N times), and a
+    generous `misfire_grace_time` so a late job RUNS LATE instead of being skipped.
+    """
+    from apscheduler.executors.pool import ThreadPoolExecutor
+
     settings = load_settings()
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(
+        executors={"default": ThreadPoolExecutor(20)},
+        job_defaults={
+            "coalesce": True,        # a backlog of missed runs collapses into one
+            "max_instances": 1,      # never run two copies of the same job
+            "misfire_grace_time": 3600,   # run up to 1h late rather than skip
+        },
+    )
 
     # Daily pipeline
     daily_time = settings.get("schedule", {}).get("daily_run", "08:00")
