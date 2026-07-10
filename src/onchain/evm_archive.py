@@ -26,6 +26,7 @@ logger = structlog.get_logger()
 
 BALANCE_OF = "0x70a08231"  # balanceOf(address) selector
 DECIMALS = "0x313ce567"    # decimals() selector
+TOTAL_SUPPLY = "0x18160ddd"  # totalSupply() selector
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 # A browser UA — several keyless public RPCs (publicnode) 403 the default urllib UA.
 _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -74,6 +75,7 @@ class ArchiveRPC:
         self.rpcs = _default_rpcs(chain)
         self._idx = 0
         self._dec_cache: dict[str, int] = {}
+        self._supply_cache: dict[str, float] = {}
         self._spb: float | None = None
         self.logs_complete: bool = True   # set by get_transfer_logs; False = partial/failed
 
@@ -206,6 +208,27 @@ class ArchiveRPC:
             dec = 18
         self._dec_cache[key] = dec
         return dec
+
+    def total_supply(self, token: str) -> float | None:
+        """Circulating denominator for percent-of-supply gates. None on a soft RPC
+        failure (empty result) — a caller must not read that as "supply is 0" and
+        divide a holding into an infinite percentage."""
+        key = token.lower()
+        if key in self._supply_cache:
+            return self._supply_cache[key]
+        try:
+            r = self._call("eth_call", [{"to": token, "data": TOTAL_SUPPLY}, "latest"])
+            res = r.get("result")
+            if not res or res == "0x":
+                return None
+            ts = int(res, 16) / float(10 ** self.token_decimals(token))
+        except Exception as e:
+            logger.debug("total_supply_failed", token=token, error=str(e))
+            return None
+        if ts <= 0:
+            return None
+        self._supply_cache[key] = ts
+        return ts
 
     def balance_of(self, token: str, holder: str, block: int | str = "latest") -> float | None:
         # Scale by the token's ACTUAL decimals — hardcoding /1e18 understated every
