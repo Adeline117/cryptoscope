@@ -703,6 +703,80 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
             "wallets_walked": walked, "terminals": len(terminals)}
 
 
+_MINT_SOURCES = _BURN          # first inflow from 0x0 = minted, not bought
+
+
+def acquisition_mode(token: str, chain: str, wallets: list, max_wallets: int = 8) -> dict:
+    """Did this cluster BUY its position, or was it ALLOCATED?
+
+    The single sharpest operator-vs-issuer discriminator, and the one this codebase
+    kept getting wrong ("concentration = the issuer"). An operator accumulates FROM
+    THE MARKET: its wallets' first inflow of the token arrives from an LP pair or a
+    router. A project allocates: the first inflow arrives from the zero address (a
+    mint) or from one distributor wallet.
+
+    Measured 2026-07-10 on the two concentrated coins in a 45-coin survey of shortable
+    small caps: AT had 5 of 6 wallets minted straight from 0x0; CHIP had 7 of 8 funded
+    by one distributor. Buys: zero. Both were issuers wearing an operator's shape —
+    23 wallets, one funder, 67% of supply, all EOAs, owner renounced.
+
+    Returns {available, bought, allocated, unresolved, verdict, top_source}.
+    `verdict` is 'bought' | 'allocated' | 'mixed' | 'unknown' — never a silent default.
+    """
+    from src.onchain import moralis_client
+    from src.onchain.entity_classify import classify_address
+    mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth",
+              "arbitrum": "arbitrum"}.get(chain)
+    if not mchain or not wallets or not moralis_client.usable():
+        return {"available": False, "verdict": "unknown", "reason": "no source"}
+
+    pairs = _token_pairs(token, chain)
+    routers = _infra(chain)["routers"]
+    creator = ""
+    try:
+        from src.onchain.goplus_client import token_security
+        sec = token_security(token, chain)
+        creator = (sec.get("creator_address") or "") if sec.get("available") else ""
+    except Exception:
+        creator = ""
+
+    tl = token.lower()
+    bought = allocated = unresolved = 0
+    sources: dict[str, int] = {}
+    for w in [str(x).lower() for x in wallets[:max_wallets]]:
+        try:
+            d = moralis_client.get(f"{w}/erc20/transfers?chain={mchain}&order=ASC&limit=25")
+            rows = [r for r in ((d or {}).get("result") or [])
+                    if (r.get("address") or r.get("token_address") or "").lower() == tl
+                    and (r.get("to_address") or "").lower() == w]
+        except Exception:
+            rows = []
+        if not rows:
+            unresolved += 1                 # can't date the acquisition → unknown
+            continue
+        frm = (rows[0].get("from_address") or "").lower()
+        sources[frm] = sources.get(frm, 0) + 1
+        if frm in pairs or frm in routers:
+            bought += 1
+        elif (frm in _MINT_SOURCES or frm == creator.lower()
+              or classify_address(frm, chain).get("type") == "contract"):
+            allocated += 1
+        else:
+            allocated += 1                  # a plain wallet handing out the float
+    resolved = bought + allocated
+    if not resolved:
+        verdict = "unknown"
+    elif allocated > bought:
+        verdict = "allocated"
+    elif bought > allocated:
+        verdict = "bought"
+    else:
+        verdict = "mixed"
+    top = max(sources.items(), key=lambda kv: kv[1])[0] if sources else None
+    return {"available": True, "bought": bought, "allocated": allocated,
+            "unresolved": unresolved, "verdict": verdict, "top_source": top}
+
+
 def _cluster_holds_onchain(token: str, chain: str, wallets: list,
                            as_of_block: int | None = None) -> bool:
     """INV-4 / SYN fix: confirm the snapshot-derived cluster ACTUALLY holds on-chain
@@ -917,7 +991,24 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
     supply_ok = bool(conc.get("supply_verified"))
     if not supply_ok and (lg or dom):
         out["caveats"].append("supply_unverified:集中度是子集比例而非供应占比,装弹门槛不执行")
-    loaded_cluster = (supply_ok and dom >= 5 and lg >= 10
+
+    # OPERATOR vs ISSUER. A concentrated cluster that was ALLOCATED (minted to, or
+    # handed the float by one distributor) is a treasury/team, not an operator — it
+    # never bought, so it has no cost basis to defend and no reason to run the price.
+    # Two coins in a 45-coin survey looked exactly like operators (23 wallets, one
+    # funder, 67% of supply, all EOAs, owner renounced) and both were issuers.
+    # Skipped under replay: today's first-inflow lookup is not the past's.
+    acq = {"available": False, "verdict": "unknown"}
+    if cluster_w and not replay:
+        acq = acquisition_mode(token, chain, cluster_w)
+        out["current"]["acquisition"] = acq
+        if acq.get("verdict") == "allocated":
+            out["caveats"].append(
+                f"issuer_allocation:簇成员首笔入账来自铸造/单一分发地址"
+                f"(买{acq['bought']}/分配{acq['allocated']}) → 集中度=发行方,非操盘")
+    is_operator_acq = acq.get("verdict") != "allocated"
+
+    loaded_cluster = (supply_ok and dom >= 5 and lg >= 10 and is_operator_acq
                       and _cluster_holds_onchain(token, chain, cluster_w, as_of_block))
 
     if conf_q >= 55:
