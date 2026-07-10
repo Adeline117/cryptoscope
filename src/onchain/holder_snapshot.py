@@ -489,6 +489,43 @@ def fetch_holders_moralis(
     return holders
 
 
+def _verify_onchain(token: str, chain_id: int, holders: list[dict],
+                    top_n: int = 30) -> list[dict]:
+    """Replace reconstructed balances with the on-chain truth for the head of the list.
+
+    A transfer-netted balance is only as current as the last transfer you paged. When
+    the walk is truncated, the head of the list is exactly where the error is largest
+    and where every concentration verdict is decided. `balance_of` returns None on an
+    RPC failure and 0.0 for a genuinely empty wallet — those are different answers, and
+    a wallet we could not read is DROPPED (unknown), never kept at its stale value.
+
+    Returns [] when nothing could be verified: no data beats wrong data.
+    """
+    chain = {1: "ethereum", 56: "bsc", 8453: "base", 42161: "arbitrum"}.get(chain_id)
+    if not chain:
+        return holders
+    try:
+        from src.onchain.evm_archive import ArchiveRPC
+        rpc = ArchiveRPC(chain)
+    except Exception:
+        return []
+    out, checked, failed = [], 0, 0
+    for h in holders[:top_n]:
+        b = rpc.balance_of(token, h["address"])
+        if b is None:
+            failed += 1
+            continue                       # unreadable → unknown → excluded
+        checked += 1
+        if b > 1e-9:
+            out.append({"address": h["address"], "balance": round(b, 8)})
+    if not checked:
+        return []
+    logger.info("holders_onchain_verified", token=token, checked=checked,
+                failed=failed, kept=len(out), dropped=checked - len(out))
+    out.sort(key=lambda h: -h["balance"])
+    return out
+
+
 def fetch_holders_evm(
     token: str, chain_id: int = 1, max_pages: int = 25, timeout: int = 25
 ) -> list[dict[str, Any]]:
@@ -555,12 +592,26 @@ def fetch_holders_evm(
             else:
                 truncated = True
             if truncated:
-                logger.info("evm_holders_truncated", token=token, max_pages=max_pages)
+                logger.warning("evm_holders_truncated", token=token, max_pages=max_pages,
+                               note="只累加了最早的转账 → 余额是历史值,必须链上核实")
             zero = "0x0000000000000000000000000000000000000000"
             holders = [
                 {"address": a, "balance": round(b, 8)}
                 for a, b in balances.items() if b > 1e-9 and a != zero
             ]
+            holders.sort(key=lambda h: -h["balance"])
+            if truncated and holders:
+                # A TRUNCATED reconstruction nets only the token's EARLIEST transfers,
+                # so it reports balances from years ago and returns them as "current
+                # holders". WOO's top wallet showed 1.49B tokens (50% of supply) while
+                # balanceOf said 0 — and effective_concentration_signal built a
+                # `cluster_confidence 56` on that. Every ETH concentration verdict was
+                # exposed to this. Verify the head of the list on-chain, or refuse.
+                holders = _verify_onchain(token, chain_id, holders, top_n=30)
+                if not holders:
+                    logger.warning("evm_holders_unverifiable", token=token,
+                                   note="截断且链上核实失败 → 返回空(不可判),绝不返回历史余额")
+                    return []
             if holders:
                 return holders
         except Exception as e:
