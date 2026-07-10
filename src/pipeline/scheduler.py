@@ -450,17 +450,22 @@ async def _run_operator_sentinel():
 
 async def _run_operator_id_push():
     """Daily: run the verified identify_operator on tracked sentinels and PUSH the
-    actionable verdicts to Telegram — loaded_live/live = pump-watch, distributing/
-    exited/rotating = dump-threat. Non-actionable (indeterminate/churn/too_young) are
-    NOT pushed (noise)."""
+    actionable verdicts to Telegram — accumulating/live = pump-watch, distributing/
+    exited/rotating = dump-threat. Non-actionable (indeterminate/churn/too_young/
+    dormant) are NOT pushed (noise)."""
     logger.info("scheduled_operator_id_push")
     import json
 
     from src.config import DATA_DIR
-    from src.onchain.operator_id import identify_operator
+    from src.onchain.operator_id import (LONG_ACTIONABLE, SHORT_ACTIONABLE,
+                                         identify_operator, promotable)
 
-    PUMP = {"loaded_live_operator", "live_operator"}
-    DUMP = {"distributing", "exited_by_selling", "present_rotating_confirmed"}
+    # F8: only an ACCUMULATING loaded cluster is a pump warning. loaded_dormant /
+    # velocity-unavailable loaded_live are STATE, not signal — pushing them as 拉盘预警
+    # was the BASED failure (right label, useless trade). live_operator (hidden-Sybil
+    # cluster) stays a watch-level pump line. promotable() also drops `borderline`.
+    PUMP = LONG_ACTIONABLE | {"live_operator"}
+    DUMP = SHORT_ACTIONABLE
     EVM = {"bsc", "ethereum", "base", "arbitrum"}
     try:
         reg = json.loads((DATA_DIR / "operator_sentinels.json").read_text())
@@ -475,9 +480,11 @@ async def _run_operator_id_push():
         except Exception:
             continue
         v, c = r["verdict"], r["confidence"]
-        if v in PUMP and c >= 55:
-            lines.append(f"🟢 <b>{s['symbol']}</b> 装弹活庄(拉盘预警) conf{c}\n  {r['evidence'][:70]}")
-        elif v in DUMP and c >= 55:
+        if not promotable(r):
+            continue
+        if v in PUMP:
+            lines.append(f"🟢 <b>{s['symbol']}</b> 庄在吸筹(拉盘预警) conf{c}\n  {r['evidence'][:70]}")
+        elif v in DUMP:
             lines.append(f"🔴 <b>{s['symbol']}</b> 派发/换钱包(砸盘预警) conf{c}\n  {r['evidence'][:70]}")
     if lines:
         from src.distribution.telegram_sender import send_alert
