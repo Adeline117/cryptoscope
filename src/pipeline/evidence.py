@@ -91,7 +91,10 @@ def episodes(db_path=None) -> list[dict]:
                    "phase": r["phase"], "start_ts": r["ts"], "last_ts": r["ts"],
                    "kind": r["kind"], "price0": r["price0"],
                    "liquidity": r["liquidity"] or 0, "n_fires": 1,
-                   "resolved": r["resolved"], "hit_4h": r["hit_4h"],
+                   # resolved: 1 = scored, 2 = RETIRED (never priceable). Only 1 may
+                   # enter a denominator — a retired alert scored as a miss would
+                   # silently drag the hit rate down.
+                   "resolved": r["resolved"] == 1, "hit_4h": r["hit_4h"],
                    "hit_24h": r["hit_24h"]}
             out.append(cur)
         else:
@@ -296,7 +299,7 @@ def report(db_path=None, with_base_rate: bool = True) -> str:
 
     for direction in ("short", "long"):
         de = [e for e in eps if e["direction"] == direction]
-        res = [e for e in de if e["resolved"]]
+        res = [e for e in de if e["resolved"]]   # resolved==1 only (see episodes)
         label = "空头" if direction == "short" else "多头"
         if not res:
             lines.append(f"{label}: {len(de)} 个事件, 0 个已结算 → 无可报告\n")

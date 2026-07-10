@@ -133,3 +133,29 @@ def test_kill_line_refuses_when_perp_universe_unavailable(tmp_path, monkeypatch)
     monkeypatch.setattr(ev, "_shortable_tokens", lambda: set())
     out = ev.kill_line(db)
     assert "加载失败" in out and "不做任何统计" in out
+
+
+def test_retired_alert_is_not_a_miss(tmp_path):
+    """resolved=2 means 'never priceable, retired'. Counting it as a scored miss
+    would silently drag the hit rate down — data failure becoming a bad number."""
+    from src.pipeline.evidence import episodes
+    t0 = datetime(2026, 6, 16, 9, 0, tzinfo=timezone.utc)
+    p = tmp_path / "a.db"
+    c = sqlite3.connect(p)
+    c.execute("""CREATE TABLE alerts (id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT, token TEXT, chain TEXT, symbol TEXT, kind TEXT, direction TEXT,
+        price0 REAL, liquidity REAL, price_4h REAL, price_24h REAL,
+        hit_4h INTEGER, hit_24h INTEGER, resolved INTEGER DEFAULT 0, phase TEXT)""")
+    # one genuinely scored hit, one retired (resolved=2, no hit data)
+    c.execute("INSERT INTO alerts (ts,token,chain,symbol,kind,direction,price0,liquidity,"
+              "hit_24h,resolved,phase) VALUES (?,'0xa','bsc','A','k','short',1.0,1e6,1,1,'sell')",
+              (t0.isoformat(),))
+    c.execute("INSERT INTO alerts (ts,token,chain,symbol,kind,direction,price0,liquidity,"
+              "hit_24h,resolved,phase) VALUES (?,'0xb','bsc','B','k','short',0,1e6,NULL,2,'sell')",
+              (t0.isoformat(),))
+    c.commit(); c.close()
+    eps = episodes(p)
+    scored = [e for e in eps if e["resolved"]]
+    assert len(eps) == 2, "retired alerts still exist as episodes (audit trail)"
+    assert len(scored) == 1, "a retired alert must not enter the denominator"
+    assert scored[0]["symbol"] == "A"

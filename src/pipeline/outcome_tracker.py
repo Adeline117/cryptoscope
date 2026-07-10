@@ -118,8 +118,53 @@ def _hit(direction: str, price0: float, price1: float, liquidity: float = 0) -> 
     return 0
 
 
+UNRESOLVABLE_DAYS = 14      # past this, an unpriced alert will never resolve
+
+
+def _price_at(token: str, chain: str, when: datetime) -> float | None:
+    """The price AT `when` — not the price whenever we happen to run.
+
+    `_price()` returns the CURRENT price. The resolver used it for `price_24h`, which
+    is only correct if the resolver fires punctually at ts+24h. It does not: the
+    scheduler was starving it (11,240 misfires; it once went two days without
+    running), so `price_24h` silently became 'price whenever we got around to it'.
+    A late resolution then measures days of return and calls it a 24-hour move.
+
+    Reading the horizon price from historical candles makes resolution CORRECT
+    regardless of when it runs — and therefore idempotent and back-fillable.
+    """
+    if chain == "majors":
+        # No free historical OHLCV wired for OKX majors; only resolve punctually.
+        age_h = (datetime.now(timezone.utc) - when).total_seconds() / 3600
+        return _price(token, chain) if abs(age_h) <= 2 else None
+    try:
+        from src.pipeline.evidence import _deepest_pool, _ohlcv
+        pool = _deepest_pool(token, chain)
+        if not pool:
+            return None
+        target = int(when.timestamp())
+        for before in (None, target + 36 * 3600):
+            try:
+                candles = _ohlcv(chain, pool, before=before)
+            except Exception:
+                continue
+            best = None
+            for cd in candles:
+                if best is None or abs(cd[0] - target) < abs(best[0] - target):
+                    best = cd
+            if best is not None and abs(best[0] - target) <= 2 * 3600:
+                return best[4]          # hourly close within 2h of the horizon
+    except Exception as e:
+        logger.debug("price_at_failed", token=token, error=str(e)[:60])
+    return None
+
+
 def resolve_outcomes() -> int:
-    """Fill in 4h/24h prices + hit flags for alerts whose horizon has elapsed."""
+    """Fill in 4h/24h prices + hit flags for alerts whose horizon has elapsed.
+
+    Prices are read AT the horizon, so a late run resolves correctly rather than
+    measuring its own lateness. Alerts that can never be priced are retired instead
+    of accumulating forever as a fake backlog."""
     now = datetime.now(timezone.utc)
     c = _conn()
     resolved = 0
@@ -127,15 +172,27 @@ def resolve_outcomes() -> int:
         rows = c.execute("SELECT id, ts, token, chain, direction, price0, liquidity, price_4h, price_24h "
                          "FROM alerts WHERE resolved = 0").fetchall()
         for rid, ts, token, chain, direction, p0, liq, p4, p24 in rows:
-            age_h = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+            t0 = datetime.fromisoformat(ts)
+            age_h = (now - t0).total_seconds() / 3600
+            # An alert with no entry price can never be scored — retire it rather
+            # than letting it inflate the backlog or count as a miss.
+            if not p0 or p0 <= 0:
+                if age_h > 24:
+                    c.execute("UPDATE alerts SET resolved=2 WHERE id=?", (rid,))
+                continue
+            if age_h > UNRESOLVABLE_DAYS * 24 and (p4 is None or p24 is None):
+                c.execute("UPDATE alerts SET resolved=2 WHERE id=?", (rid,))
+                logger.info("alert_unresolvable", id=rid, token=token[:10],
+                            age_days=round(age_h / 24, 1), note="无价源,退休,不计入分母")
+                continue
             updates = {}
             if p4 is None and age_h >= 4:
-                px = _price(token, chain)
+                px = _price_at(token, chain, t0 + timedelta(hours=4))
                 if px:
                     updates["price_4h"] = px
                     updates["hit_4h"] = _hit(direction, p0, px, liq or 0)
             if p24 is None and age_h >= 24:
-                px = _price(token, chain)
+                px = _price_at(token, chain, t0 + timedelta(hours=24))
                 if px:
                     updates["price_24h"] = px
                     updates["hit_24h"] = _hit(direction, p0, px, liq or 0)
