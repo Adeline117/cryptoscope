@@ -1162,7 +1162,8 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                                 "long" if "做多" in action else "none"
                     log_alert(t["token"], t["chain"], t["symbol"],
                               ",".join(sorted(kinds)), direction,
-                              cur.get("price") or 0, cur.get("liquidity") or 0)
+                              cur.get("price") or 0, cur.get("liquidity") or 0,
+                              phase=t.get("last_phase"))   # episode grouping needs it
                 except Exception:
                     pass
             # Advance state, never overwriting a good value with None (#hardening).
@@ -1200,13 +1201,37 @@ def _format(alerts: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def alerts_muted() -> bool:
+    """Telegram push is MUTED by default until the alerts are shown to have an edge.
+
+    Measured 2026-07-09: collapsed to independent (symbol x day) episodes, the short
+    alerts hit 1 of 16 — while these tokens fall 5% in a random 24h window 24-37% of
+    the time. There is no evidence of edge, and a hint of NEGATIVE edge (the alarms
+    likely fire after the move, and price mean-reverts). Pushing a trade signal on
+    that basis is worse than sending nothing.
+
+    Recording continues regardless: `log_alert` still writes every fire, because the
+    120-150 independent episodes needed to ever MEASURE an edge can only accrue if
+    the loop keeps running. Muting the push without muting the log is the point.
+
+    Un-mute with OPERATOR_ALERTS_MUTED=0 once an edge is demonstrated. Note this also
+    silences RUG/砸盘 flee alarms — that is the cost of the current honesty."""
+    import os
+    return os.environ.get("OPERATOR_ALERTS_MUTED", "1").strip().lower() not in ("0", "false", "no")
+
+
 async def run_and_alert(use_transfers: bool = False) -> int:
-    """Scheduler entry: check + push Telegram on any trigger. Returns alert count."""
-    alerts = check_run(use_transfers=use_transfers)
-    if alerts:
+    """Scheduler entry: check + (maybe) push Telegram. Returns alert count."""
+    alerts = check_run(use_transfers=use_transfers)   # log_alert runs inside — always
+    if alerts and not alerts_muted():
         from src.distribution.telegram_sender import send_alert
         await send_alert(_format(alerts))
-    logger.info("operator_sentinel_done", targets=len(_load()), alerts=len(alerts))
+    elif alerts:
+        logger.info("alerts_suppressed_unproven", n=len(alerts),
+                    symbols=[a["symbol"] for a in alerts],
+                    note="已记录未推送:告警尚未证明有edge(OPERATOR_ALERTS_MUTED=0 可恢复)")
+    logger.info("operator_sentinel_done", targets=len(_load()), alerts=len(alerts),
+                muted=alerts_muted())
     return len(alerts)
 
 

@@ -486,10 +486,14 @@ async def _run_operator_id_push():
             lines.append(f"🟢 <b>{s['symbol']}</b> 庄在吸筹(拉盘预警) conf{c}\n  {r['evidence'][:70]}")
         elif v in DUMP:
             lines.append(f"🔴 <b>{s['symbol']}</b> 派发/换钱包(砸盘预警) conf{c}\n  {r['evidence'][:70]}")
-    if lines:
+    from src.pipeline.operator_sentinel import alerts_muted
+    if lines and not alerts_muted():
         from src.distribution.telegram_sender import send_alert
         await send_alert("🎯 <b>操盘判决(identify_operator)</b>\n━━━━━━━━━━\n" + "\n\n".join(lines[:12]))
-    logger.info("operator_id_push_done", pushed=len(lines))
+    elif lines:
+        logger.info("verdicts_suppressed_unproven", n=len(lines),
+                    note="判决已计算未推送:尚未证明有edge")
+    logger.info("operator_id_push_done", pushed=len(lines), muted=alerts_muted())
 
 
 async def _run_holder_snapshots():
