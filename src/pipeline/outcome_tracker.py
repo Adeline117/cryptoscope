@@ -39,24 +39,35 @@ def _conn() -> sqlite3.Connection:
         kind TEXT, direction TEXT, price0 REAL, liquidity REAL,
         price_4h REAL, price_24h REAL, hit_4h INTEGER, hit_24h INTEGER,
         resolved INTEGER DEFAULT 0)""")
-    # add liquidity column to older DBs
+    # add columns to older DBs
     cols = {r[1] for r in c.execute("PRAGMA table_info(alerts)").fetchall()}
     if "liquidity" not in cols:
         c.execute("ALTER TABLE alerts ADD COLUMN liquidity REAL")
+    if "phase" not in cols:
+        # The operator's behavioral phase (sell/arm/buy/stall) at fire time. It was
+        # already computed in operator_sentinel and then discarded; episode grouping
+        # needs it, because a phase change starts a NEW episode even inside cooldown.
+        c.execute("ALTER TABLE alerts ADD COLUMN phase TEXT")
     return c
 
 
 def log_alert(token: str, chain: str, symbol: str, kind: str, direction: str,
-              price0: float, liquidity: float = 0) -> None:
+              price0: float, liquidity: float = 0, phase: str | None = None) -> None:
     """Record a fired alert with entry price, direction ('long'/'short') + the pool
-    liquidity (so the hit threshold can require beating slippage — #5)."""
+    liquidity (so the hit threshold can require beating slippage — #5) + the operator
+    `phase` at fire time (episode grouping needs it; see src/pipeline/evidence.py).
+
+    NOTE: every fire is stored, including repeats of an ongoing episode. Rows are an
+    AUDIT TRAIL, not independent trials — 40 rows once came from one 17-minute SIREN
+    episode and were read as a 44% hit rate. Never compute a hit rate off this table
+    directly; go through evidence.episodes()."""
     try:
         c = _conn()
         try:
-            c.execute("INSERT INTO alerts (ts, token, chain, symbol, kind, direction, price0, liquidity) "
-                      "VALUES (?,?,?,?,?,?,?,?)",
+            c.execute("INSERT INTO alerts (ts, token, chain, symbol, kind, direction, "
+                      "price0, liquidity, phase) VALUES (?,?,?,?,?,?,?,?,?)",
                       (datetime.now(timezone.utc).isoformat(), token, chain, symbol,
-                       kind, direction, price0, liquidity))
+                       kind, direction, price0, liquidity, phase))
             c.commit()
         finally:
             c.close()
