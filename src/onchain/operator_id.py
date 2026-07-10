@@ -211,14 +211,16 @@ def same_entity(a: str, b: str, chain: str, funders: dict | None = None) -> dict
     why, jac = [], None
     try:
         from src.onchain.cex_addresses import evm_exchanges
-        from src.pipeline.anomaly_screener import _funder_is_disperser
+        from src.pipeline.anomaly_screener import funder_disperser_verdict
         if funders is None:
             from src.onchain.funder_graph import get_funders
             funders = get_funders([al, bl], chain)
         fa = str(funders.get(al) or "").lower()
         fb = str(funders.get(bl) or "").lower()
         cex = evm_exchanges()
-        if fa and fa == fb and fa not in cex and not _funder_is_disperser(fa, chain):
+        # `is False` (affirmative): an unverifiable funder must not fabricate a link.
+        if (fa and fa == fb and fa not in cex
+                and funder_disperser_verdict(fa, chain) is False):
             why.append(f"shared_funder:{fa[:10]}")
     except Exception:
         pass
@@ -319,15 +321,20 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     # confidently-EOA, non-CEX, non-pair — they clear every other exclusion — and a
     # desk cycling inventory then reads as "operator sold and left" (exited_by_selling
     # conf 85). Bounded to the wallets the referee will actually walk.
-    mm_dropped = []
+    # Red-team: a FAILED basket read is not a PASSED check — track unchecked wallets so
+    # the caller caps confidence instead of emitting conf-85 as if the MM screen ran.
+    mm_dropped, mm_unchecked = [], []
     for rec in exited[:10]:
-        if _is_mm_like(rec["address"], chain):
+        b = _wallet_basket(rec["address"], chain)
+        if b is None:
+            mm_unchecked.append(rec["address"])
+        elif len(b) >= _MM_BASKET_SIZE:
             mm_dropped.append(rec["address"])
     if mm_dropped:
         exited = [e for e in exited if e["address"] not in set(mm_dropped)]
         logger.info("mm_candidates_dropped", token=token, n=len(mm_dropped))
     return {"available": True, "exited": exited[:15], "holding": holding[:15],
-            "mm_dropped": mm_dropped}
+            "mm_dropped": mm_dropped, "mm_unchecked": mm_unchecked}
 
 
 def _token_age_onchain(token: str, chain: str) -> float | None:
@@ -835,12 +842,16 @@ def identify_operator(token: str, chain: str) -> dict:
         out["caveats"].append("年龄门:<14d非可判")
         return out
     elif (hist.get("available") and len(holding) >= 5 and sum_hold > 1.5 * sum_exit_in
-          and (hold_pct is None or hold_pct >= 8)
+          and hold_pct is not None and hold_pct >= 8
           and _cluster_holds_onchain(token, chain, [h["address"] for h in holding])):
         # LOADED-LIVE (BASED): a coordinated set still HOLDS clearly more than it emptied.
         # F3 (red-team): >=5 wallets, sum_hold > 1.5x emptied, >=8% of REAL totalSupply
         # (not the old `max(...,1)` floor), + RPC-verified live balances — so retail
         # diamond-hands holding dust can't fabricate a loaded operator.
+        # Red-team round 2: the floor must be AFFIRMATIVELY satisfied. `hold_pct is
+        # None` (totalSupply read failed) used to pass the gate — a node hiccup
+        # re-opened the exact dust-holder FP this branch exists to kill. Fail closed:
+        # no denominator = size unproven = fall through to the referee.
         _loaded_split([h["address"] for h in holding], min(80, 45 + 5 * len(holding)),
                       f"{len(holding)}个早期重仓钱包仍持有(合计{sum_hold:,.0f}"
                       + (f",占供应{hold_pct:.1f}%" if hold_pct else "")
@@ -864,11 +875,15 @@ def identify_operator(token: str, chain: str) -> dict:
         seed_funders = set()
         try:
             from src.onchain.funder_graph import get_funders
-            from src.pipeline.anomaly_screener import _funder_is_disperser
+            from src.pipeline.anomaly_screener import funder_disperser_verdict
             cexset = evm_exchanges()
             fmap = get_funders([e["address"] for e in exited[:6]], chain)
             for f in sorted({str(v or "").lower() for v in fmap.values()} - {""}):
-                if f not in cexset and not _funder_is_disperser(f, chain):
+                # Red-team: admission requires an AFFIRMATIVE non-disperser verdict.
+                # `is False` — None means the fan-out couldn't be evaluated, and an
+                # unverifiable funder used as an operator seed links unrelated retail
+                # (the falsified family-root over-claim). Fail closed.
+                if f not in cexset and funder_disperser_verdict(f, chain) is False:
                     seed_funders.add(f)
         except Exception:
             pass
@@ -903,12 +918,21 @@ def identify_operator(token: str, chain: str) -> dict:
         # remaining are opposite trades, and the old verdict said "distributing" to both.
         rem_pct = (100.0 * sum_hold / total_supply) if (total_supply and sum_hold) else None
         out["current"]["remaining_operator_float_pct"] = round(rem_pct, 2) if rem_pct else None
-        # F12: quantize the ratio before the 0.5/0.2 cliffs so boundary jitter can't
-        # flip the category run-to-run.
-        sold_frac = round((sold / total_out) / 0.05) * 0.05 if total_out > 0 else 0.0
-        mv_frac = round((moved_internal / total_out) / 0.05) * 0.05 if total_out > 0 else 0.0
-        if total_out > 0 and abs(sold_frac - 0.5) < 0.03:
-            out["caveats"].append("borderline:卖出占比贴近50%门槛,卖/移定性不稳定")
+        # F12 (corrected in red-team round 2): quantize-then-compare merely RELOCATED
+        # the cliff (raw 0.4749 vs 0.4751 still flipped the verdict) and the caveat
+        # band only covered the above-cliff side. Real protection: RAW ratios with
+        # symmetric borderline bands centered on each ACTUAL decision boundary. Inside
+        # a band the verdict may still flip run-to-run, but `borderline` blocks
+        # promotion/push on BOTH sides, so no user-visible signal ever flips.
+        sold_frac = (sold / total_out) if total_out > 0 else 0.0
+        mv_frac = (moved_internal / total_out) if total_out > 0 else 0.0
+        if total_out > 0:
+            if abs(sold_frac - 0.5) < 0.05:
+                out["caveats"].append("borderline:卖出占比贴近50%门槛,卖/移定性不稳定")
+            elif abs(sold_frac - 0.2) < 0.03:
+                out["caveats"].append("borderline:卖出占比贴近20%派发门槛,定性不稳定")
+            if abs(mv_frac - 0.5) < 0.05:
+                out["caveats"].append("borderline:簇内回流占比贴近50%门槛,换仓定性不稳定")
 
         if resolved_n == 0 or total_out <= 0:
             out["verdict"] = "indeterminate_emptied"
@@ -928,7 +952,15 @@ def identify_operator(token: str, chain: str) -> dict:
             out["confidence"] = min(85, 50 + 5 * resolved_n)
             out["evidence"] = (f"{len(exited)}个早期重仓钱包清空,转出{sold/total_out*100:.0f}%进"
                                f"LP池/CEX(卖{sold:,.0f}) = 操盘卖出离场")
-        elif moved_internal >= 0.5 * total_out:
+            # Red-team: a FAILED MM-basket read is not a passed MM screen. If any
+            # exited candidate couldn't be basket-checked, this conf-85 verdict may
+            # be a market-maker desk cycling inventory — cap and say so.
+            if hist.get("mm_unchecked"):
+                out["confidence"] = min(out["confidence"], 60)
+                out["caveats"].append(
+                    f"mm_check_unavailable:{len(hist['mm_unchecked'])}个候选钱包篮子取数失败,"
+                    f"MM/串行degen未排除,置信度受限")
+        elif mv_frac >= 0.5:
             # moved-to-member → follow the frontier: PARKED (loaded threat) = real
             # rotation; SOLD downstream = distribution/churn, NOT a loaded operator.
             fr = _rotation_frontier(token, chain, [e["address"] for e in exited[:8]],
@@ -1020,9 +1052,15 @@ def identify_operator(token: str, chain: str) -> dict:
                                f"{'集中于金库/长持' if lg>=15 else '散户盘'},无操盘证据")
 
     # F11 TERMINAL GATE: the pool is drained and nothing trades — whatever the operator
-    # did, it already happened. Emitting a live "拉盘候选"/"在派发" here is a misfire on
-    # a corpse; cap confidence and say so rather than implying a tradeable event ahead.
-    if terminal and out["verdict"] not in ("too_young_to_judge", "unknown"):
+    # did, it already happened. Emitting a live "在派发" here is a misfire on a corpse;
+    # cap confidence and say so rather than implying a tradeable event ahead.
+    # Red-team: FORWARD-LOOKING loaded verdicts are exempt — a still-loaded operator
+    # over a thin pool (present_rotating / loaded_*) is the most dangerous live setup,
+    # not a corpse; capping it below 55 silenced the exact EVAA-class dump threat.
+    # The corpse call applies to backward-looking outcomes (distributing/exited/…).
+    _FORWARD = {"present_rotating_confirmed", "loaded_accumulating", "loaded_dormant",
+                "loaded_live_operator", "live_operator"}
+    if terminal and out["verdict"] not in _FORWARD | {"too_young_to_judge", "unknown"}:
         out["confidence"] = min(out["confidence"], 40)
         out["caveats"].append(
             f"terminal:流动性${mkt.get('liquidity_usd'):,}/24h量${mkt.get('volume_h24'):,} "

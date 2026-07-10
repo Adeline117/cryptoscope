@@ -442,8 +442,9 @@ def test_evm_funder_native_balance_disperser(monkeypatch):
             # 2204 BNB in wei
             return {"result": hex(int(2204 * 1e18))}
     monkeypatch.setattr("src.onchain.evm_archive.ArchiveRPC", FakeRPC)
-    a._funder_is_disperser.cache_clear()
+    a.funder_disperser_verdict.cache_clear()
     assert a._funder_is_disperser("0xwhale", "bsc") is True
+    assert a.funder_disperser_verdict("0xwhale", "bsc") is True
 
     class FakeRPCSmall(FakeRPC):
         def _logs_call(self, method, params):
@@ -451,5 +452,9 @@ def test_evm_funder_native_balance_disperser(monkeypatch):
     monkeypatch.setattr("src.onchain.evm_archive.ArchiveRPC", FakeRPCSmall)
     monkeypatch.setattr("src.onchain.moralis_client.usable", lambda: False)
     monkeypatch.setattr("src.onchain.covalent_client.available", lambda: False)
-    a._funder_is_disperser.cache_clear()
+    a.funder_disperser_verdict.cache_clear()
+    # STRIP view: couldn't evaluate fan-out (no data source) → don't strip (False)…
     assert a._funder_is_disperser("0xoperator", "bsc") is False
+    # …but the tri-state must say UNKNOWN, so seed-funder admission fails CLOSED:
+    # an unverifiable funder can never become an operator seed / same_entity link.
+    assert a.funder_disperser_verdict("0xoperator", "bsc") is None

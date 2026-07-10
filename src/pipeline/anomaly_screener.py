@@ -371,14 +371,25 @@ _DISPERSER_EVM_RECIPIENTS = 40  # an EVM funder that seeded >40 distinct wallets
 _DISPERSER_EVM_NATIVE = {"bsc": 300.0, "ethereum": 100.0, "base": 100.0}
 
 
-@lru_cache(maxsize=4096)
 def _funder_is_disperser(funder: str, chain: str) -> bool:
-    """True if the funder behaves like a CEX/launchpad/router (high-frequency, many
-    recipients, or a large hot-wallet balance) rather than a focused operator. Cached
-    per (funder, chain) — at most a couple network calls per distinct dominant funder.
-    Conservative: on any error it returns False (don't drop a real signal on a flake)."""
+    """Bool view of the tri-state check, for the disperser-STRIP call sites where a
+    flake must not drop a real signal (couldn't-check → keep the funder edge)."""
+    return funder_disperser_verdict(funder, chain) is True
+
+
+@lru_cache(maxsize=4096)
+def funder_disperser_verdict(funder: str, chain: str) -> bool | None:
+    """Tri-state: True = behaves like a CEX/launchpad/router (high-frequency, many
+    recipients, large hot-wallet balance); False = AFFIRMATIVELY evaluated as a
+    focused funder; None = could not evaluate (data source down / no coverage).
+
+    The distinction matters because the two consumers need opposite failure modes:
+    the disperser-STRIP sites treat None like False (don't drop a signal on a flake),
+    but seed-funder admission / same_entity must treat None as EXCLUDED — an
+    unverifiable funder admitted as an "operator seed" fabricates entity links
+    (the falsified family-root over-claim)."""
     if not funder:
-        return False
+        return None
     # Known CEX hot wallets — cheap, no network.
     try:
         from src.onchain.cex_addresses import evm_exchanges, solana_exchanges
@@ -409,7 +420,7 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
             if lamports and lamports / 1e9 >= _DISPERSER_SOL_BAL:
                 return True
         except Exception:
-            return False
+            return None          # RPC failure = could not evaluate, not "focused"
         return False
     # EVM native-balance check (KEYLESS — works even with Moralis AND Covalent out):
     # a funder holding a large native balance is a CEX/whale/MM desk, not an operator.
@@ -433,10 +444,10 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
             mchain = {"bsc": "bsc", "ethereum": "eth", "base": "base", "arbitrum": "arbitrum",
                       "optimism": "optimism", "polygon": "polygon"}.get(chain)
             if not mchain:
-                return False
+                return None      # chain not covered = could not evaluate
             data = moralis_client.get(f"{funder}?chain={mchain}&order=ASC&limit=100")
             if not data:
-                return False
+                return None      # fetch failed = could not evaluate fan-out
             recips = {(t.get("to_address") or "").lower() for t in data.get("result", [])
                       if (t.get("from_address") or "").lower() == funder.lower()
                       and int(t.get("value", "0") or 0) > 0}
@@ -444,16 +455,16 @@ def _funder_is_disperser(funder: str, chain: str) -> bool:
         if covalent_client.available():
             cid = {"ethereum": 1, "bsc": 56, "base": 8453}.get(chain)
             if not cid:
-                return False
+                return None
             data = covalent_client.get(f"{cid}/address/{funder}/transactions_v3/page/0/?no-logs=true")
             items = ((data or {}).get("data") or {}).get("items") or []
             recips = {(t.get("to_address") or "").lower() for t in items
                       if (t.get("from_address") or "").lower() == funder.lower()
                       and int(t.get("value", "0") or 0) > 0}
             return len(recips) > _DISPERSER_EVM_RECIPIENTS
-        return False
+        return None              # no data source at all = could not evaluate
     except Exception:
-        return False
+        return None
 
 
 # Confirmed MULTI-TOKEN operator funders — exempt from the disperser strip. A real
