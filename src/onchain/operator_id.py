@@ -1145,6 +1145,22 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
             out["evidence"] = (f"当前分散(最大{lg:.0f}%)且历史无'吸入后派发'的操盘足迹 → "
                                f"{'集中于金库/长持' if lg>=15 else '散户盘'},无操盘证据")
 
+    # CODE RISK — a SEPARATE dimension, never folded into cluster_confidence and never
+    # a gate. "Is there an operator and what are they doing" (behavioral) and "can this
+    # contract rug by code" (structural) are orthogonal questions; mixing them corrupts
+    # a clean behavioral signal. A missing GoPlus read reports available=False
+    # ("unchecked"), never "clean". Skipped under replay: today's contract state is not
+    # the past's.
+    if not replay:
+        try:
+            from src.onchain.goplus_client import rug_risk
+            out["rug_risk"] = rug_risk(token, chain)
+        except Exception as e:
+            out["rug_risk"] = {"available": False, "reason": str(e)[:50],
+                               "note": "代码风险未检查 — 不等于安全"}
+    else:
+        out["rug_risk"] = {"available": False, "reason": "replay"}
+
     # F11 TERMINAL GATE: the pool is drained and nothing trades — whatever the operator
     # did, it already happened. Emitting a live "在派发" here is a misfire on a corpse;
     # cap confidence and say so rather than implying a tradeable event ahead.
