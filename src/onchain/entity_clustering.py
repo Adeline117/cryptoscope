@@ -171,8 +171,9 @@ def cluster_addresses(
          funder must have funded >= this many in-scope wallets to count as one
          entity (ported from pre-airdrop-detection's bw_flag, validated at 5).
       2. Temporal co-acquisition — addresses that received the token together.
-      3. Similar balance — clusters of near-identical non-trivial balances
-         (operators split a position into equal chunks).
+      3. Similar balance — CORROBORATOR ONLY. Near-identical balances confirm a
+         funder-proposed link; they never create one on their own (an equal-tier
+         airdrop otherwise fabricates a single large "entity" out of retail).
     CEX/MM addresses (`exclude`) are kept as singletons — custodial noise.
     """
     if exclude is None:
@@ -222,13 +223,33 @@ def cluster_addresses(
             for other in members[1:]:
                 uf.union(members[0], other)
 
-    # Edge type 3: similar-balance split positions.
+    # Edge type 3: similar-balance split positions — CORROBORATOR ONLY.
+    #
+    # This edge used to union on balance alone. An equal-tier airdrop or a staking
+    # program pays N wallets the identical amount, so 40 unrelated retail addresses
+    # fused into one fabricated 20% "entity" → cluster_confidence 83 → a top-of-tree
+    # `live_operator` verdict built on nothing. No downstream fix can undo it: the
+    # signal arrives pre-merged.
+    #
+    # A shared balance is now only allowed to CONFIRM a link that a shared root funder
+    # already proposes — it can no longer create one. Without funder data the edge is
+    # silently dropped (unknown ≠ same entity).
     if balances:
         for group in _similar_balance_groups(
             {a: b for a, b in balances.items() if _norm(a) not in exclude}
         ):
-            for other in group[1:]:
-                uf.union(group[0], other)
+            if not funders:
+                continue           # no corroboration available → refuse to merge
+            by_root_bal: dict[str, list[str]] = {}
+            for a in group:
+                root = _root_funder(a, funders, exclude)
+                if root and root not in exclude:
+                    by_root_bal.setdefault(root, []).append(a)
+            for same_root in by_root_bal.values():
+                if len(same_root) < 2:
+                    continue       # equal balance + a funder nobody else shares = noise
+                for other in same_root[1:]:
+                    uf.union(same_root[0], other)
 
     return {a: uf.find(a) for a in addrs if a not in exclude}
 

@@ -101,26 +101,55 @@ def test_cluster_root_funder_chain():
     assert m["0xa"] == m["0xb"] == m["0xd"]
 
 
-def test_cluster_similar_balance():
+def test_cluster_similar_balance_needs_funder_corroboration():
+    """Equal balance is a CORROBORATOR, not an entity edge.
+
+    An equal-tier airdrop pays N unrelated wallets the identical amount. Merging on
+    balance alone fabricated one large 'entity' out of retail and drove a top-of-tree
+    live_operator verdict. Balance may only confirm a link a shared funder proposes.
+    """
     from src.onchain.entity_clustering import _similar_balance_groups, cluster_addresses
 
-    bals = {f"0x{i:040x}": 1000.0 for i in range(4)}
+    addrs = [f"0x{i:040x}" for i in range(4)]
+    bals = {a: 1000.0 for a in addrs}
     bals["0xother"] = 37.0
     groups = _similar_balance_groups(bals)
-    assert any(len(g) >= 4 for g in groups)
+    assert any(len(g) >= 4 for g in groups)   # the raw grouping still sees them
 
+    # No funder data → equal balances must NOT merge (airdrop, not an operator).
     m = cluster_addresses(list(bals), balances=bals, exclude=set())
-    roots = {m[f"0x{i:040x}"] for i in range(4)}
-    assert len(roots) == 1  # the 4 equal-balance马甲 merge into one entity
+    assert len({m[a] for a in addrs}) == 4
+
+    # Distinct funders → still no merge, even at identical balances.
+    solo = {a: f"0xfunder{i}" for i, a in enumerate(addrs)}
+    m = cluster_addresses(list(bals), funders=solo, balances=bals, exclude=set())
+    assert len({m[a] for a in addrs}) == 4
+
+    # Shared non-CEX funder + equal balances → corroborated, merges into one entity.
+    shared = {a: "0xdeadbeef" for a in addrs}
+    m = cluster_addresses(list(bals), funders=shared, balances=bals, exclude=set())
+    assert len({m[a] for a in addrs}) == 1
 
 
 def test_effective_concentration_catches_split_position():
-    # 5 wallets each holding 20 (looks spread) — equal balances → one entity.
+    """A split position is caught when a shared funder corroborates the equal balances."""
+    split = [f"0x{i:040x}" for i in range(5)]
+    holders = [{"address": a, "balance": 20} for a in split]
+    holders += [{"address": f"0xreal{i}", "balance": 3} for i in range(20)]
+    funders = {a: "0xoperatorfunder" for a in split}
+    m = effective_concentration(holders, funders=funders, top_n=1)
+    assert m["effective_top_n_pct"] > m["nominal_top_n_pct"]
+    assert m["concentration_gap"] > 0
+
+
+def test_effective_concentration_does_not_fabricate_from_airdrop():
+    """The same equal balances WITHOUT a shared funder are an airdrop tier, not an
+    entity. Fabricating one here was the top-of-tree false-positive source."""
     holders = [{"address": f"0x{i:040x}", "balance": 20} for i in range(5)]
     holders += [{"address": f"0xreal{i}", "balance": 3} for i in range(20)]
     m = effective_concentration(holders, top_n=1)
-    assert m["effective_top_n_pct"] > m["nominal_top_n_pct"]
-    assert m["concentration_gap"] > 0
+    assert m["concentration_gap"] == 0
+    assert m["effective_top_n_pct"] == m["nominal_top_n_pct"]
 
 
 # --------------------------------------------------------------------------
