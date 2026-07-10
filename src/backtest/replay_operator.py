@@ -47,12 +47,20 @@ SHORT_VERDICTS = {"distributing", "exited_by_selling", "present_rotating_confirm
 LONG_VERDICTS = {"loaded_accumulating"}
 
 
+# Measured archive depth per chain (probe date 2026-07-10, keyless/Alchemy pools).
+# An earlier note claimed "BSC ~30d, Base none". Both were wrong: the BSC probe used a
+# wallet that genuinely held nothing 90d ago, and the Base probe predated the RPC fix.
+# Never infer "no archive" from a zero balance — probe with a block that must have state.
+ARCHIVE_DAYS = {"bsc": 240, "ethereum": 90, "base": 30}
+
+
 def _blocks_for_dates(chain: str, days_ago: list[int]) -> dict[int, int]:
     """Map each `days_ago` to a block number, via measured seconds-per-block.
 
-    Returns {} when the chain has no archive — Base returns None for a 30d-old
-    balance, so replaying it would silently score every wallet as empty. Refusing is
-    the only honest option (see plan: Base is unbacktestable)."""
+    Returns {} when the chain has no archive at all. Individual blocks are probed
+    separately by `_archive_ok`: a chain can serve state at 30d and not at 90d, and
+    replaying past its depth would read every balance as 0 and call every wallet
+    exited — a fabricated `exited_by_selling` on every token."""
     from src.onchain.evm_archive import ArchiveRPC
     rpc = ArchiveRPC(chain)
     if not rpc.available():
@@ -202,20 +210,97 @@ def score(samples: list[dict], horizon_h: int = 24) -> dict:
     return out
 
 
+def transitions(samples: list[dict]) -> list[dict]:
+    """The moments the verdict CHANGED — the only thing in a state classifier that
+    carries timing information.
+
+    A standing `distributing` says the operator has been selling for weeks; it cannot
+    tell you today is the day. The FLIP into `distributing` is an event with a
+    timestamp, and an event is the only thing you can be early to.
+
+    The first sample per token is never a transition: we don't know the state before
+    the replay window opened, and calling an unknown->X change an event would count
+    every token's first observation as a signal.
+    """
+    by_token: dict = {}
+    for s in samples:
+        by_token.setdefault((s["token"], s["chain"]), []).append(s)
+    out = []
+    for key, group in by_token.items():
+        group = sorted(group, key=lambda s: s["block"])       # chronological
+        for prev, cur in zip(group, group[1:]):
+            if cur["verdict"] != prev["verdict"]:
+                out.append({**cur, "from_verdict": prev["verdict"],
+                            "to_verdict": cur["verdict"],
+                            "from_block": prev["block"]})
+    return out
+
+
+def score_transitions(samples: list[dict], horizon_h: int = 24) -> dict:
+    """Precision of verdict FLIPS against the token's own chance base rate.
+
+    This is the honest counterpart to `score()`: it asks whether the moment the
+    detector changed its mind carried information, rather than whether a standing
+    label correlates with a direction (it cannot — see score()'s constant-verdict
+    guard).
+    """
+    from src.pipeline.evidence import base_rate, wilson
+
+    trans = [t for t in transitions(samples) if t.get("ret") is not None]
+    directional = [t for t in trans
+                   if t["to_verdict"] in SHORT_VERDICTS | LONG_VERDICTS]
+    if not directional:
+        return {"n_transitions": len(trans), "n_directional": 0,
+                "note": ("回放窗口内没有方向性跃迁。要么状态一直没变(需更长窗口/更密网格),"
+                         "要么跃迁的目标状态不带方向。无跃迁 = 无择时信号可测,不是'无 edge'。")}
+
+    hits, expected, br_cache = 0, 0.0, {}
+    for t in directional:
+        short = t["to_verdict"] in SHORT_VERDICTS
+        direction = "short" if short else "long"
+        hits += int((t["ret"] <= -0.05) if short else (t["ret"] >= 0.05))
+        key = (t["token"], t["chain"], direction)
+        if key not in br_cache:
+            br_cache[key] = base_rate(t["token"], t["chain"], direction, 0,
+                                      horizon_h=horizon_h, tradeable=False)
+        if br_cache[key]["available"]:
+            expected += br_cache[key]["p"]
+
+    n = len(directional)
+    lo, hi = wilson(hits, n)
+    out = {"n_transitions": len(trans), "n_directional": n, "hits": hits,
+           "precision": round(hits / n, 3), "wilson": [round(lo, 3), round(hi, 3)],
+           "expected_by_chance": round(expected, 2),
+           "flips": [f"{t['from_verdict']}→{t['to_verdict']} @{t['days_ago']}d "
+                     f"ret={t['ret']:+.1%}" for t in directional]}
+    if expected > 0.5:
+        out["lift"] = round(hits / expected, 2)
+    if expected < 2.0:
+        out["fragile"] = (f"期望仅 {expected:.1f},单个结果翻转即可大幅改变 lift → 不可引用")
+    if n < 30:
+        out["warning"] = f"n={n} 个跃迁,远不足以断言胜率(需 ~120-150)"
+    return out
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--token", required=True)
     ap.add_argument("--chain", default="bsc")
-    ap.add_argument("--points", type=int, default=6)
-    ap.add_argument("--max-days", type=int, default=30,
-                    help="BSC archive is ~30d deep; beyond that balances read 0")
+    ap.add_argument("--points", type=int, default=8)
+    ap.add_argument("--max-days", type=int, default=0,
+                    help="0 = use the measured archive depth for the chain")
     ap.add_argument("--horizon", type=int, default=24)
     args = ap.parse_args()
 
-    step = max(args.max_days // args.points, 1)
-    days = [d for d in range(step, args.max_days + 1, step)]
+    max_days = args.max_days or ARCHIVE_DAYS.get(args.chain, 30)
+    step = max(max_days // args.points, 1)
+    days = [d for d in range(step, max_days + 1, step)]
     samples = replay(args.token, args.chain, days, args.horizon)
+
+    print("=== 常驻状态(不应作为择时信号)===")
     print(json.dumps(score(samples, args.horizon), ensure_ascii=False, indent=2))
+    print("\n=== 状态跃迁(唯一带时间信息的东西)===")
+    print(json.dumps(score_transitions(samples, args.horizon), ensure_ascii=False, indent=2))
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     prev = []
@@ -224,6 +309,9 @@ def main() -> None:
             prev = json.loads(OUT_PATH.read_text())
         except Exception:
             prev = []
+    # replace any prior samples for this (token, chain) — a re-run supersedes
+    prev = [s for s in prev if not (s["token"].lower() == args.token.lower()
+                                    and s["chain"] == args.chain)]
     OUT_PATH.write_text(json.dumps(prev + samples, ensure_ascii=False, indent=1))
     print(f"\n{len(samples)} samples → {OUT_PATH}")
 

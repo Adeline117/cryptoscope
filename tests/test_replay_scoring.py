@@ -49,3 +49,44 @@ def test_unpriced_samples_are_excluded_not_zeroed():
 def test_no_directional_verdicts_returns_no_precision():
     out = ro.score([_s("0xa", "indeterminate_emptied", -0.2, 10)])
     assert out["n"] == 0 and "precision" not in out
+
+
+def test_first_sample_is_never_a_transition():
+    """We don't know the state before the replay window opened. Treating unknown->X as
+    an event would make every token's first observation a signal."""
+    s = [_s("0xa", "distributing", -0.1, 20), _s("0xa", "distributing", -0.1, 10)]
+    for i, x in enumerate(s):
+        x["block"] = 100 + i
+    assert ro.transitions(s) == []
+
+
+def test_transition_is_detected_chronologically():
+    a = _s("0xa", "loaded_dormant", 0.0, 20); a["block"] = 100
+    b = _s("0xa", "distributing", -0.09, 10); b["block"] = 200
+    # deliberately out of order — must sort by block, not list order
+    t = ro.transitions([b, a])
+    assert len(t) == 1
+    assert t[0]["from_verdict"] == "loaded_dormant" and t[0]["to_verdict"] == "distributing"
+
+
+def test_no_directional_transition_is_not_no_edge(monkeypatch):
+    """A constant verdict yields zero transitions. That means NOTHING WAS MEASURED —
+    it must not be reported as 'no edge'."""
+    s = [_s("0xa", "distributing", -0.1, 20), _s("0xa", "distributing", 0.02, 10)]
+    for i, x in enumerate(s):
+        x["block"] = 100 + i
+    out = ro.score_transitions(s)
+    assert out["n_directional"] == 0
+    assert "无跃迁" in out["note"] and "不是" in out["note"]
+    assert "precision" not in out and "lift" not in out
+
+
+def test_transition_scoring_uses_target_verdict_direction(monkeypatch):
+    monkeypatch.setattr("src.pipeline.evidence.base_rate",
+                        lambda *a, **k: {"available": True, "p": 0.30})
+    a = _s("0xa", "loaded_dormant", 0.0, 30); a["block"] = 100
+    b = _s("0xa", "distributing", -0.09, 20); b["block"] = 200   # short flip, hit
+    c = _s("0xa", "loaded_accumulating", 0.11, 10); c["block"] = 300  # long flip, hit
+    out = ro.score_transitions([a, b, c])
+    assert out["n_directional"] == 2 and out["hits"] == 2
+    assert "fragile" in out          # expected 0.6 < 2.0
