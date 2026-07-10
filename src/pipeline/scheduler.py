@@ -647,14 +647,28 @@ async def _run_early_accumulation():
         logger.warning("early_accumulation_hunt_failed", error=str(e)[:80])
         return
     cands = early_accumulation_candidates(suspects)
+
+    # SMART-MONEY CONVERGENCE — the second, independent leading signal, on the SAME
+    # fresh-token shortlist. Built on realized PnL (unfakeable), so it corroborates the
+    # structural accumulation signal from a different axis. Only checked on the already-
+    # shortlisted young tokens (the profitability lookups are expensive).
+    from src.onchain.smart_money import convergence
     logged = 0
     for c in cands:
         if not c.get("price0"):
             logger.warning("early_cand_unpriced", symbol=c.get("symbol"))
             continue
+        kind = "早期操盘吸筹"
+        try:
+            conv = convergence(c["address"], c["chain"], max_check=15)
+            c["smart_money"] = conv.get("verdict")
+            if conv.get("verdict") == "convergence":
+                kind = "早期吸筹+聪明钱收敛"     # both signals agree — strongest form
+        except Exception:
+            pass
         try:
             log_alert(c["address"], c["chain"], c.get("symbol", "?"),
-                      "早期操盘吸筹", "long", c["price0"], c.get("liquidity") or 0,
+                      kind, "long", c["price0"], c.get("liquidity") or 0,
                       phase="accumulate")
             logged += 1
         except Exception:

@@ -98,10 +98,19 @@ def _pending() -> str:
     return "\n".join(out)
 
 
+GOAL = """核心目标: 赚钱。操作性约束(一夜验证得出): 系统必须先不撒谎,任何下注才
+建立在链上事实上而非故事上。
+  已验证可变现 · 避雷 (pretrade 开仓前体检) —— 不需要择时,今天就有价值
+  前向实验 · 早期操盘吸筹 + 聪明钱收敛 (fresh 币, 已实现PnL, 带死线)
+  已证伪 · 链上做空择时 (0/45)、状态分类器择时 (lift 0.43)、结构类信号 (会撒谎)"""
+
+
 def main() -> None:
     from src.pipeline.evidence import kill_line, report
     from src.pipeline.operator_sentinel import alerts_muted
 
+    print(GOAL)
+    print("\n" + "=" * 66 + "\n")
     print(kill_line())
     print("\n")
     print(_accrual_health())
