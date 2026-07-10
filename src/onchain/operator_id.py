@@ -32,12 +32,23 @@ _BURN = {"0x0000000000000000000000000000000000000000",
 # Verdicts that must NEVER auto-register a sentinel (spec process-gate): unproven or
 # non-operator states. identify_operator is the only intended promotion path.
 NON_PROMOTABLE = {"too_young_to_judge", "indeterminate_emptied", "none", "dispersed",
-                  "treasury_only", "unknown"}
+                  "treasury", "treasury_only", "unknown"}
+
+# F8: only an ACCUMULATING loaded cluster is a long signal. `loaded_dormant` is a state
+# description, not a reason to buy — it stays promotable (worth watching) but callers
+# must not render it as 拉盘候选.
+LONG_ACTIONABLE = {"loaded_accumulating"}
+SHORT_ACTIONABLE = {"distributing", "exited_by_selling", "present_rotating_confirmed"}
 
 
 def promotable(verdict: dict, min_confidence: int = 55) -> bool:
     """Whether a verdict may promote to a tracked sentinel. Gates out unproven /
-    non-operator / low-confidence states — no register() bypass (MAME lesson)."""
+    non-operator / low-confidence states — no register() bypass (MAME lesson).
+
+    F12: a verdict flagged `borderline` sits within jitter distance of a category
+    cliff. Refuse promotion rather than commit to a side that may flip next run."""
+    if any(str(c).startswith("borderline") for c in (verdict.get("caveats") or [])):
+        return False
     return (verdict.get("verdict") not in NON_PROMOTABLE
             and (verdict.get("confidence") or 0) >= min_confidence)
 
@@ -46,30 +57,48 @@ _TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df52
 _ETHERSCAN_CHAINID = {"ethereum": 1}          # free Etherscan V2 = ETH only (BSC/Base need paid)
 
 
-def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 60):
+_CONFIRMATIONS = 12          # F7: freeze the walk window below the moving tip
+
+
+def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 60,
+                      head: int | None = None):
     """Full transfer history via Etherscan V2 getLogs (free = ETH only). Returns
-    (inflow, net) per wallet, or (None, None) on failure. Fast (~1k logs/2s)."""
+    (inflow, net, complete) per wallet, or (None, None, False) on failure.
+
+    F7: `toBlock` is PINNED to a head captured once. With `toBlock=latest` re-evaluated
+    per page the tip moved mid-walk, so a sell landing between pages split a wallet's
+    in/out across the boundary → transient net<0 → the whole historical dimension was
+    discarded. `complete` reports whether the walk genuinely TERMINATED (a final short
+    page) rather than hitting the page ceiling — the caller keys its guard off that."""
     import json
     import os
     import urllib.request
     from collections import defaultdict
     keys = [k.strip() for k in os.environ.get("ETHERSCAN_API_KEYS", "").split(",") if k.strip()]
     if not keys:
-        return None, None
+        return None, None, False
+    if head is None:
+        try:
+            from src.onchain.evm_archive import ArchiveRPC
+            head = ArchiveRPC("ethereum").latest_block()
+        except Exception:
+            head = None
+    to_block = str(head - _CONFIRMATIONS) if head else "latest"
     inflow, net = defaultdict(float), defaultdict(float)
-    frm, scale = 0, float(10 ** decimals)
+    frm, scale, complete = 0, float(10 ** decimals), False
     for p in range(max_pages):
         u = (f"https://api.etherscan.io/v2/api?chainid={chainid}&module=logs&action=getLogs"
-             f"&address={token}&topic0={_TRANSFER_TOPIC}&fromBlock={frm}&toBlock=latest"
+             f"&address={token}&topic0={_TRANSFER_TOPIC}&fromBlock={frm}&toBlock={to_block}"
              f"&page=1&offset=1000&apikey={keys[p % len(keys)]}")
         try:
             r = json.loads(urllib.request.urlopen(
                 urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=25
             ).read().decode())
         except Exception:
-            return (inflow, net) if inflow else (None, None)
+            return ((inflow, net, False) if inflow else (None, None, False))
         res = r.get("result")
         if not isinstance(res, list) or not res:
+            complete = True          # empty page = end of history, not a failure
             break
         for lg in res:
             tp = lg.get("topics", [])
@@ -85,9 +114,10 @@ def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 
             net[a_to] += amt
             net[a_from] -= amt
         if len(res) < 1000:
+            complete = True          # short final page = the walk really terminated
             break
         frm = int(res[-1]["blockNumber"], 16) + 1
-    return inflow, net
+    return inflow, net, complete
 
 
 def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int = 60):
@@ -128,6 +158,82 @@ def _early_inflow_moralis(token: str, chain: str, decimals: int, max_pages: int 
     return inflow if got else None
 
 
+_BASKET_CACHE: dict[str, set] = {}
+_MM_BASKET_SIZE = 60          # F10: a desk/serial-degen holds a huge generic basket
+
+
+def _wallet_basket(wallet: str, chain: str) -> set[str] | None:
+    """The set of ERC20s a wallet currently holds. An operator's basket is small and
+    idiosyncratic; a market-maker's / serial-degen's is huge and generic. None on a
+    fetch failure — an empty set would falsely read as 'clean single-token operator'."""
+    from src.onchain import moralis_client
+    mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
+    key = f"{chain}:{wallet.lower()}"
+    if key in _BASKET_CACHE:
+        return _BASKET_CACHE[key]
+    if not moralis_client.usable() or not mchain:
+        return None
+    try:
+        d = moralis_client.get(f"{wallet}/erc20?chain={mchain}")
+    except Exception:
+        return None
+    if d is None:
+        return None
+    rows = d if isinstance(d, list) else (d.get("result") or [])
+    b = {(r.get("token_address") or "").lower() for r in rows if r.get("token_address")}
+    _BASKET_CACHE[key] = b
+    return b
+
+
+def _is_mm_like(wallet: str, chain: str) -> bool:
+    """F10: market-maker / serial-degen fingerprint. These pass every candidate
+    exclusion (EOA, not CEX, not a pair) and get misread as `exited_by_selling`
+    operators. Unknown basket → False (don't exclude on missing data)."""
+    b = _wallet_basket(wallet, chain)
+    return b is not None and len(b) >= _MM_BASKET_SIZE
+
+
+def same_entity(a: str, b: str, chain: str, funders: dict | None = None) -> dict:
+    """F10: is `a` the same actor as `b`? Two independent corroborators —
+
+      1. shared root funder that is NOT a CEX and NOT a disperser (a disperser or an
+         exchange hot wallet links thousands of unrelated wallets: the falsified
+         "family root" lesson);
+      2. co-held low-cap basket overlap (Jaccard) — small idiosyncratic overlap is an
+         operator fingerprint; a huge basket on either side means MM/degen and the
+         overlap is meaningless, so we refuse rather than assert.
+
+    Returns {same, why, jaccard} — `same` only when a corroborator is POSITIVE, never
+    merely 'not contradicted'."""
+    al, bl = a.lower(), b.lower()
+    if al == bl:
+        return {"same": True, "why": "identical", "jaccard": 1.0}
+    why, jac = [], None
+    try:
+        from src.onchain.cex_addresses import evm_exchanges
+        from src.pipeline.anomaly_screener import _funder_is_disperser
+        if funders is None:
+            from src.onchain.funder_graph import get_funders
+            funders = get_funders([al, bl], chain)
+        fa = str(funders.get(al) or "").lower()
+        fb = str(funders.get(bl) or "").lower()
+        cex = evm_exchanges()
+        if fa and fa == fb and fa not in cex and not _funder_is_disperser(fa, chain):
+            why.append(f"shared_funder:{fa[:10]}")
+    except Exception:
+        pass
+    ba, bb = _wallet_basket(al, chain), _wallet_basket(bl, chain)
+    if ba is not None and bb is not None and ba and bb:
+        if len(ba) >= _MM_BASKET_SIZE or len(bb) >= _MM_BASKET_SIZE:
+            why.append("mm_like_basket:inconclusive")     # refuse, don't assert
+        else:
+            jac = round(len(ba & bb) / float(len(ba | bb)), 3)
+            if jac >= 0.5 and len(ba & bb) >= 2:
+                why.append(f"co_held_basket:{jac}")
+    same = any(w.startswith(("shared_funder", "co_held_basket")) for w in why)
+    return {"same": same, "why": why, "jaccard": jac}
+
+
 def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     """Per-wallet total-inflow vs net-now over full history — DUNE-FREE. Flags wallets
     that took in a lot but hold ~nothing now = accumulated-then-distributed (exited
@@ -137,17 +243,29 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     fetch failure → UNKNOWN, never 'none'."""
     tok = token.lower()
     cid = _ETHERSCAN_CHAINID.get(chain)
-    inflow, net = (_events_etherscan(tok, cid, decimals) if cid else (None, None))
+    inflow, net, complete = (_events_etherscan(tok, cid, decimals) if cid
+                             else (None, None, False))
 
-    if inflow is not None and net is not None:
-        # ETH: full block-walk gives complete inflow AND net → use net directly.
-        # Completeness guard: negative net among top holders = partial pull → refuse.
+    if inflow is not None and net is not None and complete:
+        # ETH: a TERMINATED full block-walk gives complete inflow AND net → use net.
+        # F7: the guard is keyed on real termination (above), not on a transient
+        # net<0 — which fired on every busy token (a fee/reflection token legitimately
+        # shows small negatives) and discarded exactly the tokens operators target.
+        # A large unexplained negative still means the pull is broken, so keep that
+        # as a hard check with a tolerance proportional to the wallet's own inflow.
         ranked = sorted(inflow.items(), key=lambda kv: -kv[1])
-        if [a for a, _ in ranked[:40] if net.get(a, 0) < -max(1.0, 1e-6 * (inflow.get(a) or 0))]:
-            logger.warning("historical_ledger_incomplete", token=token, note="partial ETH window")
+        bad = [a for a, _ in ranked[:40]
+               if net.get(a, 0) < -max(1.0, 0.02 * (inflow.get(a) or 0))]
+        if bad:
+            logger.warning("historical_ledger_incomplete", token=token,
+                           note="ETH walk terminated but net<0 beyond tolerance")
             return {"available": False, "exited": [], "holding": [], "incomplete": True}
         net_of = lambda a: net.get(a, 0.0)
     else:
+        if inflow is not None and not complete:
+            # F7: page-ceiling truncation on a busy ETH token — don't refuse; fall
+            # through to the early-window + live-balance path that BSC already uses.
+            logger.warning("eth_walk_truncated", token=token, note="falling back to early-window")
         # BSC/other: early-accumulation window (oldest-first) + CURRENT balance to
         # decide exit — avoids needing the (too-large) full history.
         inflow = _early_inflow_moralis(tok, chain, decimals)
@@ -188,7 +306,41 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
             exited.append(rec)
         elif nn > 0 and dist < 0.3:
             holding.append(rec)
-    return {"available": True, "exited": exited[:15], "holding": holding[:15]}
+    # F10: drop market-maker / serial-degen wallets from the EXITED path. They are
+    # confidently-EOA, non-CEX, non-pair — they clear every other exclusion — and a
+    # desk cycling inventory then reads as "operator sold and left" (exited_by_selling
+    # conf 85). Bounded to the wallets the referee will actually walk.
+    mm_dropped = []
+    for rec in exited[:10]:
+        if _is_mm_like(rec["address"], chain):
+            mm_dropped.append(rec["address"])
+    if mm_dropped:
+        exited = [e for e in exited if e["address"] not in set(mm_dropped)]
+        logger.info("mm_candidates_dropped", token=token, n=len(mm_dropped))
+    return {"available": True, "exited": exited[:15], "holding": holding[:15],
+            "mm_dropped": mm_dropped}
+
+
+def _token_age_onchain(token: str, chain: str) -> float | None:
+    """F2: age from the token's FIRST on-chain transfer (Moralis order=ASC, 1 row) —
+    reproducible, unlike the network-flaky `_token_age_days` heuristic. Returns days,
+    or None if unresolvable (the caller must branch on that, never fall through)."""
+    from datetime import datetime, timezone
+
+    from src.onchain import moralis_client
+    mchain = {"bsc": "bsc", "base": "base", "ethereum": "eth"}.get(chain)
+    if not moralis_client.usable() or not mchain:
+        return None
+    try:
+        d = moralis_client.get(f"erc20/{token}/transfers?chain={mchain}&order=ASC&limit=1")
+        rows = (d or {}).get("result") or []
+        ts = rows[0].get("block_timestamp") if rows else None
+        if not ts:
+            return None
+        t0 = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - t0).total_seconds() / 86400.0
+    except Exception:
+        return None
 
 
 def _infra(chain: str) -> dict:
@@ -206,32 +358,88 @@ def _infra(chain: str) -> dict:
         return {"routers": set(), "bridges": set(), "disperse": set(), "burn": set()}
 
 
-def _token_pairs(token: str, chain: str) -> set[str]:
-    """LP pair addresses (sell-into-pool destinations) from DexScreener + total liq."""
+_DS_CACHE: dict[str, dict] = {}
+
+
+def _dexscreener(token: str) -> dict:
+    """One DexScreener fetch per token per process (pairs + market both need it)."""
     import json
     import urllib.request
-    pairs: set[str] = set()
+    tl = token.lower()
+    if tl in _DS_CACHE:
+        return _DS_CACHE[tl]
+    d = {}
     try:
         req = urllib.request.Request(
             f"https://api.dexscreener.com/latest/dex/tokens/{token}",
             headers={"User-Agent": "Mozilla/5.0"})
-        d = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
-        for p in (d.get("pairs") or []):
-            pa = (p.get("pairAddress") or "").lower()
-            if pa:
-                pairs.add(pa)
+        d = json.loads(urllib.request.urlopen(req, timeout=15).read().decode()) or {}
     except Exception:
-        pass
+        d = {}
+    _DS_CACHE[tl] = d
+    return d
+
+
+def _token_pairs(token: str, chain: str) -> set[str]:
+    """LP pair addresses (sell-into-pool destinations) from DexScreener."""
+    pairs: set[str] = set()
+    for p in (_dexscreener(token).get("pairs") or []):
+        pa = (p.get("pairAddress") or "").lower()
+        if pa:
+            pairs.add(pa)
     return pairs
 
 
+def _token_market(token: str) -> dict:
+    """F11: liquidity / 24h volume / recent price change — fields the pair fetch
+    already returned and threw away. Used for the TERMINAL gate: a token whose pool
+    is drained, volume is ~zero and price already collapsed is a post-event corpse.
+    Calling it '操盘在派发' there is a misfire — the event already happened."""
+    best, liq, vol = None, 0.0, 0.0
+    for p in (_dexscreener(token).get("pairs") or []):
+        l = float(((p.get("liquidity") or {}).get("usd")) or 0)
+        v = float(p.get("volume", {}).get("h24") or 0)
+        liq += l
+        vol += v
+        if best is None or l > best[0]:
+            best = (l, p)
+    if best is None:
+        return {"available": False}
+    p = best[1]
+    pc = p.get("priceChange") or {}
+    return {"available": True, "liquidity_usd": round(liq), "volume_h24": round(vol),
+            "price_change_h24": pc.get("h24"), "price_change_h6": pc.get("h6"),
+            "price_usd": p.get("priceUsd")}
+
+
+def _is_terminal(mkt: dict) -> bool:
+    """Post-collapse corpse: no liquidity left AND no trading. Both must hold — a
+    thin-liquidity token that still trades is a live operator's playground, and a
+    deep pool with no volume is merely quiet, not dead."""
+    if not mkt.get("available"):
+        return False
+    liq = mkt.get("liquidity_usd") or 0
+    vol = mkt.get("volume_h24") or 0
+    return liq < 15_000 and vol < 2_000
+
+
 def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
-                       pairs: set, cex: dict, max_pages: int = 6,
-                       seed_funders: set | None = None) -> dict:
+                       pairs: set, cex: dict, max_pages: int = 30,
+                       seed_funders: set | None = None,
+                       expected_out: float | None = None) -> dict:
     """Where did `wallet` send `token`? Classify each destination (SELL vs MOVE) —
     the sell-vs-move referee. Sold: → LP pair / CEX. Moved: → cluster member OR (F10)
     a wallet sharing an operator seed-funder = same-entity rotation; else plain EOA
-    (rotation-unproven). Returns aggregate amounts by class."""
+    (rotation-unproven). Returns aggregate amounts by class.
+
+    F9: paging is CONVERGENCE-bounded, not a recency slice. `expected_out` (≈ total_in
+    − net_now) is how much this wallet must have sent; we page DESC until the resolved
+    outflow accounts for it, then stop. The old fixed 6-page window only saw the ~600
+    most recent transfers, so for an early operator whose sells happened early the
+    window slid off the real exit as dust accrued — SIREN's `distributing` decayed to
+    `indeterminate_emptied` with nothing but wall-clock. `coverage` reports how much of
+    the expected outflow we actually accounted for; the caller must not referee on a
+    thin slice."""
     import time
     from collections import defaultdict
 
@@ -243,9 +451,9 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
     infra = _infra(chain)
     sell_venues = pairs | infra["routers"]      # routers ARE sell venues
     agg = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
-           "to_contract": 0.0, "resolved": False}
+           "to_contract": 0.0, "resolved": False, "coverage": None, "converged": None}
     eoa_dests: dict = defaultdict(float)        # deferred: funder-checked at end (F10)
-    cursor = None
+    cursor, cum_out = None, 0.0
     tl = token.lower()
     for pg in range(max_pages):
         if pg:
@@ -264,6 +472,7 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
                 amt = float(t.get("value_decimal") or (float(t.get("value", 0)) / 1e18))
             except (ValueError, TypeError):
                 amt = 0.0
+            cum_out += amt
             to = (t.get("to_address") or "").lower()
             if to in sell_venues:
                 agg["sell_dex"] += amt
@@ -277,7 +486,15 @@ def _exit_destinations(token: str, chain: str, wallet: str, member_set: set,
                 eoa_dests[to] += amt              # defer: funder-check below
         cursor = d.get("cursor") if isinstance(d, dict) else None
         if not cursor:
+            agg["converged"] = True              # history exhausted = fully accounted
             break
+        if expected_out and expected_out > 0 and cum_out >= 0.98 * expected_out:
+            agg["converged"] = True              # convergence bound reached, stop early
+            break
+    if expected_out and expected_out > 0:
+        agg["coverage"] = round(min(cum_out / expected_out, 1.0), 3)
+        if agg["converged"] is None:
+            agg["converged"] = agg["coverage"] >= 0.9
     # F10: an EOA destination that shares an operator SEED FUNDER is same-entity
     # rotation (move_member), not an unknown EOA — automates the manual EVAA trace.
     if eoa_dests and seed_funders:
@@ -334,12 +551,19 @@ def _wallet_outflow_map(token: str, chain: str, wallet: str, max_pages: int = 6)
 
 
 def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict,
-                       depth: int = 2, max_wallets: int = 25) -> dict:
+                       depth: int = 2, max_wallets: int = 25,
+                       seed_funders: set | None = None) -> dict:
     """Follow the rotation frontier: emptied operator wallets → their MOVE
     destinations → recurse (bounded). Aggregate where the stack ULTIMATELY goes:
     sold (→pool/CEX anywhere in the frontier) vs still parked in fresh EOAs (held/
     dormant). Answers 'the rotated stack — did it eventually get sold, or is it a
-    loaded threat sitting in new wallets?'"""
+    loaded threat sitting in new wallets?'
+
+    H4/F5: `parked_in_wallets` counts a terminal wallet as OPERATOR ammo only if it is
+    funder-linked to the seed. Without that, a stack sold OTC into a buyer's wallet
+    looks identical to self-custody rotation, and the buyer's balance would be scored
+    as the operator's remaining ammo → false `present_rotating_confirmed`. Unlinked
+    terminals go to their own bucket, which the caller must not read as 'loaded'."""
     from src.onchain.entity_classify import classify_address
     sell_venues = pairs | _infra(chain)["routers"] | set(cex)
     # F1 (red-team determinism fix): deterministic ordered worklist + weight-priority
@@ -350,9 +574,11 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
     seen = set(w.lower() for w in seed)
     frontier = sorted(seen)
     sold = 0.0
-    parked_terminal = 0.0
+    parked_terminal = 0.0        # funder-LINKED terminals = operator ammo
+    parked_unlinked = 0.0        # unlinked terminals = OTC-buyer / unprovable
     to_contract = 0.0
     walked = 0
+    terminals: dict[str, float] = {}
     for lvl in range(depth):
         level_dests: dict[str, float] = {}
         for w in frontier[:max_wallets]:
@@ -370,12 +596,28 @@ def _rotation_frontier(token: str, chain: str, seed: list, pairs: set, cex: dict
                 if lvl < depth - 1:
                     nxt.append(to)
                 else:
-                    parked_terminal += amt
+                    terminals[to] = terminals.get(to, 0.0) + amt
         frontier = sorted(nxt)[:max_wallets]         # deterministic, value-independent order OK (already netted)
         if not frontier:
             break
+    # H4: split terminals into funder-linked (operator ammo) vs unlinked (unprovable).
+    if terminals:
+        fmap = {}
+        if seed_funders:
+            try:
+                from src.onchain.funder_graph import get_funders
+                ranked_t = sorted(terminals.items(), key=lambda kv: (-kv[1], kv[0]))[:25]
+                fmap = get_funders([t for t, _ in ranked_t], chain)
+            except Exception:
+                fmap = {}
+        for to, amt in terminals.items():
+            if seed_funders and str(fmap.get(to) or "").lower() in seed_funders:
+                parked_terminal += amt
+            else:
+                parked_unlinked += amt
     return {"sold_via_frontier": round(sold), "parked_in_wallets": round(parked_terminal),
-            "to_contract": round(to_contract), "wallets_walked": walked}
+            "parked_unlinked": round(parked_unlinked), "to_contract": round(to_contract),
+            "wallets_walked": walked, "terminals": len(terminals)}
 
 
 def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
@@ -398,6 +640,46 @@ def _cluster_holds_onchain(token: str, chain: str, wallets: list) -> bool:
         return got and total > 0
     except Exception:
         return False
+
+
+def _cluster_velocity_30d(token: str, chain: str, wallets: list,
+                          total_supply: float | None, days: int = 30) -> dict | None:
+    """F8: is the loaded cluster ACCUMULATING or just sitting there? Net Δ of the
+    cluster's combined balance over the last `days`, as % of supply.
+
+    A 6-month-flat fossil and a cluster that added +40% this week were emitting the
+    identical '拉盘候选' string — correct state label, useless trade signal (BASED).
+    Only a positive Δ is an actionable long.
+
+    Uses strict=True: if ANY endpoint balance read fails the answer is None (unknown),
+    never a fabricated Δ. A missing archive node must not look like a sell-off.
+    """
+    if not wallets or not total_supply:
+        return None
+    try:
+        from src.onchain.evm_archive import ArchiveRPC, combined_balance_at
+        rpc = ArchiveRPC(chain)
+        if not rpc.available():
+            return None
+        spb = rpc.seconds_per_block()
+        if not spb or spb <= 0:
+            return None
+        head = rpc.latest_block()
+        then = int(head - (days * 86400) / spb)
+        if then <= 0:
+            return None
+        addrs = list(wallets[:8])
+        b_then = combined_balance_at(token, addrs, chain, then, rpc=rpc, strict=True)
+        b_now = combined_balance_at(token, addrs, chain, head - _CONFIRMATIONS,
+                                    rpc=rpc, strict=True)
+    except Exception:
+        return None
+    if b_then is None or b_now is None:
+        return None                       # archive gap → UNKNOWN, not a fake delta
+    delta = b_now - b_then
+    return {"delta_tokens": round(delta), "balance_then": round(b_then),
+            "balance_now": round(b_now), "days": days,
+            "delta_pct_supply": round(100.0 * delta / total_supply, 2)}
 
 
 def identify_operator(token: str, chain: str) -> dict:
@@ -433,58 +715,141 @@ def identify_operator(token: str, chain: str) -> dict:
         out["historical"] = {"available": False, "exited": [], "holding": []}
         out["caveats"].append(f"historical failed: {str(e)[:60]}")
 
-    # AGE GATE (MAME fix): a token too young has no pump→distribute lifecycle to
-    # judge — youth routes out BEFORE the operator taxonomy so a busy young token is
-    # never cornered into an operator label.
+    # ---- supply + market context (F3 percent-of-supply floor, F11 terminal gate) ----
+    total_supply = None
     try:
-        from src.pipeline.operator_sentinel import _token_age_days
-        age = _token_age_days(token, chain)
+        from src.onchain.evm_archive import ArchiveRPC
+        total_supply = ArchiveRPC(chain).total_supply(token)
     except Exception:
-        age = None
-    out["current"]["token_age_days"] = age
+        total_supply = None
+    if total_supply is None:
+        out["caveats"].append("totalSupply取数失败:占比门无法执行(不以0代供应量)")
+    mkt = _token_market(token)
+    out["current"]["market"] = mkt
+    terminal = _is_terminal(mkt)
+
+    # ---- age (F2): on-chain-derived, with an EXPLICIT unknown branch ----
+    # The old `_token_age_days` was a flaky network call and `age is not None` made the
+    # whole youth gate evaporate on a timeout — silently dropping a 5-day token into
+    # the operator taxonomy. Unknown age is now its own flagged state, never a
+    # fall-through.
+    age = _token_age_onchain(token, chain)
+    age_src = "onchain_first_transfer"
+    if age is None:
+        try:
+            from src.pipeline.operator_sentinel import _token_age_days
+            age = _token_age_days(token, chain)
+            age_src = "heuristic"
+        except Exception:
+            age = None
+    if age is None:
+        age_src = "unverified"
+        out["caveats"].append("age_unverified:年龄未能链上确认,年龄门未执行(结论按未验证年龄处理)")
+    out["current"]["token_age_days"] = round(age, 1) if age is not None else None
+    out["current"]["token_age_source"] = age_src
 
     conf = conc.get("cluster_confidence") or 0
     hist = out["historical"]
     exited = hist.get("exited") or []
-
-    if age is not None and age < 14 and conf < 55:
-        out["verdict"] = "too_young_to_judge"
-        out["confidence"] = 0
-        out["evidence"] = f"代币仅{age:.0f}天(<14d):拉盘→派发生命周期无法计算,不下操盘定性"
-        out["caveats"].append("年龄门:<14d非可判")
-        return out
-
     holding = hist.get("holding") or []
     sum_hold = sum(h.get("net_now", 0) for h in holding)
     sum_exit_in = sum(e.get("total_in", 0) for e in exited)
-
     lg = conc.get("largest_entity_pct") or 0
     dom = out["current"].get("dominant_wallets") or 0
+    cluster_w = list(conc.get("dominant_cluster_wallets") or [])
 
-    if conf >= 55:
+    # F12 hysteresis: quantize noisy inputs BEFORE the cliffs, so run-to-run jitter
+    # across 54↔56 or a 0.50 boundary can't flip the category. Near a cliff we emit a
+    # `borderline` caveat and refuse promotion rather than commit to a side.
+    conf_q = int(round(conf / 5.0) * 5)
+    if abs(conf - 55) <= 3:
+        out["caveats"].append(f"borderline:cluster_confidence={conf}贴近55门槛,类别不稳定")
+
+    # F3: percent-of-supply floor for the historical loaded path. `max(sum_exit_in,1)`
+    # let 3 retail diamond-hands holding 1 token clear the bar (MAME-shaped FP).
+    hold_pct = (100.0 * sum_hold / total_supply) if (total_supply and sum_hold) else None
+    out["current"]["holding_pct_supply"] = round(hold_pct, 2) if hold_pct else None
+
+    def _loaded_split(wallets: list, base_conf: int, base_ev: str) -> None:
+        """F8: a loaded cluster is only an actionable LONG if it is ACCUMULATING.
+        A 6-month-flat fossil and a cluster that added 40% this week were both emitting
+        '拉盘候选' — the BASED failure: right state label, useless trade signal."""
+        vel = _cluster_velocity_30d(token, chain, wallets, total_supply)
+        out["current"]["velocity_30d"] = vel
+        if vel is None:
+            out["verdict"] = "loaded_live_operator"
+            out["confidence"] = min(base_conf, 60)
+            out["evidence"] = base_ev + " | 30d速度不可得(缺archive)→不判吸筹/休眠"
+            out["caveats"].append("velocity_unavailable:无法区分吸筹vs休眠,不构成做多信号")
+            return
+        d = vel["delta_pct_supply"]
+        if d > 2:
+            out["verdict"] = "loaded_accumulating"
+            out["confidence"] = min(80, base_conf + 10)
+            out["evidence"] = base_ev + f" | 近30d净吸筹 +{d:.1f}%供应 = 唯一可操作的做多形态"
+        elif d < -2:
+            out["verdict"] = "distributing"
+            out["confidence"] = min(75, base_conf)
+            out["evidence"] = base_ev + f" | 但近30d净减仓 {d:.1f}%供应 = 实为派发中"
+        else:
+            out["verdict"] = "loaded_dormant"
+            out["confidence"] = min(65, base_conf)
+            out["evidence"] = base_ev + f" | 近30d几乎不动({d:+.1f}%供应)= 装弹但休眠,非拉盘信号"
+            out["caveats"].append("dormant:仅状态描述,不是买入理由")
+
+    # ---- VERIFIED-LOADED runs BEFORE the youth gate (F2) ----
+    # A cluster whose live on-chain balances are RPC-verified is judgeable at any age.
+    # Youth only blocks the exited/distribute LIFECYCLE inference (which genuinely
+    # needs a pump→distribute history to exist). The old order forced a fast-loaded
+    # 9-day operator into `too_young_to_judge`.
+    loaded_cluster = (dom >= 5 and lg >= 10
+                      and _cluster_holds_onchain(token, chain, cluster_w))
+    # F12 (FN-2): a lone or two-wallet operator holding a big share isn't a `treasury`.
+    # Require confidently-EOA (a Safe holding 15% is a team treasury, not a trader).
+    single_op = False
+    if not loaded_cluster and lg >= 15 and dom < 5 and cluster_w:
+        try:
+            from src.onchain.entity_classify import classify_address
+            single_op = (all(classify_address(w, chain).get("type") == "eoa"
+                             for w in cluster_w[:3])
+                         and _cluster_holds_onchain(token, chain, cluster_w))
+        except Exception:
+            single_op = False
+
+    if conf_q >= 55:
         out["verdict"] = "live_operator"
         out["confidence"] = conf
         out["evidence"] = f"当前隐藏簇 cluster_confidence={conf}"
-    elif dom >= 5 and lg >= 10 and _cluster_holds_onchain(token, chain, conc.get("dominant_cluster_wallets") or []):
+    elif loaded_cluster:
         # LOADED-LIVE via the CURRENT holder graph (BASED): a coordinated CLUSTER
         # (>=5 wallets, not a single whale) holds a meaningful share of LIVE supply.
         # INV-4 GUARD (SYN catch): the concentration signal comes from a fetched holder
         # list that can be STALE — _cluster_holds_onchain RPC-verifies live balances>0
         # before calling it loaded (SYN's "5 wallets/10%" held 0 on-chain = false).
-        out["verdict"] = "loaded_live_operator"
-        out["confidence"] = min(78, 45 + int(lg))
-        out["evidence"] = (f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应(链上余额已核实>0),"
-                           f"早期未大规模离场 = 操盘装弹持有(拉盘候选)")
+        _loaded_split(cluster_w, min(78, 45 + int(lg)),
+                      f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应(链上余额已核实>0)")
+    elif single_op:
+        _loaded_split(cluster_w, 58,
+                      f"单一/双钱包EOA持有 {lg:.0f}% 流通供应(链上已核实,非多签金库)")
+        out["caveats"].append("single_operator:单钱包集中,缺协同簇证据,置信度上限较低")
+    elif age is not None and age < 14 and conf_q < 55:
+        # AGE GATE: a token too young has no pump→distribute lifecycle to judge.
+        out["verdict"] = "too_young_to_judge"
+        out["confidence"] = 0
+        out["evidence"] = f"代币仅{age:.0f}天(<14d):拉盘→派发生命周期无法计算,不下操盘定性"
+        out["caveats"].append("年龄门:<14d非可判")
+        return out
     elif (hist.get("available") and len(holding) >= 5 and sum_hold > 1.5 * sum_exit_in
+          and (hold_pct is None or hold_pct >= 8)
           and _cluster_holds_onchain(token, chain, [h["address"] for h in holding])):
         # LOADED-LIVE (BASED): a coordinated set still HOLDS clearly more than it emptied.
-        # F3 (red-team): raised the bar (>=5 wallets, sum_hold > 1.5x emptied, not the
-        # old max(...,1) floor) + RPC-verified live balances so 3 retail diamond-hands
-        # holding a token can't fabricate a loaded operator.
-        out["verdict"] = "loaded_live_operator"
-        out["confidence"] = min(80, 45 + 5 * len(holding))
-        out["evidence"] = (f"{len(holding)}个早期重仓钱包仍持有(合计{sum_hold:,.0f} > "
-                           f"已清空{sum_exit_in:,.0f}) = 操盘装弹持有,未离场未派发")
+        # F3 (red-team): >=5 wallets, sum_hold > 1.5x emptied, >=8% of REAL totalSupply
+        # (not the old `max(...,1)` floor), + RPC-verified live balances — so retail
+        # diamond-hands holding dust can't fabricate a loaded operator.
+        _loaded_split([h["address"] for h in holding], min(80, 45 + 5 * len(holding)),
+                      f"{len(holding)}个早期重仓钱包仍持有(合计{sum_hold:,.0f}"
+                      + (f",占供应{hold_pct:.1f}%" if hold_pct else "")
+                      + f" > 已清空{sum_exit_in:,.0f})")
     elif hist.get("available") and exited:
         # SELL-vs-MOVE REFEREE (destination-grounded, replaces the price guess).
         # For the emptied early-heavy wallets, trace WHERE their tokens went.
@@ -498,41 +863,72 @@ def identify_operator(token: str, chain: str) -> dict:
         # destination that shares an operator funder counts as a same-entity MOVE —
         # automating the manual EVAA funder-trace (dest funded by 0x661213676e = still
         # the operator). CEX/disperser funders are voided (they link unrelated wallets).
+        # F13: a DISPERSER funder links thousands of unrelated wallets — using it as a
+        # seed would let any two retail wallets read as "same operator". Void both
+        # CEX hot wallets and dispersers, deterministically ordered.
         seed_funders = set()
         try:
             from src.onchain.funder_graph import get_funders
+            from src.pipeline.anomaly_screener import _funder_is_disperser
             cexset = evm_exchanges()
             fmap = get_funders([e["address"] for e in exited[:6]], chain)
-            for f in fmap.values():
-                fl = str(f or "").lower()
-                if fl and fl not in cexset:
-                    seed_funders.add(fl)
+            for f in sorted({str(v or "").lower() for v in fmap.values()} - {""}):
+                if f not in cexset and not _funder_is_disperser(f, chain):
+                    seed_funders.add(f)
         except Exception:
             pass
+        out["current"]["seed_funders"] = sorted(seed_funders)
         pairs = _token_pairs(token, chain)
         cex = evm_exchanges()
         tot = {"sell_dex": 0.0, "sell_cex": 0.0, "move_member": 0.0, "move_eoa": 0.0,
                "to_contract": 0.0}
         resolved_n = 0
+        cov_num, cov_den = 0.0, 0.0
         for e in exited[:8]:                       # bounded
+            # F9: how much this wallet MUST have sent out — the convergence target.
+            exp_out = max(e.get("total_in", 0) - max(e.get("net_now", 0), 0), 0.0)
             a = _exit_destinations(token, chain, e["address"], member_set, pairs, cex,
-                                   seed_funders=seed_funders)
+                                   seed_funders=seed_funders, expected_out=exp_out)
             if a.get("resolved"):
                 resolved_n += 1
                 for kk in tot:
                     tot[kk] += a.get(kk, 0.0)
+                if a.get("coverage") is not None and exp_out > 0:
+                    cov_num += a["coverage"] * exp_out
+                    cov_den += exp_out
         sold = tot["sell_dex"] + tot["sell_cex"]
         moved_internal = tot["move_member"]
         moved_eoa = tot["move_eoa"]
         total_out = sold + moved_internal + moved_eoa + tot["to_contract"]
-        out["current"]["exit_destinations"] = {**tot, "resolved_wallets": resolved_n}
+        # F9: value-weighted share of the expected exit we actually accounted for.
+        coverage = round(cov_num / cov_den, 3) if cov_den > 0 else None
+        out["current"]["exit_destinations"] = {**tot, "resolved_wallets": resolved_n,
+                                               "coverage": coverage}
+        # F11: how much ammo is LEFT. SIREN with 45% remaining and SIREN with 3%
+        # remaining are opposite trades, and the old verdict said "distributing" to both.
+        rem_pct = (100.0 * sum_hold / total_supply) if (total_supply and sum_hold) else None
+        out["current"]["remaining_operator_float_pct"] = round(rem_pct, 2) if rem_pct else None
+        # F12: quantize the ratio before the 0.5/0.2 cliffs so boundary jitter can't
+        # flip the category run-to-run.
+        sold_frac = round((sold / total_out) / 0.05) * 0.05 if total_out > 0 else 0.0
+        mv_frac = round((moved_internal / total_out) / 0.05) * 0.05 if total_out > 0 else 0.0
+        if total_out > 0 and abs(sold_frac - 0.5) < 0.03:
+            out["caveats"].append("borderline:卖出占比贴近50%门槛,卖/移定性不稳定")
 
         if resolved_n == 0 or total_out <= 0:
             out["verdict"] = "indeterminate_emptied"
             out["confidence"] = 25
             out["evidence"] = f"{len(exited)}个早期重仓钱包已清空,但转出去向取数失败 → 卖/移不可判"
             out["caveats"].append("去向未解析 = 不得断言操盘去留")
-        elif sold >= 0.5 * total_out:
+        elif coverage is not None and coverage < 0.6:
+            # F9: we only saw a thin recent slice of the exit — the sell/move ratio on
+            # that slice is not representative of where the stack actually went.
+            out["verdict"] = "indeterminate_emptied"
+            out["confidence"] = 25
+            out["evidence"] = (f"{len(exited)}个钱包清空,但只追回{coverage*100:.0f}%的应转出量 "
+                               f"→ 卖/移比例取样不足,不下定性")
+            out["caveats"].append(f"coverage={coverage}:转出未追平,拒绝在薄样本上裁决")
+        elif sold_frac >= 0.5:
             out["verdict"] = "exited_by_selling"
             out["confidence"] = min(85, 50 + 5 * resolved_n)
             out["evidence"] = (f"{len(exited)}个早期重仓钱包清空,转出{sold/total_out*100:.0f}%进"
@@ -540,13 +936,17 @@ def identify_operator(token: str, chain: str) -> dict:
         elif moved_internal >= 0.5 * total_out:
             # moved-to-member → follow the frontier: PARKED (loaded threat) = real
             # rotation; SOLD downstream = distribution/churn, NOT a loaded operator.
-            fr = _rotation_frontier(token, chain, [e["address"] for e in exited[:8]], pairs, cex)
+            fr = _rotation_frontier(token, chain, [e["address"] for e in exited[:8]],
+                                    pairs, cex, seed_funders=seed_funders)
             out["current"]["rotation_frontier"] = fr
+            # H4: only FUNDER-LINKED terminals are operator ammo. `parked_unlinked` may
+            # be an OTC buyer's wallet — counting it as "the operator is still loaded"
+            # is the same over-claim as calling a balance→0 a sell.
             if fr["parked_in_wallets"] > fr["sold_via_frontier"] and fr["parked_in_wallets"] > 0:
                 out["verdict"] = "present_rotating_confirmed"   # EVAA: parked = loaded threat
                 out["confidence"] = min(85, 50 + 5 * resolved_n)
-                out["evidence"] = (f"{len(exited)}个钱包清空,{moved_internal/total_out*100:.0f}%回流簇内且"
-                                   f"下游{fr['parked_in_wallets']:,.0f}仍停新钱包 = 换钱包装弹,随时可砸")
+                out["evidence"] = (f"{len(exited)}个钱包清空,{mv_frac*100:.0f}%回流簇内且"
+                                   f"下游{fr['parked_in_wallets']:,.0f}停在同funder新钱包 = 换钱包装弹,随时可砸")
             elif fr["sold_via_frontier"] > 0:
                 # rotated then dumped downstream — distribution, and if no still-holding
                 # coordinated cluster this is more likely CHURN than an operator (MAME).
@@ -555,17 +955,24 @@ def identify_operator(token: str, chain: str) -> dict:
                 out["evidence"] = (f"{len(exited)}个钱包清空,回流簇内但下游已卖{fr['sold_via_frontier']:,.0f} "
                                    f"→ 派发或散户刷币(非装弹操盘);无仍持有的协同簇=倾向churn")
                 out["caveats"].append("需genesis/degen判别区分'操盘派发'vs'散户churn'")
+            elif fr.get("parked_unlinked", 0) > 0:
+                out["verdict"] = "indeterminate_emptied"
+                out["confidence"] = 30
+                out["evidence"] = (f"{len(exited)}个钱包清空回流,下游{fr['parked_unlinked']:,.0f}停在"
+                                   f"与操盘无funder关联的钱包 → 场外卖出vs自托管换钱包,不可判")
+                out["caveats"].append("parked_unlinked:终点钱包非同funder,不得记为操盘余弹")
             else:
                 out["verdict"] = "indeterminate_emptied"
                 out["confidence"] = 30
                 out["evidence"] = f"{len(exited)}个钱包清空回流簇内,下游去向未解析 → 不可判"
-        elif sold >= 0.2 * total_out or sold >= 10_000_000:
+        elif sold_frac >= 0.2 or sold >= 10_000_000:
             # DISTRIBUTING fix (SIREN): meaningful selling into pool/CEX = distribution
             # even if some also moved. A real bleed doesn't need a 50% majority.
             out["verdict"] = "distributing"
             out["confidence"] = min(75, 45 + 5 * resolved_n)
+            ammo = (f",操盘余弹约{rem_pct:.1f}%供应" if rem_pct else "")
             out["evidence"] = (f"{len(exited)}个钱包清空,已向LP池/CEX卖出{sold:,.0f}"
-                               f"({sold/total_out*100:.0f}%) = 操盘在派发出货")
+                               f"({sold_frac*100:.0f}%) = 操盘在派发出货{ammo}")
         else:
             out["verdict"] = "indeterminate_emptied"
             out["confidence"] = 35
@@ -584,4 +991,13 @@ def identify_operator(token: str, chain: str) -> dict:
         out["confidence"] = 60
         out["evidence"] = (f"当前分散(最大{lg:.0f}%)且历史无'吸入后派发'的操盘足迹 → "
                            f"{'集中于金库/长持' if lg>=15 else '散户盘'},无操盘证据")
+
+    # F11 TERMINAL GATE: the pool is drained and nothing trades — whatever the operator
+    # did, it already happened. Emitting a live "拉盘候选"/"在派发" here is a misfire on
+    # a corpse; cap confidence and say so rather than implying a tradeable event ahead.
+    if terminal and out["verdict"] not in ("too_young_to_judge", "unknown"):
+        out["confidence"] = min(out["confidence"], 40)
+        out["caveats"].append(
+            f"terminal:流动性${mkt.get('liquidity_usd'):,}/24h量${mkt.get('volume_h24'):,} "
+            f"→ 盘已死,event已发生,不构成前瞻交易信号")
     return out
