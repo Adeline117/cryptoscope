@@ -44,7 +44,10 @@ _LOGS_RPCS = {
             "https://bsc.rpc.blxrbdn.com",
             "https://bsc-rpc.publicnode.com", "https://bsc.drpc.org"],
     "ethereum": ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
-    "base": ["https://base-rpc.publicnode.com", "https://base.publicnode.com"],
+    # mainnet.base.org leads: live-probed 2026-07-09 — publicnode 403'd every Base
+    # getLogs ("all logs RPCs failed"), which blinded POD's transfer detection.
+    "base": ["https://mainnet.base.org",
+             "https://base-rpc.publicnode.com", "https://base.publicnode.com"],
 }
 
 
