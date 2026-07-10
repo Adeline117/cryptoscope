@@ -31,7 +31,11 @@ _EVM = {"bsc", "ethereum", "base", "arbitrum"}
 # native-balance jump that reads as "funding the dump txs", per chain (in native
 # units). Below this = dust/refund noise.
 _GAS_TOPUP_MIN = {"bsc": 0.01, "ethereum": 0.004, "base": 0.002, "arbitrum": 0.002}
-_MAX_WINDOW = 20_000        # clamp a stale cursor so one pass never scans unbounded
+# The lookback is bounded by TIME, not by a block count. A flat 20k-block clamp meant
+# 2.5 hours on BSC (0.45s/block) but 67 hours on ETH — so any cadence slower than ~2h
+# silently dropped BSC approvals, and the accrual engine would have died quietly.
+_MAX_LOOKBACK_H = 12
+_CHUNK_BLOCKS = 9_000       # free RPCs reject wide getLogs ranges; page instead
 
 
 def _pad_topic(addr: str) -> str:
@@ -52,22 +56,42 @@ def approval_scan(token: str, chain: str, wallets: list[str],
         from src.onchain.evm_archive import ArchiveRPC
         rpc = ArchiveRPC(chain)
         head = rpc.logs_head()
+        spb = rpc.seconds_per_block() or 3.0
     except Exception as e:
         logger.debug("approval_scan_no_head", chain=chain, error=str(e)[:60])
         return {"complete": False, "approvals": [], "to_block": None}
-    frm = head - 1_200 if from_block is None else from_block + 1
-    frm = max(frm, head - _MAX_WINDOW)
+
+    max_window = max(int(_MAX_LOOKBACK_H * 3600 / spb), 1_000)
+    frm = head - int(1800 / spb) if from_block is None else from_block + 1
+    floor = head - max_window
+    gap_skipped = 0
+    if frm < floor:
+        # A cursor older than the lookback means the scheduler was down (or too slow)
+        # and those blocks will NEVER be scanned. Say so — a silently skipped window
+        # is an event we will never know we missed.
+        gap_skipped = floor - frm
+        logger.warning("approval_scan_gap_skipped", chain=chain, token=token,
+                       blocks=gap_skipped, hours=round(gap_skipped * spb / 3600, 1),
+                       note="游标超出回看窗口 → 该段区块永不扫描,事件已永久丢失")
+        frm = floor
     if frm > head:
-        return {"complete": True, "approvals": [], "to_block": head}
+        return {"complete": True, "approvals": [], "to_block": head, "gap_skipped": 0}
+
+    res: list = []
     try:
-        r = rpc._logs_call("eth_getLogs", [{
-            "address": token,
-            "fromBlock": hex(frm), "toBlock": hex(head),
-            "topics": [_APPROVAL_TOPIC, [_pad_topic(w) for w in wallets[:20]]],
-        }])
-        res = r.get("result")
-        if not isinstance(res, list):
-            return {"complete": False, "approvals": [], "to_block": None}
+        lo = frm
+        while lo <= head:                   # chunked: free RPCs reject wide ranges
+            hi = min(lo + _CHUNK_BLOCKS, head)
+            r = rpc._logs_call("eth_getLogs", [{
+                "address": token,
+                "fromBlock": hex(lo), "toBlock": hex(hi),
+                "topics": [_APPROVAL_TOPIC, [_pad_topic(w) for w in wallets[:20]]],
+            }])
+            part = r.get("result")
+            if not isinstance(part, list):
+                return {"complete": False, "approvals": [], "to_block": None}
+            res.extend(part)
+            lo = hi + 1
     except Exception as e:
         logger.debug("approval_scan_failed", token=token, error=str(e)[:80])
         return {"complete": False, "approvals": [], "to_block": None}
@@ -98,7 +122,8 @@ def approval_scan(token: str, chain: str, wallets: list[str],
         seen.add(k)
         approvals.append({"owner": owner, "spender": spender,
                           "spender_kind": "router" if spender in routers else "other"})
-    return {"complete": True, "approvals": approvals, "to_block": head}
+    return {"complete": True, "approvals": approvals, "to_block": head,
+            "gap_skipped": gap_skipped}
 
 
 def gas_topup_scan(chain: str, wallets: list[str],
