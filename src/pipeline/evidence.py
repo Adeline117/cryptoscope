@@ -118,21 +118,30 @@ _CANDLE_CACHE: dict = {}
 _POOL_CACHE: dict = {}
 
 
-def _ohlcv(chain: str, pool: str) -> list[list]:
-    """Hourly candles, cached per (chain, pool) and paced. A 429 must NOT silently
+def _ohlcv(chain: str, pool: str, before: int | None = None,
+           timeframe: str = "hour") -> list[list]:
+    """Candles, cached per (chain, pool, before, tf) and paced. A 429 must NOT silently
     return [] and quietly drop that token from the comparison set — that would shrink
-    the denominator and flatter the lift. Raises on failure; the caller reports it."""
+    the denominator and flatter the lift. Raises on failure; the caller reports it.
+
+    One page is 1000 candles = ~41 days hourly. A replay point older than that gets
+    NO price unless we page back with `before_timestamp` — otherwise deep samples
+    silently score as `ret=None` and the surviving handful produce a precision like
+    1.0 out of n=1.
+    """
     import json
     import time
     import urllib.request
-    key = (chain, pool.lower())
+    key = (chain, pool.lower(), before, timeframe)
     if key in _CANDLE_CACHE:
         return _CANDLE_CACHE[key]
     net = {"bsc": "bsc", "ethereum": "eth", "base": "base", "solana": "solana"}.get(chain)
     if not net:
         raise ValueError(f"unsupported chain {chain}")
     u = (f"https://api.geckoterminal.com/api/v2/networks/{net}/pools/{pool}"
-         f"/ohlcv/hour?aggregate=1&limit=1000")
+         f"/ohlcv/{timeframe}?aggregate=1&limit=1000")
+    if before:
+        u += f"&before_timestamp={int(before)}"
     last = None
     for attempt in range(4):                     # free tier ~30/min → pace + retry
         try:

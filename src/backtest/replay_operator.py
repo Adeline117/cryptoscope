@@ -91,20 +91,27 @@ def _archive_ok(chain: str, token: str, block: int) -> bool:
 
 
 def _price_at(chain: str, pool: str, ts: datetime) -> float | None:
-    """Hourly close nearest to `ts` (GeckoTerminal, keyless)."""
+    """Close nearest to `ts` (GeckoTerminal, keyless), paging back for old points.
+
+    One page of hourly candles covers ~41 days. Without paging, every replay point
+    older than that returned None — the deep samples silently vanished and the one
+    surviving sample reported `precision 1.0`. Anchor the request just after `ts` so
+    the page brackets it."""
     from src.pipeline.evidence import _ohlcv
-    try:
-        candles = _ohlcv(chain, pool)
-    except Exception:
-        return None
     target = int(ts.timestamp())
-    best = None
-    for c in candles:
-        if best is None or abs(c[0] - target) < abs(best[0] - target):
-            best = c
-    if best is None or abs(best[0] - target) > 6 * 3600:
-        return None                      # nearest candle >6h away → don't guess
-    return best[4]
+    # Anchor a page that ends shortly after the target, so the target is inside it.
+    for before in (None, target + 36 * 3600):
+        try:
+            candles = _ohlcv(chain, pool, before=before)
+        except Exception:
+            continue
+        best = None
+        for c in candles:
+            if best is None or abs(c[0] - target) < abs(best[0] - target):
+                best = c
+        if best is not None and abs(best[0] - target) <= 6 * 3600:
+            return best[4]               # nearest candle within 6h
+    return None                          # don't guess a price we never observed
 
 
 def replay(token: str, chain: str, days_ago: list[int], horizon_h: int = 24) -> list[dict]:
@@ -186,6 +193,17 @@ def score(samples: list[dict], horizon_h: int = 24) -> dict:
         out["lift"] = round(hits / expected, 2)
     if n < 30:
         out["warning"] = f"n={n} 远不足以断言胜率(需 ~120-150);仅方向性参考"
+    # n=1 prints `precision: 1.0`, which is the embryo of the next fake 44%. A single
+    # sample is an anecdote; refuse the word entirely. (This fired for real: the deep
+    # replay points had no price data, leaving exactly one scored sample.)
+    if n < 3:
+        out.pop("precision", None)
+        out.pop("lift", None)
+        out["insufficient"] = (f"仅 {n} 个可打分样本 → 不存在'精度'。"
+                               f"未定价样本被剔除(不是记0),请检查价格回溯深度。")
+    unpriced = len(samples) - len(scored)
+    if unpriced:
+        out["unpriced_dropped"] = unpriced
 
     # THE CATEGORY ERROR GUARD. identify_operator is a STATE classifier ("is there an
     # operator and what did they do"), not a TIMING signal ("will price fall in 24h").

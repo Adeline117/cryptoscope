@@ -90,3 +90,19 @@ def test_transition_scoring_uses_target_verdict_direction(monkeypatch):
     out = ro.score_transitions([a, b, c])
     assert out["n_directional"] == 2 and out["hits"] == 2
     assert "fragile" in out          # expected 0.6 < 2.0
+
+
+def test_single_sample_never_reports_a_precision(monkeypatch):
+    """n=1 printed `precision: 1.0` — the embryo of the next fake 44%. It happened for
+    real: deep replay points had no price data, leaving one scored sample."""
+    monkeypatch.setattr("src.pipeline.evidence.base_rate",
+                        lambda *a, **k: {"available": True, "p": 0.37})
+    s = [_s("0xa", "distributing", None, 120), _s("0xa", "distributing", None, 96),
+         _s("0xa", "distributing", -0.17, 24)]
+    for i, x in enumerate(s):
+        x["block"] = 100 + i
+    out = ro.score(s)
+    assert out["n"] == 1
+    assert "precision" not in out and "lift" not in out
+    assert "insufficient" in out
+    assert out["unpriced_dropped"] == 2
