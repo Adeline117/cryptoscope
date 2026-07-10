@@ -246,6 +246,15 @@ def _historical_ledger(token: str, chain: str, decimals: int) -> dict:
     inflow, net, complete = (_events_etherscan(tok, cid, decimals) if cid
                              else (None, None, False))
 
+    if inflow is not None and complete and not inflow:
+        # Walk terminated with ZERO transfers. Every real ERC20 has at least its mint
+        # transfers — an empty history means wrong address/chain or an indexer error,
+        # and treating it as "checked, no operator footprint" produced a confident
+        # `dispersed` verdict for a nonexistent token. No data ≠ clean history.
+        logger.warning("historical_ledger_empty", token=token,
+                       note="0 transfers on a terminated walk = wrong address/chain?")
+        return {"available": False, "exited": [], "holding": [], "empty_history": True}
+
     if inflow is not None and net is not None and complete:
         # ETH: a TERMINATED full block-walk gives complete inflow AND net → use net.
         # F7: the guard is keyed on real termination (above), not on a transient
@@ -694,7 +703,8 @@ def identify_operator(token: str, chain: str) -> dict:
         cid = {"bsc": 56, "ethereum": 1, "base": 8453, "arbitrum": 42161}.get(chain)
         holders = fetch_holders_evm(token, chain_id=cid, max_pages=8) or []
         conc = effective_concentration_signal(holders, token, chain) or {}
-        out["current"] = {
+        out["current"]["holders_fetched"] = len(holders)
+        out["current"] |= {
             "cluster_confidence": conc.get("cluster_confidence"),
             "largest_entity_pct": conc.get("largest_entity_pct"),
             "concentration_gap": conc.get("concentration_gap"),
@@ -804,17 +814,6 @@ def identify_operator(token: str, chain: str) -> dict:
     # 9-day operator into `too_young_to_judge`.
     loaded_cluster = (dom >= 5 and lg >= 10
                       and _cluster_holds_onchain(token, chain, cluster_w))
-    # F12 (FN-2): a lone or two-wallet operator holding a big share isn't a `treasury`.
-    # Require confidently-EOA (a Safe holding 15% is a team treasury, not a trader).
-    single_op = False
-    if not loaded_cluster and lg >= 15 and dom < 5 and cluster_w:
-        try:
-            from src.onchain.entity_classify import classify_address
-            single_op = (all(classify_address(w, chain).get("type") == "eoa"
-                             for w in cluster_w[:3])
-                         and _cluster_holds_onchain(token, chain, cluster_w))
-        except Exception:
-            single_op = False
 
     if conf_q >= 55:
         out["verdict"] = "live_operator"
@@ -828,10 +827,6 @@ def identify_operator(token: str, chain: str) -> dict:
         # before calling it loaded (SYN's "5 wallets/10%" held 0 on-chain = false).
         _loaded_split(cluster_w, min(78, 45 + int(lg)),
                       f"当前活簇 {dom}个钱包协同持有 {lg:.0f}% 流通供应(链上余额已核实>0)")
-    elif single_op:
-        _loaded_split(cluster_w, 58,
-                      f"单一/双钱包EOA持有 {lg:.0f}% 流通供应(链上已核实,非多签金库)")
-        out["caveats"].append("single_operator:单钱包集中,缺协同簇证据,置信度上限较低")
     elif age is not None and age < 14 and conf_q < 55:
         # AGE GATE: a token too young has no pump→distribute lifecycle to judge.
         out["verdict"] = "too_young_to_judge"
@@ -981,16 +976,48 @@ def identify_operator(token: str, chain: str) -> dict:
             out["caveats"].append("去向多为featureless新EOA:自托管vs换钱包vs中介卖出,不可判")
     elif not hist.get("available"):
         out["verdict"] = "unknown"
-        out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
-                           "Etherscan不覆盖该链)→ '拉盘前吸筹后离场'未验证,不能断言无庄")
+        if hist.get("empty_history"):
+            out["evidence"] = "全历史0条转账:地址/链可能错误或索引失败 → 无数据,不下任何定性"
+        else:
+            out["evidence"] = ("当前无隐藏簇,但历史台账取数失败(数据源额度耗尽,如Moralis每日/"
+                               "Etherscan不覆盖该链)→ '拉盘前吸筹后离场'未验证,不能断言无庄")
         out["caveats"].append("历史维度缺失 = 结论未完成(换源/额度恢复后重跑)")
+    elif not (out["current"].get("holders_fetched") or 0):
+        # History says no operator footprint, but the CURRENT holder snapshot fetch
+        # returned nothing (Dune 402 / Moralis parked). "Dispersed" is a claim about
+        # the current graph — it cannot be asserted from zero holder data (INV-4).
+        out["verdict"] = "unknown"
+        out["evidence"] = "历史无操盘足迹,但当前holder快照取数失败(0条)→ '分散'不可断言"
+        out["caveats"].append("当前维度缺失:holder快照为空 = 数据失败,非散户盘证据")
     else:
-        # current dispersed AND history checked with no exited-accumulator
+        # current graph fetched AND history checked with no exited-accumulator.
+        # F12 (FN-2): before dumping a big single holder into `treasury`, check if it
+        # is a confidently-EOA live holder — a lone trading wallet, not a Safe/vesting
+        # contract. It stays a STATE observation (dormant, no coordination proof), so
+        # velocity decides whether it's actually accumulating; it never claims the
+        # coordinated-cluster confidence.
         lg = conc.get("largest_entity_pct") or 0
-        out["verdict"] = "treasury" if lg >= 15 else "dispersed"
-        out["confidence"] = 60
-        out["evidence"] = (f"当前分散(最大{lg:.0f}%)且历史无'吸入后派发'的操盘足迹 → "
-                           f"{'集中于金库/长持' if lg>=15 else '散户盘'},无操盘证据")
+        single_op = False
+        if lg >= 15 and dom < 5 and cluster_w:
+            try:
+                from src.onchain.entity_classify import classify_address
+                single_op = (all(classify_address(w, chain).get("type") == "eoa"
+                                 for w in cluster_w[:3])
+                             and _cluster_holds_onchain(token, chain, cluster_w))
+            except Exception:
+                single_op = False
+        if single_op:
+            _loaded_split(cluster_w, 55,
+                          f"单一/双钱包EOA持有 {lg:.0f}% 流通供应(链上已核实,非多签金库),"
+                          f"历史无出货足迹")
+            out["caveats"].append("single_operator:单钱包集中,无协同簇/无历史足迹,"
+                                  "巨鲸vs操盘不可区分,置信度受限")
+            out["confidence"] = min(out["confidence"], 60)
+        else:
+            out["verdict"] = "treasury" if lg >= 15 else "dispersed"
+            out["confidence"] = 60
+            out["evidence"] = (f"当前分散(最大{lg:.0f}%)且历史无'吸入后派发'的操盘足迹 → "
+                               f"{'集中于金库/长持' if lg>=15 else '散户盘'},无操盘证据")
 
     # F11 TERMINAL GATE: the pool is drained and nothing trades — whatever the operator
     # did, it already happened. Emitting a live "拉盘候选"/"在派发" here is a misfire on
