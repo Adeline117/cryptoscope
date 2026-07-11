@@ -58,7 +58,12 @@ def _check(name, ok, detail):
     return bool(ok)
 
 
-def run() -> dict:
+def run(live: bool = True) -> dict:
+    """Run the labeled-case validation. `live=True` (default = existing behavior)
+    also runs the LIVE balanceOf ground-truth gate, which needs archive RPC + network.
+    CI passes `live=False` to run only the deterministic, secretless pure-function
+    assertions (sections 1-6); the 24/7 scheduler runs `live=True` so the chain
+    arbitrates the holder snapshots every cycle."""
     from src.onchain.entity_classify import classify_cluster
     from src.onchain.token_registry import is_non_operator
     from src.pipeline.operator_sentinel import _distribution_history, _token_age_days
@@ -71,38 +76,44 @@ def run() -> dict:
     for s in MEMES:
         total += 1; passed += _check(f"{s} 应放行", not is_non_operator(s), "passed" if not is_non_operator(s) else "wrongly excluded")
 
-    print("=== 2. 年龄门(MAME太新应'不可判', 老币可判)===")
-    for name, c in CASES.items():
-        if c["chain"] != "bsc":
-            continue
-        dh = _distribution_history(c["token"], c["chain"], c["wallets"])
-        prof = dh.get("profile", "")
-        if c["truth"] == "false_positive":
-            ok = prof.startswith("?")            # young/insufficient → unjudgeable
-            total += 1; passed += _check(f"{name} 派发履历应'不可判'", ok, prof)
-        elif c["truth"] == "real_operator":
-            ok = "聪明庄" in prof                  # old real operator → has distribution history
-            total += 1; passed += _check(f"{name} 应判'聪明庄'", ok, prof)
-        elif c["truth"] == "team_custody":
-            # The RIGHT dump signal for our BSC universe: our micro-caps sell INTO
-            # the DEX pool (not CEX deposits — verified via Dune all-history). So
-            # the fire we validate is cluster distribution, not cex_flow. ESPORTS
-            # team cluster dumped -> distribution_history must register it.
-            ok = "聪明庄" in prof
-            total += 1; passed += _check(f"{name} 砸盘应被派发履历抓到", ok, prof)
+    # Sections 2/3/5 hit the network (distribution_history / classify_cluster /
+    # shared_fee_payer make RPC + API calls) and are rate-limit flaky — a 429 once
+    # FAILed section 5 here. They are gated on `live` so CI (offline, secretless)
+    # runs only the truly pure sections 1/4/6 and never goes red for a non-code
+    # reason. The 24/7 scheduler runs them with keys.
+    if live:
+        print("=== 2. 年龄门(MAME太新应'不可判', 老币可判)===")
+        for name, c in CASES.items():
+            if c["chain"] != "bsc":
+                continue
+            dh = _distribution_history(c["token"], c["chain"], c["wallets"])
+            prof = dh.get("profile", "")
+            if c["truth"] == "false_positive":
+                ok = prof.startswith("?")            # young/insufficient → unjudgeable
+                total += 1; passed += _check(f"{name} 派发履历应'不可判'", ok, prof)
+            elif c["truth"] == "real_operator":
+                ok = "聪明庄" in prof                  # old real operator → has distribution history
+                total += 1; passed += _check(f"{name} 应判'聪明庄'", ok, prof)
+            elif c["truth"] == "team_custody":
+                # The RIGHT dump signal for our BSC universe: our micro-caps sell INTO
+                # the DEX pool (not CEX deposits — verified via Dune all-history). So
+                # the fire we validate is cluster distribution, not cex_flow. ESPORTS
+                # team cluster dumped -> distribution_history must register it.
+                ok = "聪明庄" in prof
+                total += 1; passed += _check(f"{name} 砸盘应被派发履历抓到", ok, prof)
 
-    print("=== 3. 实体分类(团队簇=托管非交易庄)===")
-    for name, c in CASES.items():
-        if c["chain"] != "bsc":
-            continue
-        cc = classify_cluster(c["wallets"], c["chain"])
-        eoa_share = cc.get("eoa_share_of_members", 1)
-        if c["truth"] == "team_custody":
-            ok = eoa_share < 0.5                  # mostly multisig/contract
-            total += 1; passed += _check(f"{name} 应识别为团队托管", ok, f"{cc['summary']} eoa={eoa_share}")
-        elif c["truth"] == "real_operator":
-            ok = eoa_share >= 0.5                 # mostly trading EOAs
-            total += 1; passed += _check(f"{name} 应识别为交易EOA簇", ok, f"{cc['summary']} eoa={eoa_share}")
+        print("=== 3. 实体分类(团队簇=托管非交易庄)===")
+        for name, c in CASES.items():
+            if c["chain"] != "bsc":
+                continue
+            cc = classify_cluster(c["wallets"], c["chain"])
+            eoa_share = cc.get("eoa_share_of_members", 1)
+            if c["truth"] == "team_custody":
+                ok = eoa_share < 0.5                  # mostly multisig/contract
+                total += 1; passed += _check(f"{name} 应识别为团队托管", ok, f"{cc['summary']} eoa={eoa_share}")
+            elif c["truth"] == "real_operator":
+                ok = eoa_share >= 0.5                 # mostly trading EOAs
+                total += 1; passed += _check(f"{name} 应识别为交易EOA簇", ok, f"{cc['summary']} eoa={eoa_share}")
 
     print("=== 4. CEX分类(is_cex_address, 纯函数)===")
     from src.onchain.cex_flow import is_cex_address
@@ -117,17 +128,18 @@ def run() -> dict:
     # directly — it disperses to EOAs that deposit. Validating a fire needs those
     # downstream EOAs; documented gap, not a passing assertion here.
 
-    print("=== 5. Solana bundle(团队分配=同实体)===")
-    for name, c in CASES.items():
-        if c["chain"] not in ("solana", "sol"):
-            continue
-        try:
-            from src.onchain.solana_bundle import shared_fee_payer
-            edges = shared_fee_payer(c["wallets"])
-            ok = len(edges) > 0
-            total += 1; passed += _check(f"{name} 应确认同实体", ok, f"{len(edges)} 条同feePayer/bundle边")
-        except Exception as e:
-            total += 1; _check(f"{name} bundle检查", False, f"err {str(e)[:50]}")
+    if live:
+        print("=== 5. Solana bundle(团队分配=同实体)===")
+        for name, c in CASES.items():
+            if c["chain"] not in ("solana", "sol"):
+                continue
+            try:
+                from src.onchain.solana_bundle import shared_fee_payer
+                edges = shared_fee_payer(c["wallets"])
+                ok = len(edges) > 0
+                total += 1; passed += _check(f"{name} 应确认同实体", ok, f"{len(edges)} 条同feePayer/bundle边")
+            except Exception as e:
+                total += 1; _check(f"{name} bundle检查", False, f"err {str(e)[:50]}")
 
     print("=== 6. cluster_confidence(纯函数,装弹操盘应打高分)===")
     # The gap this closes: all our KNOWN cases are post-distribution → score low, so
@@ -158,30 +170,42 @@ def run() -> dict:
     # transfers, returned as current) fabricated two sentinel verdicts and survived
     # for months. It was found by accident. No unit test can catch it, because the
     # data source itself lies — only the chain can arbitrate. This gate asks the
-    # chain, on a real token, every run.
-    try:
-        from src.onchain.evm_archive import ArchiveRPC
-        from src.onchain.holder_snapshot import fetch_holders_evm
-        for sym, tok, cid, chain in [("WOO(eth)", "0x4691937a7508860f876c9c0a2a617e7d9e945d4b", 1, "ethereum"),
-                                     ("SIREN(bsc)", "0x997a58129890bbda032231a52ed1ddc845fc18e1", 56, "bsc")]:
-            hs = fetch_holders_evm(tok, chain_id=cid, max_pages=3) or []
-            rpc = ArchiveRPC(chain)
-            agree = 0
-            for h in hs[:3]:
-                real = rpc.balance_of(tok, h["address"])
-                if real is not None and abs(real - float(h["balance"])) < max(1.0, 0.02 * float(h["balance"])):
-                    agree += 1
+    # chain, on a real token, every run. Needs archive RPC + network → gated on
+    # `live` so CI (secretless) skips it; the 24/7 scheduler runs it.
+    live_failed = 0
+    if live:
+        try:
+            from src.onchain.evm_archive import ArchiveRPC
+            from src.onchain.holder_snapshot import fetch_holders_evm
+            for sym, tok, cid, chain in [("WOO(eth)", "0x4691937a7508860f876c9c0a2a617e7d9e945d4b", 1, "ethereum"),
+                                         ("SIREN(bsc)", "0x997a58129890bbda032231a52ed1ddc845fc18e1", 56, "bsc")]:
+                hs = fetch_holders_evm(tok, chain_id=cid, max_pages=3) or []
+                rpc = ArchiveRPC(chain)
+                agree = 0
+                for h in hs[:3]:
+                    real = rpc.balance_of(tok, h["address"])
+                    if real is not None and abs(real - float(h["balance"])) < max(1.0, 0.02 * float(h["balance"])):
+                        agree += 1
+                total += 1
+                ok = agree >= 2
+                if not ok:
+                    live_failed += 1
+                passed += _check(f"{sym} holder快照与链上一致(top3)", ok,
+                                 f"{agree}/3 一致 — 不一致=数据源在撒谎(幽灵余额)")
+        except Exception as e:
             total += 1
-            passed += _check(f"{sym} holder快照与链上一致(top3)", agree >= 2,
-                             f"{agree}/3 一致 — 不一致=数据源在撒谎(幽灵余额)")
-    except Exception as e:
-        total += 1
-        passed += _check("holder链上一致性网关", False, f"无法执行: {str(e)[:50]}")
+            live_failed += 1
+            passed += _check("holder链上一致性网关", False, f"无法执行: {str(e)[:50]}")
 
     print(f"\n=== 混淆(小N，N={total}）: {passed}/{total} 正确 ({passed/max(total,1)*100:.0f}%) ===")
     print("注：N小，非统计显著；这是'已知案例上系统分类对不对'的诚实回放。")
-    return {"passed": passed, "total": total}
+    return {"passed": passed, "total": total, "live": live, "live_failed": live_failed}
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    # CI / offline use: `--no-live` runs only the deterministic pure-function
+    # assertions (no RPC, no keys). Default keeps the full live chain-arbitration.
+    res = run(live="--no-live" not in sys.argv)
+    if res["passed"] < res["total"]:
+        sys.exit(1)   # non-zero exit → CI red / scheduler can detect failure

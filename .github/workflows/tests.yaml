@@ -1,0 +1,36 @@
+name: Tests
+
+# The verification machinery (23 test files + the labeled-case validators) existed
+# but never ran automatically — the daily/weekly workflows only run the pipelines.
+# This makes them a STANDING gate: every push/PR runs the hermetic tests plus the
+# deterministic, secretless validator sections. The live chain-arbitration gate
+# (needs RPC + keys, is rate-limit flaky) is NOT here on purpose — it runs on the
+# 24/7 scheduler as `self_audit`, where a real failure is an operational alarm, not
+# a merge blocker. A flaky required check gets disabled within a week; this one won't.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest (hermetic unit + regression tests)
+        run: python -m pytest tests/ -q
+
+      - name: Deterministic detector validators (offline, no keys)
+        run: python -m src.backtest.validate_detectors --no-live
