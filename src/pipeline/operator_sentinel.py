@@ -145,6 +145,43 @@ def _save(data: dict) -> None:
     os.replace(tmp, SENTINELS_FILE)
 
 
+# ---- detector liveness heartbeats -------------------------------------------
+# A detector can run every 5 min yet silently evaluate NOTHING — the transfer-based
+# 庄在卖 alarm did exactly that for weeks (a cursor bug forced its flow to a None
+# baseline on every pass, so it never got past 'establish baseline'). "Did the job
+# run" would not catch it; "did it fire" is wrong (a healthy dump detector is
+# legitimately silent). The signal that it is ALIVE is: when did it last produce an
+# EVALUABLE (past-baseline, cursor-advanced) result. We stamp that here and let
+# health.py alarm when it goes stale.
+HEARTBEATS_FILE = DATA_DIR / "detector_heartbeats.json"
+
+
+def _record_detector_heartbeat(name: str) -> None:
+    """Stamp `name`'s last-evaluable time = now. Best-effort; never raises into the
+    monitoring pass."""
+    try:
+        from datetime import datetime, timezone
+        import os
+        data = detector_heartbeats()
+        data[name] = datetime.now(timezone.utc).isoformat()
+        HEARTBEATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = HEARTBEATS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        os.replace(tmp, HEARTBEATS_FILE)
+    except Exception as e:
+        logger.debug("heartbeat_write_failed", detector=name, error=str(e)[:60])
+
+
+def detector_heartbeats() -> dict:
+    """{detector_name: last_evaluable_iso}. Empty if never written."""
+    if HEARTBEATS_FILE.exists():
+        try:
+            return json.loads(HEARTBEATS_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
 def _dex(token: str, chain: str) -> dict:
     """Liquidity / price / 24h volume from DexScreener (deepest pair)."""
     try:
@@ -866,6 +903,15 @@ def check_run(use_transfers: bool = False) -> list[dict]:
         flows = {k: cluster_net_flow(t["token"], t["chain"], t["wallets"],
                                      _flow_cursor(t))
                  for k, t in targets.items()}
+        # LIVENESS: the detector is genuinely evaluating (not perpetually
+        # re-baselining like it did under the cursor bug) iff at least one target
+        # both returned a scan AND already had a persisted cursor from a prior pass.
+        # `_flow_cursor(t)` here reads the PREVIOUS pass's persisted value (advance
+        # happens later under the lock), which is exactly the condition the bug
+        # pinned to None forever. Stamp only on a truly evaluable pass.
+        if any(flows.get(k) is not None and _flow_cursor(t) is not None
+               for k, t in targets.items()):
+            _record_detector_heartbeat("transfer_flow")
         # CEX deposit-flow = the #1 LEADING dump signal: an operator cluster sending
         # tokens to an exchange deposit address precedes the sell by minutes-hours.
         # Only on the 5-min transfer pass (it's a getLogs scan). Pass the measured

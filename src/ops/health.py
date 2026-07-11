@@ -52,6 +52,54 @@ def _rows(db: str, sql: str) -> list:
         return []
 
 
+# A detector's max tolerated gap between EVALUABLE results. transfer_flow stamps
+# every 5-min pass while cursors advance; 48h stale (accounting for legit RPC
+# outages that age out) means it is broken, not merely quiet.
+_DETECTOR_MAX_AGE_H = {"transfer_flow": 48}
+
+
+def _dead_signals() -> list[dict]:
+    """Registered detectors whose last EVALUABLE result is missing or too old.
+
+    Returns [{detector, age_hours|None, reason}]. Only flags a detector when there
+    are registered sentinels for it to evaluate — an empty sentinel set means the
+    detector is idle-by-design, not dead."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    from src.config import DATA_DIR
+    sf = DATA_DIR / "operator_sentinels.json"
+    try:
+        n_sentinels = len(_json.loads(sf.read_text())) if sf.exists() else 0
+    except Exception:
+        n_sentinels = 0
+    if n_sentinels == 0:
+        return []   # nothing to evaluate → not dead
+
+    try:
+        from src.pipeline.operator_sentinel import detector_heartbeats
+        hb = detector_heartbeats()
+    except Exception:
+        hb = {}
+
+    now = datetime.now(timezone.utc)
+    dead = []
+    for det, max_age in _DETECTOR_MAX_AGE_H.items():
+        ts = hb.get(det)
+        if not ts:
+            dead.append({"detector": det, "age_hours": None,
+                         "reason": f"从未产出可评估结果(有{n_sentinels}个哨兵在监控)"})
+            continue
+        try:
+            age_h = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+        except Exception:
+            continue
+        if age_h > max_age:
+            dead.append({"detector": det, "age_hours": round(age_h, 1),
+                         "reason": f"距上次可评估 {age_h:.0f}h > {max_age}h — 每5分钟在跑却静默无评估(游标类静默失败)"})
+    return dead
+
+
 def collect_stats() -> dict:
     """Gather health metrics from every DB + environment."""
     # Holder snapshots
@@ -83,6 +131,12 @@ def collect_stats() -> dict:
         stale_snaps = find_stale_snapshots(tokens=watched) if watched else []
     except Exception:
         stale_snaps = []
+
+    # Dead-signal detection: a detector that runs every pass but silently evaluates
+    # nothing (the weeks-dead 庄在卖 cursor bug). Distinct from data-freshness above:
+    # this is DETECTOR-evaluability, not snapshot age. Only meaningful when there ARE
+    # registered sentinels for the detector to evaluate.
+    dead_signals = _dead_signals()
 
     # Tokens with enough history to fire the signal (>=4 snapshots in window)
     ready = _scalar(
@@ -141,6 +195,7 @@ def collect_stats() -> dict:
                       "stale": [{"token": s["token"], "chain": s["chain"],
                                  "reason": s["reason"], "age_hours": s["age_hours"]}
                                 for s in stale_snaps[:8]]},
+        "dead_signals": dead_signals,
         "signals": {"by_type": signals, "pending_price_checks": sig_pending},
         "watchlist_active": watch_active,
         "funders": {"cached": funders_cached, "resolved": funders_resolved},
@@ -228,6 +283,9 @@ def format_telegram(stats: dict) -> str:
         f"📸 快照 {snap['total']} 条 · {snap['tokens']} 个 token\n"
         f"   可出信号(≥4快照): <b>{snap['signal_ready_tokens']}</b>\n"
         + (f"   ⚠️ 数据冻结/停更: <b>{snap['stale_count']}</b> 个 token\n" if snap.get("stale_count") else "")
+        + ("".join(f"🛑 <b>信号已死</b>: {d['detector']} — {d['reason']}\n"
+                   for d in s.get("dead_signals", []))
+           if s.get("dead_signals") else "")
         + f"🎯 累计信号 {sigs} 条\n"
         f"👁 观察名单 {s['watchlist_active']}\n"
         f"🔎 筛选器追踪 {s.get('screener',{}).get('tracked',0)} · 持续候选 {len(s.get('screener',{}).get('top_recurring',[]))}\n"
@@ -240,7 +298,23 @@ def format_telegram(stats: dict) -> str:
 async def send_health_summary() -> bool:
     from src.distribution.telegram_sender import send_alert
 
-    return await send_alert(format_telegram(collect_stats()))
+    stats = collect_stats()
+    # A dead signal is an OUTAGE, not a status line. The daily summary is calibrated
+    # to read 'healthy', so a silently-dead detector must ALSO fire its own loud
+    # alarm — otherwise it hides in a green report (exactly how 庄在卖 stayed dead
+    # for weeks). Sent unconditionally (not gated by OPERATOR_ALERTS_MUTED): this is
+    # an operational alarm, not a trade signal.
+    dead = stats.get("dead_signals") or []
+    if dead:
+        lines = ["🛑 <b>信号已死 · DEAD SIGNAL</b>", "━━━━━━━━━━━━━━"]
+        for d in dead:
+            lines.append(f"• <b>{d['detector']}</b>: {d['reason']}")
+        lines.append("<i>检测器每轮都在跑却没在评估任何东西 — 立刻查游标/数据源,当前该信号的沉默不可信</i>")
+        try:
+            await send_alert("\n".join(lines))
+        except Exception:
+            pass
+    return await send_alert(format_telegram(stats))
 
 
 if __name__ == "__main__":
