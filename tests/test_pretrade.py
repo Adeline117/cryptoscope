@@ -59,3 +59,22 @@ def test_engine_crash_is_unknown_not_safe(monkeypatch):
         raise RuntimeError("rpc down")
     monkeypatch.setattr(pt, "identify_operator", boom)
     assert pt.check("0xt", "bsc")["level"] == pt.UNKNOWN
+
+
+def test_loaded_live_operator_is_not_green(monkeypatch):
+    """THE HOLE: loaded_live_operator (the engine's 'most dangerous live setup', and
+    the default when velocity can't be computed) had no branch → green-lit."""
+    _op(monkeypatch, verdict="loaded_live_operator")
+    assert pt.check("0xt", "bsc")["level"] != pt.CONSIDER
+
+
+def test_unknown_verdict_string_never_green(monkeypatch):
+    """A future/unrecognized verdict must not default to green by omission."""
+    _op(monkeypatch, verdict="some_new_verdict_added_later")
+    assert pt.check("0xt", "bsc")["level"] == pt.UNKNOWN
+
+
+def test_closed_source_contract_is_not_green(monkeypatch):
+    _op(monkeypatch, verdict="dispersed",
+        rug={"available": True, "is_open_source": 0, "flags": {}, "facts": []})
+    assert pt.check("0xt", "bsc")["level"] != pt.CONSIDER

@@ -67,10 +67,22 @@ def check(token: str, chain: str) -> dict:
         reasons.append((CONSIDER, f"链上核实在吸筹(conf{conf}):唯一带正向含义的形态,但择时未验证"))
     elif verdict == "loaded_dormant":
         reasons.append((CAUTION, "装弹但休眠:庄在场却不动,不是买入理由"))
+    elif verdict in ("loaded_live_operator", "live_operator"):
+        # THE HOLE the review found: these are the engine's OWN "most dangerous live
+        # setup" (a verified loaded operator holding the ammo), and loaded_live_operator
+        # is the DEFAULT when 30d velocity can't be computed (common on free BSC RPC).
+        # With no branch, an empty reasons list defaulted to CONSIDER → the avoidance
+        # filter green-lit a loaded 庄. That is the exact opposite of its job.
+        reasons.append((CAUTION, f"当前活簇装弹操盘({verdict} conf{conf}):庄在场持仓,"
+                        f"随时可派发 — 不是安全,是最危险的活盘之一"))
     elif verdict == "too_young_to_judge":
         reasons.append((UNKNOWN, "代币过新,操盘生命周期无法判断"))
     elif verdict in ("unknown", "indeterminate_emptied"):
         reasons.append((UNKNOWN, f"操盘状态取数不足({verdict}):不构成安全,只是没查清"))
+    elif verdict not in ("dispersed", "treasury", "treasury_only", "distributing_or_churn"):
+        # Final catch-all: any UNRECOGNIZED verdict must not silently default to green.
+        # A new verdict string added later can never green-light by omission.
+        reasons.append((UNKNOWN, f"未知判决类型({verdict}):无法评估,不构成安全"))
 
     # concentration only counts when it's a share of REAL supply and BOUGHT (not issued)
     lg = cur.get("largest_entity_pct")
@@ -90,6 +102,12 @@ def check(token: str, chain: str) -> dict:
     rr = op.get("rug_risk") or {}
     if not rr.get("available"):
         reasons.append((UNKNOWN, "合约代码风险未检查(GoPlus 无数据)— 不等于安全"))
+    elif rr.get("is_open_source") == 0:
+        # Closed source: GoPlus can't analyse the code, so its flags are unknowable
+        # (rug_risk suppresses them from `facts`). Reading raw `flags` here would be
+        # inconsistent — treat as UNCHECKED, not clean.
+        reasons.append((UNKNOWN, "合约未开源:代码风险不可核实 — 不等于安全"))
+        facts["rug_facts"] = rr.get("facts", [])
     else:
         facts["rug_facts"] = rr.get("facts", [])
         f = rr.get("flags", {})

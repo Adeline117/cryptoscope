@@ -97,3 +97,41 @@ def test_garbage_pnl_is_rejected(monkeypatch):
     """A $2.4-octillion realized figure is token-decimal overflow, not profit."""
     _wire_moralis(monkeypatch, _summary(500, 2.4e27), _per(9, 1))
     assert sm.wallet_skill("0xw", "bsc")["skilled"] is False
+
+
+def test_cex_funded_wallets_stay_independent(monkeypatch):
+    """A shared CEX funder does NOT mean one actor — it links unrelated retail. Two
+    smart wallets both funded by Binance must NOT collapse into one entity."""
+    monkeypatch.setattr("src.onchain.funder_graph.get_funders",
+                        lambda ws, c, **k: {w: "0xbinance" for w in ws})
+    monkeypatch.setattr("src.onchain.cex_addresses.evm_exchanges",
+                        lambda: {"0xbinance": "Binance"})
+    groups = sm._collapse_to_entities(["0xa", "0xb"], "bsc")
+    assert len(groups) == 2, "CEX-funded wallets are independent, not merged"
+
+
+def test_skilled_wallet_behind_unskilled_group0_is_found(monkeypatch):
+    """convergence must score the whole group, not just group[0] — a skilled wallet
+    behind an unskilled first-seen co-funded wallet must still count."""
+    monkeypatch.setattr(sm, "_recent_buyers", lambda t, c, **k: ["0xA", "0xB"])
+    monkeypatch.setattr(sm, "_collapse_to_entities", lambda ws, c: [["0xA", "0xB"]])
+    skills = {"0xA": {"skilled": False}, "0xB": {"skilled": True, "reason": "x"}}
+    monkeypatch.setattr(sm, "wallet_skill", lambda w, c: skills[w])
+    r = sm.convergence("0xt", "bsc")
+    assert r["skilled_entities"] == 1, "the skilled member behind group[0] must be found"
+
+
+def test_per_token_bot_filter(monkeypatch):
+    """A bot doing 2900 trades over 10 tokens slips past MAX_TRADES but is 290/token."""
+    _wire_moralis(monkeypatch, _summary(2900, 5000), _per(7, 3))  # 10 tokens -> 290/token
+    assert sm.wallet_skill("0xbot", "bsc")["skilled"] is False
+
+
+def test_wallet_from_fallback_key(monkeypatch):
+    """A swap with wallet only under fromAddress must still be counted as a buyer."""
+    import src.onchain.moralis_client as mc
+    monkeypatch.setattr(mc, "usable", lambda: True)
+    monkeypatch.setattr(mc, "get", lambda p: {"result": [
+        {"transactionType": "buy", "fromAddress": "0xW1"},
+        {"transactionType": "buy", "walletAddress": "0xW2"}]})
+    assert set(sm._recent_buyers("0xt", "bsc")) == {"0xw1", "0xw2"}

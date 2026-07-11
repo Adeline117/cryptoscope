@@ -47,6 +47,7 @@ _MCHAIN = {"bsc": "bsc", "ethereum": "eth", "base": "base", "arbitrum": "arbitru
 # output was not looked at. It is now.
 MIN_TRADES = 20            # below this, win rate is variance, not skill
 MAX_TRADES = 3_000         # above this it's a bot arbitraging the pool, not a trader
+MAX_TRADES_PER_TOKEN = 50  # a trader does ~3-7/token; a bot does hundreds (live-measured)
 MIN_TOKENS = 8             # distinct tokens: one hot token ≠ skill
 MIN_WIN_RATE = 0.50        # profitable on a majority of positions
 MIN_REALIZED_USD = 1_000   # actually made money, not rounding noise
@@ -76,9 +77,14 @@ def wallet_skill(address: str, chain: str) -> dict:
     n_tok = len(per)
     wins = sum(1 for x in per if float(x.get("realized_profit_usd") or 0) > 0)
     win_rate = wins / n_tok if n_tok else 0.0
-    is_bot = trades > MAX_TRADES
+    # trades-per-token cleanly separates a discretionary trader (~3-7 trades/token,
+    # live-measured) from a high-frequency bot (>100/token) — sharper than the absolute
+    # MAX_TRADES, which a 2900-trades/10-tokens bot would slip past.
+    per_token = trades / n_tok if n_tok else 0
+    is_bot = trades > MAX_TRADES or per_token > MAX_TRADES_PER_TOKEN
     is_garbage = realized > MAX_REALIZED_USD    # overflow / whale, not copyable
     skilled = (MIN_TRADES <= trades <= MAX_TRADES and n_tok >= MIN_TOKENS
+               and per_token <= MAX_TRADES_PER_TOKEN
                and win_rate >= MIN_WIN_RATE
                and MIN_REALIZED_USD <= realized <= MAX_REALIZED_USD)
     reason = ("跨%d币%d笔·净$%d·胜率%.0f%%" % (n_tok, trades, realized, win_rate * 100))
@@ -102,7 +108,11 @@ def _recent_buyers(token: str, chain: str, limit: int = 60) -> list[str]:
     for r in ((d or {}).get("result") or []):
         if str(r.get("transactionType")).lower() != "buy":
             continue
-        w = (r.get("walletAddress") or "").lower()
+        # Moralis swaps does not reliably populate walletAddress — try the same key
+        # fallbacks the proven reader uses, or the wallet silently drops and buyers
+        # are undercounted toward a false 'unknown'.
+        w = (r.get("walletAddress") or r.get("wallet_address")
+             or r.get("fromAddress") or r.get("from_address") or "").lower()
         if w and w not in seen:
             seen.add(w)
             out.append(w)
@@ -112,19 +122,29 @@ def _recent_buyers(token: str, chain: str, limit: int = 60) -> list[str]:
 def _collapse_to_entities(wallets: list[str], chain: str) -> list[list[str]]:
     """Group funder-linked wallets: five mules from one funder are ONE actor, not five
     converging smart-money wallets. Each returned group is one independent entity.
-    A wallet whose funder can't be resolved stays its own entity (unknown ≠ merged)."""
+    A wallet whose funder can't be resolved stays its own entity (unknown ≠ merged).
+
+    A CEX/disperser funder does NOT indicate one actor — it links thousands of
+    unrelated retail wallets (the falsified 'family root' lesson). Collapsing on a
+    CEX funder would merge genuinely independent smart-money wallets and defeat the
+    whole independence check, so a CEX-funded wallet stays its own entity."""
     try:
         from src.onchain.funder_graph import get_funders
         fmap = get_funders(wallets, chain)
     except Exception:
         fmap = {}
+    try:
+        from src.onchain.cex_addresses import evm_exchanges
+        cex = {a.lower() for a in evm_exchanges()}
+    except Exception:
+        cex = set()
     by_funder: dict = {}
     singletons: list[list[str]] = []
     for w in wallets:
         f = str(fmap.get(w) or "").lower()
-        if f:
+        if f and f not in cex:          # a shared NON-CEX funder = same actor
             by_funder.setdefault(f, []).append(w)
-        else:
+        else:                            # no funder, or a CEX funder → independent
             singletons.append([w])
     return list(by_funder.values()) + singletons
 
@@ -149,14 +169,22 @@ def convergence(token: str, chain: str, max_check: int = 20) -> dict:
     for group in entities:
         if checked >= max_check:
             break
-        # score the group's largest/first wallet as its representative
-        rep = group[0]
-        checked += 1
-        sk = wallet_skill(rep, chain)
-        time.sleep(0.2)
-        if sk.get("skilled"):
+        # An entity counts as skilled if ANY of its wallets is skilled — group[0] is
+        # just the first-seen wallet (DESC order), not the best, so scoring only it
+        # would miss a skilled wallet grouped behind an unskilled co-funded one.
+        hit = None
+        for w in group[:3]:              # bounded: check up to 3 of a group
+            if checked >= max_check:
+                break
+            checked += 1
+            sk = wallet_skill(w, chain)
+            time.sleep(0.2)
+            if sk.get("skilled"):
+                hit = {"wallet": w, "mules": len(group), **sk}
+                break
+        if hit:
             skilled_entities += 1
-            skilled_wallets.append({"wallet": rep, "mules": len(group), **sk})
+            skilled_wallets.append(hit)
 
     if skilled_entities >= 3:
         verdict = "convergence"
