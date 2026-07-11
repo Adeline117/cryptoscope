@@ -37,8 +37,14 @@ logger = structlog.get_logger()
 DB_PATH = DATA_DIR / "alert_outcomes.db"
 
 # A new episode starts after this much silence on the same (token, direction, phase),
-# or immediately on a phase change. Reuses the value that sat dead in outcome_tracker.
-EPISODE_GAP_MIN = 45
+# or immediately on a phase change. Set to the HOLDING HORIZON, not a 45-min burst
+# window: you can hold only ONE position per token at a time, so two same-direction
+# alerts within the outcome horizon are the SAME position, not independent bets. The
+# 45-min window let one sustained decline (BASED, 2026-07-01→02) count as 4 independent
+# "hits" and inflated the directional lift from ~1.7 to ~1.9 — the SIREN-40-fire double
+# count at a coarser time scale. 24h merges the position; genuinely separate events
+# (>24h apart, or a phase flip) still split.
+EPISODE_GAP_MIN = 24 * 60
 # Controls drawn per episode when estimating the token's own base rate.
 CONTROLS_PER_EPISODE = 60
 
