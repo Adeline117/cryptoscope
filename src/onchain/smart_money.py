@@ -77,6 +77,12 @@ def wallet_skill(address: str, chain: str) -> dict:
     n_tok = len(per)
     wins = sum(1 for x in per if float(x.get("realized_profit_usd") or 0) > 0)
     win_rate = wins / n_tok if n_tok else 0.0
+    # The SET of tokens traded — a behavioral fingerprint. A wallet FARM (one actor,
+    # many separately-funded wallets to defeat funder clustering) shows up as several
+    # wallets with near-identical token sets. convergence() collapses on this so a
+    # farm can't masquerade as N independent skilled entities (the CZBULL lesson).
+    token_set = frozenset((x.get("token_address") or "").lower()
+                          for x in per if x.get("token_address"))
     # trades-per-token cleanly separates a discretionary trader (~3-7 trades/token,
     # live-measured) from a high-frequency bot (>100/token) — sharper than the absolute
     # MAX_TRADES, which a 2900-trades/10-tokens bot would slip past.
@@ -94,7 +100,7 @@ def wallet_skill(address: str, chain: str) -> dict:
         reason = f"盈利数异常(${realized:.0e})— 溢出/巨鲸,剔除"
     return {"available": True, "skilled": skilled, "trades": trades, "tokens": n_tok,
             "realized_usd": round(realized), "win_rate": round(win_rate, 2),
-            "is_bot": is_bot, "reason": reason}
+            "is_bot": is_bot, "reason": reason, "token_set": token_set}
 
 
 def _recent_buyers(token: str, chain: str, limit: int = 60) -> list[str]:
@@ -149,13 +155,44 @@ def _collapse_to_entities(wallets: list[str], chain: str) -> list[list[str]]:
     return list(by_funder.values()) + singletons
 
 
+def _collapse_by_behavior(skilled: list[dict], containment: float = 0.6) -> list[list[dict]]:
+    """Group skilled wallets that trade near-identical token SETS into one actor.
+
+    A wallet farm funds each wallet separately (often from a CEX) so the funder graph
+    never links them — but the wallets run ONE strategy, so their traded-token sets
+    are near-identical. Independent traders share at most the few hot tokens; a farm
+    shares ~everything. CZBULL surfaced 10 'skilled entities' that were one farm:
+    three sampled wallets had 61/61, 60/61, 60/61 identical token sets. So collapse on
+    token-set containment: if one wallet's set is >=`containment` inside another's,
+    they are the same actor. Greedy single-link clustering (farms are tight, so the
+    representative-set drift of single-link is not a problem here)."""
+    groups: list[dict] = []
+    for sk in skilled:
+        ts = sk.get("token_set") or frozenset()
+        placed = False
+        if ts:
+            for g in groups:
+                rep = g["rep"]
+                inter = len(ts & rep)
+                denom = min(len(ts), len(rep)) or 1
+                if inter / denom >= containment:
+                    g["members"].append(sk)
+                    g["rep"] = rep | ts          # grow the actor's footprint
+                    placed = True
+                    break
+        if not placed:
+            groups.append({"rep": set(ts), "members": [sk]})
+    return [g["members"] for g in groups]
+
+
 def convergence(token: str, chain: str, max_check: int = 20) -> dict:
     """Independent SKILLED wallets converging on this token now.
 
     Returns {available, buyers_checked, skilled_entities, skilled_wallets, verdict,
     detail}. `verdict` ∈ convergence | some | none | unknown. Convergence requires
-    >=3 INDEPENDENT skilled entities — one skilled buyer is noise, and a cluster of
-    mules is one actor no matter how many wallets.
+    >=3 INDEPENDENT skilled entities — one skilled buyer is noise, a cluster of mules
+    is one actor no matter how many wallets, and a behaviorally-identical wallet FARM
+    (separately funded to dodge funder clustering) is likewise ONE actor.
     """
     buyers = _recent_buyers(token, chain)
     if not buyers:
@@ -186,18 +223,31 @@ def convergence(token: str, chain: str, max_check: int = 20) -> dict:
             skilled_entities += 1
             skilled_wallets.append(hit)
 
-    if skilled_entities >= 3:
+    # SECOND independence pass: collapse behaviorally-identical wallets (a farm the
+    # funder graph missed). The COUNT that decides convergence is farms, not wallets.
+    farms = _collapse_by_behavior(skilled_wallets)
+    distinct_actors = len(farms)
+    farmed_out = skilled_entities - distinct_actors     # wallets revealed as one farm
+
+    if distinct_actors >= 3:
         verdict = "convergence"
-    elif skilled_entities >= 1:
+    elif distinct_actors >= 1:
         verdict = "some"
     else:
         verdict = "none"
+
+    detail = (f"{checked}个买家实体中 {skilled_entities} 个聪明钱钱包 → 按行为去重后 "
+              f"{distinct_actors} 个独立主体({'收敛' if verdict=='convergence' else verdict})")
+    caveats = ["反身性:人人跟同一批聪明钱→edge衰减",
+               "延迟:你看到时已落后其入场价",
+               "幸存者偏差:盈利历史仍可能是运气,前向验证+死线才算数"]
+    if farmed_out > 0:
+        detail += f" ⚠️ 有 {farmed_out} 个钱包被识别为同一钱包农场(交易同一组币),已合并"
+        caveats.insert(0, f"钱包农场:{skilled_entities}个'聪明钱'实为{distinct_actors}个主体,"
+                          f"农场刷量伪装成收敛(CZBULL教训)")
     return {"available": True, "buyers_checked": checked,
             "independent_entities": len(entities),
-            "skilled_entities": skilled_entities,
+            "skilled_wallets_n": skilled_entities,
+            "skilled_entities": distinct_actors,          # behavior-deduped = the real count
             "skilled_wallets": skilled_wallets, "verdict": verdict,
-            "detail": (f"{checked}个独立买家实体中 {skilled_entities} 个是已实现盈利的"
-                       f"聪明钱({'收敛' if verdict=='convergence' else verdict})"),
-            "caveats": ["反身性:人人跟同一批聪明钱→edge衰减",
-                        "延迟:你看到时已落后其入场价",
-                        "幸存者偏差:盈利历史仍可能是运气,前向验证+死线才算数"]}
+            "detail": detail, "caveats": caveats}

@@ -152,12 +152,26 @@ def test_strong_steady_buy_pressure_reaches_long(monkeypatch):
     hit = {}
     def conv(t, c, **k):
         hit["reached"] = True
-        return {"verdict": "some", "skilled_entities": 2}
+        return {"verdict": "convergence", "skilled_entities": 3}
     monkeypatch.setattr("src.onchain.smart_money.convergence", conv)
     # ratio 4.5 (45 buys / 10 sells), NOT accelerating (h1*6 = 270 < h6 1000)
     r = yf.classify(_cand(txns={"h1": {"buys": 45, "sells": 10}, "h6": {"buys": 1000}}))
     assert hit.get("reached"), "strong steady buy pressure must reach the smart-money gate"
     assert r and r["direction"] == "long"
+
+
+def test_some_smart_money_is_not_enough_for_long(monkeypatch):
+    """The CZBULL lesson: 'some' (1-2 skilled actors, or a wallet farm collapsed to
+    one) must NOT fire a LONG. Only true convergence (>=3 independent actors) does —
+    one skilled buyer is noise and a farm churning its own token is one actor."""
+    _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
+         largest_entity_pct=6, dominant_cluster_wallets=[])
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda t, c: {"available": True, "flags": {}, "facts": []})
+    monkeypatch.setattr("src.onchain.smart_money.convergence",
+                        lambda t, c, **k: {"verdict": "some", "skilled_entities": 1})
+    r = yf.classify(_cand(txns={"h1": {"buys": 45, "sells": 10}, "h6": {"buys": 1000}}))
+    assert r is None, "'some' smart money (farm/noise) must not reach a LONG"
 
 
 def test_fifteen_pct_single_entity_not_long(monkeypatch):

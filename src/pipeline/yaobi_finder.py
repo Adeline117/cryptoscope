@@ -280,9 +280,14 @@ def classify(cand: dict) -> dict | None:
         conv = convergence(tok, ch, max_check=12)
     except Exception:
         conv = {"verdict": "unknown", "skilled_entities": 0}
-    sk = conv.get("skilled_entities", 0)
-    if conv.get("verdict") not in ("some", "convergence"):
-        return None                            # no proven-profitable money entering
+    sk = conv.get("skilled_entities", 0)          # behavior-deduped independent actors
+    if conv.get("verdict") != "convergence":
+        # Require TRUE convergence (>=3 INDEPENDENT actors), not "some" (1-2). One
+        # skilled buyer is noise, and — the CZBULL lesson — a wallet farm churning its
+        # own token collapses to a single actor that would otherwise read as "some".
+        # A LONG only earns the label when several independent proven-profitable
+        # wallets converge; that is the whole "聪明钱进场" thesis.
+        return None
     score = 20 + sk * 15 + min(bp["ratio_h1"], 5) * 4
     if cand["age_days"] <= 10:
         score += 10
