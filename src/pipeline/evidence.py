@@ -49,7 +49,7 @@ def _rows(conn: sqlite3.Connection) -> list[dict]:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(alerts)")}
     phase = "phase" if "phase" in cols else "NULL AS phase"
     q = (f"SELECT id, ts, token, chain, symbol, kind, direction, price0, liquidity, "
-         f"hit_4h, hit_24h, resolved, {phase} FROM alerts "
+         f"price_4h, price_24h, hit_4h, hit_24h, resolved, {phase} FROM alerts "
          f"WHERE chain != 'majors' ORDER BY token, chain, direction, ts")
     return [dict(zip([c[0] for c in conn.execute(q).description], r))
             for r in conn.execute(q)]
@@ -64,10 +64,12 @@ def episodes(db_path=None) -> list[dict]:
 
     An episode is a contiguous run of alerts on the same (token, chain, direction)
     where consecutive fires are < EPISODE_GAP_MIN apart AND the phase hasn't changed.
-    The FIRST fire supplies the entry (`price0`, `liquidity`) — that is the price you
-    could actually have traded on. The episode is `resolved` once its first fire is,
-    and its `hit` is that first fire's outcome. Later fires are confirmations of an
-    already-known event; scoring them again is double-counting.
+    The ANCHOR fire — the first fire with a real entry price (`price0 > 0`) — supplies
+    entry, outcome and liquidity; that is the price you could actually have traded on.
+    Pinning to the literal first fire was a bug: a first fire logged with `price0=0`
+    (market data unavailable at log time) is retired unscoreable, discarding a later
+    sibling fire that holds the only real hit. Later fires are otherwise confirmations
+    of an already-known event; scoring them again is double-counting.
     """
     conn = sqlite3.connect(str(db_path or DB_PATH))
     try:
@@ -75,31 +77,35 @@ def episodes(db_path=None) -> list[dict]:
     finally:
         conn.close()
 
-    out: list[dict] = []
-    cur: dict | None = None
+    # group into episodes (a list of fires each)
+    groups: list[list[dict]] = []
+    key = last_ts = phase = None
     for r in rows:
-        key = (r["token"], r["chain"], r["direction"])
-        new_ep = (
-            cur is None
-            or cur["key"] != key
-            or (r["phase"] or "") != (cur["phase"] or "")
-            or _ts(r["ts"]) - _ts(cur["last_ts"]) >= timedelta(minutes=EPISODE_GAP_MIN)
-        )
+        k = (r["token"], r["chain"], r["direction"])
+        new_ep = (not groups or k != key or (r["phase"] or "") != (phase or "")
+                  or _ts(r["ts"]) - _ts(last_ts) >= timedelta(minutes=EPISODE_GAP_MIN))
         if new_ep:
-            cur = {"key": key, "token": r["token"], "chain": r["chain"],
-                   "symbol": r["symbol"], "direction": r["direction"],
-                   "phase": r["phase"], "start_ts": r["ts"], "last_ts": r["ts"],
-                   "kind": r["kind"], "price0": r["price0"],
-                   "liquidity": r["liquidity"] or 0, "n_fires": 1,
-                   # resolved: 1 = scored, 2 = RETIRED (never priceable). Only 1 may
-                   # enter a denominator — a retired alert scored as a miss would
-                   # silently drag the hit rate down.
-                   "resolved": r["resolved"] == 1, "hit_4h": r["hit_4h"],
-                   "hit_24h": r["hit_24h"]}
-            out.append(cur)
+            groups.append([r])
+            key, phase = k, r["phase"]
         else:
-            cur["last_ts"] = r["ts"]
-            cur["n_fires"] += 1
+            groups[-1].append(r)
+        last_ts = r["ts"]
+
+    out: list[dict] = []
+    for fires in groups:
+        f0 = fires[0]
+        anchor = next((f for f in fires if f["price0"] and f["price0"] > 0), f0)
+        out.append({
+            "key": (f0["token"], f0["chain"], f0["direction"]),
+            "token": f0["token"], "chain": f0["chain"], "symbol": f0["symbol"],
+            "direction": f0["direction"], "phase": f0["phase"],
+            "start_ts": f0["ts"], "kind": f0["kind"], "n_fires": len(fires),
+            "price0": anchor["price0"], "price_24h": anchor.get("price_24h"),
+            "liquidity": anchor["liquidity"] or 0,
+            # resolved: 1 = scored, 2 = RETIRED (never priceable). Only 1 counts — a
+            # retired alert scored as a miss would silently drag the hit rate down.
+            "resolved": anchor["resolved"] == 1,
+            "hit_4h": anchor["hit_4h"], "hit_24h": anchor["hit_24h"]})
     return out
 
 
@@ -253,7 +259,22 @@ def _lift_block(res: list[dict], direction: str, tradeable: bool) -> list[str]:
         lines.append("      → 无可比事件,不给结论")
         return lines
 
-    k_m = sum(1 for e, _ in matched if e["hit_24h"])
+    # F1 fix: the OBSERVED numerator must use the SAME threshold as the expected.
+    # In mode B (directional) `expected` is computed at a flat 5% bar, but the stored
+    # `hit_24h` was computed at the alert's REAL pool liquidity (slippage-adjusted, e.g.
+    # 47% on a $33k pool). Reusing hit_24h there scored a −28% short as a MISS while its
+    # expectation was summed at 5% → a fabricated lift ≈ 0, and the report told the user
+    # the DIRECTIONAL detector was worse than random when a −28% call was directionally
+    # right. In mode B, recompute the hit from the raw move at 5%.
+    from src.pipeline.outcome_tracker import _hit
+    def observed_hit(e: dict) -> int:
+        if tradeable:
+            return 1 if e["hit_24h"] else 0
+        p0, p1 = e.get("price0"), e.get("price_24h")
+        if not p0 or not p1:
+            return 1 if e["hit_24h"] else 0        # no raw price → fall back
+        return _hit(direction, p0, p1, 0)          # flat 5%, matches the expectation
+    k_m = sum(observed_hit(e) for e, _ in matched)
     n_m = len(matched)
     expected = sum(p for _, p in matched)          # Poisson-binomial expectation
     lo, hi = wilson(k_m, n_m)
@@ -262,8 +283,11 @@ def _lift_block(res: list[dict], direction: str, tradeable: bool) -> list[str]:
     for e, p in matched:
         by_sym.setdefault(e["symbol"], []).append(p)
     for sym, ps in sorted(by_sym.items()):
-        thr = hit_threshold_pct(next(e["liquidity"] for e, _ in matched
-                                     if e["symbol"] == sym) if tradeable else 0)
+        # median liquidity of the symbol's episodes, not an arbitrary first one — a
+        # symbol whose episodes span $32k–$38k has different thresholds per episode.
+        liqs = sorted(e["liquidity"] for e, _ in matched if e["symbol"] == sym)
+        med_liq = liqs[len(liqs) // 2] if (tradeable and liqs) else 0
+        thr = hit_threshold_pct(med_liq)
         lines.append(f"      {sym:9} 随机基准 {sum(ps)/len(ps)*100:5.1f}%  "
                      f"(命中门槛 {thr:.1f}%, {len(ps)} 个事件)")
     lines.append(f"      → 匹配子集: 实际 {k_m}/{n_m} "
@@ -374,16 +398,23 @@ def kill_line(db_path=None) -> str:
         return "\n".join(lines)
 
     lines.append(f"可开空事件: {len(eps)}   |   不可开空事件(不计入): {untradeable}")
-    if untradeable and not eps:
-        lines.append("")
-        lines.append("🔴 全部事件都发生在【不能开空的币】上(BSC 小盘妖币无永续合约)。")
-        lines.append("   在这些币上measure出的任何 edge 都无法变现 —— 这是能力与变现场所的")
-        lines.append("   结构性错配,不是数据不足。可交易宇宙的积累速率 = 0/天,判定期 = ∞。")
-        lines.append("")
-        lines.append("   必须先扩大【perp 币上的】事件面,否则这个赌注永远无法判定:")
-        lines.append("   · perp_cex_scan 每日跑满 190 币(当前 0 命中 → 需实测信号密度)")
-        lines.append("   · 把 mobilization(授权/注gas)与 LP 解锁接到 perp 大户上")
-        lines.append("   · 或承认:我们最擅长探测的币,恰恰是不能做空的币")
+    # No shortable event-kind episodes at all. Without this guard the min()/max() over
+    # an empty `eps` below CRASHED the whole report — 'not measured' must never be a
+    # stack trace. Two sub-cases: events exist but none are shortable (structural
+    # mismatch), or no event-precursor alerts have fired yet (未测量).
+    if not eps:
+        if untradeable:
+            lines.append("")
+            lines.append("🔴 全部事件都发生在【不能开空的币】上(BSC 小盘妖币无永续合约)。")
+            lines.append("   在这些币上measure出的任何 edge 都无法变现 —— 这是能力与变现场所的")
+            lines.append("   结构性错配,不是数据不足。可交易宇宙的积累速率 = 0/天,判定期 = ∞。")
+            lines.append("")
+            lines.append("   必须先扩大【perp 币上的】事件面,否则这个赌注永远无法判定:")
+            lines.append("   · perp_cex_scan 每日跑满 190 币(当前 0 命中 → 需实测信号密度)")
+            lines.append("   · 把 mobilization(授权/注gas)与 LP 解锁接到 perp 大户上")
+            lines.append("   · 或承认:我们最擅长探测的币,恰恰是不能做空的币")
+        else:
+            lines.append("尚无事件抢先类告警 → 未测量(不是'无 edge')。")
         return "\n".join(lines)
 
     resolved = [e for e in eps if e["resolved"]]

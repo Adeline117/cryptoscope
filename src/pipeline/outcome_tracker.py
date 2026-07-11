@@ -196,8 +196,12 @@ def resolve_outcomes() -> int:
                 if px:
                     updates["price_24h"] = px
                     updates["hit_24h"] = _hit(direction, p0, px, liq or 0)
-            done = (p4 is not None or "price_4h" in updates) and \
-                   (p24 is not None or "price_24h" in updates)
+            # RESOLVED is gated on the 24h horizon ONLY — that is the horizon the
+            # scoreboard reads. Requiring the 4h price too meant a valid 24h hit on a
+            # thin pool (whose 4h candle GeckoTerminal omits for no-trade hours) stayed
+            # resolved=0, went invisible for 14 days, then was retired — silently
+            # deleting real outcomes from the denominator. 4h is a bonus, not a gate.
+            done = (p24 is not None or "price_24h" in updates)
             if updates:
                 if done:
                     updates["resolved"] = 1
