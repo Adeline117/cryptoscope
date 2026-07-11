@@ -216,11 +216,28 @@ def resolve_outcomes() -> int:
     return resolved
 
 
+# The banner that MUST head any raw tally off this table. It is the structural
+# guard against class-2 (the "44% hit rate" that was 40 duplicate SIREN rows from
+# one 17-min episode read as independent trials). Frozen by tests/test_no_bare_hitrate.
+_AUDIT_TALLY_DISCLAIMER = (
+    "⚠️ 原始审计计数 · 不是命中率 · 每行是一次触发(含同一事件的重复),非独立试验。\n"
+    "   真实命中率/基准率/Wilson 区间只看 evidence.report()(按 episode 去重)。")
+
+
 def hit_rate_report() -> str:
+    """RAW audit-trail tally of the alerts table — deliberately NOT a hit rate.
+
+    Every row is one fire, including repeats of the same ongoing episode, so a naive
+    SUM(hit)/COUNT over these rows is the exact 44%-fake mechanism (log_alert's
+    docstring: 'Never compute a hit rate off this table directly; go through
+    evidence.episodes()'). This report therefore leads with a disclaimer, labels its
+    numbers as raw counts, and points to evidence.report() for the honest measurement.
+    """
     c = _conn()
     try:
         total = c.execute("SELECT COUNT(*) FROM alerts").fetchone()[0]
-        lines = ["=" * 56, f"告警命中率(共 {total} 条告警)", "=" * 56]
+        lines = ["=" * 56, f"告警原始审计计数(共 {total} 行触发,非独立事件)", "=" * 56,
+                 _AUDIT_TALLY_DISCLAIMER, "-" * 56]
         for direction in ("long", "short"):
             for h in ("4h", "24h"):
                 row = c.execute(
@@ -228,17 +245,21 @@ def hit_rate_report() -> str:
                     f"WHERE direction=? AND hit_{h} IS NOT NULL", (direction,)).fetchone()
                 n, hits = row[0], (row[1] or 0)
                 if n:
-                    lines.append(f"  {direction:5} {h}: {hits}/{n} 命中 ({hits/n*100:.0f}%)")
+                    # raw counts only — NO percentage, so this line can never be
+                    # lifted out of context and quoted as a hit rate.
+                    lines.append(f"  {direction:5} {h}: {hits}/{n} 行命中(原始,未去重)")
         # by kind
-        lines.append("  ── 按信号类型(24h)──")
+        lines.append("  ── 按信号类型(24h · 原始行)──")
         for kind, n, hits in c.execute(
             "SELECT kind, COUNT(*), SUM(hit_24h) FROM alerts "
             "WHERE hit_24h IS NOT NULL GROUP BY kind"):
-            lines.append(f"  {kind:10}: {(hits or 0)}/{n} ({(hits or 0)/n*100:.0f}%)")
+            lines.append(f"  {kind:10}: {(hits or 0)}/{n} 行")
         pending = c.execute("SELECT COUNT(*) FROM alerts WHERE resolved=0").fetchone()[0]
         lines.append(f"  待结算: {pending}")
         if total == 0:
             lines.append("  (还没有告警——等哨兵触发后开始累积)")
+        lines.append("-" * 56)
+        lines.append("→ 命中率/edge 看 evidence.report()(episode 去重 + 基准率 + Wilson)")
         return "\n".join(lines)
     finally:
         c.close()
