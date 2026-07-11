@@ -209,7 +209,12 @@ def classify(cand: dict) -> dict | None:
         sig = effective_concentration_signal(holders, tok, ch) or {}
     except Exception:
         return None
-    if not sig.get("supply_verified"):        # subset ratio ≠ supply share
+    if not sig.get("supply_verified"):
+        # subset ratio ≠ supply share. But a supply-RPC OUTAGE makes EVERY token fail
+        # this, and an empty scan then looks like 'no operators found' when it's really
+        # 'couldn't check'. Log it so a run of these is visible as an outage, not read
+        # as a clean scan (the failure-becomes-conclusion trap).
+        logger.info("yaobi_supply_unverified", token=cand.get("address"), chain=ch)
         return None
     lg = sig.get("largest_entity_pct") or 0
     gap = sig.get("concentration_gap") or 0
@@ -227,7 +232,11 @@ def classify(cand: dict) -> dict | None:
         score = gap * 4 + min(lg, 30) * 0.5
         if acq.get("verdict") == "bought":
             score += 20
-        if bp["ratio_h1"] < 0.7:               # already selling
+        # "already selling" bonus only when there is REAL sell data — a monitored token
+        # with missing txns has ratio 0, which is < 0.7 but means 'no data', not
+        # 'heavy selling'. Guarding on sells_h1 > 0 stops a missing read inflating the
+        # short score and biasing the whole ranking.
+        if bp["sells_h1"] > 0 and bp["ratio_h1"] < 0.7:
             score += 15
         shape = "隐藏簇·装弹" if gap >= 6 else "高集中·装弹"
         return {**base, "direction": "short", "op_score": round(score, 1),
@@ -235,18 +244,34 @@ def classify(cand: dict) -> dict | None:
                 "signals": f"集中{lg:.0f}% gap{gap:.0f} 买卖比{bp['ratio_h1']}"}
 
     # ---- LONG (会涨): healthy + demand + smart money + clean ----
-    if lg >= 20:                                # too concentrated for a clean run
-        return None
-    if not (bp["ratio_h1"] >= 1.5 and bp["accelerating"]):
+    if lg >= 15:                                # a single ~15%+ entity ≠ healthy for a
+        return None                             # clean run (tightened from 20 — the
+                                                # research floor is "top holder well
+                                                # under 20%").
+    # demand gate (cheap pre-filter before the expensive smart-money check): a token
+    # is worth the smart-money lookup if buying is ACCELERATING, or buy dominance is
+    # simply strong (ratio >= 2.5) — a 4.5 buy/sell ratio is real demand even if steady,
+    # and the trace showed the accelerating-only rule wrongly rejecting it. Smart money
+    # (gate 5) remains the real discriminator; this only gates who reaches it.
+    if not (bp["ratio_h1"] >= 1.5 and (bp["accelerating"] or bp["ratio_h1"] >= 2.5)):
         return None                            # no demand building → not a long yet
     # clean contract gate (cheap-ish) before the expensive smart-money check
     try:
         from src.onchain.goplus_client import rug_risk
         rr = rug_risk(tok, ch)
-        crit = rr.get("available") and any(k in " ".join(rr.get("facts", []))
-                                           for k in ("蜜罐", "改余额", "可增发且", "暂停", "不可信"))
-        if crit:
-            return None                        # rug flags disqualify a long
+        if rr.get("available"):
+            f = rr.get("flags") or {}
+            # STRUCTURED flags, not Chinese substring matching — the substring form had
+            # "可增发且" which never matched the real fact "可增发(...", so mintable
+            # tokens slipped through the long gate. A LONG is something you'd buy, so
+            # any of these disqualifies:
+            crit = (f.get("is_honeypot") == 1 or f.get("owner_change_balance") == 1
+                    or f.get("transfer_pausable") == 1 or f.get("can_take_back_ownership") == 1
+                    or (f.get("is_mintable") == 1 and rr.get("owner_renounced") is not True)
+                    or (rr.get("owner_renounced") is None
+                        and any("不可信" in x for x in rr.get("facts", []))))
+            if crit:
+                return None                    # rug/mint/pause risk disqualifies a long
     except Exception:
         pass
     # smart money — the LEADING signal, expensive, run last only for long-eligible
@@ -287,6 +312,9 @@ def _dex_candidate(token: str, chain: str) -> dict | None:
     return {"address": token, "chain": chain,
             "symbol": (pr.get("baseToken") or {}).get("symbol", "?"),
             "price": float(pr.get("priceUsd") or 0), "liq": liq,
+            "txns": pr.get("txns") or {},      # BUG FIX: without this every MONITORED
+            # token re-analysed by the funnel had buy_pressure 0 → the long path was
+            # structurally unreachable for the entire capture-and-monitor mechanism.
             "vol": float(pr.get("volume", {}).get("h24") or 0), "age_days": round(age, 1),
             "mcap": float(pr.get("marketCap") or pr.get("fdv") or 0),
             "ch24": (pr.get("priceChange") or {}).get("h24")}

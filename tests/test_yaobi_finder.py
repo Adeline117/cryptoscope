@@ -104,3 +104,65 @@ def test_monitor_add_is_idempotent(tmp_path, monkeypatch):
     yf._monitor_add([{"address": "0xA", "chain": "bsc", "symbol": "A"}])
     yf._monitor_add([{"address": "0xa", "chain": "bsc", "symbol": "A"}])   # same, lower
     assert yf._monitor_size() == 1, "first_seen must be preserved, not re-added"
+
+
+def test_mintable_token_disqualified_from_long(monkeypatch):
+    """The rug gate used a substring '可增发且' that never matched the real fact
+    '可增发(...'. A mintable, non-renounced token must NOT be a long candidate."""
+    _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
+         largest_entity_pct=4, dominant_cluster_wallets=[])
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk", lambda t, c: {
+        "available": True, "flags": {"is_mintable": 1}, "owner_renounced": False,
+        "facts": ["可增发(owner 能凭空铸币稀释)"]})
+    monkeypatch.setattr("src.onchain.smart_money.convergence",
+                        lambda t, c, **k: {"verdict": "convergence", "skilled_entities": 3})
+    r = yf.classify(_cand(txns={"h1": {"buys": 40, "sells": 10}, "h6": {"buys": 120}}))
+    assert r is None, "mintable+not-renounced must be disqualified from long"
+
+
+def test_honeypot_disqualified_from_long(monkeypatch):
+    _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
+         largest_entity_pct=4, dominant_cluster_wallets=[])
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk", lambda t, c: {
+        "available": True, "flags": {"is_honeypot": 1}, "owner_renounced": True, "facts": []})
+    monkeypatch.setattr("src.onchain.smart_money.convergence",
+                        lambda t, c, **k: {"verdict": "convergence", "skilled_entities": 3})
+    assert yf.classify(_cand(txns={"h1": {"buys": 40, "sells": 10}, "h6": {"buys": 120}})) is None
+
+
+def test_missing_txns_does_not_inflate_short_score(monkeypatch):
+    """A monitored token with no txns has ratio 0; that must NOT trigger the
+    'already selling +15' bonus — missing data is not heavy selling."""
+    _sig(monkeypatch)  # gap 10 -> short
+    monkeypatch.setattr("src.onchain.operator_id.acquisition_mode",
+                        lambda *a, **k: {"verdict": "bought"})
+    no_txns = yf.classify(_cand(txns={}))            # missing data
+    real_sell = yf.classify(_cand(txns={"h1": {"buys": 1, "sells": 50}, "h6": {"buys": 10}}))
+    assert no_txns["direction"] == "short" and real_sell["direction"] == "short"
+    assert real_sell["op_score"] > no_txns["op_score"], "only real selling gets the +15"
+
+
+def test_strong_steady_buy_pressure_reaches_long(monkeypatch):
+    """A 4.5 buy/sell ratio that is NOT accelerating is still real demand and must
+    reach the smart-money gate (the trace found accelerating-only wrongly rejected it)."""
+    _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
+         largest_entity_pct=6, dominant_cluster_wallets=[])
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda t, c: {"available": True, "flags": {}, "facts": []})
+    hit = {}
+    def conv(t, c, **k):
+        hit["reached"] = True
+        return {"verdict": "some", "skilled_entities": 2}
+    monkeypatch.setattr("src.onchain.smart_money.convergence", conv)
+    # ratio 4.5 (45 buys / 10 sells), NOT accelerating (h1*6 = 270 < h6 1000)
+    r = yf.classify(_cand(txns={"h1": {"buys": 45, "sells": 10}, "h6": {"buys": 1000}}))
+    assert hit.get("reached"), "strong steady buy pressure must reach the smart-money gate"
+    assert r and r["direction"] == "long"
+
+
+def test_fifteen_pct_single_entity_not_long(monkeypatch):
+    """Tightened: a single 15%+ entity is not 'healthy distribution' for a long."""
+    _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
+         largest_entity_pct=17, dominant_cluster_wallets=["0x1"])
+    r = yf.classify(_cand(txns={"h1": {"buys": 40, "sells": 5}, "h6": {"buys": 60}}))
+    assert r is None or r["direction"] != "long"
