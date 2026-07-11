@@ -196,6 +196,17 @@ def create_scheduler() -> AsyncIOScheduler:
         name="早期操盘吸筹 (新发币·从市场买入·前向记录)",
     )
 
+    # Every 3h: the 妖币 FINDER — the repo's day-one goal. Wide continuous scan of the
+    # young-token window (NOT trending, which is post-pump) for verified real operators,
+    # accumulating a ranked watchlist. Frequent because the signature is ~1% rare and
+    # only a wide net over time builds a real list.
+    scheduler.add_job(
+        _run_yaobi_finder,
+        CronTrigger(hour="*/3", minute=25),
+        id="yaobi_finder",
+        name="妖币发现器 (年轻币·核实真操盘·观察名单)",
+    )
+
     # Cluster coverage → weekly Dune holder reconstruction per sentinel; alerts on
     # untracked big EOAs / reconstruction drift (the manual audit, institutionalized).
     scheduler.add_job(
@@ -625,6 +636,45 @@ async def _run_perp_cex_scan():
     elif hits:
         logger.info("perp_alerts_suppressed_unproven", n=len(hits))
     logger.info("perp_cex_scan_done", hits=len(hits), logged=logged)
+
+
+async def _run_yaobi_finder():
+    """The 妖币 finder — the repo's actual goal: FIND operator tokens, early. Wide scan
+    of the young-token accumulation window for verified real operators, persisted to a
+    ranked watchlist and forward-recorded. Records always; pushes the strongest (young
+    + verified-bought) when unmuted. It finds real operators — it does not claim which
+    pump; timing is the user's call on a clean list."""
+    logger.info("scheduled_yaobi_finder")
+    from src.pipeline.operator_sentinel import alerts_muted
+    from src.pipeline.outcome_tracker import log_alert
+    from src.pipeline.yaobi_finder import scan, watchlist
+
+    try:
+        finds = scan(chains=("bsc", "base"), pages=3, max_analyze=60)
+    except Exception as e:
+        logger.warning("yaobi_finder_failed", error=str(e)[:80])
+        return
+    logged = 0
+    for r in finds:
+        if r.get("price") and r.get("acquisition") == "bought":
+            try:
+                log_alert(r["address"], r["chain"], r["symbol"],
+                          "妖币发现·从市场买入", "long", r["price"], r.get("liq") or 0,
+                          phase="accumulate")
+                logged += 1
+            except Exception:
+                pass
+    strong = [r for r in finds if r.get("acquisition") == "bought" and r.get("age_days", 99) <= 10]
+    if strong and not alerts_muted():
+        from src.distribution.telegram_sender import send_alert
+        msg = "🎯 <b>妖币发现 — 核实真操盘(年轻·从市场买入)</b>\n━━━━━━━━━━\n"
+        for r in strong[:8]:
+            msg += (f"<b>{r['symbol']}</b> [{r['chain']}] 龄{r['age_days']}d "
+                    f"持{r['largest_pct']:.0f}% gap{r['gap']:.0f} mc${r['mcap']/1e6:.1f}M\n")
+        msg += "已核实真holder/供应/买入。不预测拉盘时机 — 名单之上自己判断。"
+        await send_alert(msg)
+    logger.info("yaobi_finder_done", found=len(finds), logged=logged,
+                watchlist_total=len(watchlist()))
 
 
 async def _run_early_accumulation():
