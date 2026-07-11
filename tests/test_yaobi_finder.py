@@ -67,3 +67,27 @@ def test_persist_and_watchlist_roundtrip(tmp_path, monkeypatch):
                  "liq": 1e5, "mcap": 2e6, "age_days": 5, "op_score": 60, "shape": "隐藏簇",
                  "acquisition": "bought", "largest_pct": 20, "gap": 12, "cluster_n": 5})
     assert len(yf.watchlist()) == 1, "first-seen must be preserved, not overwritten"
+
+
+def test_capture_and_monitor_funnel(tmp_path, monkeypatch):
+    """Fresh candidates are captured to the monitor pool and re-surface as due for
+    re-analysis while still in the age window — the funnel that turns a sparse per-scan
+    yield into an accumulating one."""
+    monkeypatch.setattr(yf, "DB_PATH", tmp_path / "wl.db")
+    yf._monitor_add([{"address": "0xA", "chain": "bsc", "symbol": "A"},
+                     {"address": "0xB", "chain": "bsc", "symbol": "B"}])
+    due = yf._monitor_due()
+    assert {d["token"] for d in due} == {"0xa", "0xb"}
+    assert yf._monitor_size() == 2
+
+    # promoting one removes it from the due/monitor-open pool
+    yf._monitor_touch("0xA", "bsc", promoted=True)
+    assert {d["token"] for d in yf._monitor_due()} == {"0xb"}
+    assert yf._monitor_size() == 1
+
+
+def test_monitor_add_is_idempotent(tmp_path, monkeypatch):
+    monkeypatch.setattr(yf, "DB_PATH", tmp_path / "wl.db")
+    yf._monitor_add([{"address": "0xA", "chain": "bsc", "symbol": "A"}])
+    yf._monitor_add([{"address": "0xa", "chain": "bsc", "symbol": "A"}])   # same, lower
+    assert yf._monitor_size() == 1, "first_seen must be preserved, not re-added"

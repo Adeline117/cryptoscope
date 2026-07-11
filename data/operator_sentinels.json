@@ -29,12 +29,12 @@
       "funding": 0.0057
     },
     "last": {
-      "price": 0.1002,
-      "liquidity": 272823.1,
-      "vol24": 1284553.2,
+      "price": 0.1012,
+      "liquidity": 273148.19,
+      "vol24": 1220981.82,
       "pair": "0x07b7556Ede0f9a6a7d155A78Bc0573f531001A57",
       "cluster_balance": 19659014.20399599,
-      "float_lp": 804498.3276189064,
+      "float_lp": 721096.7554620967,
       "funding": 0.005
     },
     "balanceof_reliable": true,
@@ -74,13 +74,13 @@
       "funding": 0.0669
     },
     "last": {
-      "price": 0.01765,
-      "liquidity": 929776.66,
-      "vol24": 3796.41,
+      "price": 0.0161,
+      "liquidity": 917254.05,
+      "vol24": 2547.45,
       "pair": "0x5Bb59Bb9371cBeC158eD602d5f3CF1AD1c9B4462",
-      "cluster_balance": 424580290.9790811,
-      "float_lp": 7492045.78663423,
-      "funding": 0.0238
+      "cluster_balance": 426497994.4197092,
+      "float_lp": 7494804.739318727,
+      "funding": 0.0534
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -126,13 +126,13 @@
       "funding": 0.1135
     },
     "last": {
-      "price": 0.02826,
-      "liquidity": 1965779.99,
-      "vol24": 76965.96,
+      "price": 0.02767,
+      "liquidity": 1949910.45,
+      "vol24": 70112.85,
       "pair": "0xb2AF49dBF526054FAf19602860A5E298a79F3D05",
       "cluster_balance": 44826811.78143148,
-      "float_lp": 23742708.639402665,
-      "funding": 0.0287
+      "float_lp": 24037486.950107224,
+      "funding": 0.0159
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -167,10 +167,10 @@
       "funding": -0.02
     },
     "last": {
-      "price": 0.0186,
-      "liquidity": 459102.74,
-      "vol24": 258527.07,
-      "cluster_balance": 100000000.0,
+      "price": 0.01733,
+      "liquidity": 443069.02,
+      "vol24": 263626.1,
+      "cluster_balance": 0.0,
       "funding": -0.02,
       "pair": "FKfRK3WdaGXokysR1fPGgCDEeGkV1b1YYnX9ykVpG3JG"
     },
@@ -197,12 +197,12 @@
       "funding": 0.005
     },
     "last": {
-      "price": 0.03909,
-      "liquidity": 4580857.47,
-      "vol24": 2901537.61,
+      "price": 0.03978,
+      "liquidity": 4619270.56,
+      "vol24": 3037198.39,
       "pair": "0xbC42145d5A574EDe9b8860FCa2A49EB7B239Efa5",
       "cluster_balance": 79641741.38218607,
-      "float_lp": 58618808.81632506,
+      "float_lp": 58072041.3537435,
       "funding": 0.005
     },
     "balanceof_reliable": true,
@@ -239,13 +239,13 @@
       "funding": 0.02
     },
     "last": {
-      "price": 0.008799,
-      "liquidity": 924151.76,
-      "vol24": 384438.28,
+      "price": 0.00879,
+      "liquidity": 923187.73,
+      "vol24": 439394.08,
       "cluster_balance": 307810366.42624587,
       "funding": -0.02,
       "pair": "0x924F1a4422a89900FAaFa3F886721FDCcD6e086a",
-      "float_lp": 52526003.26452134
+      "float_lp": 52507132.11743722
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -285,13 +285,13 @@
       "funding": 0.0194
     },
     "last": {
-      "price": 1.97,
-      "liquidity": 331047.46,
-      "vol24": 3744933.53,
+      "price": 2.55,
+      "liquidity": 348495.95,
+      "vol24": 3570284.23,
       "pair": "0x26deB24a2623Cf54452Ab5183E2C34551831D54d",
       "cluster_balance": 17233187.96605214,
-      "float_lp": 32223.54158437306,
-      "funding": 0.01
+      "float_lp": 28622.64003386145,
+      "funding": 0.071
     },
     "balanceof_reliable": true,
     "sanity": {
@@ -309,7 +309,7 @@
     },
     "entity_kind": "present_rotating_confirmed",
     "note": "funder验证换钱包网络(2026-07-09深查): 枢纽0x661213676e同funder倒仓, 全程未向池/CEX砸盘=装弹威胁。哨兵盯仍持仓的换钱包成员,任一向池/CEX大量转=真砸盘。",
-    "price_peak": 2.13,
+    "price_peak": 2.55,
     "flow_ts": "2026-06-16T18:09:37.000Z",
     "bleed_alerted_pct": 0.0,
     "last_phase": "buy"
@@ -342,12 +342,12 @@
       "funding": null
     },
     "last": {
-      "price": 0.00769,
-      "liquidity": 188665.68,
-      "vol24": 13017.07,
+      "price": 0.007828,
+      "liquidity": 190982.79,
+      "vol24": 14432.29,
       "pair": "0x99543A3DcF169C8E442cC5ba1CB978FF1dF2a8Be",
       "cluster_balance": 4771337018.494153,
-      "float_lp": 16565547.287759436,
+      "float_lp": 15928413.001382457,
       "funding": null
     },
     "balanceof_reliable": true,
@@ -366,7 +366,7 @@
     "entity_kind": "treasury_issuer_allocation",
     "note": "2026-07-10 acquisition核实: 簇成员全部来自单一分发地址(买入0),是发行方/团队金库,非交易型操盘。live_operator 判决更正为 treasury。",
     "bleed_alerted_pct": 0.0,
-    "price_peak": 0.00769,
+    "price_peak": 0.007828,
     "flow_ts": "2026-07-07T22:27:59.000Z",
     "verdict_retracted": true
   },
@@ -401,9 +401,9 @@
       "funding": null
     },
     "last": {
-      "price": 0.02488,
-      "liquidity": 5664981.3,
-      "vol24": 639279.49,
+      "price": 0.02486,
+      "liquidity": 5663772.89,
+      "vol24": 625100.11,
       "pair": "0xeaca4ad2d0132b25b790921c2ce047373ae94467e15957a0e218df23dadfc4b2",
       "cluster_balance": 434021143.27484566,
       "float_lp": 0.0,
@@ -425,7 +425,7 @@
     "entity_kind": "falsified_ghost_holders",
     "note": "2026-07-10 复核: 入册判决基于【截断的 holder 重建】(链上 balanceOf=0 的幽灵余额)。链上核实后 conf 26/16、dom=1 → 无协同簇。判决作废,降级为观察,不作为做空依据。",
     "bleed_alerted_pct": 0.0,
-    "price_peak": 0.02488,
+    "price_peak": 0.02486,
     "flow_ts": "2026-06-27T18:59:59.000Z",
     "verdict_retracted": true
   },
@@ -460,9 +460,9 @@
       "funding": null
     },
     "last": {
-      "price": 0.02152,
-      "liquidity": 6910244.05,
-      "vol24": 644767.08,
+      "price": 0.02156,
+      "liquidity": 6917897.89,
+      "vol24": 626635.4,
       "pair": "0x18c85fdb568efe0a6b96b4c36b33aa16d5ecc40739e274a8a2a7fa87a0e51162",
       "cluster_balance": 678235088.7943534,
       "float_lp": null,
@@ -553,9 +553,9 @@
       "funding": -0.02
     },
     "last": {
-      "price": 0.3664,
-      "liquidity": 4446302.47,
-      "vol24": 862040.51,
+      "price": 0.3557,
+      "liquidity": 4368103.71,
+      "vol24": 533753.64,
       "pair": "0x7c84276e317f128b55bd270dbfba3ef94c84b984c124a1de7c4f72da90bfba45",
       "cluster_balance": 282260051.8505402,
       "float_lp": null,

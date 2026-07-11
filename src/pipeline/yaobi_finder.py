@@ -56,7 +56,58 @@ def _conn() -> sqlite3.Connection:
         op_score REAL, shape TEXT, acquisition TEXT, largest_pct REAL, gap REAL,
         cluster_n INTEGER,
         PRIMARY KEY (token, chain))""")
+    # CAPTURE-AND-MONITOR funnel: the operator signature is ~1% and develops over
+    # DAYS, so a single scan of the sparse young-tradeable window finds ~0. Instead,
+    # every fresh candidate that clears the cheap pre-filter is captured here, and
+    # re-analysed on later scans as it ages INTO the accumulation window. This widens
+    # the funnel from a handful per scan to everything that has passed through the
+    # window recently — with full verification kept (real holders, supply, acquisition).
+    c.execute("""CREATE TABLE IF NOT EXISTS monitor (
+        token TEXT, chain TEXT, symbol TEXT, first_seen TEXT, last_checked TEXT,
+        checks INTEGER DEFAULT 0, promoted INTEGER DEFAULT 0,
+        PRIMARY KEY (token, chain))""")
     return c
+
+
+def _monitor_add(cands: list[dict]) -> None:
+    """Record fresh candidates for later re-analysis as they mature."""
+    c = _conn()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        for r in cands:
+            c.execute("INSERT OR IGNORE INTO monitor (token, chain, symbol, first_seen, "
+                      "last_checked) VALUES (?,?,?,?,?)",
+                      (r["address"].lower(), r["chain"], r.get("symbol", "?"), now, now))
+        c.commit()
+    finally:
+        c.close()
+
+
+def _monitor_due(max_age_days: float = MAX_AGE_DAYS, limit: int = 80) -> list[dict]:
+    """Monitored tokens still inside the accumulation window and not yet promoted,
+    least-recently-checked first (so re-analysis rotates through the pool)."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+    c = _conn()
+    try:
+        rows = c.execute(
+            "SELECT token, chain, symbol FROM monitor WHERE promoted=0 AND first_seen>=? "
+            "ORDER BY last_checked ASC LIMIT ?", (cutoff, limit)).fetchall()
+    finally:
+        c.close()
+    return [{"token": r[0], "chain": r[1], "symbol": r[2]} for r in rows]
+
+
+def _monitor_touch(token: str, chain: str, promoted: bool = False) -> None:
+    c = _conn()
+    try:
+        c.execute("UPDATE monitor SET last_checked=?, checks=checks+1, promoted=? "
+                  "WHERE token=? AND chain=?",
+                  (datetime.now(timezone.utc).isoformat(), 1 if promoted else 0,
+                   token.lower(), chain))
+        c.commit()
+    finally:
+        c.close()
 
 
 def _gather_young(chains=("bsc", "base"), pages: int = 3) -> list[dict]:
@@ -156,20 +207,78 @@ def analyze(cand: dict) -> dict | None:
             "gap": round(gap, 1), "cluster_n": len(cw)}
 
 
-def scan(chains=("bsc", "base"), pages: int = 3, max_analyze: int = 60) -> list[dict]:
-    """One scan pass: gather young candidates, analyse, PERSIST new operator finds."""
-    cands = _gather_young(chains, pages)
-    logger.info("yaobi_gathered", candidates=len(cands))
+def _dex_candidate(token: str, chain: str) -> dict | None:
+    """Re-fetch a monitored token's current market data so analyze() can run on it."""
+    try:
+        d = json.loads(urllib.request.urlopen(urllib.request.Request(
+            f"https://api.dexscreener.com/tokens/v1/{chain}/{token}",
+            headers={"User-Agent": "Mozilla/5.0"}), timeout=12).read())
+    except Exception:
+        return None
+    pr = max((x for x in (d if isinstance(d, list) else [])),
+             key=lambda x: float((x.get("liquidity") or {}).get("usd") or 0), default=None)
+    if not pr:
+        return None
+    ms = pr.get("pairCreatedAt") or 0
+    age = (time.time() * 1000 - ms) / 86_400_000 if ms else None
+    liq = float((pr.get("liquidity") or {}).get("usd") or 0)
+    if age is None or liq < MIN_LIQ_USD:
+        return None
+    return {"address": token, "chain": chain,
+            "symbol": (pr.get("baseToken") or {}).get("symbol", "?"),
+            "price": float(pr.get("priceUsd") or 0), "liq": liq,
+            "vol": float(pr.get("volume", {}).get("h24") or 0), "age_days": round(age, 1),
+            "mcap": float(pr.get("marketCap") or pr.get("fdv") or 0),
+            "ch24": (pr.get("priceChange") or {}).get("h24")}
+
+
+def scan(chains=("bsc", "base"), pages: int = 3, max_analyze: int = 40) -> list[dict]:
+    """One pass of the CAPTURE-AND-MONITOR funnel:
+      1. gather fresh young candidates, capture them to the monitor pool;
+      2. analyse the fresh ones AND the maturing monitored ones;
+      3. promote any that now show a verified operator signature to the watchlist.
+    The signature develops over days, so re-checking the pool is what turns a sparse
+    per-scan yield into an accumulating list."""
+    fresh = _gather_young(chains, pages)
+    _monitor_add(fresh)                       # capture everything young for later
+    due = _monitor_due()                      # maturing tokens to re-check
+    logger.info("yaobi_gathered", fresh=len(fresh), monitored_due=len(due))
+
     finds = []
-    for c in cands[:max_analyze]:
-        r = analyze(c)
+    analyzed = 0
+    # fresh first, then rotate through the monitor pool up to the budget
+    work = [(c, False) for c in fresh] + [(m, True) for m in due]
+    seen: set = set()
+    for item, from_monitor in work:
+        if analyzed >= max_analyze:
+            break
+        tok, ch = item.get("address") or item.get("token"), item["chain"]
+        if (tok.lower(), ch) in seen:
+            continue
+        seen.add((tok.lower(), ch))
+        cand = _dex_candidate(tok, ch) if from_monitor else item
+        if not cand:
+            continue
+        analyzed += 1
+        r = analyze(cand)
+        if from_monitor:
+            _monitor_touch(tok, ch, promoted=bool(r))
         if r:
             finds.append(r)
             _persist(r)
         time.sleep(0.2)
     finds.sort(key=lambda r: -r["op_score"])
-    logger.info("yaobi_scan_done", analyzed=min(len(cands), max_analyze), found=len(finds))
+    logger.info("yaobi_scan_done", analyzed=analyzed, found=len(finds),
+                monitor_pool=_monitor_size())
     return finds
+
+
+def _monitor_size() -> int:
+    c = _conn()
+    try:
+        return c.execute("SELECT COUNT(*) FROM monitor WHERE promoted=0").fetchone()[0]
+    finally:
+        c.close()
 
 
 def _persist(r: dict) -> None:
