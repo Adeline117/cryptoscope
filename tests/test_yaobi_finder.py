@@ -22,37 +22,50 @@ def _sig(monkeypatch, **s):
                         lambda *a, **k: base)
 
 
-def test_verified_bought_operator_enters(monkeypatch):
-    _sig(monkeypatch)
+def test_concentration_routes_to_short(monkeypatch):
+    """Concentration is a DUMP tell now — a verified operator cluster routes to SHORT."""
+    _sig(monkeypatch)  # gap=10 -> operator concentration
     monkeypatch.setattr("src.onchain.operator_id.acquisition_mode",
                         lambda *a, **k: {"verdict": "bought"})
-    r = yf.analyze(_cand())
-    assert r is not None and "从市场买入" in r["shape"] and r["op_score"] > 0
+    r = yf.classify(_cand(txns={"h1": {"buys": 5, "sells": 50}, "h6": {"buys": 30}}))
+    assert r is not None and r["direction"] == "short"
 
 
 def test_allocated_issuer_is_rejected(monkeypatch):
     _sig(monkeypatch)
     monkeypatch.setattr("src.onchain.operator_id.acquisition_mode",
                         lambda *a, **k: {"verdict": "allocated"})
-    assert yf.analyze(_cand()) is None
+    assert yf.classify(_cand(txns={"h1": {"buys": 5, "sells": 5}, "h6": {"buys": 30}})) is None
 
 
 def test_unverified_supply_is_rejected(monkeypatch):
     _sig(monkeypatch, supply_verified=False)
-    assert yf.analyze(_cand()) is None
+    assert yf.classify(_cand()) is None
 
 
-def test_no_operator_signature_is_rejected(monkeypatch):
+def test_healthy_but_no_demand_is_none(monkeypatch):
+    """Healthy distribution but no buy pressure = not a long yet."""
     _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
          largest_entity_pct=3, dominant_cluster_wallets=["0x1"])
-    monkeypatch.setattr("src.onchain.operator_id.acquisition_mode",
-                        lambda *a, **k: {"verdict": "unknown"})
-    assert yf.analyze(_cand()) is None
+    r = yf.classify(_cand(txns={"h1": {"buys": 2, "sells": 5}, "h6": {"buys": 20}}))
+    assert r is None
+
+
+def test_healthy_plus_demand_plus_smart_money_is_long(monkeypatch):
+    """会涨: healthy dist + buy pressure + smart-money convergence = LONG."""
+    _sig(monkeypatch, cluster_confidence=10, concentration_gap=1,
+         largest_entity_pct=4, dominant_cluster_wallets=[])
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda t, c: {"available": True, "facts": []})
+    monkeypatch.setattr("src.onchain.smart_money.convergence",
+                        lambda t, c, **k: {"verdict": "convergence", "skilled_entities": 3})
+    r = yf.classify(_cand(txns={"h1": {"buys": 40, "sells": 10}, "h6": {"buys": 120}}))
+    assert r is not None and r["direction"] == "long" and "聪明钱" in r["shape"]
 
 
 def test_empty_holders_is_rejected(monkeypatch):
     monkeypatch.setattr("src.onchain.holder_snapshot.fetch_holders_evm", lambda *a, **k: [])
-    assert yf.analyze(_cand()) is None
+    assert yf.classify(_cand()) is None
 
 
 def test_persist_and_watchlist_roundtrip(tmp_path, monkeypatch):

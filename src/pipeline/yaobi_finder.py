@@ -54,8 +54,11 @@ def _conn() -> sqlite3.Connection:
         token TEXT, chain TEXT, symbol TEXT,
         first_seen TEXT, price0 REAL, liq0 REAL, mcap0 REAL, age_days0 REAL,
         op_score REAL, shape TEXT, acquisition TEXT, largest_pct REAL, gap REAL,
-        cluster_n INTEGER,
+        cluster_n INTEGER, direction TEXT, signals TEXT,
         PRIMARY KEY (token, chain))""")
+    if "direction" not in {r[1] for r in c.execute("PRAGMA table_info(finds)")}:
+        c.execute("ALTER TABLE finds ADD COLUMN direction TEXT")
+        c.execute("ALTER TABLE finds ADD COLUMN signals TEXT")
     # CAPTURE-AND-MONITOR funnel: the operator signature is ~1% and develops over
     # DAYS, so a single scan of the sparse young-tradeable window finds ~0. Instead,
     # every fresh candidate that clears the cheap pre-filter is captured here, and
@@ -158,53 +161,110 @@ def _gather_young(chains=("bsc", "base"), pages: int = 3) -> list[dict]:
                     "price": float(pr.get("priceUsd") or 0), "liq": liq, "vol": vol,
                     "age_days": round(age, 1),
                     "mcap": float(pr.get("marketCap") or pr.get("fdv") or 0),
-                    "ch24": (pr.get("priceChange") or {}).get("h24")})
+                    "ch24": (pr.get("priceChange") or {}).get("h24"),
+                    "txns": pr.get("txns") or {}})
         time.sleep(0.25)
     return out
 
 
-def analyze(cand: dict) -> dict | None:
-    """Full operator analysis on a pre-filtered candidate. Returns an enriched record
-    if it carries an operator signature, else None. Verified data only (ghost/subset
-    guards from the night)."""
+def _buy_pressure(cand: dict) -> dict:
+    """Leading-ish demand proxy from trade counts: buy/sell ratio + whether buying is
+    ACCELERATING in the last hour. Holder growth itself lags (it IS the pump); buy
+    pressure that is rising is the earliest cheap read of demand building."""
+    tx = cand.get("txns") or {}
+    b1, s1 = tx.get("h1", {}).get("buys", 0), tx.get("h1", {}).get("sells", 0)
+    b6 = tx.get("h6", {}).get("buys", 0)
+    ratio_h1 = b1 / max(s1, 1)
+    accelerating = b1 * 6 > b6 * 1.2 and b1 >= 10
+    return {"ratio_h1": round(ratio_h1, 2), "accelerating": accelerating,
+            "buys_h1": b1, "sells_h1": s1}
+
+
+def classify(cand: dict) -> dict | None:
+    """DUAL classifier — 会砸(short) or 会涨(long) or None.
+
+    The key insight the research forced: concentration is a DUMP tell, not a run tell.
+    A hidden operator cluster distributes into the first pump; the tokens that RUN have
+    HEALTHY distribution + smart money entering + buy pressure building. So concentration
+    routes to SHORT, and a separate healthy+smart-money profile routes to LONG. Same
+    verification either way (real holders, supply-verified, bought-vs-allocated).
+
+      SHORT (会砸): a VERIFIED operator cluster (concentration, bought-not-allocated) —
+                   loaded to dump — or heavy sell pressure on a still-concentrated bag.
+      LONG  (会涨): healthy distribution (largest < 20%, no hidden cluster) + buy
+                   pressure (ratio > 1.5, accelerating) + smart-money convergence +
+                   clean contract. Concentration here is a DISQUALIFIER.
+    """
     from src.onchain.holder_snapshot import fetch_holders_evm
     from src.onchain.operator_id import acquisition_mode
     from src.pipeline.anomaly_screener import effective_concentration_signal
-    ch = cand["chain"]
+    ch, tok = cand["chain"], cand["address"]
     cid = _CID.get(ch)
     if not cid:
         return None
     try:
-        holders = fetch_holders_evm(cand["address"], chain_id=cid, max_pages=3) or []
+        holders = fetch_holders_evm(tok, chain_id=cid, max_pages=3) or []
         if not holders:
             return None
-        sig = effective_concentration_signal(holders, cand["address"], ch) or {}
+        sig = effective_concentration_signal(holders, tok, ch) or {}
     except Exception:
         return None
     if not sig.get("supply_verified"):        # subset ratio ≠ supply share
         return None
-    conf = sig.get("cluster_confidence") or 0
     lg = sig.get("largest_entity_pct") or 0
     gap = sig.get("concentration_gap") or 0
     cw = sig.get("dominant_cluster_wallets") or []
-    # operator signature: hidden Sybil cluster, or a strong coordinated cluster
-    if not (gap >= 6 or conf >= 55 or (len(cw) >= 4 and lg >= 12)):
+    bp = _buy_pressure(cand)
+
+    base = {**cand, "largest_pct": round(lg, 1), "gap": round(gap, 1),
+            "cluster_n": len(cw), "buy_pressure": bp}
+
+    # ---- SHORT (会砸): verified operator concentration = loaded to dump ----
+    if gap >= 6 or (lg >= 15 and len(cw) >= 3):
+        acq = acquisition_mode(tok, ch, cw) if cw else {"verdict": "unknown"}
+        if acq.get("verdict") == "allocated":
+            return None                        # issuer treasury, not a tradeable setup
+        score = gap * 4 + min(lg, 30) * 0.5
+        if acq.get("verdict") == "bought":
+            score += 20
+        if bp["ratio_h1"] < 0.7:               # already selling
+            score += 15
+        shape = "隐藏簇·装弹" if gap >= 6 else "高集中·装弹"
+        return {**base, "direction": "short", "op_score": round(score, 1),
+                "shape": shape, "acquisition": acq.get("verdict"),
+                "signals": f"集中{lg:.0f}% gap{gap:.0f} 买卖比{bp['ratio_h1']}"}
+
+    # ---- LONG (会涨): healthy + demand + smart money + clean ----
+    if lg >= 20:                                # too concentrated for a clean run
         return None
-    acq = acquisition_mode(cand["address"], ch, cw) if cw else {"verdict": "unknown"}
-    if acq.get("verdict") == "allocated":
-        return None                            # issuer, not an operator
-    # youth + hidden-cluster + verified-bought all push the score up
-    score = gap * 4 + min(lg, 30) * 0.5
-    if acq.get("verdict") == "bought":
-        score += 25
+    if not (bp["ratio_h1"] >= 1.5 and bp["accelerating"]):
+        return None                            # no demand building → not a long yet
+    # clean contract gate (cheap-ish) before the expensive smart-money check
+    try:
+        from src.onchain.goplus_client import rug_risk
+        rr = rug_risk(tok, ch)
+        crit = rr.get("available") and any(k in " ".join(rr.get("facts", []))
+                                           for k in ("蜜罐", "改余额", "可增发且", "暂停", "不可信"))
+        if crit:
+            return None                        # rug flags disqualify a long
+    except Exception:
+        pass
+    # smart money — the LEADING signal, expensive, run last only for long-eligible
+    try:
+        from src.onchain.smart_money import convergence
+        conv = convergence(tok, ch, max_check=12)
+    except Exception:
+        conv = {"verdict": "unknown", "skilled_entities": 0}
+    sk = conv.get("skilled_entities", 0)
+    if conv.get("verdict") not in ("some", "convergence"):
+        return None                            # no proven-profitable money entering
+    score = 20 + sk * 15 + min(bp["ratio_h1"], 5) * 4
     if cand["age_days"] <= 10:
         score += 10
-    shape = ("隐藏簇" if gap >= 6 else "协同大户")
-    if acq.get("verdict") == "bought":
-        shape += "·从市场买入"
-    return {**cand, "op_score": round(score, 1), "shape": shape,
-            "acquisition": acq.get("verdict"), "largest_pct": round(lg, 1),
-            "gap": round(gap, 1), "cluster_n": len(cw)}
+    return {**base, "direction": "long", "op_score": round(score, 1),
+            "shape": f"健康分散·聪明钱进场×{sk}", "acquisition": "-",
+            "signals": f"分散(最大{lg:.0f}%) 买卖比{bp['ratio_h1']} 聪明钱{sk} "
+                       f"({conv.get('verdict')})"}
 
 
 def _dex_candidate(token: str, chain: str) -> dict | None:
@@ -260,7 +320,7 @@ def scan(chains=("bsc", "base"), pages: int = 3, max_analyze: int = 40) -> list[
         if not cand:
             continue
         analyzed += 1
-        r = analyze(cand)
+        r = classify(cand)
         if from_monitor:
             _monitor_touch(tok, ch, promoted=bool(r))
         if r:
@@ -286,12 +346,13 @@ def _persist(r: dict) -> None:
     try:
         c.execute("""INSERT OR IGNORE INTO finds
             (token, chain, symbol, first_seen, price0, liq0, mcap0, age_days0,
-             op_score, shape, acquisition, largest_pct, gap, cluster_n)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+             op_score, shape, acquisition, largest_pct, gap, cluster_n, direction, signals)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                   (r["address"].lower(), r["chain"], r["symbol"],
                    datetime.now(timezone.utc).isoformat(), r["price"], r["liq"],
                    r["mcap"], r["age_days"], r["op_score"], r["shape"],
-                   r["acquisition"], r["largest_pct"], r["gap"], r["cluster_n"]))
+                   r.get("acquisition"), r["largest_pct"], r["gap"], r["cluster_n"],
+                   r.get("direction"), r.get("signals")))
         c.commit()
     finally:
         c.close()
@@ -311,18 +372,18 @@ def watchlist(limit: int = 40) -> list[dict]:
 
 def main() -> None:
     finds = scan()
-    print(f"本轮扫描新增操盘签名: {len(finds)}\n")
-    for r in finds[:15]:
-        print(f"  {r['symbol']:10} [{r['chain']:4}] op{r['op_score']:>5.0f} "
-              f"持{r['largest_pct']:.0f}% gap{r['gap']:.0f} 簇{r['cluster_n']} "
-              f"龄{r['age_days']}d mc${r['mcap']/1e6:.1f}M {r['shape']}")
+    longs = [r for r in finds if r.get("direction") == "long"]
+    shorts = [r for r in finds if r.get("direction") == "short"]
+    print(f"本轮: 🟢会涨(多) {len(longs)}  🔴会砸(空) {len(shorts)}\n")
+    for r in longs[:10]:
+        print(f"  🟢 {r['symbol']:10} [{r['chain']:4}] 龄{r['age_days']}d mc${r['mcap']/1e6:.1f}M {r['signals']}")
+    for r in shorts[:10]:
+        print(f"  🔴 {r['symbol']:10} [{r['chain']:4}] 龄{r['age_days']}d mc${r['mcap']/1e6:.1f}M {r['signals']}")
     wl = watchlist()
-    print(f"\n累计观察名单(共 {len(wl)}):")
-    for r in wl[:20]:
-        print(f"  {r['symbol']:10} [{r['chain']:4}] 首见{r['first_seen'][:10]} "
-              f"@${r['price0']:.6g} op{r['op_score']:.0f} {r['shape']}")
-    print("\n这是【发现】的真操盘名单 —— 已核实真holder/供应/买入,无幽灵无发行方。")
-    print("它不预测谁会拉盘(真操盘也可能休眠);时机是你在干净名单之上的判断。")
+    print(f"\n累计名单(共 {len(wl)}): 多 {sum(1 for r in wl if r.get('direction')=='long')} / "
+          f"空 {sum(1 for r in wl if r.get('direction')=='short')}")
+    print("\n会涨=健康分散+聪明钱进场+买压;会砸=核实操盘装弹。均已核实真holder/供应,无幽灵无发行方。")
+    print("这是【发现】,不是保证。时机与仓位是你在干净名单之上的判断。")
 
 
 if __name__ == "__main__":
