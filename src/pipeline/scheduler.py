@@ -112,6 +112,16 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Daily System Health Summary",
     )
 
+    # Daily correctness self-audit: labeled-case validators + live balanceOf
+    # ground-truth gate. Alarms on failure (ghost data / regressed case). Twice
+    # daily so a ghost-data lie surfaces within ~12h, not a full day.
+    scheduler.add_job(
+        _run_self_audit,
+        CronTrigger(hour="7,19", minute=20),
+        id="self_audit",
+        name="自检 (标注案例+链上真值网关 → 失败即告警)",
+    )
+
     # Anomaly candidate screen → push suspected-accumulation coins every 6h
     scheduler.add_job(
         _run_anomaly_screen,
@@ -486,6 +496,57 @@ async def _run_health_summary():
     from src.ops.health import send_health_summary
 
     await send_health_summary()
+
+
+async def _run_self_audit():
+    """Standing correctness self-audit: run the labeled-case validators INCLUDING the
+    live balanceOf ground-truth gate that reconciles holder snapshots against the
+    chain. This is the one mechanism that can catch the ghost-holder lie (the data
+    source itself lies; no unit test can). It runs here — not in CI — because it
+    needs RPC + keys and is rate-limit flaky; a real failure is an operational alarm.
+
+    On failure it sends a DISTINCT alarm, deliberately NOT gated by
+    OPERATOR_ALERTS_MUTED and NOT folded into the daily health summary (which is
+    designed to read 'healthy'). A silently-broken verdict engine must be loud."""
+    import asyncio
+
+    logger.info("scheduled_self_audit")
+    from src.backtest import validate_detectors
+
+    # validate_detectors.run() is synchronous and hits the network — run it off the
+    # event loop so the 5-min sentinel/scheduler jobs aren't blocked.
+    try:
+        res = await asyncio.to_thread(validate_detectors.run, True)
+    except Exception as e:
+        logger.error("self_audit_crashed", error=str(e))
+        res = {"passed": 0, "total": 1, "live": True, "live_failed": 1,
+               "crash": str(e)[:120]}
+
+    passed, total = res.get("passed", 0), res.get("total", 1)
+    live_failed = res.get("live_failed", 0)
+    # Two independent failure conditions: the live chain-arbitration gate tripped
+    # (ghost data — highest severity), OR overall correctness dropped below a hard
+    # floor (a labeled case regressed).
+    floor = 0.85
+    ok = (live_failed == 0) and (passed / max(total, 1) >= floor)
+    logger.info("self_audit_done", passed=passed, total=total,
+                live_failed=live_failed, ok=ok)
+    if not ok:
+        from src.distribution.telegram_sender import send_alert
+        crash = res.get("crash")
+        msg = (
+            "🚨 <b>自检失败 · SELF-AUDIT FAILURE</b>\n"
+            "━━━━━━━━━━━━━━\n"
+            f"标注案例正确率: <b>{passed}/{total}</b> (下限 {int(floor*100)}%)\n"
+            + (f"⚠️ 链上真值网关失败: <b>{live_failed}</b> 处 — 持币快照与链上不符=数据源在撒谎(幽灵余额)\n"
+               if live_failed else "")
+            + (f"崩溃: {crash}\n" if crash else "")
+            + "<i>判决引擎可能在悄悄输出错的东西 — 立刻查,不要相信当前告警</i>"
+        )
+        try:
+            await send_alert(msg)
+        except Exception as e:
+            logger.error("self_audit_alarm_send_failed", error=str(e))
 
 
 async def _run_anomaly_screen():
