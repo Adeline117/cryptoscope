@@ -95,6 +95,35 @@ def smart_money_rank(chain: str, tf: str = "1h", limit: int = 40) -> list[dict]:
     return out
 
 
+def exit_liquidity_risk(t: dict) -> dict:
+    """The metric the打狗 research says should DOMINATE: how likely is the user to be
+    the EXIT LIQUIDITY here? (~3% of pump.fun traders ever clear $1k; 85% of snipers
+    dump in 5 min; copiers make 3% vs the 14% they copy.) Scored from the tells that
+    predict 'you're the one being dumped on': bundled/entrapment launch, snipers
+    already loaded, smart money already crowded (you're late), bot-dominated volume."""
+    reasons, score = [], 0
+    br = _num(t.get("bundler_rate"))
+    er = _num(t.get("entrapment_ratio"))
+    snipers = t.get("sniper_count") or 0
+    smart = t.get("smart_degen_count") or 0
+    bots = t.get("bot_degen_count") or 0
+    sh = _num(t.get("top70_sniper_hold_rate"))
+    if br >= 0.30:
+        score += 2; reasons.append("捆绑发射(创建者同捆买)")
+    if er >= 0.20:
+        score += 2; reasons.append("诱捕盘(在钓人接盘)")
+    if sh >= 0.15:
+        score += 2; reasons.append(f"狙击者持仓{sh*100:.0f}%(随时砸你)")
+    if snipers >= 40:
+        score += 1; reasons.append(f"{snipers}个狙击已埋伏(你晚了)")
+    if smart >= 40:
+        score += 1; reasons.append("聪明钱已过多=扩散过半(你是后排)")
+    if smart and bots / max(smart, 1) >= 25:
+        score += 1; reasons.append("机器人主导成交(刷量)")
+    level = "high" if score >= 3 else ("med" if score >= 1 else "low")
+    return {"level": level, "score": score, "reasons": reasons[:3]}
+
+
 def _manipulation(t: dict) -> dict:
     """Structure #4, the honest defensive form: is this token's activity MANIPULATED /
     bot-driven, so its smart-money/price signal is polluted? From GMGN's native fields
@@ -107,6 +136,8 @@ def _manipulation(t: dict) -> dict:
     er = _num(t.get("entrapment_ratio"))
     bots = t.get("bot_degen_count") or 0
     smart = t.get("smart_degen_count") or 0
+    if _num(t.get("sell_tax")) >= 0.05:      # 打狗研究: >5% sell tax = skip (was 10%)
+        reasons.append(f"卖出税{_num(t.get('sell_tax'))*100:.0f}%")
     if br >= 0.30:
         reasons.append(f"捆绑抢跑率{br*100:.0f}%(创建者钱包同捆买入)")
     if er >= 0.20:
@@ -179,6 +210,7 @@ def opportunities(chains=("sol", "bsc", "base", "eth"), min_smart: int = 2,
                 continue                       # already past the early slope → skip
             t["rug"] = _rug_from_gmgn(t)
             t["manipulation"] = _manipulation(t)     # #4 taint flag
+            t["exit_risk"] = exit_liquidity_risk(t)  # 打狗研究: the dominant metric
             # A huge smart-money count is a LATENESS tell, not conviction — 200 smart
             # wallets don't pile in during the early slope. So the fresh score REWARDS
             # young age and CAPS the smart-money contribution (a handful just-entering
@@ -191,8 +223,11 @@ def opportunities(chains=("sol", "bsc", "base", "eth"), min_smart: int = 2,
             t["crowded"] = (t["smart_money"] or 0) > 40     # likely already run
             t["strength"] = "强" if (t["confirmed_fresh"] and t["smart_money"] >= 3) else "弱"
             out.append(t)
-    # youngest-with-smart-money first; confirmed-fresh always above unknown-age
-    out.sort(key=lambda x: (not x["confirmed_fresh"], -x["fresh_score"]))
+    # rank: confirmed-fresh first, then LOW exit-liquidity-risk (the research's
+    # dominant metric — a fresh token you'd be dumped on is not an opportunity), then
+    # freshness. High-exit-risk fresh tokens sink below clean ones.
+    _er = {"low": 0, "med": 1, "high": 2}
+    out.sort(key=lambda x: (not x["confirmed_fresh"], _er.get(x["exit_risk"]["level"], 1), -x["fresh_score"]))
     return out
 
 

@@ -172,9 +172,8 @@ function renderPerp(){
   if(d.scan_error) return `<div class="err">Hyperliquid 取数失败: ${esc(d.scan_error)}</div>`;
   setLegend([["danger","多头拥挤/点火向下(防砸)"],["warn","空头拥挤(防轧空)"],["good","点火向上"]]);
   const s=d.perps||[];
-  document.getElementById("lead").innerHTML=`永续合约里,资金费/未平仓正在告诉你<b>哪一边的杠杆拥挤了</b>——拥挤的一边就是清算燃料。`+
-    ` 现在有 <b>${s.length}</b> 个信号(数据来自 Hyperliquid,实时无门槛)。`+
-    `<div class="note">拥挤=那一侧在付极高资金费死扛,一旦反向就连环爆;点火=未平仓和价格同向放量=新杠杆进场,趋势有燃料。第2轮起才有点火。</div>`;
+  document.getElementById("lead").innerHTML=`资金费/未平仓告诉你<b>哪一边杠杆拥挤了</b>。现在 <b>${s.length}</b> 个信号(Hyperliquid 实时)。`+
+    `<div class="note">研究打脸重点:<b>"资金费高就做空"单独用是亏的</b>(资金费其实跟涨)——拥挤只是<b>戒备/谁是弱势侧</b>,可交易的那一刻是<b>未平仓开始回落</b>(清算启动)。真正正 EV 的是<b>资金费套利</b>(现货多+永续空吃费,~8%基准),裸做多散户 74-89% 亏。这栏当"我是不是站在被清算那侧"的防御用,不是做空按钮。</div>`;
   document.getElementById("summary").textContent=s.length?`${s.length} 个永续信号`:"暂无极端信号(市场不拥挤)";
   if(!s.length) return '<div class="err">当前没有资金费极端/点火的币 —— 说明市场杠杆不拥挤,这本身是个信息。</div>';
   return s.map(p=>{
@@ -198,7 +197,7 @@ function renderOpp(){
   setLegend([["good","🟢刚出·聪明钱刚进(能埋伏)"],["warn","⚪早期未确认"],["danger","🔴已跑/有雷(别追)"]]);
   document.getElementById("lead").innerHTML=`<b>按新鲜度排,不按热度排</b>——最上面是刚出几分钟/几小时、聪明钱<b>刚进场</b>的(能埋伏的窗口)。`+
     ` 其中 <b>${fresh}</b> 个已确认新鲜(<12小时)。`+
-    `<div class="note">"200 个聪明钱在买"= 已经晚了,那种排在最底标🔴已跑。诚实天花板:你永远晚于在创建区块就买的内部狙击者(他们1-5分钟清仓);看板能给的最早是"扩散早坡",小仓+止损。</div>`;
+    `<div class="note">排序=先够新、再<b>接盘风险低</b>、再新鲜度——把"你当接盘侠概率"压在上涨潜力之前(打狗研究:前者主导结果)。残酷基率:pump.fun 只 ~3% 交易者赚过 $1k、99% 币归零、跟单实测只赚被跟者零头(3% vs 14%)。这板子能做的是<b>帮你避开当接盘侠</b>,不保证赚。铁律:小仓≤1%、2x 卖回本金、止损。</div>`;
   document.getElementById("summary").textContent=s.length?`${fresh} 个确认新鲜 / ${s.length} 个总 · ${esc(d.source||"?")}`:"这轮没有新鲜的聪明钱入场";
   if(!s.length) return '<div class="err">这轮没有聪明钱在买的新币,或 FlareSolverr 未运行(GMGN 源需要它)。</div>';
   const RUG={avoid:'<b style="color:var(--danger)">🔴有雷·别碰</b>',caution:'<span style="color:var(--warn)">🟠有风险</span>',clean:'<span style="color:var(--good)">🟢合约干净</span>',unchecked:'<span style="color:var(--muted)">⚪未检查</span>'};
@@ -207,7 +206,8 @@ function renderOpp(){
     const sm=o.smart_money??o.smart_actors??0;
     const rug=o.rug||{level:"unchecked",facts:[]};
     const mp=o.manipulation||{level:"clean",reasons:[]};
-    const avoid=rug.level==="avoid";
+    const xr=o.exit_risk||{level:"low",reasons:[]};
+    const avoid=rug.level==="avoid"||xr.level==="high";
     const fresh=o.confirmed_fresh, crowded=o.crowded;
     const botHeavy=(o.bots||0)>0 && sm>0 && (o.bots/sm)>8;
     // badge: freshness FIRST (that's the whole point — early beats crowded)
@@ -215,13 +215,14 @@ function renderOpp(){
       : fresh?[`🟢刚出 ${ageStr(o)}`,"c-good","s-good"]
       : crowded?["🔴已跑·晚了","c-danger","s-danger"]
       : ["⚪早期未确认","c-warn","s-warn"];
+    const XR={high:'<b style="color:var(--danger)">🔴接盘风险高</b>',med:'<span style="color:var(--warn)">🟠接盘风险中</span>',low:'<span style="color:var(--good)">🟢接盘风险低</span>'};
     return card(o.symbol,o.chain,vl,vc,vs,
       `${o.age_hours!=null?`<b>${ageStr(o)}</b>新,`:''}<b>${sm}</b> 个聪明钱刚进${o.renowned?`(${o.renowned} 个知名)`:''}。`,
-      avoid?`合约有雷(${(rug.facts||[]).join("、")})——聪明钱在买也别碰,是圈套。`:
-        crowded?`已经 ${sm} 个聪明钱了——扩散过半,你多半是接盘方,别追。`:
-        botHeavy?`机器人/狙击 ${o.bots}/${o.snipers||0} 远多于聪明钱——你可能就是出货对象,谨慎。`:
-        fresh?"够新、聪明钱刚进——这是能埋伏的窗口,但你仍晚于内部狙击者,小仓+止损。":"年龄没确认,别当早期,当线索看。",
-      [RUG[rug.level]||'',(mp.level!=="clean"?`<span style="color:var(--${mp.level==="severe"?"danger":"warn"})">⚠️操纵${mp.level==="severe"?"重":""}</span>`:''),
+      (avoid&&rug.level==="avoid")?`合约有雷(${(rug.facts||[]).join("、")})——聪明钱在买也别碰,是圈套。`:
+        xr.level==="high"?`高概率你是接盘侠:${(xr.reasons||[]).join("、")}。数据说这种绝大多数归零,别碰。`:
+        xr.level==="med"?`有接盘信号:${(xr.reasons||[]).join("、")}。谨慎,极小仓。`:
+        fresh?"够新、聪明钱刚进、没明显接盘信号——能埋伏的窗口。但仍晚于内部狙击者(他们5分钟内跑),小仓+2x卖本金+止损。":"年龄没确认,别当早期。",
+      [XR[xr.level]||'',RUG[rug.level]||'',(mp.level!=="clean"?`<span style="color:var(--${mp.level==="severe"?"danger":"warn"})">⚠️操纵</span>`:''),
        `聪明钱 <b>${sm}</b>`,(o.renowned?`知名 <b>${o.renowned}</b>`:''),
        (o.snipers!=null?`狙击 <b>${o.snipers}</b>`:''),(o.bots!=null?`机器人 <b>${o.bots}</b>`:''),
        `流动性 <b>${fmtUsd(o.liq)}</b>`,(o.price_chg_1h!=null?`1h ${chg(o.price_chg_1h)}`:'')],

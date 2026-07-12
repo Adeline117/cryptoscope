@@ -125,16 +125,25 @@ def _signal(r: dict) -> dict | None:
     if r["oi_usd"] < IGNITION_MIN_OI_USD:
         return None
     fa = r["funding_ann"]
-    # CASCADE / crowding — from funding alone (needs real size to matter)
+    oc = r.get("oi_chg_pct")
+    # CASCADE — funding EXTREME marks the crowded/fragile side, but research is blunt:
+    # the standing "high funding" state is NOT a short trigger (funding fights momentum,
+    # R²≈0). The tradable event is the ROLLOVER — OI starting to FALL from the crowded
+    # state = liquidation beginning. So: OI dropping while funding extreme = "firing"
+    # (actionable); otherwise "crowded fragile" = context/defense only.
     if r["oi_usd"] >= MIN_OI_USD and abs(fa) >= FUNDING_CROWDED_ANN:
-        if fa > 0:
-            return {"kind": "cascade", "direction": "longs_crowded",
-                    "strength": "强" if fa >= 150 else "中",
-                    "why": f"多头在付 {fa:.0f}%/年资金费 = 多头拥挤,一旦下跌他们是燃料 → 防向下清算,别接多"}
-        else:
-            return {"kind": "cascade", "direction": "shorts_crowded",
-                    "strength": "强" if fa <= -150 else "中",
-                    "why": f"空头在付 {abs(fa):.0f}%/年资金费 = 空头拥挤 → 防轧空向上"}
+        side = "longs_crowded" if fa > 0 else "shorts_crowded"
+        firing = oc is not None and oc <= -2      # OI unwinding
+        base = (f"多头在付 {fa:.0f}%/年资金费=多头拥挤" if fa > 0
+                else f"空头在付 {abs(fa):.0f}%/年资金费=空头拥挤")
+        if firing:
+            return {"kind": "cascade", "direction": side, "strength": "强",
+                    "why": f"{base},且未平仓已回落{oc:.0f}% = 清算正在启动 → "
+                           + ("向下级联,做空/避多" if fa > 0 else "轧空向上")}
+        return {"kind": "cascade", "direction": side,
+                "strength": "中" if abs(fa) >= 150 else "弱",
+                "why": f"{base}(戒备,非做空触发——要等未平仓开始回落才是那一刻);"
+                       + (f"另:正费率可做资金费套利(现货多+永续空)吃 {fa:.0f}%/年" if fa > 0 else "防轧空")}
     # IGNITION — OI rising with price (needs history)
     oc, pc = r.get("oi_chg_pct"), r.get("price_chg_since")
     if oc is not None and pc is not None and oc >= IGNITION_OI_JUMP * 100:
