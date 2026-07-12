@@ -95,6 +95,39 @@ def smart_money_rank(chain: str, tf: str = "1h", limit: int = 40) -> list[dict]:
     return out
 
 
+def _manipulation(t: dict) -> dict:
+    """Structure #4, the honest defensive form: is this token's activity MANIPULATED /
+    bot-driven, so its smart-money/price signal is polluted? From GMGN's native fields
+    — bundler_rate (creator-controlled launch-bundle buys = frontrun/sandwich kin),
+    entrapment_ratio (luring buyers to dump on), and bot-vs-smart dominance. Not per-tx
+    sandwich detection (those free APIs are dead) — a per-token taint flag, which is the
+    'MEV pollutes my signal' defense the goal actually needs."""
+    reasons = []
+    br = _num(t.get("bundler_rate"))
+    er = _num(t.get("entrapment_ratio"))
+    bots = t.get("bot_degen_count") or 0
+    smart = t.get("smart_degen_count") or 0
+    if br >= 0.30:
+        reasons.append(f"捆绑抢跑率{br*100:.0f}%(创建者钱包同捆买入)")
+    if er >= 0.20:
+        reasons.append(f"诱捕率{er*100:.0f}%(在钓人接盘)")
+    if smart == 0 and bots >= 50:
+        reasons.append(f"纯机器人刷量({bots}bot/0聪明钱)")
+    elif smart > 0 and bots / max(smart, 1) >= 25:
+        reasons.append(f"机器人是聪明钱的{bots//max(smart,1)}倍(刷量为主)")
+    severe = br >= 0.45 or er >= 0.35 or (smart == 0 and bots >= 200)
+    level = "severe" if severe else ("moderate" if reasons else "clean")
+    return {"level": level, "reasons": reasons[:3],
+            "bundler_rate": round(br, 3), "entrapment_ratio": round(er, 3)}
+
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _rug_from_gmgn(t: dict) -> dict:
     """Turn GMGN's native safety fields into the board's avoid/caution/clean badge."""
     facts = []
@@ -145,6 +178,7 @@ def opportunities(chains=("sol", "bsc", "base", "eth"), min_smart: int = 2,
             if age is not None and age > max_age_hours:
                 continue                       # already past the early slope → skip
             t["rug"] = _rug_from_gmgn(t)
+            t["manipulation"] = _manipulation(t)     # #4 taint flag
             # A huge smart-money count is a LATENESS tell, not conviction — 200 smart
             # wallets don't pile in during the early slope. So the fresh score REWARDS
             # young age and CAPS the smart-money contribution (a handful just-entering

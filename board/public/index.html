@@ -80,6 +80,7 @@
   <div class="tabs" role="tablist">
     <button class="tab on" data-v="watch" role="tab">🐋 聪明钱刚买入·最早</button>
     <button class="tab" data-v="opp" role="tab">💎 早期聪明钱扎堆</button>
+    <button class="tab" data-v="avoid" role="tab">🛡️ 避雷/污染</button>
     <button class="tab" data-v="perp" role="tab">🔥 永续拥挤/点火</button>
     <button class="tab" data-v="op" role="tab">💰 庄在做盘</button>
   </div>
@@ -130,6 +131,35 @@ function renderWatch(){
   }).join("");
 }
 
+// ---- AVOID (#4 manipulation-taint + #5 rug) ----
+function renderAvoid(){
+  const d=data.opp; if(!d) return '<div class="err">还没数据 — 避雷线复用聪明钱数据,等它先加载。</div>';
+  const all=d.opportunities||[];
+  // dangerous = rug avoid/caution OR manipulation moderate/severe — traps among what
+  // smart money is buying (tempting but polluted)
+  const danger=all.filter(o=>{const r=(o.rug||{}).level,m=(o.manipulation||{}).level;
+    return r==="avoid"||r==="caution"||m==="severe"||m==="moderate";})
+    .sort((a,b)=>({severe:0,avoid:0,moderate:1,caution:2,clean:9})[Math.min()] , (rank=o=>Math.min(({avoid:0,caution:2,unchecked:9,clean:9})[(o.rug||{}).level]??9,({severe:0,moderate:1,clean:9})[(o.manipulation||{}).level]??9)), rank(a)-rank(b));
+  setLegend([["danger","🔴严重·蜜罐/重操纵(别碰)"],["warn","🟠中度·捆绑/机器人刷(谨慎)"]]);
+  document.getElementById("lead").innerHTML=`聪明钱在买的币里,<b>这些是圈套</b>——合约有雷(#5)或被机器人/捆绑抢跑操纵(#4,你的聪明钱信号被污染)。`+
+    ` 共 <b>${danger.length}</b> 个。`+
+    `<div class="note">#4 免费实时 MEV API 全死,这里用 GMGN 的捆绑率/诱捕率/机器人占比做"操纵污染"检测——防的就是"聪明钱信号被 MEV/刷量污染"。看着有聪明钱不代表能买。</div>`;
+  document.getElementById("summary").textContent=danger.length?`${danger.length} 个圈套`:"这批里没查到明显圈套(不等于都安全)";
+  if(!danger.length) return '<div class="err">当前聪明钱在买的币里没查到蜜罐/重操纵的。不等于都安全——合约未开源的仍标⚪。</div>';
+  return danger.map(o=>{
+    const r=o.rug||{level:"unchecked",facts:[]}, m=o.manipulation||{level:"clean",reasons:[]};
+    const severe=r.level==="avoid"||m.level==="severe";
+    const why=[...(r.facts||[]).map(f=>"合约:"+f),...(m.reasons||[])];
+    return card(o.symbol,o.chain,severe?"🔴严重圈套":"🟠有污染",severe?"c-danger":"c-warn",severe?"s-danger":"s-warn",
+      `${o.smart_money||0} 个聪明钱在买,但<b>${severe?"是圈套":"有操纵污染"}</b>:${why.slice(0,2).join("、")}。`,
+      severe?"合约有雷或被重度操纵——聪明钱在买也别碰,大概率你是被钓的接盘方。":"有捆绑/机器人刷量迹象,聪明钱信号被污染,别当干净信号,谨慎小仓。",
+      [`聪明钱 <b>${o.smart_money||0}</b>`,(o.bots!=null?`机器人 <b>${o.bots}</b>`:''),
+       (m.bundler_rate?`捆绑 <b>${(m.bundler_rate*100).toFixed(0)}%</b>`:''),(m.entrapment_ratio?`诱捕 <b>${(m.entrapment_ratio*100).toFixed(0)}%</b>`:''),
+       `流动性 <b>${fmtUsd(o.liq)}</b>`],
+      `${why.join("<br>")}<br>${esc(o.token||"")}`);
+  }).join("");
+}
+
 // ---- PERP (#2 ignition + #3 cascade) ----
 const PSIG={
   longs_crowded:{label:"多头拥挤·防砸",vc:"c-danger",vs:"s-danger"},
@@ -176,6 +206,7 @@ function renderOpp(){
   return s.map(o=>{
     const sm=o.smart_money??o.smart_actors??0;
     const rug=o.rug||{level:"unchecked",facts:[]};
+    const mp=o.manipulation||{level:"clean",reasons:[]};
     const avoid=rug.level==="avoid";
     const fresh=o.confirmed_fresh, crowded=o.crowded;
     const botHeavy=(o.bots||0)>0 && sm>0 && (o.bots/sm)>8;
@@ -190,10 +221,36 @@ function renderOpp(){
         crowded?`已经 ${sm} 个聪明钱了——扩散过半,你多半是接盘方,别追。`:
         botHeavy?`机器人/狙击 ${o.bots}/${o.snipers||0} 远多于聪明钱——你可能就是出货对象,谨慎。`:
         fresh?"够新、聪明钱刚进——这是能埋伏的窗口,但你仍晚于内部狙击者,小仓+止损。":"年龄没确认,别当早期,当线索看。",
-      [RUG[rug.level]||'',`聪明钱 <b>${sm}</b>`,(o.renowned?`知名 <b>${o.renowned}</b>`:''),
+      [RUG[rug.level]||'',(mp.level!=="clean"?`<span style="color:var(--${mp.level==="severe"?"danger":"warn"})">⚠️操纵${mp.level==="severe"?"重":""}</span>`:''),
+       `聪明钱 <b>${sm}</b>`,(o.renowned?`知名 <b>${o.renowned}</b>`:''),
        (o.snipers!=null?`狙击 <b>${o.snipers}</b>`:''),(o.bots!=null?`机器人 <b>${o.bots}</b>`:''),
        `流动性 <b>${fmtUsd(o.liq)}</b>`,(o.price_chg_1h!=null?`1h ${chg(o.price_chg_1h)}`:'')],
-      `${(rug.facts&&rug.facts.length)?"合约: "+rug.facts.map(esc).join("、")+"<br>":""}${esc(o.token||"")}`);
+      `${(rug.facts&&rug.facts.length)?"合约: "+rug.facts.map(esc).join("、")+"<br>":""}${(mp.reasons&&mp.reasons.length)?"操纵: "+mp.reasons.map(esc).join("、")+"<br>":""}${esc(o.token||"")}`);
+  }).join("");
+}
+
+// ---- AVOID (#5 rug + #4 manipulation: the traps among what smart money buys) ----
+function renderAvoid(){
+  const d=data.opp; if(!d) return '<div class="err">还没数据。</div>';
+  const all=d.opportunities||[];
+  const bad=all.filter(o=>{const r=(o.rug||{}).level,m=(o.manipulation||{}).level;
+    return r==="avoid"||r==="caution"||m==="moderate"||m==="severe";})
+    .sort((a,b)=>{const sev=x=>((x.rug||{}).level==="avoid"?3:0)+((x.manipulation||{}).level==="severe"?3:(x.manipulation||{}).level==="moderate"?1:0)+((x.rug||{}).level==="caution"?1:0);return sev(b)-sev(a);});
+  setLegend([["danger","有雷/重度操纵·别碰"],["warn","有风险/操纵·谨慎"]]);
+  document.getElementById("lead").innerHTML=`<b>看着诱人、其实是圈套的</b>——聪明钱榜里被检测出<b>合约有雷</b>或<b>捆绑抢跑/诱捕/机器人刷量</b>的币。`+
+    ` 当前 <b>${bad.length}</b> 个。`+
+    `<div class="note">这是 #4(MEV/操纵污染,来自 GMGN 捆绑率/诱捕率/机器人占比)+ #5(蜜罐/税/未开源)的防御线。"聪明钱在买"若被操纵污染,你很可能就是被钓的接盘方。</div>`;
+  document.getElementById("summary").textContent=bad.length?`${bad.length} 个被标记危险`:"当前榜里没检测到明显圈套";
+  if(!bad.length) return '<div class="err">当前"聪明钱在买"的币里没检测到明显的雷/操纵——但这不等于安全,合约仍可能事后作恶,小仓+止损。</div>';
+  return bad.map(o=>{
+    const rug=o.rug||{level:"clean",facts:[]},mp=o.manipulation||{level:"clean",reasons:[]};
+    const hard=rug.level==="avoid"||mp.level==="severe";
+    const flags=[...(rug.facts||[]),...(mp.reasons||[])];
+    return card(o.symbol,o.chain,hard?"🔴别碰":"🟠谨慎",hard?"c-danger":"c-warn",hard?"s-danger":"s-warn",
+      `${o.smart_money||0} 个聪明钱在买,但${hard?'检测到严重问题':'有风险信号'}:${flags.slice(0,2).join("、")}。`,
+      hard?"聪明钱可能就是在钓你接盘,或合约能直接作恶——别碰。":"有操纵/合约风险,即使聪明钱在买也要谨慎,小仓。",
+      [`聪明钱 <b>${o.smart_money||0}</b>`,(o.bots!=null?`机器人 <b>${o.bots}</b>`:''),`流动性 <b>${fmtUsd(o.liq)}</b>`],
+      `${flags.length?"问题: "+flags.map(esc).join("、")+"<br>":""}${esc(o.token||"")}`);
   }).join("");
 }
 
@@ -236,7 +293,7 @@ function renderOp(){
 }
 
 function staleness(){
-  const d=data[view], el=document.getElementById("stale");
+  const d=data[view==="avoid"?"opp":view], el=document.getElementById("stale");
   if(!d){el.textContent="无数据";el.className="stale dead";return}
   const gen=new Date(d.generated_at),next=new Date(d.next_expected_at),now=new Date(),age=Math.round((now-gen)/60000);
   document.getElementById("gen").textContent="更新于 "+gen.toLocaleString();
@@ -245,7 +302,7 @@ function staleness(){
   else{el.textContent="🔴 超24h没更新,别信";el.className="stale dead"}
 }
 function paint(){
-  document.getElementById("grid").innerHTML = view==="watch"?renderWatch():view==="perp"?renderPerp():view==="opp"?renderOpp():renderOp();
+  document.getElementById("grid").innerHTML = view==="watch"?renderWatch():view==="perp"?renderPerp():view==="opp"?renderOpp():view==="avoid"?renderAvoid():renderOp();
   document.querySelectorAll(".tab").forEach(t=>t.className="tab"+(t.dataset.v===view?" on":""));
   staleness();
 }

@@ -524,10 +524,14 @@ async def _run_smart_wallet_watch():
     logger.info("scheduled_smart_wallet_watch")
     from src.pipeline import board_export
     try:
+        # both real-time lanes on the 15-min cadence: the wallet watch AND perps
+        # (frequent perp snapshots also densify OI history so IGNITION can compute).
         watch = await asyncio.to_thread(board_export.render_watch)
-        paths = await asyncio.to_thread(board_export.write_views, watch=watch)
+        perps = await asyncio.to_thread(board_export.render_perps)
+        paths = await asyncio.to_thread(board_export.write_views, watch=watch, perps=perps)
         n = await asyncio.to_thread(board_export.push_to_blob, paths)
-        logger.info("smart_wallet_watch_done", tokens=len(watch.get("watch", [])), pushed=n)
+        logger.info("smart_wallet_watch_done", tokens=len(watch.get("watch", [])),
+                    perps=len(perps.get("perps", [])), pushed=n)
     except Exception as e:
         logger.error("smart_wallet_watch_failed", error=str(e)[:120])
 

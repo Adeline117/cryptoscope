@@ -34,8 +34,8 @@ SNAP_DB = DATA_DIR / "perp_snapshots.db"
 # thresholds (heuristics, labeled as such — annualized funding %)
 FUNDING_CROWDED_ANN = 50.0     # |ann funding| above this = a crowded, paying side
 MIN_OI_USD = 500_000           # ignore illiquid coins (noise)
-IGNITION_OI_JUMP = 0.05        # +5% OI since last snapshot = leverage piling in
-SNAPSHOT_MIN_GAP_MIN = 20      # diff against a snapshot at least this old
+IGNITION_OI_JUMP = 0.03        # +3% OI since last snapshot = leverage piling in
+SNAPSHOT_MIN_GAP_MIN = 12      # diff against a snapshot at least this old (15-min job)
 
 
 def _fetch_ctxs() -> list[dict]:
@@ -115,14 +115,18 @@ def _store_and_diff(rows: list[dict]) -> None:
         c.close()
 
 
+IGNITION_MIN_OI_USD = 200_000  # ignition tolerates smaller coins than cascade (a real
+                               # OI+price surge on a $250k coin is signal, not noise)
+
+
 def _signal(r: dict) -> dict | None:
     """Classify a coin into a cascade or ignition signal, or None. Returns
     {kind, direction, strength, why}."""
-    if r["oi_usd"] < MIN_OI_USD:
+    if r["oi_usd"] < IGNITION_MIN_OI_USD:
         return None
     fa = r["funding_ann"]
-    # CASCADE / crowding — from funding alone
-    if abs(fa) >= FUNDING_CROWDED_ANN:
+    # CASCADE / crowding — from funding alone (needs real size to matter)
+    if r["oi_usd"] >= MIN_OI_USD and abs(fa) >= FUNDING_CROWDED_ANN:
         if fa > 0:
             return {"kind": "cascade", "direction": "longs_crowded",
                     "strength": "强" if fa >= 150 else "中",
