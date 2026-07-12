@@ -158,7 +158,8 @@ def _cielo_smart_buys(chains: str = "eth,bsc,base,solana", list_id: int = 75168,
     return out
 
 
-def render_opportunities(chains=("bsc", "base"), max_scan: int = 22) -> dict:
+def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
+                         max_scan: int = 30) -> dict:
     """THE offense view: fresh low-float tokens that PROVEN-PROFITABLE, INDEPENDENT
     wallets are buying right now — category #1 (get in early on the diffusion curve).
 

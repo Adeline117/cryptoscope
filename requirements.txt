@@ -39,3 +39,4 @@ python-telegram-bot>=20.7
 python-dotenv>=1.0
 click>=8.1
 rich>=13.7
+dune-client>=1.7
