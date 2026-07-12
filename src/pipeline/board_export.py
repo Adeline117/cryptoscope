@@ -46,42 +46,48 @@ ARENA_API = "https://www.arenafi.org/api/rankings"
 # --------------------------------------------------------------------------- #
 # operators view — from the sentinel verdict engine
 # --------------------------------------------------------------------------- #
-def render_operators() -> dict:
-    """One record per registered sentinel, from identify_operator. Slow (minutes);
-    runs in the scheduler's export job, never in a request path."""
+def _analyze_sentinel(v: dict) -> dict:
+    """Verdict record for one sentinel. Never raises."""
     from src.onchain.operator_id import identify_operator
+    tok, ch, sym = v.get("token"), v.get("chain"), v.get("symbol", "?")
+    rec = {"symbol": sym, "chain": ch, "token": tok}
+    try:
+        r = identify_operator(tok, ch)
+        cur = r.get("current", {}) or {}
+        mkt = cur.get("market", {}) or {}
+        acq = cur.get("acquisition", {}) or {}
+        rec.update({
+            "ok": True,
+            "verdict": r.get("verdict"), "confidence": r.get("confidence"),
+            "acquisition": acq.get("verdict"),
+            "current_graph_available": cur.get("current_graph_available"),
+            "supply_verified": cur.get("supply_verified"),
+            "largest_entity_pct": cur.get("largest_entity_pct"),
+            "largest_address_pct": cur.get("largest_address_pct"),
+            "dominant_wallets": cur.get("dominant_wallets"),
+            "entity_count": cur.get("entity_count"),
+            "liquidity_usd": mkt.get("liquidity_usd"),
+            "volume_h24": mkt.get("volume_h24"),
+            "caveats": (r.get("caveats") or [])[:3],
+        })
+        rec.update(_dex_direction(tok, ch))
+    except Exception as e:
+        rec.update({"ok": False, "error": str(e)[:120]})
+    return rec
+
+
+def render_operators() -> dict:
+    """One record per registered sentinel, from identify_operator. Each verdict is
+    minutes of RPC; run at concurrency 3 (proven safe vs rate limits) so 12 sentinels
+    finish in ~one identify_operator's wall time, not twelve. Runs in the scheduler's
+    export job, never in a request path."""
+    from concurrent.futures import ThreadPoolExecutor
 
     sf = DATA_DIR / "operator_sentinels.json"
     sentinels = json.loads(sf.read_text()) if sf.exists() else {}
-    records = []
-    for v in sentinels.values():
-        tok, ch, sym = v.get("token"), v.get("chain"), v.get("symbol", "?")
-        if not tok:
-            continue
-        rec = {"symbol": sym, "chain": ch, "token": tok}
-        try:
-            r = identify_operator(tok, ch)
-            cur = r.get("current", {}) or {}
-            mkt = cur.get("market", {}) or {}
-            acq = cur.get("acquisition", {}) or {}
-            rec.update({
-                "ok": True,
-                "verdict": r.get("verdict"), "confidence": r.get("confidence"),
-                "acquisition": acq.get("verdict"),
-                "current_graph_available": cur.get("current_graph_available"),
-                "supply_verified": cur.get("supply_verified"),
-                "largest_entity_pct": cur.get("largest_entity_pct"),
-                "largest_address_pct": cur.get("largest_address_pct"),
-                "dominant_wallets": cur.get("dominant_wallets"),
-                "entity_count": cur.get("entity_count"),
-                "liquidity_usd": mkt.get("liquidity_usd"),
-                "volume_h24": mkt.get("volume_h24"),
-                "caveats": (r.get("caveats") or [])[:3],
-            })
-            rec.update(_dex_direction(tok, ch))
-        except Exception as e:
-            rec.update({"ok": False, "error": str(e)[:120]})
-        records.append(rec)
+    targets = [v for v in sentinels.values() if v.get("token")]
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        records = list(ex.map(_analyze_sentinel, targets))
     return _envelope({"operators": records})
 
 
