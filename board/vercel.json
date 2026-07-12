@@ -1,5 +1,8 @@
 {
   "cleanUrls": true,
+  "rewrites": [
+    { "source": "/data/:path*", "destination": "https://oyyt6qeyzyzf55vg.public.blob.vercel-storage.com/:path*" }
+  ],
   "headers": [
     { "source": "/(.*)", "headers": [
       { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=900, stale-while-revalidate=60, stale-if-error=86400" }
