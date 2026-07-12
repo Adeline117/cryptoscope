@@ -91,6 +91,73 @@ def render_operators() -> dict:
     return _envelope({"operators": records})
 
 
+def _rug_flag(token: str, chain: str) -> dict:
+    """GoPlus (keyless) → an AVOID/caution/clean badge. #5 folded into opportunities:
+    a token smart money is buying that's ALSO a honeypot is a trap, not a find. Never
+    calls a failed check 'safe'."""
+    try:
+        from src.onchain.goplus_client import rug_risk
+        rr = rug_risk(token, chain)
+    except Exception as e:
+        return {"level": "unchecked", "facts": [], "reason": str(e)[:60]}
+    if not rr.get("available"):
+        return {"level": "unchecked", "facts": [], "reason": rr.get("reason")}
+    facts = rr.get("facts") or []
+    hard = any(any(w in f for w in ("蜜罐", "owner 可直接改", "可暂停", "可收回", "隐藏 owner"))
+               for f in facts)
+    level = "avoid" if hard else ("caution" if facts else "clean")
+    return {"level": level, "facts": facts[:4], "lp_locked": rr.get("lp_all_locked")}
+
+
+def _cielo_smart_buys(chains: str = "eth,bsc,base,solana", list_id: int = 75168,
+                      min_usd: int = 500, limit: int = 100) -> list | None:
+    """If CIELO_API_KEY is set, pull recent BUYS by Cielo's curated Smart Money list
+    (id 75168) and aggregate by token = 'N curated smart wallets bought X recently'.
+    Returns None when no key (caller falls back to the home-grown radar). Research-
+    verified endpoint; stays dormant until a free key is added to .env."""
+    key = os.environ.get("CIELO_API_KEY", "")
+    if not key:
+        return None
+    try:
+        url = (f"https://feed-api.cielo.finance/api/v1/feed?list={list_id}"
+               f"&txTypes=swap&newTrades=true&chains={chains}&minUSD={min_usd}&limit={limit}")
+        req = urllib.request.Request(url, headers={"X-API-KEY": key,
+                                                   "User-Agent": "falsifier-board/0.1"})
+        d = json.loads(urllib.request.urlopen(req, timeout=20).read())
+    except Exception as e:
+        logger.warning("cielo_fetch_failed", error=str(e)[:100])
+        return None
+    items = d.get("data", {}).get("items") or d.get("items") or d.get("data") or []
+    by_token: dict = {}
+    for r in items if isinstance(items, list) else []:
+        # a BUY = the wallet received token1 paying token0; Cielo marks direction, but
+        # be defensive about field names across versions.
+        tok = (r.get("token1_address") or r.get("token_address")
+               or (r.get("token1") or {}).get("address"))
+        sym = (r.get("token1_symbol") or r.get("symbol")
+               or (r.get("token1") or {}).get("symbol") or "?")
+        ch = r.get("chain") or r.get("network")
+        wallet = r.get("wallet") or r.get("from")
+        usd = float(r.get("token1_amount_usd") or r.get("amount_usd") or r.get("value_usd") or 0)
+        if not tok:
+            continue
+        e = by_token.setdefault(tok.lower(), {"symbol": sym, "chain": ch, "token": tok,
+                                              "wallets": set(), "usd": 0.0})
+        if wallet:
+            e["wallets"].add(str(wallet).lower())
+        e["usd"] += usd
+    out = []
+    for e in by_token.values():
+        n = len(e["wallets"])
+        out.append({"symbol": e["symbol"], "chain": e["chain"], "token": e["token"],
+                    "smart_actors": n, "smart_wallets_seen": n, "farm_collapsed": 0,
+                    "usd_bought": round(e["usd"]), "strength": "强" if n >= 3 else "弱",
+                    "sample_wallets": list(e["wallets"])[:4],
+                    "rug": _rug_flag(e["token"], e["chain"]) if e["chain"] in ("bsc", "base", "ethereum") else {"level": "unchecked", "facts": []}})
+    out.sort(key=lambda x: -x["smart_actors"])
+    return out
+
+
 def render_opportunities(chains=("bsc", "base"), max_scan: int = 22) -> dict:
     """THE offense view: fresh low-float tokens that PROVEN-PROFITABLE, INDEPENDENT
     wallets are buying right now — category #1 (get in early on the diffusion curve).
@@ -105,10 +172,20 @@ def render_opportunities(chains=("bsc", "base"), max_scan: int = 22) -> dict:
     from src.onchain.smart_money import convergence
     from src.pipeline.yaobi_finder import _buy_pressure, _gather_young
 
+    # #1 STRONG PATH: if a Cielo key is present, read the curated Smart Money list's
+    # recent buys directly (fast, dense, no farm noise) instead of the slow home-grown
+    # scan. Falls through to the radar when there's no key.
+    cielo = _cielo_smart_buys()
+    if cielo is not None:
+        return _envelope({"opportunities": cielo, "scanned": None, "source": "Cielo 策展聪明钱名单",
+                          "note": ("Cielo 策展的已验证聪明钱正在买入的币,按买入钱包数排。"
+                                   "已带 GoPlus 避雷。诚实边界:你看到时已落后其入场,多数会归零。")})
+
     try:
         fresh = _gather_young(chains, pages=2)
     except Exception as e:
-        return _envelope({"opportunities": [], "scanned": 0, "scan_error": str(e)[:120]})
+        return _envelope({"opportunities": [], "scanned": 0, "scan_error": str(e)[:120],
+                          "source": "自建雷达"})
 
     out = []
     scanned = 0
@@ -138,12 +215,13 @@ def render_opportunities(chains=("bsc", "base"), max_scan: int = 22) -> dict:
             "buys_h1": bp.get("buys_h1"), "sells_h1": bp.get("sells_h1"),
             "strength": "强" if actors >= 3 else "弱",
             "sample_wallets": wallets,
+            "rug": _rug_flag(tok, ch),          # #5 avoid-flag folded in
         })
     out.sort(key=lambda x: (-(x["smart_actors"] or 0), x["age_days"] if x["age_days"] is not None else 999))
-    return _envelope({"opportunities": out, "scanned": scanned,
+    return _envelope({"opportunities": out, "scanned": scanned, "source": "自建雷达(慢/稀疏)",
                       "note": ("聪明钱=有已实现盈利历史、且相互独立(非同一钱包农场)的钱包正在买入。"
-                               "强=≥3个独立主体收敛;弱=1-2个,只是线索。诚实边界:你看到时已落后他们入场价,"
-                               "多数会归零,这是雷达不是必赚。")})
+                               "强=≥3个独立主体收敛;弱=1-2个,只是线索。已带 GoPlus 避雷。"
+                               "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")})
 
 
 def render_perps() -> dict:

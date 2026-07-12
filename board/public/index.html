@@ -144,14 +144,18 @@ function renderOpp(){
     `<div class="note">这是自建雷达(慢、稀疏,常撞刷量农场——已自动剔除)。接 Cielo 聪明钱名单会强很多,需一个免费 key。诚实:你看到时已落后他们入场价,多数会归零。</div>`;
   document.getElementById("summary").textContent=s.length?`${s.length} 个命中`:"这轮没扫到聪明钱在买的新币";
   if(!s.length) return '<div class="err">这轮没有"独立聪明钱正在买"的新币。自建雷达信号本就稀疏——接 Cielo/GMGN 的策展聪明钱名单是正解(需免费 key)。</div>';
+  const RUG={avoid:'<b style="color:var(--danger)">🔴合约有雷·别碰</b>',caution:'<span style="color:var(--warn)">🟠合约有风险</span>',clean:'<span style="color:var(--good)">🟢合约干净</span>',unchecked:'<span style="color:var(--muted)">⚪合约未检查</span>'};
   return s.map(o=>{
     const strong=o.smart_actors>=3;
-    return card(o.symbol,o.chain,strong?"强·聪明钱进场":"弱·有线索",strong?"c-good":"c-warn",strong?"s-good":"s-warn",
+    const rug=o.rug||{level:"unchecked",facts:[]};
+    const avoid=rug.level==="avoid";
+    return card(o.symbol,o.chain,avoid?"⚠️别碰·有雷":(strong?"强·聪明钱进场":"弱·有线索"),avoid?"c-danger":(strong?"c-good":"c-warn"),avoid?"s-danger":(strong?"s-good":"s-warn"),
       `${o.smart_actors} 个已实现盈利的<b>独立</b>钱包正在买${o.farm_collapsed>0?`(另有 ${o.farm_collapsed} 个是同一农场,已剔除)`:''}。`,
-      strong?"值得盯紧、快查合约安全再说,别当必赚。":"只有 1-2 个,当线索看,别重仓。",
-      [`${(o.age_days!=null?o.age_days.toFixed(1)+'天新':'')}`,`流动性 <b>${fmtUsd(o.liq)}</b>`,
+      avoid?`合约有雷(${(rug.facts||[]).join("、")})——聪明钱在买也别碰,可能是圈套。`:(strong?"值得盯紧,合约看起来干净;仍别当必赚。":"只有 1-2 个,当线索看,别重仓。"),
+      [RUG[rug.level]||'',`${(o.age_days!=null?o.age_days.toFixed(1)+'天新':'')}`,`流动性 <b>${fmtUsd(o.liq)}</b>`,
+       (o.usd_bought!=null?`买入额 <b>${fmtUsd(o.usd_bought)}</b>`:``),
        (o.buy_ratio_h1!=null?`买卖比 <b>${o.buy_ratio_h1}</b>`:``)],
-      `买入钱包(可自查): ${(o.sample_wallets||[]).map(esc).join(", ")||"—"}<br>${esc(o.token||"")}`);
+      `买入钱包(可自查): ${(o.sample_wallets||[]).map(esc).join(", ")||"—"}${(rug.facts&&rug.facts.length)?"<br>合约: "+rug.facts.map(esc).join("、"):""}<br>${esc(o.token||"")}`);
   }).join("");
 }
 
