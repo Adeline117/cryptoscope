@@ -128,7 +128,9 @@
   .skl{height:var(--row-h);border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--s1) 25%,var(--s3) 50%,var(--s1) 75%);background-size:200% 100%;animation:sk 1.3s infinite}
   @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
 
-  /* perp heatmap */
+  /* perp: carry section header + heatmap */
+  .perp-sec{font-size:12px;font-weight:650;color:var(--text);margin:2px 0 9px;letter-spacing:.02em}
+  .perp-sec small{font-weight:500;color:var(--dim);letter-spacing:0}
   .hm{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
   .cell{border:1px solid var(--border);border-radius:9px;padding:9px 10px;background:var(--s1);display:flex;flex-direction:column;gap:5px;cursor:pointer}
   .cell .sy{font-weight:650;font-size:13px}
@@ -272,9 +274,9 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>`资金费/未平仓告诉你<b>哪一边杠杆拥挤</b>。<b>"高资金费就做空"单独用是亏的</b>——这是戒备/谁是弱势侧,可交易的是未平仓开始回落那一刻。`,
-    stat:d=>{const s=d?.perps||[];return[["信号",s.length,""],["点火",s.filter(x=>x.signal==="ignition").length,""],["拥挤",s.filter(x=>x.signal==="cascade").length,""]]},
-    readme:"真正正 EV 的是<b>资金费套利</b>(现货多+永续空吃费,~8%基准);裸做多散户 74-89% 亏。这栏当「我是不是站在被清算那侧」的防御用,不是做空按钮。",
+    title:d=>{const c=d?.carry||[];const mj=c.filter(x=>x.is_major).length;return `<b style="color:var(--good)">资金费套利是这里唯一对个人可复制的正EV核</b>:现货多+永续空,吃杠杆多头付的费,不赌方向。当前 <b>${c.length}</b> 个机会(<b>${mj}</b> 个主流)。下面拥挤/点火是方向观测,防御用不是买卖指令。`},
+    stat:d=>{const c=d?.carry||[];const mj=c.filter(x=>x.is_major).length;const top=c[0];return[["套利机会",c.length,""],["主流(较净)",mj,""],["最高年化",top?`+${top.sustained_ann}%`:"—",top?top.tier:""]]},
+    readme:"这条线的<b>真核是💰资金费套利</b>(delta中性:现货多+永续空,吃杠杆多头付的费,~8%基准起,主流更净)——研究里唯一「个人真能做出正EV」的核。<b>但这是carry不是无风险套利</b>:费率翻负要倒付、空腿被挤压强平、交易所暴雷/脱锚(2025-10-10 USDe 在 Binance 砸到 $0.65 强平了偿付充足的账户)。年化为毛,未扣手续费/滑点。下面的拥挤/点火是<b>方向观测</b>:裸做多散户 74-89% 亏,当「我是不是站在被清算那侧」的防御用,不是做空按钮。",
     rows:d=>d?.perps||[],
     custom:true,
   },
@@ -303,18 +305,42 @@ const OPMAP={dump:{label:"正在出货",b:"danger",so:"对手盘就是庄,别接
 const OPRANK={dump:0,armed:1,accum:2,issuer:3,faded:4,unknown:5};
 function classOp(r){if(!r.ok)return"unknown";const v=r.verdict||"",a=r.acquisition||"";if(a==="allocated")return"issuer";if(["distributing","exited_by_selling","present_rotating_confirmed","distributing_or_churn"].includes(v))return((r.largest_entity_pct||0)<5&&(r.dominant_wallets||0)<=1)?"faded":"dump";if(v==="loaded_accumulating")return"accum";if(["loaded_live_operator","live_operator"].includes(v))return(r.current_graph_available&&(r.largest_entity_pct||0)<2)?"unknown":"armed";if(v==="loaded_dormant")return"armed";if(["dispersed","treasury","treasury_only"].includes(v))return"faded";return"unknown"}
 
-// perp heatmap
+// perp: carry screener (the real edge, on top) + crowding/ignition heatmap (defense, below)
 function renderPerp(d){
-  const s=d?.perps||[]; if(!s.length)return `<div class="scroll"><div class="empty">当前市场杠杆不拥挤 —— 这本身是个信息。</div></div>`;
-  const col=p=>{const fa=p.funding_ann;const a=Math.min(Math.abs(fa)/300,1);
-    if(p.signal==="ignition")return{bg:`color-mix(in srgb,var(--good) ${20+a*30}%,var(--s1))`,b:"var(--good-b)"};
-    return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
-  return `<div class="hm">`+s.map(p=>{const c=col(p);const lab=p.signal==="ignition"?(p.direction==="up"?"🔥点火↑":"🔥点火↓"):(p.direction==="longs_crowded"?"多头拥挤":"空头拥挤");
-    return `<div class="cell" style="background:${c.bg};border-color:${c.b}" data-perp='${esc(JSON.stringify(p.why))}'>
-      <div class="sy">${esc(p.symbol)} <span class="chip">${lab}</span></div>
-      <div class="fu ${p.funding_ann>0?'down':'up'}">${p.funding_ann>0?'+':''}${p.funding_ann}%<small style="color:var(--dim)">/年</small></div>
-      <div class="mt">OI ${usd(p.oi_usd)} · 24h ${p.price_chg_24h!=null?(p.price_chg_24h>0?'+':'')+(+p.price_chg_24h).toFixed(1)+'%':'—'}</div>
-    </div>`}).join("")+`</div>`;
+  const carry=d?.carry||[], s=d?.perps||[];
+  if(!carry.length && !s.length) return `<div class="scroll"><div class="empty">当前无正资金费机会,市场杠杆也不拥挤 —— 这本身是个信息。</div></div>`;
+  let html="";
+  // ── CARRY: delta-neutral funding arbitrage — the ONE replicable positive-EV core ──
+  if(carry.length){
+    const rows=carry.slice(0,20).map(c=>{
+      const pf=c.pos_frac, drift=c.sustained_ann!==c.funding_ann;
+      const flags=c.flags.length?c.flags.map(f=>`<span class="chip b-warn">${esc(f.split(":")[0].split("(")[0])}</span>`).join(" ")
+                                :'<span class="chip b-good">干净</span>';
+      return `<tr title="${esc(c.note)}">
+        <td>${idc(c.symbol,c.tier)}</td>
+        <td class="n"><span class="num" style="color:var(--good)">+${c.sustained_ann}%</span>${drift?`<small class="dim"> 现${c.funding_ann>0?'+':''}${c.funding_ann}%</small>`:''}</td>
+        <td class="n">${pf!=null?`<span class="num">${(pf*100).toFixed(0)}%</span>`:'<small class="dim">积累中</small>'}</td>
+        <td class="n"><span class="num">${usd(c.oi_usd)}</span></td>
+        <td>${flags}</td></tr>`}).join("");
+    html+=`<div class="perp-sec">💰 资金费套利 · delta中性 <small>现货多+永续空,吃杠杆多头付的费,不赌方向 · 主流优先 · 年化为毛(未扣手续费/滑点)</small></div>
+      <div class="scroll"><table class="tbl"><thead><tr>
+        <th>代币</th><th class="n">年化资金费</th><th class="n">持续性</th><th class="n">OI深度</th><th>风险</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  // ── CROWDING / IGNITION: directional observation — defensive, not a trade button ──
+  if(s.length){
+    const col=p=>{const fa=p.funding_ann;const a=Math.min(Math.abs(fa)/300,1);
+      if(p.signal==="ignition")return{bg:`color-mix(in srgb,var(--good) ${20+a*30}%,var(--s1))`,b:"var(--good-b)"};
+      return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
+    html+=`<div class="perp-sec" style="margin-top:16px">🌡️ 拥挤 / 点火 <small>方向观测 · 判断你是不是站在被清算那侧 · 防御用,非买卖指令</small></div>
+      <div class="hm">`+s.map(p=>{const c=col(p);const lab=p.signal==="ignition"?(p.direction==="up"?"🔥点火↑":"🔥点火↓"):(p.direction==="longs_crowded"?"多头拥挤":"空头拥挤");
+      return `<div class="cell" style="background:${c.bg};border-color:${c.b}" data-perp='${esc(JSON.stringify(p.why))}'>
+        <div class="sy">${esc(p.symbol)} <span class="chip">${lab}</span></div>
+        <div class="fu ${p.funding_ann>0?'down':'up'}">${p.funding_ann>0?'+':''}${p.funding_ann}%<small style="color:var(--dim)">/年</small></div>
+        <div class="mt">OI ${usd(p.oi_usd)} · 24h ${p.price_chg_24h!=null?(p.price_chg_24h>0?'+':'')+(+p.price_chg_24h).toFixed(1)+'%':'—'}</div>
+      </div>`}).join("")+`</div>`;
+  }
+  return html;
 }
 
 // ---------- paint ----------

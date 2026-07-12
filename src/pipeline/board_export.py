@@ -289,15 +289,19 @@ def render_watch() -> dict:
 def render_perps() -> dict:
     """Structure #2 (trend ignition) + #3 (liquidation-cascade right side) from
     Hyperliquid — keyless, live, no home-grown detection needed."""
-    from src.onchain.hyperliquid import perp_signals
+    from src.onchain.hyperliquid import _fetch_ctxs, _store_and_diff, carry_signals, perp_signals
     try:
-        sigs = perp_signals()
-        return _envelope({"perps": sigs, "source": "Hyperliquid (keyless)",
-                          "note": ("拥挤=资金费极端,那一侧在付费死扛=清算燃料(防它被清算的方向)。"
-                                   "点火=未平仓与价同向放量=新杠杆进场,趋势有燃料。第2轮起才有点火(需OI历史)。"
-                                   "诚实边界:抬高的是概率不是时点,不是买卖指令。")})
+        rows = _fetch_ctxs()
+        if rows:
+            _store_and_diff(rows)          # one snapshot shared by both screens
+        sigs = perp_signals(rows) if rows else []
+        carry = carry_signals(rows) if rows else []
+        return _envelope({"perps": sigs, "carry": carry, "source": "Hyperliquid (keyless)",
+                          "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
+                                   "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
+                                   "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")})
     except Exception as e:
-        return _envelope({"perps": [], "source": "Hyperliquid", "scan_error": str(e)[:120]})
+        return _envelope({"perps": [], "carry": [], "source": "Hyperliquid", "scan_error": str(e)[:120]})
 
 
 def _dex_direction(token: str, chain: str) -> dict:
