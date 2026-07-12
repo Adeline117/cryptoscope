@@ -42,7 +42,9 @@ def _conn() -> sqlite3.Connection:
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, lane TEXT, symbol TEXT,
         chain TEXT, token TEXT, price0 REAL, liquidity REAL, metric REAL,
         price_4h REAL, price_24h REAL, hit_4h INTEGER, hit_24h INTEGER,
-        resolved INTEGER DEFAULT 0)""")
+        base_rate REAL, resolved INTEGER DEFAULT 0)""")
+    if "base_rate" not in {r[1] for r in c.execute("PRAGMA table_info(picks)")}:
+        c.execute("ALTER TABLE picks ADD COLUMN base_rate REAL")
     return c
 
 
@@ -107,6 +109,15 @@ def resolve() -> int:
                 if px:
                     upd["price_24h"] = px
                     upd["hit_24h"] = _hit(DIRECTION, p0, px, liq or 0)
+                    # store this token's DIRECTIONAL base rate (flat 5%, tradeable=False)
+                    # once, so lane_stats can compute a same-rule lift without re-fetching.
+                    try:
+                        from src.pipeline.evidence import base_rate
+                        br = base_rate(tok, ch, DIRECTION, 0, horizon_h=24, tradeable=False)
+                        if br.get("available"):
+                            upd["base_rate"] = br["p"]
+                    except Exception:
+                        pass
             done = (p24 is not None or "price_24h" in upd)
             if upd:
                 if done:
@@ -125,21 +136,33 @@ def lane_stats() -> dict:
     """Per-lane honest hit rate: {lane: {n, hits, rate, lo, hi, verdict, pending}}.
     verdict is '不可判' until n>=MIN_N — never quote a rate the sample can't support."""
     from src.pipeline.evidence import wilson
+    from src.pipeline.outcome_tracker import _hit
     c = _conn()
     out = {}
     try:
         lanes = [r[0] for r in c.execute("SELECT DISTINCT lane FROM picks").fetchall()]
         for lane in lanes:
-            row = c.execute("SELECT COUNT(*), SUM(hit_24h) FROM picks "
-                            "WHERE lane=? AND hit_24h IS NOT NULL", (lane,)).fetchone()
-            n, hits = row[0] or 0, row[1] or 0
+            rows = c.execute("SELECT price0, price_24h, base_rate FROM picks "
+                             "WHERE lane=? AND price_24h IS NOT NULL", (lane,)).fetchall()
+            # apples-to-apples: score BOTH the pick hit and the base rate at flat 5%
+            # (directional), never mix the slippage-aware hit with a flat base — that
+            # exact mismatch produced the fake 'lift 0.43' earlier this session.
+            n = len(rows)
+            hits = sum(_hit(DIRECTION, p0, p24, 0) for p0, p24, _ in rows if p0 and p24)
+            brs = [b for _, _, b in rows if b is not None]
             pending = c.execute("SELECT COUNT(*) FROM picks WHERE lane=? AND resolved=0",
                                 (lane,)).fetchone()[0]
             if n >= MIN_N:
+                rate = hits / n
                 lo, hi = wilson(hits, n)
-                out[lane] = {"n": n, "hits": hits, "rate": round(hits / n, 3),
+                base = sum(brs) / len(brs) if brs else None
+                lift = round(rate / base, 2) if base else None
+                edge = ("有edge迹象" if lift and lift >= 1.15 else
+                        "无edge/负" if lift and lift <= 1.0 else "接近随机")
+                out[lane] = {"n": n, "hits": hits, "rate": round(rate, 3),
                              "lo": round(lo, 3), "hi": round(hi, 3),
-                             "verdict": "measured", "pending": pending}
+                             "base_rate": round(base, 3) if base else None, "lift": lift,
+                             "verdict": "measured", "edge": edge, "pending": pending}
             else:
                 out[lane] = {"n": n, "hits": hits, "verdict": "不可判", "pending": pending,
                              "note": f"样本 {n}/{MIN_N},还在积累"}
