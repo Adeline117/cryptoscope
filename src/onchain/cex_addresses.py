@@ -82,6 +82,24 @@ def _cached_dune_labels() -> dict[str, str]:
     return {}
 
 
+def _eth_labels_cex() -> dict[str, str]:
+    """ETH exchange hot wallets from dawsbot/eth-labels (data/eth_labels_cex.json,
+    fetched from src/mainnet/exchange). Broadens the ETH CEX set beyond the BSC-centric
+    supplement so a funder that is really a Binance/Coinbase hot wallet gets filtered
+    before it manufactures a false operator cluster (the shared-funder falsification
+    lesson). Empty dict on any read failure — never zeroes the rest of the set."""
+    try:
+        import json
+
+        from src.config import DATA_DIR
+        p = DATA_DIR / "eth_labels_cex.json"
+        if p.exists():
+            return {a.lower(): "eth-labels" for a in json.loads(p.read_text()).get("addresses", [])}
+    except Exception:
+        pass
+    return {}
+
+
 def evm_exchanges() -> dict[str, str]:
     """EVM exchange addresses (lowercased) → label: whale_tracker (ETH-centric) +
     the Dune-sourced BSC supplement + the weekly-refreshed Dune label cache.
@@ -92,6 +110,7 @@ def evm_exchanges() -> dict[str, str]:
     We still return the BSC supplement so BSC detection is unaffected."""
     out = dict(BSC_CEX_SUPPLEMENT)
     out.update(_cached_dune_labels())
+    out.update(_eth_labels_cex())      # 372 fresh ETH exchange hot wallets (dawsbot/eth-labels)
     try:
         from src.collectors.whale_tracker import WhaleTrackerCollector
 
