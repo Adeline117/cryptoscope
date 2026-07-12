@@ -33,8 +33,8 @@ def test_lane_stats_refuses_number_below_min_n(bo):
     # inject 5 resolved picks (< MIN_N) → must be 不可判, never a quoted rate
     c = bo._conn()
     for i in range(5):
-        c.execute("INSERT INTO picks(ts,lane,symbol,chain,token,price0,hit_24h,resolved) "
-                  "VALUES ('2026-01-01T00:00:00+00:00','opp','T',?,?,0.001,1,1)",
+        c.execute("INSERT INTO picks(ts,lane,symbol,chain,token,price0,price_24h,resolved) "
+                  "VALUES ('2026-01-01T00:00:00+00:00','opp','T',?,?,1.0,1.1,1)",
                   ("bsc", f"0x{i}"))
     c.commit(); c.close()
     st = bo.lane_stats()["opp"]
@@ -42,14 +42,17 @@ def test_lane_stats_refuses_number_below_min_n(bo):
     assert "rate" not in st
 
 
-def test_lane_stats_quotes_wilson_at_min_n(bo):
+def test_lane_stats_computes_lift_and_edge_at_min_n(bo):
+    # 7 of MIN_N hit (+6% > flat 5%), base_rate 0.25 each → apples-to-apples lift
     c = bo._conn()
     for i in range(bo.MIN_N):
-        c.execute("INSERT INTO picks(ts,lane,symbol,chain,token,price0,hit_24h,resolved) "
-                  "VALUES ('2026-01-01T00:00:00+00:00','opp','T',?,?,0.001,?,1)",
-                  ("bsc", f"0x{i}", 1 if i < 7 else 0))
+        c.execute("INSERT INTO picks(ts,lane,symbol,chain,token,price0,price_24h,base_rate,resolved) "
+                  "VALUES ('2026-01-01T00:00:00+00:00','opp','T',?,?,1.0,?,0.25,1)",
+                  ("bsc", f"0x{i}", 1.06 if i < 7 else 0.98))
     c.commit(); c.close()
     st = bo.lane_stats()["opp"]
     assert st["verdict"] == "measured"
-    assert st["n"] == bo.MIN_N and st["hits"] == 7
-    assert st["lo"] < st["rate"] < st["hi"]      # Wilson interval brackets the point
+    assert st["n"] == bo.MIN_N and st["hits"] == 7           # scored at flat 5% from prices
+    assert st["lo"] < st["rate"] < st["hi"]                  # Wilson brackets the point
+    assert st["base_rate"] == 0.25 and st["lift"] == round((7 / bo.MIN_N) / 0.25, 2)
+    assert st["edge"] in ("有edge迹象", "接近随机", "无edge/负")
