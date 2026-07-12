@@ -30,11 +30,18 @@ def create_scheduler() -> AsyncIOScheduler:
     Fixes: a wider thread pool, `coalesce` (a backlog runs once, not N times), and a
     generous `misfire_grace_time` so a late job RUNS LATE instead of being skipped.
     """
-    from apscheduler.executors.pool import ThreadPoolExecutor
+    # EVERY job here is `async def`. The previous fix set a ThreadPoolExecutor as the
+    # default to cure executor starvation — but a thread pool does NOT await coroutines,
+    # so it created each coroutine and discarded it ("coroutine was never awaited"): the
+    # whole 24/7 automation silently stopped running ANY job. Async jobs MUST run on the
+    # AsyncIOExecutor (the loop). Starvation is handled the right way instead — by
+    # coalesce + misfire_grace_time below, and by heavy jobs offloading blocking work via
+    # asyncio.to_thread (board_export/self_audit already do).
+    from apscheduler.executors.asyncio import AsyncIOExecutor
 
     settings = load_settings()
     scheduler = AsyncIOScheduler(
-        executors={"default": ThreadPoolExecutor(20)},
+        executors={"default": AsyncIOExecutor()},
         job_defaults={
             "coalesce": True,        # a backlog of missed runs collapses into one
             "max_instances": 1,      # never run two copies of the same job
