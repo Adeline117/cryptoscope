@@ -122,6 +122,15 @@ def create_scheduler() -> AsyncIOScheduler:
         name="自检 (标注案例+链上真值网关 → 失败即告警)",
     )
 
+    # Falsifier-board export: render operators/traders JSON views + push to Vercel
+    # Blob (the public board polls those URLs). 45min keeps next_expected_at honest.
+    scheduler.add_job(
+        _run_board_export,
+        CronTrigger(minute=50),
+        id="board_export",
+        name="证伪器看板导出 (operators/traders JSON → Vercel Blob)",
+    )
+
     # Anomaly candidate screen → push suspected-accumulation coins every 6h
     scheduler.add_job(
         _run_anomaly_screen,
@@ -489,6 +498,20 @@ async def _run_stage2():
 
     result = await run_stage2_detector()
     logger.info("stage2_detector_done", **result)
+
+
+async def _run_board_export():
+    """Render + push the falsifier-board JSON views. render_operators() runs the
+    verdict engine over all sentinels (minutes of RPC) — keep it off the event loop."""
+    import asyncio
+
+    logger.info("scheduled_board_export")
+    from src.pipeline import board_export
+    try:
+        res = await asyncio.to_thread(board_export.run, True)
+        logger.info("board_export_done", **res)
+    except Exception as e:
+        logger.error("board_export_failed", error=str(e)[:120])
 
 
 async def _run_health_summary():

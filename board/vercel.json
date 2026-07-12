@@ -1,0 +1,8 @@
+{
+  "cleanUrls": true,
+  "headers": [
+    { "source": "/(.*)", "headers": [
+      { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=900, stale-while-revalidate=60, stale-if-error=86400" }
+    ]}
+  ]
+}

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>暴富路径证伪器 · Falsifier Board</title>
+<style>
+  :root{
+    --bg:#0b0d11; --surface:#14171e; --surface2:#191d26; --line:#262c37;
+    --ink:#e7ebf2; --ink2:#aab2c0; --muted:#727c8c;
+    --accent:#37b6a4; --good:#46b17b; --warn:#e0a33e; --danger:#e5484d; --info:#5b8def; --violet:#9b8cff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:light){:root{
+    --bg:#f4f6f9; --surface:#fff; --surface2:#eef1f6; --line:#dde3ec;
+    --ink:#141922; --ink2:#3f4a5a; --muted:#7a8494;
+    --accent:#1a8f7f; --good:#2f9e63; --warn:#b47613; --danger:#c93a3f; --info:#3a6fd6; --violet:#6a58d6;}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:30px 18px 70px}
+  h1{font-size:22px;font-weight:650;margin:0;letter-spacing:-.01em}
+  .sub{color:var(--ink2);font-size:13px;margin:4px 0 0}
+  header{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:space-between;padding-bottom:16px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;gap:12px;align-items:center}
+  .logo{width:36px;height:36px;border-radius:8px;background:linear-gradient(150deg,var(--danger),var(--warn));display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:18px;color:#160404}
+  .stale{font-family:var(--mono);font-size:11.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface)}
+  .stale.ok{color:var(--good)} .stale.old{color:var(--warn)} .stale.dead{color:var(--danger)}
+  .honest{margin:16px 0 0;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--info);border-radius:10px;padding:12px 15px;font-size:12.5px;color:var(--ink2)}
+  .honest b{color:var(--ink)}
+  .tabs{display:flex;gap:8px;margin:20px 0 14px}
+  .tab{font-family:var(--mono);font-size:13px;font-weight:600;padding:7px 16px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer}
+  .tab.on{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+  .tab:focus-visible{outline:2px solid var(--info);outline-offset:2px}
+  .summary{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:0 0 14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+  .card .top{padding:12px 15px 10px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);align-items:flex-start}
+  .sym{font-size:15.5px;font-weight:650;display:flex;gap:7px;align-items:center;min-width:0}
+  .sym .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;text-transform:uppercase;flex:none}
+  .dir{font-family:var(--mono);font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;flex:none}
+  .body{padding:11px 15px 13px;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
+  .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+  .cell .k{font-size:10px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);display:block}
+  .cell .v{font-family:var(--mono);font-size:13.5px;font-weight:600}
+  .why{font-size:11.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px;line-height:1.45}
+  .flag{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:0 5px;border-radius:4px;margin-left:4px;vertical-align:1px}
+  .f-ok{color:var(--good);background:color-mix(in srgb,var(--good) 15%,transparent)}
+  .f-no{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+  .up{color:var(--good)} .down{color:var(--danger)}
+  .d-dump{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
+  .d-armed{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+  .d-accum{color:var(--good);background:color-mix(in srgb,var(--good) 14%,transparent)}
+  .d-faded{color:var(--muted);background:color-mix(in srgb,var(--muted) 16%,transparent)}
+  .d-issuer{color:var(--violet);background:color-mix(in srgb,var(--violet) 14%,transparent)}
+  .d-unknown{color:var(--info);background:color-mix(in srgb,var(--info) 13%,transparent)}
+  .v-unfalsified{color:var(--info);background:color-mix(in srgb,var(--info) 13%,transparent)}
+  .v-lottery{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
+  .v-insuff{color:var(--muted);background:color-mix(in srgb,var(--muted) 16%,transparent)}
+  .stripe-dump{box-shadow:inset 3px 0 0 var(--danger)} .stripe-armed{box-shadow:inset 3px 0 0 var(--warn)}
+  .stripe-accum{box-shadow:inset 3px 0 0 var(--good)} .stripe-faded{box-shadow:inset 3px 0 0 var(--muted)}
+  .stripe-issuer{box-shadow:inset 3px 0 0 var(--violet)} .stripe-unknown{box-shadow:inset 3px 0 0 var(--info)}
+  .stripe-lottery{box-shadow:inset 3px 0 0 var(--danger)} .stripe-insuff{box-shadow:inset 3px 0 0 var(--muted)}
+  .err{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--danger);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--ink2)}
+  .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
+  @media(max-width:540px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo">证</div>
+      <div><h1>暴富路径证伪器</h1><p class="sub">链上操盘证伪 · Trader 技能证伪 — 先验=运气,未能证伪才放行</p></div>
+    </div>
+    <span class="stale" id="stale">加载中…</span>
+  </header>
+
+  <div class="honest" id="honest">
+    <b>诚实边界:</b>真技能是 <b>&lt;1–2% 的尾巴</b>;本板的工作是给"暴富信号"定价和证伪,不是给买卖点。
+    链上状态是状态分类器不是择时;trader 判决先门后分(样本门→彩票门),v0 最强的正面判决只有"未被证伪",<b>永远不会显示"可跟单"</b>。
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab on" id="tab-op" role="tab" aria-selected="true">链上操盘 · 哨兵</button>
+    <button class="tab" id="tab-tr" role="tab" aria-selected="false">Trader 证伪 · Arena</button>
+  </div>
+  <p class="summary" id="summary"></p>
+  <div class="grid" id="grid"></div>
+  <div class="foot">
+    <span id="gen">—</span>
+    <span>60s 轮询 · 45min 重算 · 仅信号非投资建议</span>
+  </div>
+</div>
+
+<script>
+const DIR = {
+  dump:{label:"砸盘风险",cls:"d-dump",stripe:"stripe-dump",rank:0},
+  armed:{label:"装弹待动",cls:"d-armed",stripe:"stripe-armed",rank:1},
+  accum:{label:"吸筹倾向",cls:"d-accum",stripe:"stripe-accum",rank:2},
+  issuer:{label:"发行方盘",cls:"d-issuer",stripe:"stripe-issuer",rank:3},
+  faded:{label:"已派发·分散",cls:"d-faded",stripe:"stripe-faded",rank:4},
+  unknown:{label:"不可判",cls:"d-unknown",stripe:"stripe-unknown",rank:5},
+};
+const TV = {
+  unfalsified:{label:"未被证伪",cls:"v-unfalsified",stripe:"stripe-unknown",rank:0},
+  lottery_leverage:{label:"彩票杠杆",cls:"v-lottery",stripe:"stripe-lottery",rank:1},
+  tail_luck:{label:"尾部运气",cls:"v-lottery",stripe:"stripe-lottery",rank:2},
+  sniper_timing:{label:"狙击时序",cls:"d-issuer",stripe:"stripe-issuer",rank:3},
+  insufficient_data:{label:"样本不足",cls:"v-insuff",stripe:"stripe-insuff",rank:4},
+};
+let view = "op", data = {op:null, tr:null};
+
+function classifyOp(r){
+  if(!r.ok) return "unknown";
+  const v=r.verdict||"", acq=r.acquisition||"";
+  if(acq==="allocated") return "issuer";
+  if(["distributing","exited_by_selling","present_rotating_confirmed","distributing_or_churn"].includes(v))
+    return ((r.largest_entity_pct||0)<5 && (r.dominant_wallets||0)<=1) ? "faded" : "dump";
+  if(v==="loaded_accumulating") return "accum";
+  if(["loaded_live_operator","live_operator"].includes(v))
+    return (r.current_graph_available && (r.largest_entity_pct||0)<2) ? "unknown" : "armed";
+  if(v==="loaded_dormant") return "armed";
+  if(["dispersed","treasury","treasury_only"].includes(v)) return "faded";
+  return "unknown";
+}
+const fmtUsd=n=>n==null?"—":(n=+n,n>=1e6?"$"+(n/1e6).toFixed(2)+"M":n>=1e3?"$"+(n/1e3).toFixed(0)+"k":"$"+n.toFixed(0));
+const pct=n=>n==null?"—":(+n).toFixed(1)+"%";
+const flag=ok=>ok===true?'<span class="flag f-ok">✓核实</span>':'<span class="flag f-no">未核实</span>';
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function renderOp(){
+  const d=data.op; if(!d) return '<div class="err">operators.json 尚无数据 — 等本地导出任务第一次推送</div>';
+  const items=(d.operators||[]).map(r=>({r,k:classifyOp(r)}))
+    .sort((a,b)=>DIR[a.k].rank-DIR[b.k].rank||(b.r.confidence||0)-(a.r.confidence||0));
+  const counts={}; items.forEach(i=>counts[i.k]=(counts[i.k]||0)+1);
+  document.getElementById("summary").textContent=items.length+" 个哨兵 · "+
+    Object.keys(DIR).filter(k=>counts[k]).map(k=>DIR[k].label+" "+counts[k]).join(" · ");
+  return items.map(({r,k})=>{
+    const dd=DIR[k];
+    const pc1=r.pc_h24==null?"":`<span class="${r.pc_h24>0?'up':r.pc_h24<0?'down':''}">${r.pc_h24>0?'+':''}${(+r.pc_h24).toFixed(1)}% 24h</span>`;
+    return `<div class="card ${dd.stripe}">
+      <div class="top"><div class="sym"><span class="name">${esc(r.symbol)}</span><span class="chip">${esc(r.chain)}</span></div>
+        <span class="dir ${dd.cls}">${dd.label}</span></div>
+      <div class="body">
+        <div style="font-family:var(--mono);font-size:11.5px;color:var(--ink2)">判决 <b style="color:var(--ink)">${esc(r.verdict||"—")}</b> · conf ${r.confidence??"—"} · 获取 <b style="color:var(--ink)">${esc(r.acquisition||"—")}</b></div>
+        <div class="kv">
+          <div class="cell"><span class="k">簇最大 ${flag(r.supply_verified)}</span><span class="v">${pct(r.largest_entity_pct)}</span></div>
+          <div class="cell"><span class="k">簇钱包/实体</span><span class="v">${r.dominant_wallets??"—"}/${r.entity_count??"—"}</span></div>
+          <div class="cell"><span class="k">流动性</span><span class="v">${fmtUsd(r.liquidity_usd)}</span></div>
+          <div class="cell"><span class="k">24h量 ${pc1}</span><span class="v">${fmtUsd(r.volume_h24)}</span></div>
+        </div>
+        ${(r.caveats&&r.caveats.length)?`<div class="why">${r.caveats.map(c=>"· "+esc(c)).join("<br>")}</div>`:""}
+        ${!r.ok?`<div class="why" style="color:var(--danger)">引擎错误: ${esc(r.error||"?")}</div>`:""}
+      </div></div>`;
+  }).join("");
+}
+
+function renderTr(){
+  const d=data.tr; if(!d) return '<div class="err">traders.json 尚无数据 — 等本地导出任务第一次推送</div>';
+  if(d.source_ok===false) return `<div class="err">Arena API 取数失败: ${esc(d.source_error||"?")} — 显示的是上次成功快照或无数据</div>`;
+  const items=(d.traders||[]).slice()
+    .sort((a,b)=>(TV[a.falsifier.verdict]?.rank??9)-(TV[b.falsifier.verdict]?.rank??9)||(a.rank??999)-(b.rank??999));
+  const counts={}; items.forEach(t=>{const k=t.falsifier.verdict;counts[k]=(counts[k]||0)+1});
+  document.getElementById("summary").textContent=items.length+" 个 trader("+esc(d.window||"90d")+") · "+
+    Object.keys(TV).filter(k=>counts[k]).map(k=>TV[k].label+" "+counts[k]).join(" · ");
+  return items.map(t=>{
+    const v=TV[t.falsifier.verdict]||TV.insufficient_data;
+    return `<div class="card ${v.stripe}">
+      <div class="top"><div class="sym"><span class="name">${esc(t.handle||t.trader_id||"?")}</span><span class="chip">${esc(t.source||"?")}</span></div>
+        <span class="dir ${v.cls}">${v.label}</span></div>
+      <div class="body">
+        <div class="kv">
+          <div class="cell"><span class="k">榜位/分</span><span class="v">#${t.rank??"—"} · ${t.arena_score??"—"}</span></div>
+          <div class="cell"><span class="k">ROI</span><span class="v ${(t.roi||0)>=0?'up':'down'}">${pct(t.roi)}</span></div>
+          <div class="cell"><span class="k">胜率 / 单数</span><span class="v">${pct(t.win_rate)} / ${t.trades_count??"—"}</span></div>
+          <div class="cell"><span class="k">最大回撤</span><span class="v">${pct(t.max_drawdown)}</span></div>
+        </div>
+        <div class="why">· ${esc(t.falsifier.why)}<br>· 未可算: ${(t.unavailable||[]).join(", ")||"—"}</div>
+      </div></div>`;
+  }).join("");
+}
+
+function staleness(){
+  const d=data[view]; const el=document.getElementById("stale");
+  if(!d){el.textContent="无数据";el.className="stale dead";return}
+  const gen=new Date(d.generated_at), next=new Date(d.next_expected_at), now=new Date();
+  const ageMin=Math.round((now-gen)/60000);
+  document.getElementById("gen").textContent="数据生成于 "+gen.toLocaleString()+" · 下次预期 "+next.toLocaleTimeString();
+  if(now.getTime()<next.getTime()+15*60000){el.textContent="数据 "+ageMin+" 分钟前";el.className="stale ok"}
+  else if(ageMin<24*60){el.textContent="⚠ 已陈旧 "+ageMin+" 分钟(源头可能睡了)";el.className="stale old"}
+  else{el.textContent="✗ 数据超过 24h — 别信这页";el.className="stale dead"}
+}
+
+function paint(){
+  document.getElementById("grid").innerHTML = view==="op"?renderOp():renderTr();
+  document.getElementById("tab-op").className="tab"+(view==="op"?" on":"");
+  document.getElementById("tab-tr").className="tab"+(view==="tr"?" on":"");
+  staleness();
+}
+document.getElementById("tab-op").onclick=()=>{view="op";paint()};
+document.getElementById("tab-tr").onclick=()=>{view="tr";paint()};
+
+async function load(){
+  const bust="?t="+Math.floor(Date.now()/60000);
+  const [op,tr]=await Promise.allSettled([
+    fetch("/data/operators.json"+bust).then(r=>r.ok?r.json():null),
+    fetch("/data/traders.json"+bust).then(r=>r.ok?r.json():null),
+  ]);
+  if(op.status==="fulfilled"&&op.value&&op.value.schema_version===1) data.op=op.value;
+  if(tr.status==="fulfilled"&&tr.value&&tr.value.schema_version===1) data.tr=tr.value;
+  paint();
+}
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>
