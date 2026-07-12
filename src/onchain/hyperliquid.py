@@ -75,6 +75,11 @@ def _conn() -> sqlite3.Connection:
     c.execute("""CREATE TABLE IF NOT EXISTS snaps(
         coin TEXT, ts TEXT, oi_usd REAL, mark REAL, vol24 REAL)""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_coin_ts ON snaps(coin, ts)")
+    # funding_ann persisted per snapshot so carry_signals can score PERSISTENCE (the
+    # fraction of recent snapshots funding stayed positive) — the #1 carry risk is
+    # funding flipping negative and you paying instead of collecting.
+    if "funding_ann" not in {r[1] for r in c.execute("PRAGMA table_info(snaps)")}:
+        c.execute("ALTER TABLE snaps ADD COLUMN funding_ann REAL")
     return c
 
 
@@ -104,9 +109,11 @@ def _store_and_diff(rows: list[dict]) -> None:
             else:
                 r["oi_chg_pct"] = None
                 r["price_chg_since"] = None
-        # write current snapshot
-        c.executemany("INSERT INTO snaps(coin, ts, oi_usd, mark, vol24) VALUES (?,?,?,?,?)",
-                      [(r["name"], now.isoformat(), r["oi_usd"], r["markPx"], r["vol24"]) for r in rows])
+        # write current snapshot (incl funding_ann for carry persistence scoring)
+        c.executemany(
+            "INSERT INTO snaps(coin, ts, oi_usd, mark, vol24, funding_ann) VALUES (?,?,?,?,?,?)",
+            [(r["name"], now.isoformat(), r["oi_usd"], r["markPx"], r["vol24"],
+              r["funding_ann"]) for r in rows])
         # prune snapshots older than ~2 days
         c.execute("DELETE FROM snaps WHERE ts < ?",
                   ((now.replace(microsecond=0)).isoformat()[:10] + "T00:00:00+00:00",))
@@ -158,13 +165,15 @@ def _signal(r: dict) -> dict | None:
     return None
 
 
-def perp_signals() -> list[dict]:
+def perp_signals(rows: list[dict] | None = None) -> list[dict]:
     """Ranked perp signals: cascade-crowding + ignition. Persists a snapshot each call
-    so ignition (OI-delta) becomes available from the 2nd call on."""
-    rows = _fetch_ctxs()
-    if not rows:
-        return []
-    _store_and_diff(rows)
+    so ignition (OI-delta) becomes available from the 2nd call on. Pass pre-fetched+
+    stored `rows` to share one network call/snapshot with carry_signals."""
+    if rows is None:
+        rows = _fetch_ctxs()
+        if not rows:
+            return []
+        _store_and_diff(rows)
     out = []
     for r in rows:
         sig = _signal(r)
@@ -184,6 +193,92 @@ def perp_signals() -> list[dict]:
     return out
 
 
+# ── Funding-carry screener (delta-neutral): the ONE replicable positive-EV core ──
+# Research verdict (core-of-edge-provider-not-signal): the only edge an individual can
+# actually run is being the COUNTERPARTY to leveraged longs — hold spot + short the
+# perp, collect the funding they pay. This is CARRY (a risk premium), NOT free arb:
+# funding can flip negative (you pay), the short leg can get squeezed/ADL'd, the venue
+# can blow up or the price de-peg (2025-10-10: USDe hit $0.65 on Binance, liquidating
+# solvent accounts). So we screen for SUSTAINED positive funding + flag every risk,
+# and never quote a fabricated net — funding is gross of fees/slippage.
+CARRY_MIN_OI_USD = 1_000_000   # need a deep perp + a real spot market to run the pair
+CARRY_MIN_ANN = 8.0            # gross ann funding floor — below this, fees eat the carry
+CARRY_WINDOW_H = 48            # persistence window
+# clean majors: deep spot + perp, far lower de-peg/liquidity-squeeze risk than an alt
+CARRY_MAJORS = {"BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "AVAX", "LTC", "LINK",
+                "ADA", "SUI", "APT", "ARB", "OP", "TON", "TRX"}
+
+
+def _funding_persistence(window_h: int = CARRY_WINDOW_H) -> dict[str, dict]:
+    """Per coin over the last `window_h`: {coin: {mean_ann, pos_frac, n}} from the
+    persisted snapshots. Empty until snapshots accrue — honestly absent, not faked."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_h)).isoformat()
+    c = _conn()
+    agg: dict[str, list[float]] = {}
+    try:
+        for coin, fa in c.execute(
+                "SELECT coin, funding_ann FROM snaps WHERE ts >= ? AND funding_ann IS NOT NULL",
+                (cutoff,)):
+            agg.setdefault(coin, []).append(fa)
+    finally:
+        c.close()
+    out = {}
+    for coin, xs in agg.items():
+        if xs:
+            out[coin] = {"mean_ann": sum(xs) / len(xs),
+                         "pos_frac": sum(1 for x in xs if x > 0) / len(xs),
+                         "n": len(xs)}
+    return out
+
+
+def carry_signals(rows: list[dict] | None = None) -> list[dict]:
+    """Delta-neutral funding-carry opportunities (spot long + perp short), ranked by
+    quality = sustained funding × persistence, majors preferred. Every row carries its
+    tail-risk flags. Pass pre-fetched+stored `rows` to share one call with perp_signals."""
+    if rows is None:
+        rows = _fetch_ctxs()
+        if not rows:
+            return []
+        _store_and_diff(rows)      # also records funding for persistence history
+    hist = _funding_persistence()
+    out = []
+    for r in rows:
+        fa = r["funding_ann"]
+        if r["oi_usd"] < CARRY_MIN_OI_USD or fa < CARRY_MIN_ANN:
+            continue
+        h = hist.get(r["name"])
+        # sustained = mean over window if we have history, else the current snapshot
+        sustained = h["mean_ann"] if h and h["n"] >= 3 else fa
+        pos_frac = h["pos_frac"] if h and h["n"] >= 3 else None
+        is_major = r["name"] in CARRY_MAJORS
+        flags = []
+        if not is_major:
+            flags.append("非主流:清算/脱锚/深度风险高")
+        if r["oi_usd"] < 3_000_000:
+            flags.append("深度薄:滑点+空腿易被挤压")
+        if pos_frac is not None and pos_frac < 0.8:
+            flags.append(f"费率不稳:仅{pos_frac*100:.0f}%时间为正,会倒付")
+        if pos_frac is None:
+            flags.append("持续性积累中(需多轮快照)")
+        # quality: reward sustained carry AND persistence AND depth; majors get a lift
+        pf = pos_frac if pos_frac is not None else 0.5
+        quality = sustained * pf * (1.3 if is_major else 1.0)
+        out.append({
+            "symbol": r["name"], "funding_ann": round(fa, 1),
+            "sustained_ann": round(sustained, 1), "pos_frac": pos_frac,
+            "oi_usd": round(r["oi_usd"]), "is_major": is_major,
+            "tier": "主流" if is_major else "山寨", "flags": flags,
+            "n_snaps": h["n"] if h else 0, "_q": quality,
+            "note": (f"现货多+永续空,吃约 {sustained:.0f}%/年(毛,未扣手续费/滑点)。"
+                     "这是carry不是无风险套利——费率翻负要倒付,空腿保证金留足防挤压强平。"),
+        })
+    out.sort(key=lambda x: -x["_q"])
+    for x in out:
+        del x["_q"]
+    return out
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
 
@@ -194,3 +289,9 @@ if __name__ == "__main__":
     for s in sigs[:15]:
         print(f"  {s['symbol']:9} {s['signal']:8} {s['direction']:14} [{s['strength']}] "
               f"fund {s['funding_ann']:+.0f}% OI ${s['oi_usd']/1e6:.1f}M — {s['why'][:60]}")
+    carry = carry_signals()
+    print(f"\n{len(carry)} funding-carry opportunities (delta-neutral)")
+    for s in carry[:15]:
+        print(f"  {s['symbol']:9} [{s['tier']}] ann {s['funding_ann']:+.0f}% sustained "
+              f"{s['sustained_ann']:+.0f}% OI ${s['oi_usd']/1e6:.1f}M "
+              f"{'· '.join(s['flags']) if s['flags'] else 'clean'}")
