@@ -78,8 +78,9 @@
   </header>
 
   <div class="tabs" role="tablist">
-    <button class="tab on" data-v="perp" role="tab">🔥 永续拥挤/点火</button>
-    <button class="tab" data-v="opp" role="tab">💎 早期聪明钱在买</button>
+    <button class="tab on" data-v="watch" role="tab">🐋 聪明钱刚买入·最早</button>
+    <button class="tab" data-v="opp" role="tab">💎 早期聪明钱扎堆</button>
+    <button class="tab" data-v="perp" role="tab">🔥 永续拥挤/点火</button>
     <button class="tab" data-v="op" role="tab">💰 庄在做盘</button>
   </div>
   <div class="lead" id="lead">加载中…</div>
@@ -90,7 +91,7 @@
 </div>
 
 <script>
-let view="perp", data={perp:null,opp:null,op:null};
+let view="watch", data={watch:null,perp:null,opp:null,op:null};
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmtUsd=n=>n==null?"—":(n=+n,n>=1e6?"$"+(n/1e6).toFixed(1)+"M":n>=1e3?"$"+Math.round(n/1e3)+"k":"$"+Math.round(n));
 const pct=n=>n==null?"—":(+n).toFixed(1)+"%";
@@ -105,6 +106,29 @@ const card=(sym,chip,vlabel,vc,vs,human,so,facts,tech)=>`<div class="card ${vs}"
   </div></div>`;
 const dot=v=>`<span class="d" style="background:var(--${v})"></span>`;
 function setLegend(a){document.getElementById("legend").innerHTML=a.map(([c,t])=>`<span class="lg">${dot(c)}${t}</span>`).join("")}
+
+// ---- WATCH (earliest: watched wallets just bought) ----
+function renderWatch(){
+  const d=data.watch; if(!d) return '<div class="err">还没数据 — 等第一次监听(每15分钟)。</div>';
+  if(d.scan_error||(d.watch&&!d.watch.length&&d.note&&d.note.includes("FlareSolverr")))
+    return `<div class="err">实时监听需要本地 FlareSolverr 运行。当前监听 ${d.watched_wallets||0} 个已验证钱包。</div>`;
+  const s=(d.watch||[]).slice().sort((a,b)=>(b.n_buyers-a.n_buyers)||((a.mins_ago??999)-(b.mins_ago??999)));
+  setLegend([["good","🐋收敛·≥2个聪明钱同买(最强)"],["warn","单个聪明钱刚买"]]);
+  const conv=s.filter(x=>x.n_buyers>=2).length;
+  document.getElementById("lead").innerHTML=`<b>最早的信号:盯着 ${d.watched_wallets||0} 个已验证盈利的钱包,它们刚买了什么</b>——分钟级,早于任何排名聚合。`+
+    ` 窗口内 <b>${s.length}</b> 个币被买${conv?`,其中 <b style="color:var(--good)">${conv} 个收敛</b>(多个聪明钱同买)`:""}。`+
+    `<div class="note">收敛(≥2个独立聪明钱同窗买同一个)是能给的最强早信号。诚实:仍晚于创建区块的内部狙击者;单个钱包买=线索不是确认。小仓+止损。</div>`;
+  document.getElementById("summary").textContent=s.length?`${s.length} 个 · 监听 ${d.watched_wallets} 钱包`:"窗口内这批钱包没有新买入";
+  if(!s.length) return '<div class="err">这批聪明钱最近没买新东西(正常——好机会本就稀疏)。每15分钟自动刷新。</div>';
+  return s.map(b=>{
+    const conv=b.n_buyers>=2;
+    return card(b.symbol,b.chain,conv?`🐋 ${b.n_buyers}个聪明钱同买`:"单个聪明钱买",conv?"c-good":"c-warn",conv?"s-good":"s-warn",
+      `<b>${b.n_buyers}</b> 个已验证盈利的钱包${conv?'同时':''}买了它${b.mins_ago!=null?` · <b>${b.mins_ago}分钟前</b>`:''}。`,
+      conv?"多个独立聪明钱同窗进场——这是最强的早信号,快查合约再小仓埋伏。":"只有一个聪明钱,当线索;等第二个跟进或看它加仓。",
+      [`聪明钱 <b>${b.n_buyers}</b>`,`买入额 <b>${fmtUsd(b.usd_bought)}</b>`,(b.mins_ago!=null?`<b>${b.mins_ago}</b>分钟前`:'')],
+      `买入钱包: ${(b.buyers||[]).map(w=>esc(w.slice(0,8))+"…").join(", ")}<br>${esc(b.token||"")}`);
+  }).join("");
+}
 
 // ---- PERP (#2 ignition + #3 cascade) ----
 const PSIG={
@@ -221,7 +245,7 @@ function staleness(){
   else{el.textContent="🔴 超24h没更新,别信";el.className="stale dead"}
 }
 function paint(){
-  document.getElementById("grid").innerHTML = view==="perp"?renderPerp():view==="opp"?renderOpp():renderOp();
+  document.getElementById("grid").innerHTML = view==="watch"?renderWatch():view==="perp"?renderPerp():view==="opp"?renderOpp():renderOp();
   document.querySelectorAll(".tab").forEach(t=>t.className="tab"+(t.dataset.v===view?" on":""));
   staleness();
 }
@@ -229,11 +253,13 @@ document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.v;pai
 async function load(){
   const b="?t="+Math.floor(Date.now()/60000);
   const r=await Promise.allSettled([
+    fetch("/data/watch.json"+b).then(x=>x.ok?x.json():null),
     fetch("/data/perps.json"+b).then(x=>x.ok?x.json():null),
     fetch("/data/opportunities.json"+b).then(x=>x.ok?x.json():null),
     fetch("/data/operators.json"+b).then(x=>x.ok?x.json():null),
   ]);
-  const [p,o,op]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  const [wt,p,o,op]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  if(wt&&wt.schema_version===1) data.watch=wt;
   if(p&&p.schema_version===1) data.perp=p;
   if(o&&o.schema_version===1) data.opp=o;
   if(op&&op.schema_version===1) data.op=op;

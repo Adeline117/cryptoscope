@@ -131,6 +131,22 @@ def create_scheduler() -> AsyncIOScheduler:
         name="证伪器看板导出 (operators/traders JSON → Vercel Blob)",
     )
 
+    # EARLIEST lane: poll watched proven wallets' fresh buys every 15 min (much more
+    # often than the 45-min board export — this is the real-time-ish signal).
+    scheduler.add_job(
+        _run_smart_wallet_watch,
+        CronTrigger(minute="*/15"),
+        id="smart_wallet_watch",
+        name="聪明钱实时监听 (watched wallets 刚买入 → Blob)",
+    )
+    # Refresh the proven-wallet watchlist daily (the skilled set is stable day-to-day).
+    scheduler.add_job(
+        _run_harvest_wallets,
+        CronTrigger(hour=8, minute=10),
+        id="harvest_wallets",
+        name="聪明钱名单收割 (GMGN PnL rank → watchlist)",
+    )
+
     # Anomaly candidate screen → push suspected-accumulation coins every 6h
     scheduler.add_job(
         _run_anomaly_screen,
@@ -498,6 +514,35 @@ async def _run_stage2():
 
     result = await run_stage2_detector()
     logger.info("stage2_detector_done", **result)
+
+
+async def _run_smart_wallet_watch():
+    """Every 15 min: poll the watched proven wallets, push the fresh-buys lane. This is
+    the board's EARLIEST signal so it runs far more often than the 45-min board export."""
+    import asyncio
+
+    logger.info("scheduled_smart_wallet_watch")
+    from src.pipeline import board_export
+    try:
+        watch = await asyncio.to_thread(board_export.render_watch)
+        paths = await asyncio.to_thread(board_export.write_views, watch=watch)
+        n = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("smart_wallet_watch_done", tokens=len(watch.get("watch", [])), pushed=n)
+    except Exception as e:
+        logger.error("smart_wallet_watch_failed", error=str(e)[:120])
+
+
+async def _run_harvest_wallets():
+    """Daily: refresh the proven-wallet watchlist from GMGN's PnL rank."""
+    import asyncio
+
+    logger.info("scheduled_harvest_wallets")
+    from src.onchain import smart_wallets
+    try:
+        res = await asyncio.to_thread(smart_wallets.harvest_all)
+        logger.info("harvest_wallets_done", **res)
+    except Exception as e:
+        logger.error("harvest_wallets_failed", error=str(e)[:120])
 
 
 async def _run_board_export():

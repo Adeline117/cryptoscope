@@ -244,6 +244,23 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
                                "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")})
 
 
+def render_watch() -> dict:
+    """The EARLIEST lane: tokens that WATCHED proven wallets JUST bought (minutes ago),
+    before it aggregates into any rank. Convergence (>=2 watched wallets, same token,
+    same window) is the strongest early signal a dashboard can honestly give."""
+    from src.onchain.smart_wallets import fresh_smart_buys, watchlist
+    try:
+        buys = fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"), window_min=45)
+    except Exception as e:
+        return _envelope({"watch": [], "watched_wallets": 0, "scan_error": str(e)[:120]})
+    if buys is None:
+        return _envelope({"watch": [], "watched_wallets": len(watchlist()),
+                          "note": "FlareSolverr 未运行 — 实时监听需要它"})
+    return _envelope({"watch": buys, "watched_wallets": len(watchlist()),
+                      "note": ("盯着一批已验证盈利的钱包,它们刚买入的币(分钟级,早于排名聚合)。"
+                               "收敛=≥2个独立聪明钱同窗买同一个=最强早信号。仍晚于创建区块内部人。")})
+
+
 def render_perps() -> dict:
     """Structure #2 (trend ignition) + #3 (liquidation-cascade right side) from
     Hyperliquid — keyless, live, no home-grown detection needed."""
