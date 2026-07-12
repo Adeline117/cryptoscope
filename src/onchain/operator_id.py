@@ -863,6 +863,7 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
     if replay:
         out["current"]["holders_fetched"] = 0
         out["current"]["current_graph_available"] = False
+        out["current"]["supply_verified"] = False
         out["caveats"].append(
             "replay:当前持仓图无法回溯(holder快照只有今天)→ 本次判决仅基于历史台账")
     else:
@@ -874,13 +875,26 @@ def identify_operator(token: str, chain: str, as_of_block: int | None = None) ->
             conc = effective_concentration_signal(holders, token, chain) or {}
             out["current"]["holders_fetched"] = len(holders)
             out["current"] |= {
+                # current_graph_available and supply_verified are TRUST flags: they
+                # must ALWAYS be present and boolean, never absent. When they were only
+                # set in the replay branch (available) or left inside `conc`
+                # (supply_verified), a consumer reading out["current"] got None — which
+                # is indistinguishable from "verification failed", and that ambiguity
+                # let a live, fully-verified graph be misread as broken. Absence is now
+                # impossible: a flag is True/False, and its meaning is unambiguous.
+                "current_graph_available": bool(holders),
+                "supply_verified": bool(conc.get("supply_verified")),
                 "cluster_confidence": conc.get("cluster_confidence"),
                 "largest_entity_pct": conc.get("largest_entity_pct"),
+                "largest_address_pct": conc.get("largest_address_pct"),
                 "concentration_gap": conc.get("concentration_gap"),
+                "entity_count": conc.get("entity_count"),
                 "dominant_wallets": len(conc.get("dominant_cluster_wallets") or []),
             }
         except Exception as e:
             out["caveats"].append(f"current-graph failed: {str(e)[:60]}")
+            out["current"]["current_graph_available"] = False
+            out["current"]["supply_verified"] = False
             conc = {}
     # expose the cluster ADDRESSES so callers (sentinel registration) can act on a
     # verdict — counts alone aren't registrable.
