@@ -4,67 +4,77 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>暴富路径证伪器 · Falsifier Board</title>
+<title>妖币 & Trader 证伪板 — 人话版</title>
 <style>
   :root{
     --bg:#0b0d11; --surface:#14171e; --surface2:#191d26; --line:#262c37;
     --ink:#e7ebf2; --ink2:#aab2c0; --muted:#727c8c;
-    --accent:#37b6a4; --good:#46b17b; --warn:#e0a33e; --danger:#e5484d; --info:#5b8def; --violet:#9b8cff;
+    --good:#46b17b; --warn:#e0a33e; --danger:#e5484d; --info:#5b8def; --violet:#9b8cff; --accent:#37b6a4;
     --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
-    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
   }
   @media (prefers-color-scheme:light){:root{
-    --bg:#f4f6f9; --surface:#fff; --surface2:#eef1f6; --line:#dde3ec;
+    --bg:#f5f7fa; --surface:#fff; --surface2:#eef1f6; --line:#e0e5ee;
     --ink:#141922; --ink2:#3f4a5a; --muted:#7a8494;
-    --accent:#1a8f7f; --good:#2f9e63; --warn:#b47613; --danger:#c93a3f; --info:#3a6fd6; --violet:#6a58d6;}}
+    --good:#2f9e63; --warn:#b47613; --danger:#c93a3f; --info:#3a6fd6; --violet:#6a58d6; --accent:#1a8f7f;}}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1180px;margin:0 auto;padding:30px 18px 70px}
-  h1{font-size:22px;font-weight:650;margin:0;letter-spacing:-.01em}
-  .sub{color:var(--ink2);font-size:13px;margin:4px 0 0}
-  header{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:space-between;padding-bottom:16px;border-bottom:1px solid var(--line)}
-  .brand{display:flex;gap:12px;align-items:center}
-  .logo{width:36px;height:36px;border-radius:8px;background:linear-gradient(150deg,var(--danger),var(--warn));display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:18px;color:#160404}
-  .stale{font-family:var(--mono);font-size:11.5px;padding:4px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface)}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1120px;margin:0 auto;padding:28px 18px 72px}
+  h1{font-size:21px;font-weight:700;margin:0;letter-spacing:-.01em}
+  .sub{color:var(--ink2);font-size:13px;margin:3px 0 0}
+  header{display:flex;gap:13px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding-bottom:15px;border-bottom:1px solid var(--line)}
+  .brand{display:flex;gap:11px;align-items:center}
+  .logo{width:36px;height:36px;border-radius:9px;background:linear-gradient(150deg,var(--danger),var(--warn));display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:17px;color:#160404}
+  .stale{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface)}
   .stale.ok{color:var(--good)} .stale.old{color:var(--warn)} .stale.dead{color:var(--danger)}
-  .honest{margin:16px 0 0;background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--info);border-radius:10px;padding:12px 15px;font-size:12.5px;color:var(--ink2)}
-  .honest b{color:var(--ink)}
-  .tabs{display:flex;gap:8px;margin:20px 0 14px}
-  .tab{font-family:var(--mono);font-size:13px;font-weight:600;padding:7px 16px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer}
-  .tab.on{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+
+  .lead{margin:18px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .lead .big{font-size:16px;font-weight:600;line-height:1.5}
+  .lead .big b{color:var(--danger)}
+  .lead .note{font-size:12.5px;color:var(--muted);margin-top:8px}
+
+  .tabs{display:flex;gap:8px;margin:20px 0 4px}
+  .tab{font-size:14px;font-weight:600;padding:8px 17px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer}
+  .tab.on{color:#fff;background:var(--accent);border-color:var(--accent)}
   .tab:focus-visible{outline:2px solid var(--info);outline-offset:2px}
-  .summary{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:0 0 14px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
-  .card .top{padding:12px 15px 10px;display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);align-items:flex-start}
-  .sym{font-size:15.5px;font-weight:650;display:flex;gap:7px;align-items:center;min-width:0}
+  .legend{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0 4px}
+  .lg{font-size:12px;padding:4px 11px;border-radius:999px;display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line)}
+  .lg .d{width:8px;height:8px;border-radius:50%;flex:none}
+  .lg small{color:var(--muted)}
+  .summary{font-size:12.5px;color:var(--muted);margin:12px 0 16px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:13px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;display:flex;flex-direction:column}
+  .card .top{padding:13px 16px 11px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .sym{font-size:17px;font-weight:700;display:flex;gap:8px;align-items:center;min-width:0}
   .sym .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .chip{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;text-transform:uppercase;flex:none}
-  .dir{font-family:var(--mono);font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:999px;white-space:nowrap;flex:none}
-  .body{padding:11px 15px 13px;display:flex;flex-direction:column;gap:9px;font-size:12.5px}
-  .kv{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
-  .cell .k{font-size:10px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted);display:block}
-  .cell .v{font-family:var(--mono);font-size:13.5px;font-weight:600}
-  .why{font-size:11.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px;line-height:1.45}
-  .flag{font-family:var(--mono);font-size:9.5px;font-weight:700;padding:0 5px;border-radius:4px;margin-left:4px;vertical-align:1px}
-  .f-ok{color:var(--good);background:color-mix(in srgb,var(--good) 15%,transparent)}
-  .f-no{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+  .verdict{font-size:13px;font-weight:700;padding:5px 12px;border-radius:999px;white-space:nowrap;flex:none}
+  .body{padding:2px 16px 15px;display:flex;flex-direction:column;gap:10px}
+  .human{font-size:14.5px;color:var(--ink);line-height:1.5}
+  .so{font-size:13.5px;font-weight:600;padding:9px 12px;border-radius:9px;background:var(--surface2);line-height:1.5}
+  .so .lab{font-weight:700;margin-right:5px}
+  .facts{font-size:12.5px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:4px 14px}
+  .facts b{color:var(--ink);font-family:var(--mono);font-weight:600}
   .up{color:var(--good)} .down{color:var(--danger)}
-  .d-dump{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
-  .d-armed{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
-  .d-accum{color:var(--good);background:color-mix(in srgb,var(--good) 14%,transparent)}
-  .d-faded{color:var(--muted);background:color-mix(in srgb,var(--muted) 16%,transparent)}
-  .d-issuer{color:var(--violet);background:color-mix(in srgb,var(--violet) 14%,transparent)}
-  .d-unknown{color:var(--info);background:color-mix(in srgb,var(--info) 13%,transparent)}
-  .v-unfalsified{color:var(--info);background:color-mix(in srgb,var(--info) 13%,transparent)}
-  .v-lottery{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent)}
-  .v-insuff{color:var(--muted);background:color-mix(in srgb,var(--muted) 16%,transparent)}
-  .stripe-dump{box-shadow:inset 3px 0 0 var(--danger)} .stripe-armed{box-shadow:inset 3px 0 0 var(--warn)}
-  .stripe-accum{box-shadow:inset 3px 0 0 var(--good)} .stripe-faded{box-shadow:inset 3px 0 0 var(--muted)}
-  .stripe-issuer{box-shadow:inset 3px 0 0 var(--violet)} .stripe-unknown{box-shadow:inset 3px 0 0 var(--info)}
-  .stripe-lottery{box-shadow:inset 3px 0 0 var(--danger)} .stripe-insuff{box-shadow:inset 3px 0 0 var(--muted)}
-  .err{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--danger);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--ink2)}
-  .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
+  details.tech{font-size:11.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
+  details.tech summary{cursor:pointer;color:var(--muted);font-size:11.5px;list-style:none;user-select:none}
+  details.tech summary::before{content:"▸ ";}
+  details.tech[open] summary::before{content:"▾ ";}
+  details.tech .raw{font-family:var(--mono);margin-top:6px;word-break:break-all;line-height:1.6}
+
+  /* verdict colors */
+  .c-dump{color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent)}
+  .c-armed{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+  .c-accum{color:var(--good);background:color-mix(in srgb,var(--good) 15%,transparent)}
+  .c-issuer{color:var(--violet);background:color-mix(in srgb,var(--violet) 15%,transparent)}
+  .c-faded{color:var(--muted);background:color-mix(in srgb,var(--muted) 18%,transparent)}
+  .c-unknown{color:var(--info);background:color-mix(in srgb,var(--info) 14%,transparent)}
+  .s-dump{box-shadow:inset 4px 0 0 var(--danger)} .s-armed{box-shadow:inset 4px 0 0 var(--warn)}
+  .s-accum{box-shadow:inset 4px 0 0 var(--good)} .s-issuer{box-shadow:inset 4px 0 0 var(--violet)}
+  .s-faded{box-shadow:inset 4px 0 0 var(--muted)} .s-unknown{box-shadow:inset 4px 0 0 var(--info)}
+  .err{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--danger);border-radius:11px;padding:16px;font-size:13.5px;color:var(--ink2)}
+  .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
   @media(max-width:540px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -72,44 +82,41 @@
 <div class="wrap">
   <header>
     <div class="brand">
-      <div class="logo">证</div>
-      <div><h1>暴富路径证伪器</h1><p class="sub">链上操盘证伪 · Trader 技能证伪 — 先验=运气,未能证伪才放行</p></div>
+      <div class="logo">妖</div>
+      <div><h1>妖币 & Trader 证伪板</h1><p class="sub">一句话说清:这个币/这个人,到底是真本事还是运气/骗局</p></div>
     </div>
     <span class="stale" id="stale">加载中…</span>
   </header>
 
-  <div class="honest" id="honest">
-    <b>诚实边界:</b>真技能是 <b>&lt;1–2% 的尾巴</b>;本板的工作是给"暴富信号"定价和证伪,不是给买卖点。
-    链上状态是状态分类器不是择时;trader 判决先门后分(样本门→彩票门),v0 最强的正面判决只有"未被证伪",<b>永远不会显示"可跟单"</b>。
-  </div>
+  <div class="lead"><div class="big" id="lead-big">加载中…</div>
+    <div class="note" id="lead-note"></div></div>
 
   <div class="tabs" role="tablist">
-    <button class="tab on" id="tab-op" role="tab" aria-selected="true">链上操盘 · 哨兵</button>
-    <button class="tab" id="tab-tr" role="tab" aria-selected="false">Trader 证伪 · Arena</button>
+    <button class="tab on" id="tab-op" role="tab">💰 币 · 有没有庄在做盘</button>
+    <button class="tab" id="tab-tr" role="tab">📈 人 · 是技能还是运气</button>
   </div>
+  <div class="legend" id="legend"></div>
   <p class="summary" id="summary"></p>
   <div class="grid" id="grid"></div>
-  <div class="foot">
-    <span id="gen">—</span>
-    <span>60s 轮询 · 45min 重算 · 仅信号非投资建议</span>
-  </div>
+  <div class="foot"><span id="gen">—</span><span>每小时自动刷新 · 只是信号,不是投资建议</span></div>
 </div>
 
 <script>
-const DIR = {
-  dump:{label:"砸盘风险",cls:"d-dump",stripe:"stripe-dump",rank:0},
-  armed:{label:"装弹待动",cls:"d-armed",stripe:"stripe-armed",rank:1},
-  accum:{label:"吸筹倾向",cls:"d-accum",stripe:"stripe-accum",rank:2},
-  issuer:{label:"发行方盘",cls:"d-issuer",stripe:"stripe-issuer",rank:3},
-  faded:{label:"已派发·分散",cls:"d-faded",stripe:"stripe-faded",rank:4},
-  unknown:{label:"不可判",cls:"d-unknown",stripe:"stripe-unknown",rank:5},
+// 每个类别:颜色 + 人话含义 + "所以我该怎么想"
+const OP = {
+  dump:  {label:"正在出货",  c:"c-dump",  s:"s-dump",  rank:0, meaning:"持币的庄正在往外卖。",                       so:"对手盘就是庄,别接飞刀;真要动只能做空。"},
+  armed: {label:"庄在场·待动",c:"c-armed", s:"s-armed", rank:1, meaning:"有一伙从市场买入的协同钱包(真庄)持着货,暂时按兵不动。", so:"盯着它等它出手;现在既不是买点也不是卖点。"},
+  accum: {label:"疑似吸筹",  c:"c-accum", s:"s-accum", rank:2, meaning:"有庄在悄悄买入建仓。",                         so:"唯一带正向的形态,但何时拉不确定,别重仓赌。"},
+  issuer:{label:"项目方持币", c:"c-issuer",s:"s-issuer",rank:3, meaning:"集中的那些钱包是团队/金库仓(被分配的,不是买来的)—— 不是有人在操盘。", so:"别把它当妖币。要防的是团队解锁砸盘,不是庄拉盘。"},
+  faded: {label:"庄已走·散盘",c:"c-faded", s:"s-faded", rank:4, meaning:"庄早就派发完跑了,现在是普通散户盘。",             so:"没庄了,当普通币看。"},
+  unknown:{label:"查不清",   c:"c-unknown",s:"s-unknown",rank:5,meaning:"数据不足,或判决自相矛盾,不下结论。",             so:"别信这一条,等更多数据。"},
 };
-const TV = {
-  unfalsified:{label:"未被证伪",cls:"v-unfalsified",stripe:"stripe-unknown",rank:0},
-  lottery_leverage:{label:"彩票杠杆",cls:"v-lottery",stripe:"stripe-lottery",rank:1},
-  tail_luck:{label:"尾部运气",cls:"v-lottery",stripe:"stripe-lottery",rank:2},
-  sniper_timing:{label:"狙击时序",cls:"d-issuer",stripe:"stripe-issuer",rank:3},
-  insufficient_data:{label:"样本不足",cls:"v-insuff",stripe:"stripe-insuff",rank:4},
+const TR = {
+  lottery_leverage:{label:"高风险·会爆型",c:"c-dump",s:"s-dump",rank:0, meaning:"靠高杠杆 / 接近爆仓 / 异常高胜率撑出来的战绩。", so:"典型迟早爆的那类,别跟。"},
+  tail_luck:      {label:"多半靠运气", c:"c-dump", s:"s-dump", rank:1, meaning:"盈利集中在一两笔大的,不可重复。",             so:"别跟。"},
+  sniper_timing:  {label:"靠抢跑狙击", c:"c-issuer",s:"s-issuer",rank:2, meaning:"赚的是抢跑 / 狙击时序,不是判断力。",           so:"复制不了(实测跟单只有本人的零头),别跟。"},
+  unfalsified:    {label:"暂没查出问题",c:"c-unknown",s:"s-unknown",rank:3, meaning:"通过了基本筛查:交易够多、没爆仓、胜率不诡异。", so:"但这≠有可复制的技能。真技能是不到 2% 的极少数,现在还没到能盖章的程度。"},
+  insufficient_data:{label:"交易太少",c:"c-faded",s:"s-faded",rank:4, meaning:"样本太少,任何判断都是噪声。",                 so:"没法评。"},
 };
 let view = "op", data = {op:null, tr:null};
 
@@ -126,59 +133,69 @@ function classifyOp(r){
   if(["dispersed","treasury","treasury_only"].includes(v)) return "faded";
   return "unknown";
 }
-const fmtUsd=n=>n==null?"—":(n=+n,n>=1e6?"$"+(n/1e6).toFixed(2)+"M":n>=1e3?"$"+(n/1e3).toFixed(0)+"k":"$"+n.toFixed(0));
+const fmtUsd=n=>n==null?"—":(n=+n,n>=1e6?"$"+(n/1e6).toFixed(1)+"M":n>=1e3?"$"+Math.round(n/1e3)+"k":"$"+Math.round(n));
 const pct=n=>n==null?"—":(+n).toFixed(1)+"%";
-const flag=ok=>ok===true?'<span class="flag f-ok">✓核实</span>':'<span class="flag f-no">未核实</span>';
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const chg=n=>n==null?"":`<span class="${n>0?'up':n<0?'down':''}">${n>0?'+':''}${(+n).toFixed(1)}%</span>`;
+
+const DOT={"c-dump":"--danger","c-armed":"--warn","c-accum":"--good","c-issuer":"--violet","c-faded":"--muted","c-unknown":"--info"};
+function legend(map){
+  document.getElementById("legend").innerHTML = Object.values(map).sort((a,b)=>a.rank-b.rank)
+    .map(x=>`<span class="lg"><span class="d" style="background:var(${DOT[x.c]})"></span>${x.label}</span>`).join("");
+}
 
 function renderOp(){
-  const d=data.op; if(!d) return '<div class="err">operators.json 尚无数据 — 等本地导出任务第一次推送</div>';
-  const items=(d.operators||[]).map(r=>({r,k:classifyOp(r)}))
-    .sort((a,b)=>DIR[a.k].rank-DIR[b.k].rank||(b.r.confidence||0)-(a.r.confidence||0));
-  const counts={}; items.forEach(i=>counts[i.k]=(counts[i.k]||0)+1);
-  document.getElementById("summary").textContent=items.length+" 个哨兵 · "+
-    Object.keys(DIR).filter(k=>counts[k]).map(k=>DIR[k].label+" "+counts[k]).join(" · ");
+  const d=data.op; if(!d) return '<div class="err">还没数据 — 等本地第一次推送(约几分钟)。</div>';
+  const items=(d.operators||[]).map(r=>({r,k:classifyOp(r)})).sort((a,b)=>OP[a.k].rank-OP[b.k].rank||(b.r.confidence||0)-(a.r.confidence||0));
+  const c={}; items.forEach(i=>c[i.k]=(c[i.k]||0)+1);
+  legend(OP);
+  const n=items.length;
+  document.getElementById("lead-big").innerHTML =
+    `这 ${n} 个盯着的币里 —— <b>真有庄在做盘的只有 ${(c.armed||0)+(c.accum||0)+(c.dump||0)} 个</b>,其中在出货别接的 ${c.dump||0} 个、庄在场待动的 ${c.armed||0} 个;`+
+    ` 另有 <b style="color:var(--violet)">${c.issuer||0} 个其实是项目方/团队持币,根本不是妖币</b>;${c.faded||0} 个庄已走、${c.unknown||0} 个查不清。`;
+  document.getElementById("lead-note").textContent = "「项目方持币」最容易被误当妖币——集中≠有人操盘。这里用链上首笔资金来源把两者分开了。";
+  document.getElementById("summary").textContent = Object.keys(OP).filter(k=>c[k]).map(k=>OP[k].label+" "+c[k]).join(" · ");
   return items.map(({r,k})=>{
-    const dd=DIR[k];
-    const pc1=r.pc_h24==null?"":`<span class="${r.pc_h24>0?'up':r.pc_h24<0?'down':''}">${r.pc_h24>0?'+':''}${(+r.pc_h24).toFixed(1)}% 24h</span>`;
-    return `<div class="card ${dd.stripe}">
+    const o=OP[k];
+    const facts=[`最大持有 <b>${pct(r.largest_entity_pct)}</b>${r.supply_verified===false?'<span style="color:var(--warn)">(未核实)</span>':''}`,
+      (r.dominant_wallets>1?`<b>${r.dominant_wallets}</b> 个钱包协同`:``),
+      `流动性 <b>${fmtUsd(r.liquidity_usd)}</b>`,
+      (r.pc_h24!=null?`24h ${chg(r.pc_h24)}`:``)].filter(Boolean);
+    return `<div class="card ${o.s}">
       <div class="top"><div class="sym"><span class="name">${esc(r.symbol)}</span><span class="chip">${esc(r.chain)}</span></div>
-        <span class="dir ${dd.cls}">${dd.label}</span></div>
+        <span class="verdict ${o.c}">${o.label}</span></div>
       <div class="body">
-        <div style="font-family:var(--mono);font-size:11.5px;color:var(--ink2)">判决 <b style="color:var(--ink)">${esc(r.verdict||"—")}</b> · conf ${r.confidence??"—"} · 获取 <b style="color:var(--ink)">${esc(r.acquisition||"—")}</b></div>
-        <div class="kv">
-          <div class="cell"><span class="k">簇最大 ${flag(r.supply_verified)}</span><span class="v">${pct(r.largest_entity_pct)}</span></div>
-          <div class="cell"><span class="k">簇钱包/实体</span><span class="v">${r.dominant_wallets??"—"}/${r.entity_count??"—"}</span></div>
-          <div class="cell"><span class="k">流动性</span><span class="v">${fmtUsd(r.liquidity_usd)}</span></div>
-          <div class="cell"><span class="k">24h量 ${pc1}</span><span class="v">${fmtUsd(r.volume_h24)}</span></div>
-        </div>
-        ${(r.caveats&&r.caveats.length)?`<div class="why">${r.caveats.map(c=>"· "+esc(c)).join("<br>")}</div>`:""}
-        ${!r.ok?`<div class="why" style="color:var(--danger)">引擎错误: ${esc(r.error||"?")}</div>`:""}
+        <div class="human">${o.meaning}</div>
+        <div class="so"><span class="lab">所以 👉</span>${o.so}</div>
+        <div class="facts">${facts.join("")}</div>
+        <details class="tech"><summary>技术细节</summary><div class="raw">判决 ${esc(r.verdict||"—")} · 置信 ${r.confidence??"—"} · 获取方式 ${esc(r.acquisition||"—")}<br>簇最大 ${pct(r.largest_entity_pct)} / 单钱包 ${pct(r.largest_address_pct)} · 实体数 ${r.entity_count??"—"} · 供应核实 ${r.supply_verified===true?"是":r.supply_verified===false?"否":"—"}${(r.caveats&&r.caveats.length)?"<br>"+r.caveats.map(esc).join("<br>"):""}${!r.ok?'<br><span style="color:var(--danger)">引擎错误: '+esc(r.error||"?")+'</span>':""}<br><span style="color:var(--muted)">${esc(r.token||"")}</span></div></details>
       </div></div>`;
   }).join("");
 }
 
 function renderTr(){
-  const d=data.tr; if(!d) return '<div class="err">traders.json 尚无数据 — 等本地导出任务第一次推送</div>';
-  if(d.source_ok===false) return `<div class="err">Arena API 取数失败: ${esc(d.source_error||"?")} — 显示的是上次成功快照或无数据</div>`;
-  const items=(d.traders||[]).slice()
-    .sort((a,b)=>(TV[a.falsifier.verdict]?.rank??9)-(TV[b.falsifier.verdict]?.rank??9)||(a.rank??999)-(b.rank??999));
-  const counts={}; items.forEach(t=>{const k=t.falsifier.verdict;counts[k]=(counts[k]||0)+1});
-  document.getElementById("summary").textContent=items.length+" 个 trader("+esc(d.window||"90d")+") · "+
-    Object.keys(TV).filter(k=>counts[k]).map(k=>TV[k].label+" "+counts[k]).join(" · ");
+  const d=data.tr; if(!d) return '<div class="err">还没数据 — 等本地第一次推送。</div>';
+  if(d.source_ok===false) return `<div class="err">拉不到 Arena 排行榜数据(${esc(d.source_error||"?")})。显示的是上次成功的快照或空。</div>`;
+  const items=(d.traders||[]).slice().sort((a,b)=>(TR[a.falsifier.verdict]?.rank??9)-(TR[b.falsifier.verdict]?.rank??9)||(a.rank??999)-(b.rank??999));
+  const c={}; items.forEach(t=>{const k=t.falsifier.verdict;c[k]=(c[k]||0)+1});
+  legend(TR);
+  document.getElementById("lead-big").innerHTML =
+    `排行榜前 ${items.length} 名里 —— <b>没有一个能盖章"有可复制的技能"</b>(真技能是不到 2% 的极少数,靠短期榜单根本认证不了)。`+
+    ` 明确该避开的:<b style="color:var(--danger)">${(c.lottery_leverage||0)+(c.tail_luck||0)+(c.sniper_timing||0)} 个</b>(高风险/靠运气/靠抢跑);${c.insufficient_data||0} 个交易太少没法评;` +
+    ` 剩下 ${c.unfalsified||0} 个只是"暂时没查出问题",不等于能跟。`;
+  document.getElementById("lead-note").textContent = "这一栏是给榜单泼冷水的:排行榜奖励的是敢梭哈的幸存者,不是有本事的人。所以这里只做减法(帮你排除),不推荐跟单。";
+  document.getElementById("summary").textContent = Object.keys(TR).filter(k=>c[k]).map(k=>TR[k].label+" "+c[k]).join(" · ");
   return items.map(t=>{
-    const v=TV[t.falsifier.verdict]||TV.insufficient_data;
-    return `<div class="card ${v.stripe}">
+    const o=TR[t.falsifier.verdict]||TR.insufficient_data;
+    const facts=[`榜位 <b>#${t.rank??"—"}</b>`,`ROI ${chg(t.roi)}`,`胜率 <b>${pct(t.win_rate)}</b>`,`<b>${t.trades_count??"—"}</b> 单`,`最大回撤 <b>${pct(t.max_drawdown)}</b>`];
+    return `<div class="card ${o.s}">
       <div class="top"><div class="sym"><span class="name">${esc(t.handle||t.trader_id||"?")}</span><span class="chip">${esc(t.source||"?")}</span></div>
-        <span class="dir ${v.cls}">${v.label}</span></div>
+        <span class="verdict ${o.c}">${o.label}</span></div>
       <div class="body">
-        <div class="kv">
-          <div class="cell"><span class="k">榜位/分</span><span class="v">#${t.rank??"—"} · ${t.arena_score??"—"}</span></div>
-          <div class="cell"><span class="k">ROI</span><span class="v ${(t.roi||0)>=0?'up':'down'}">${pct(t.roi)}</span></div>
-          <div class="cell"><span class="k">胜率 / 单数</span><span class="v">${pct(t.win_rate)} / ${t.trades_count??"—"}</span></div>
-          <div class="cell"><span class="k">最大回撤</span><span class="v">${pct(t.max_drawdown)}</span></div>
-        </div>
-        <div class="why">· ${esc(t.falsifier.why)}<br>· 未可算: ${(t.unavailable||[]).join(", ")||"—"}</div>
+        <div class="human">${o.meaning}</div>
+        <div class="so"><span class="lab">所以 👉</span>${o.so}</div>
+        <div class="facts">${facts.join("")}</div>
+        <details class="tech"><summary>技术细节</summary><div class="raw">证伪判决 ${esc(t.falsifier.verdict)} · ${esc(t.falsifier.why)}<br>还算不了(缺逐笔/链上入场数据): ${(t.unavailable||[]).join(", ")||"—"}</div></details>
       </div></div>`;
   }).join("");
 }
@@ -188,12 +205,11 @@ function staleness(){
   if(!d){el.textContent="无数据";el.className="stale dead";return}
   const gen=new Date(d.generated_at), next=new Date(d.next_expected_at), now=new Date();
   const ageMin=Math.round((now-gen)/60000);
-  document.getElementById("gen").textContent="数据生成于 "+gen.toLocaleString()+" · 下次预期 "+next.toLocaleTimeString();
-  if(now.getTime()<next.getTime()+15*60000){el.textContent="数据 "+ageMin+" 分钟前";el.className="stale ok"}
-  else if(ageMin<24*60){el.textContent="⚠ 已陈旧 "+ageMin+" 分钟(源头可能睡了)";el.className="stale old"}
-  else{el.textContent="✗ 数据超过 24h — 别信这页";el.className="stale dead"}
+  document.getElementById("gen").textContent="数据更新于 "+gen.toLocaleString();
+  if(now.getTime()<next.getTime()+15*60000){el.textContent="🟢 "+ageMin+" 分钟前更新";el.className="stale ok"}
+  else if(ageMin<24*60){el.textContent="🟡 已 "+ageMin+" 分钟没更新";el.className="stale old"}
+  else{el.textContent="🔴 超过 24h 没更新,别信这页";el.className="stale dead"}
 }
-
 function paint(){
   document.getElementById("grid").innerHTML = view==="op"?renderOp():renderTr();
   document.getElementById("tab-op").className="tab"+(view==="op"?" on":"");
@@ -202,7 +218,6 @@ function paint(){
 }
 document.getElementById("tab-op").onclick=()=>{view="op";paint()};
 document.getElementById("tab-tr").onclick=()=>{view="tr";paint()};
-
 async function load(){
   const bust="?t="+Math.floor(Date.now()/60000);
   const [op,tr]=await Promise.allSettled([
