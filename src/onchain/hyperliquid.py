@@ -232,6 +232,55 @@ def _funding_persistence(window_h: int = CARRY_WINDOW_H) -> dict[str, dict]:
     return out
 
 
+SCORECARD_WINDOW_H = 7 * 24
+SCORECARD_MIN_SNAPS = 20       # same MIN_N discipline as the board measurement layer
+SCORECARD_MIN_SPAN_H = 24      # need a real span, not 20 snapshots in one burst
+
+
+def carry_scorecard(window_h: int = SCORECARD_WINDOW_H) -> dict:
+    """Lane-level REALIZED-carry track record from the accumulated snapshots — the honest
+    proof/disproof of the edge core. Not 'funding is 11% now' but 'holding the clean-major
+    carry basket over the window actually realized X%/yr and stayed positive Z% of the
+    time, worst instantaneous −W%'. Refuses a number until the sample supports one
+    ('不可判'), exactly like board_outcomes — a realized carry is only honest with history.
+
+    Scope = CARRY_MAJORS only: the executable, deep-spot subset. Alts' realized funding
+    is dominated by de-peg/liquidation tail risk this can't capture, so quoting a basket
+    number on them would overstate an individual's achievable carry."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_h)).isoformat()
+    c = _conn()
+    pts: list[tuple[str, float]] = []      # (ts, funding_ann) across all major coins
+    try:
+        for ts, coin, fa in c.execute(
+                "SELECT ts, coin, funding_ann FROM snaps "
+                "WHERE ts >= ? AND funding_ann IS NOT NULL", (cutoff,)):
+            if coin in CARRY_MAJORS:
+                pts.append((ts, fa))
+    finally:
+        c.close()
+    if len(pts) < SCORECARD_MIN_SNAPS:
+        return {"available": False, "verdict": "不可判", "n": len(pts),
+                "note": f"已实现carry战绩积累中({len(pts)}/{SCORECARD_MIN_SNAPS}个快照点)"}
+    tss = sorted(t for t, _ in pts)
+    try:
+        span_h = (datetime.fromisoformat(tss[-1]) - datetime.fromisoformat(tss[0])).total_seconds() / 3600
+    except Exception:
+        span_h = 0
+    if span_h < SCORECARD_MIN_SPAN_H:
+        return {"available": False, "verdict": "不可判", "n": len(pts),
+                "note": f"跨度仅{span_h:.0f}h(<{SCORECARD_MIN_SPAN_H}h),等更长历史"}
+    fas = [fa for _, fa in pts]
+    realized = sum(fas) / len(fas)
+    pos_frac = sum(1 for x in fas if x > 0) / len(fas)
+    return {"available": True, "verdict": "measured",
+            "realized_ann": round(realized, 1), "pos_frac": round(pos_frac, 3),
+            "worst_ann": round(min(fas), 1), "n": len(fas), "span_h": round(span_h, 1),
+            "note": (f"主流carry篮子近{span_h:.0f}h已实现约 {realized:.0f}%/年(毛),"
+                     f"{pos_frac*100:.0f}%时间为正,最差瞬时 {min(fas):.0f}%/年。"
+                     "毛值未扣手续费/滑点,且不含脱锚/挤压尾部。")}
+
+
 def carry_signals(rows: list[dict] | None = None) -> list[dict]:
     """Delta-neutral funding-carry opportunities (spot long + perp short), ranked by
     quality = sustained funding × persistence, majors preferred. Every row carries its
@@ -295,3 +344,5 @@ if __name__ == "__main__":
         print(f"  {s['symbol']:9} [{s['tier']}] ann {s['funding_ann']:+.0f}% sustained "
               f"{s['sustained_ann']:+.0f}% OI ${s['oi_usd']/1e6:.1f}M "
               f"{'· '.join(s['flags']) if s['flags'] else 'clean'}")
+    sc = carry_scorecard()
+    print(f"\ncarry scorecard: {sc.get('note')}")

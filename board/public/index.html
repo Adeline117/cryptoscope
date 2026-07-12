@@ -131,6 +131,13 @@
   /* perp: carry section header + heatmap */
   .perp-sec{font-size:12px;font-weight:650;color:var(--text);margin:2px 0 9px;letter-spacing:.02em}
   .perp-sec small{font-weight:500;color:var(--dim);letter-spacing:0}
+  .sc-card{display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;padding:10px 14px;margin:0 0 11px;
+    background:var(--s1);border:1px solid var(--border);border-radius:10px}
+  .sc-card .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .sc-card .v{display:flex;gap:5px;align-items:baseline}
+  .sc-card .v .num{font-size:16px;font-weight:650}
+  .sc-card .v small{color:var(--dim);font-size:11px}
+  .sc-card.muted .v{color:var(--dim);font-size:13px}
   .hm{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
   .cell{border:1px solid var(--border);border-radius:9px;padding:9px 10px;background:var(--s1);display:flex;flex-direction:column;gap:5px;cursor:pointer}
   .cell .sy{font-weight:650;font-size:13px}
@@ -322,7 +329,16 @@ function renderPerp(d){
         <td class="n">${pf!=null?`<span class="num">${(pf*100).toFixed(0)}%</span>`:'<small class="dim">积累中</small>'}</td>
         <td class="n"><span class="num">${usd(c.oi_usd)}</span></td>
         <td>${flags}</td></tr>`}).join("");
+    const sc=d?.carry_scorecard;
+    let scBanner="";
+    if(sc){ if(sc.verdict==="measured"){
+        scBanner=`<div class="sc-card"><span class="k">主流carry已实现战绩·近${sc.span_h}h</span>
+          <span class="v"><span class="num" style="color:var(--good)">+${sc.realized_ann}%</span><small>已实现年化(毛)</small></span>
+          <span class="v"><span class="num">${(sc.pos_frac*100).toFixed(0)}%</span><small>时间正费</small></span>
+          <span class="v"><span class="num" style="color:var(--danger)">${sc.worst_ann}%</span><small>最差瞬时</small></span></div>`;
+      } else scBanner=`<div class="sc-card muted"><span class="k">主流carry已实现战绩</span><span class="v">不可判 <small>${esc(sc.note||'')}</small></span></div>`; }
     html+=`<div class="perp-sec">💰 资金费套利 · delta中性 <small>现货多+永续空,吃杠杆多头付的费,不赌方向 · 主流优先 · 年化为毛(未扣手续费/滑点)</small></div>
+      ${scBanner}
       <div class="scroll"><table class="tbl"><thead><tr>
         <th>代币</th><th class="n">年化资金费</th><th class="n">持续性</th><th class="n">OI深度</th><th>风险</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;

@@ -289,14 +289,17 @@ def render_watch() -> dict:
 def render_perps() -> dict:
     """Structure #2 (trend ignition) + #3 (liquidation-cascade right side) from
     Hyperliquid — keyless, live, no home-grown detection needed."""
-    from src.onchain.hyperliquid import _fetch_ctxs, _store_and_diff, carry_signals, perp_signals
+    from src.onchain.hyperliquid import (_fetch_ctxs, _store_and_diff, carry_scorecard,
+                                         carry_signals, perp_signals)
     try:
         rows = _fetch_ctxs()
         if rows:
             _store_and_diff(rows)          # one snapshot shared by both screens
         sigs = perp_signals(rows) if rows else []
         carry = carry_signals(rows) if rows else []
-        return _envelope({"perps": sigs, "carry": carry, "source": "Hyperliquid (keyless)",
+        scorecard = carry_scorecard()      # realized-carry track record (honest measurement)
+        return _envelope({"perps": sigs, "carry": carry, "carry_scorecard": scorecard,
+                          "source": "Hyperliquid (keyless)",
                           "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
                                    "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
                                    "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")})
