@@ -167,12 +167,12 @@ def _rug_from_gmgn(t: dict) -> dict:
     if t.get("is_honeypot") == 1:
         facts.append("蜜罐")
     try:
-        if float(t.get("sell_tax") or 0) >= 0.10:
+        if float(t.get("sell_tax") or 0) >= 0.05:      # 打狗研究: >5% = skip
             facts.append(f"卖出税{float(t['sell_tax'])*100:.0f}%")
     except (TypeError, ValueError):
         pass
-    if t.get("is_open_source") == 0:
-        facts.append("未开源")
+    # NOTE: is_open_source is ~always 0 on Solana (programs aren't EVM-verified-source)
+    # — it floods the safety column with false 'caution'. Dropped; it's not a Tier-A tell.
     if (t.get("dev_hold_rate") or 0) >= 0.10:
         facts.append(f"dev持仓{t['dev_hold_rate']*100:.0f}%")
     if (t.get("sniper_hold_rate") or 0) >= 0.15:
