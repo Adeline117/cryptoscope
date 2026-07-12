@@ -137,25 +137,31 @@ function renderPerp(){
 // ---- OPP (#1 early smart money) ----
 function renderOpp(){
   const d=data.opp; if(!d) return '<div class="err">还没数据 — 等第一次推送。</div>';
-  const s=(d.opportunities||[]).slice().sort((a,b)=>(b.smart_actors||0)-(a.smart_actors||0));
-  setLegend([["good","强·≥3个独立聪明钱"],["warn","弱·1-2个(仅线索)"]]);
-  document.getElementById("lead").innerHTML=`新上的低流通币里,<b>有已实现盈利、且互相独立(非同一钱包农场)的钱包正在买入</b>的。`+
-    ` 扫了 ${d.scanned??"?"} 个,命中 <b>${s.length}</b> 个。`+
-    `<div class="note">这是自建雷达(慢、稀疏,常撞刷量农场——已自动剔除)。接 Cielo 聪明钱名单会强很多,需一个免费 key。诚实:你看到时已落后他们入场价,多数会归零。</div>`;
-  document.getElementById("summary").textContent=s.length?`${s.length} 个命中`:"这轮没扫到聪明钱在买的新币";
-  if(!s.length) return '<div class="err">这轮没有"独立聪明钱正在买"的新币。自建雷达信号本就稀疏——接 Cielo/GMGN 的策展聪明钱名单是正解(需免费 key)。</div>';
-  const RUG={avoid:'<b style="color:var(--danger)">🔴合约有雷·别碰</b>',caution:'<span style="color:var(--warn)">🟠合约有风险</span>',clean:'<span style="color:var(--good)">🟢合约干净</span>',unchecked:'<span style="color:var(--muted)">⚪合约未检查</span>'};
+  const s=(d.opportunities||[]).slice().sort((a,b)=>((b.smart_money??b.smart_actors)||0)-((a.smart_money??a.smart_actors)||0));
+  const gmgn=(d.source||"").includes("GMGN");
+  setLegend([["good","强·聪明钱≥5"],["warn","弱·聪明钱2-4"],["danger","有雷别碰"]]);
+  document.getElementById("lead").innerHTML=`新上的低流通币里,<b>聪明钱正在买</b>的——按聪明钱数量排。`+
+    ` 命中 <b>${s.length}</b> 个${gmgn?"(全链含 Solana)":""}。`+
+    `<div class="note">${gmgn?"数据源 GMGN 策展聪明钱。同时看狙击/机器人数(远多于聪明钱=你可能是出货对象)和合约安全。":"自建雷达(慢/稀疏)。"}诚实:你看到时已落后他们入场价,多数会归零,这是雷达不是必赚。</div>`;
+  document.getElementById("summary").textContent=s.length?`${s.length} 个 · 数据源 ${esc(d.source||"?")}`:"这轮没扫到聪明钱在买的新币";
+  if(!s.length) return '<div class="err">这轮没有聪明钱在买的新币,或 FlareSolverr 未运行(GMGN 源需要它)。</div>';
+  const RUG={avoid:'<b style="color:var(--danger)">🔴有雷·别碰</b>',caution:'<span style="color:var(--warn)">🟠有风险</span>',clean:'<span style="color:var(--good)">🟢合约干净</span>',unchecked:'<span style="color:var(--muted)">⚪未检查</span>'};
   return s.map(o=>{
-    const strong=o.smart_actors>=3;
+    const sm=o.smart_money??o.smart_actors??0, strong=sm>=5;
     const rug=o.rug||{level:"unchecked",facts:[]};
     const avoid=rug.level==="avoid";
-    return card(o.symbol,o.chain,avoid?"⚠️别碰·有雷":(strong?"强·聪明钱进场":"弱·有线索"),avoid?"c-danger":(strong?"c-good":"c-warn"),avoid?"s-danger":(strong?"s-good":"s-warn"),
-      `${o.smart_actors} 个已实现盈利的<b>独立</b>钱包正在买${o.farm_collapsed>0?`(另有 ${o.farm_collapsed} 个是同一农场,已剔除)`:''}。`,
-      avoid?`合约有雷(${(rug.facts||[]).join("、")})——聪明钱在买也别碰,可能是圈套。`:(strong?"值得盯紧,合约看起来干净;仍别当必赚。":"只有 1-2 个,当线索看,别重仓。"),
-      [RUG[rug.level]||'',`${(o.age_days!=null?o.age_days.toFixed(1)+'天新':'')}`,`流动性 <b>${fmtUsd(o.liq)}</b>`,
-       (o.usd_bought!=null?`买入额 <b>${fmtUsd(o.usd_bought)}</b>`:``),
-       (o.buy_ratio_h1!=null?`买卖比 <b>${o.buy_ratio_h1}</b>`:``)],
-      `买入钱包(可自查): ${(o.sample_wallets||[]).map(esc).join(", ")||"—"}${(rug.facts&&rug.facts.length)?"<br>合约: "+rug.facts.map(esc).join("、"):""}<br>${esc(o.token||"")}`);
+    // reverse tells (GMGN): lots of snipers/bots relative to smart money = 出货对象是你
+    const botHeavy=(o.bots||0)>0 && sm>0 && (o.bots/sm)>8;
+    return card(o.symbol,o.chain,avoid?"⚠️别碰·有雷":(strong?"强·聪明钱多":"弱·有几个"),avoid?"c-danger":(strong?"c-good":"c-warn"),avoid?"s-danger":(strong?"s-good":"s-warn"),
+      `<b>${sm}</b> 个聪明钱在买${o.renowned?`(其中 ${o.renowned} 个知名钱包)`:''}${o.age_days!=null?` · ${o.age_days<1?Math.round(o.age_days*24)+'小时':o.age_days.toFixed(0)+'天'}新`:''}。`,
+      avoid?`合约有雷(${(rug.facts||[]).join("、")})——聪明钱在买也别碰,是圈套。`:
+        botHeavy?`但机器人/狙击盘 ${o.bots}/${o.snipers||0} 远多于聪明钱——很可能你就是出货对象,谨慎。`:
+        (strong?"聪明钱扎堆、合约看着干净;仍别当必赚,你已落后其入场价。":"聪明钱不多,当线索看,别重仓。"),
+      [RUG[rug.level]||'',`聪明钱 <b>${sm}</b>`,(o.renowned?`知名 <b>${o.renowned}</b>`:''),
+       (o.snipers!=null?`狙击 <b>${o.snipers}</b>`:''),(o.bots!=null?`机器人 <b>${o.bots}</b>`:''),
+       `流动性 <b>${fmtUsd(o.liq)}</b>`,(o.mcap!=null?`市值 <b>${fmtUsd(o.mcap)}</b>`:''),
+       (o.price_chg_1h!=null?`1h ${chg(o.price_chg_1h)}`:'')],
+      `${(rug.facts&&rug.facts.length)?"合约: "+rug.facts.map(esc).join("、")+"<br>":""}${o.sample_wallets&&o.sample_wallets.length?"买入钱包: "+o.sample_wallets.map(esc).join(", ")+"<br>":""}${esc(o.token||"")}`);
   }).join("");
 }
 

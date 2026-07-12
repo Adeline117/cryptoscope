@@ -173,9 +173,28 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
     from src.onchain.smart_money import convergence
     from src.pipeline.yaobi_finder import _buy_pressure, _gather_young
 
-    # #1 STRONG PATH: if a Cielo key is present, read the curated Smart Money list's
-    # recent buys directly (fast, dense, no farm noise) instead of the slow home-grown
-    # scan. Falls through to the radar when there's no key.
+    # #1 STRONGEST PATH: GMGN's curated smart-money rank via FlareSolverr — ALL chains
+    # incl Solana, with bot/sniper reverse-tells + native honeypot/tax/LP safety, one
+    # call per chain. Far better than the slow home-grown convergence. Dormant when
+    # FlareSolverr is down (returns None → fall through).
+    try:
+        from src.onchain import gmgn
+        gm = gmgn.opportunities(chains=("sol", "bsc", "base", "eth"), min_smart=2)
+    except Exception as e:
+        logger.warning("gmgn_failed", error=str(e)[:100])
+        gm = None
+    if gm is not None:
+        # normalize to the card shape (add token alias + smart_actors for the UI)
+        for o in gm:
+            o["token"] = o.get("address")
+            o["smart_actors"] = o.get("smart_money")
+            o["age_days"] = (o.get("age_hours") or 0) / 24 if o.get("age_hours") else None
+            o["liq"] = o.get("liquidity")
+        return _envelope({"opportunities": gm, "scanned": len(gm), "source": "GMGN 策展聪明钱(全链)",
+                          "note": ("GMGN 策展的聪明钱正在买的新币,按聪明钱数排,全链含 Solana。"
+                                   "同时显示狙击/机器人数(反指标)和合约安全。诚实:你看到时已落后其入场,多数会归零。")})
+
+    # #1 second path: Cielo curated list (if key present).
     cielo = _cielo_smart_buys()
     if cielo is not None:
         return _envelope({"opportunities": cielo, "scanned": None, "source": "Cielo 策展聪明钱名单",
