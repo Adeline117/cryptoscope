@@ -244,6 +244,31 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
                                "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")})
 
 
+def render_stats(opportunities: dict | None) -> dict:
+    """Measurement layer: log this round's opp picks (with entry price), resolve any
+    due, and emit the honest per-lane hit rate. The board shows '不可判' until the
+    sample supports a number — the same discipline that killed the fake 44%."""
+    try:
+        from src.pipeline import board_outcomes
+        ops = (opportunities or {}).get("opportunities", [])
+        picks = [{"symbol": o.get("symbol"), "chain": o.get("chain"),
+                  "token": o.get("token") or o.get("address"),
+                  "price0": o.get("price"), "liquidity": o.get("liq"),
+                  "metric": o.get("smart_money")}
+                 for o in ops[:12] if o.get("price")]
+        # _price_at resolves via GeckoTerminal, which covers Solana + EVM. A pick whose
+        # horizon price can't be fetched simply stays unresolved and retires — never a
+        # fake number.
+        board_outcomes.log_picks("opp", picks)
+        board_outcomes.resolve()
+        return _envelope({"lanes": board_outcomes.lane_stats(),
+                          "note": "每条线 pick 的事后命中率(对照滑点门槛,4h/24h,GeckoTerminal取价)。"
+                                  "样本<20 显示'不可判'——不拿不足的样本报假数字(44%教训)。刚开始积累。"})
+    except Exception as e:
+        logger.warning("render_stats_failed", error=str(e)[:120])
+        return _envelope({"lanes": {}, "error": str(e)[:120]})
+
+
 def render_watch() -> dict:
     """The EARLIEST lane: tokens that WATCHED proven wallets JUST bought (minutes ago),
     before it aggregates into any rank. Convergence (>=2 watched wallets, same token,
@@ -440,7 +465,8 @@ def run(push: bool = True, include_operators: bool = True) -> dict:
     perps = render_perps()                              # #2 ignition + #3 cascade
     opportunities = render_opportunities()              # #1 early smart-money buys
     operators = render_operators() if include_operators else None
-    paths = write_views(perps=perps, opportunities=opportunities, operators=operators)
+    stats = render_stats(opportunities)                 # measurement: log + resolve + hit rate
+    paths = write_views(perps=perps, opportunities=opportunities, operators=operators, stats=stats)
     n = push_to_blob(paths) if push else 0
     return {"views_written": len(paths), "views_pushed": n,
             "perps": len((perps or {}).get("perps", [])),

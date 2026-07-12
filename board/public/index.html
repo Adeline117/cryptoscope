@@ -186,7 +186,7 @@ const ageStr=h=>h==null?"—":h<1/60?"<1m":h<1?Math.round(h*60)+"m":h<24?h.toFix
 function rel(ts){if(!ts)return"—";const s=Math.round(Date.now()/1000-ts);return s<5?"刚刚":s<60?s+"秒前":s<3600?Math.floor(s/60)+"分前":Math.floor(s/3600)+"时前"}
 function relMs(t){const s=Math.round((Date.now()-t)/1000);return s<5?"刚刚":s<60?s+"s前":s<3600?Math.floor(s/60)+"分前":Math.floor(s/3600)+"时前"}
 
-let view="watch", data={watch:null,opp:null,perp:null,op:null}, lastPoll=0;
+let view="watch", data={watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 
@@ -321,7 +321,11 @@ function renderPerp(d){
 function paint(){
   const L=LANES[view], d=data[view==="avoid"?"opp":view];
   $("lanetitle").innerHTML=L.title(d);
-  $("lanestat").innerHTML=(L.stat(d)||[]).map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
+  const st=(L.stat(d)||[]).slice();
+  const ls=data.stats?.lanes?.[view];
+  if(ls){ if(ls.verdict==="measured") st.push(["本线命中率",`${ls.hits}/${ls.n}`,`Wilson[${(ls.lo*100).toFixed(0)}-${(ls.hi*100).toFixed(0)}%]`]);
+    else st.push(["本线命中率","不可判",`积累${ls.n}/20`]); }
+  $("lanestat").innerHTML=st.map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
   $("rd").innerHTML=L.readme;
   $("view").innerHTML = view==="perp"?renderPerp(d) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
   // counts
@@ -355,12 +359,13 @@ let pt=0; setInterval(()=>{pt=(pt+1)%60;$("prog").style.width=(pt/60*100)+"%"},1
 
 async function load(){
   const b="?t="+Math.floor(Date.now()/6e4);
-  const r=await Promise.allSettled(["watch","perps","opportunities","operators"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
-  const [wt,p,o,op]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  const r=await Promise.allSettled(["watch","perps","opportunities","operators","stats"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
+  const [wt,p,o,op,st]=r.map(x=>x.status==="fulfilled"?x.value:null);
   if(wt&&wt.schema_version===1)data.watch=wt;
   if(p&&p.schema_version===1)data.perp=p;
   if(o&&o.schema_version===1)data.opp=o;
   if(op&&op.schema_version===1)data.op=op;
+  if(st&&st.schema_version===1)data.stats=st;
   lastPoll=Date.now(); pt=0;
   paint();
 }
