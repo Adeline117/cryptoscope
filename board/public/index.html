@@ -137,31 +137,39 @@ function renderPerp(){
 // ---- OPP (#1 early smart money) ----
 function renderOpp(){
   const d=data.opp; if(!d) return '<div class="err">还没数据 — 等第一次推送。</div>';
-  const s=(d.opportunities||[]).slice().sort((a,b)=>((b.smart_money??b.smart_actors)||0)-((a.smart_money??a.smart_actors)||0));
-  const gmgn=(d.source||"").includes("GMGN");
-  setLegend([["good","强·聪明钱≥5"],["warn","弱·聪明钱2-4"],["danger","有雷别碰"]]);
-  document.getElementById("lead").innerHTML=`新上的低流通币里,<b>聪明钱正在买</b>的——按聪明钱数量排。`+
-    ` 命中 <b>${s.length}</b> 个${gmgn?"(全链含 Solana)":""}。`+
-    `<div class="note">${gmgn?"数据源 GMGN 策展聪明钱。同时看狙击/机器人数(远多于聪明钱=你可能是出货对象)和合约安全。":"自建雷达(慢/稀疏)。"}诚实:你看到时已落后他们入场价,多数会归零,这是雷达不是必赚。</div>`;
-  document.getElementById("summary").textContent=s.length?`${s.length} 个 · 数据源 ${esc(d.source||"?")}`:"这轮没扫到聪明钱在买的新币";
+  // keep the data's fresh-first order (confirmed_fresh then fresh_score); do NOT
+  // re-sort by smart_money — a big count means LATE.
+  const s=(d.opportunities||[]).slice().sort((a,b)=>((b.confirmed_fresh?1:0)-(a.confirmed_fresh?1:0))||((b.fresh_score||0)-(a.fresh_score||0)));
+  const fresh=s.filter(o=>o.confirmed_fresh).length;
+  setLegend([["good","🟢刚出·聪明钱刚进(能埋伏)"],["warn","⚪早期未确认"],["danger","🔴已跑/有雷(别追)"]]);
+  document.getElementById("lead").innerHTML=`<b>按新鲜度排,不按热度排</b>——最上面是刚出几分钟/几小时、聪明钱<b>刚进场</b>的(能埋伏的窗口)。`+
+    ` 其中 <b>${fresh}</b> 个已确认新鲜(<12小时)。`+
+    `<div class="note">"200 个聪明钱在买"= 已经晚了,那种排在最底标🔴已跑。诚实天花板:你永远晚于在创建区块就买的内部狙击者(他们1-5分钟清仓);看板能给的最早是"扩散早坡",小仓+止损。</div>`;
+  document.getElementById("summary").textContent=s.length?`${fresh} 个确认新鲜 / ${s.length} 个总 · ${esc(d.source||"?")}`:"这轮没有新鲜的聪明钱入场";
   if(!s.length) return '<div class="err">这轮没有聪明钱在买的新币,或 FlareSolverr 未运行(GMGN 源需要它)。</div>';
   const RUG={avoid:'<b style="color:var(--danger)">🔴有雷·别碰</b>',caution:'<span style="color:var(--warn)">🟠有风险</span>',clean:'<span style="color:var(--good)">🟢合约干净</span>',unchecked:'<span style="color:var(--muted)">⚪未检查</span>'};
+  const ageStr=o=>{const a=o.age_hours; return a==null?"年龄未知":(a<1?Math.round(a*60)+"分钟":a<24?a.toFixed(1)+"小时":Math.round(a/24)+"天");};
   return s.map(o=>{
-    const sm=o.smart_money??o.smart_actors??0, strong=sm>=5;
+    const sm=o.smart_money??o.smart_actors??0;
     const rug=o.rug||{level:"unchecked",facts:[]};
     const avoid=rug.level==="avoid";
-    // reverse tells (GMGN): lots of snipers/bots relative to smart money = 出货对象是你
+    const fresh=o.confirmed_fresh, crowded=o.crowded;
     const botHeavy=(o.bots||0)>0 && sm>0 && (o.bots/sm)>8;
-    return card(o.symbol,o.chain,avoid?"⚠️别碰·有雷":(strong?"强·聪明钱多":"弱·有几个"),avoid?"c-danger":(strong?"c-good":"c-warn"),avoid?"s-danger":(strong?"s-good":"s-warn"),
-      `<b>${sm}</b> 个聪明钱在买${o.renowned?`(其中 ${o.renowned} 个知名钱包)`:''}${o.age_days!=null?` · ${o.age_days<1?Math.round(o.age_days*24)+'小时':o.age_days.toFixed(0)+'天'}新`:''}。`,
+    // badge: freshness FIRST (that's the whole point — early beats crowded)
+    const [vl,vc,vs]= avoid?["⚠️别碰·有雷","c-danger","s-danger"]
+      : fresh?[`🟢刚出 ${ageStr(o)}`,"c-good","s-good"]
+      : crowded?["🔴已跑·晚了","c-danger","s-danger"]
+      : ["⚪早期未确认","c-warn","s-warn"];
+    return card(o.symbol,o.chain,vl,vc,vs,
+      `${o.age_hours!=null?`<b>${ageStr(o)}</b>新,`:''}<b>${sm}</b> 个聪明钱刚进${o.renowned?`(${o.renowned} 个知名)`:''}。`,
       avoid?`合约有雷(${(rug.facts||[]).join("、")})——聪明钱在买也别碰,是圈套。`:
-        botHeavy?`但机器人/狙击盘 ${o.bots}/${o.snipers||0} 远多于聪明钱——很可能你就是出货对象,谨慎。`:
-        (strong?"聪明钱扎堆、合约看着干净;仍别当必赚,你已落后其入场价。":"聪明钱不多,当线索看,别重仓。"),
+        crowded?`已经 ${sm} 个聪明钱了——扩散过半,你多半是接盘方,别追。`:
+        botHeavy?`机器人/狙击 ${o.bots}/${o.snipers||0} 远多于聪明钱——你可能就是出货对象,谨慎。`:
+        fresh?"够新、聪明钱刚进——这是能埋伏的窗口,但你仍晚于内部狙击者,小仓+止损。":"年龄没确认,别当早期,当线索看。",
       [RUG[rug.level]||'',`聪明钱 <b>${sm}</b>`,(o.renowned?`知名 <b>${o.renowned}</b>`:''),
        (o.snipers!=null?`狙击 <b>${o.snipers}</b>`:''),(o.bots!=null?`机器人 <b>${o.bots}</b>`:''),
-       `流动性 <b>${fmtUsd(o.liq)}</b>`,(o.mcap!=null?`市值 <b>${fmtUsd(o.mcap)}</b>`:''),
-       (o.price_chg_1h!=null?`1h ${chg(o.price_chg_1h)}`:'')],
-      `${(rug.facts&&rug.facts.length)?"合约: "+rug.facts.map(esc).join("、")+"<br>":""}${o.sample_wallets&&o.sample_wallets.length?"买入钱包: "+o.sample_wallets.map(esc).join(", ")+"<br>":""}${esc(o.token||"")}`);
+       `流动性 <b>${fmtUsd(o.liq)}</b>`,(o.price_chg_1h!=null?`1h ${chg(o.price_chg_1h)}`:'')],
+      `${(rug.facts&&rug.facts.length)?"合约: "+rug.facts.map(esc).join("、")+"<br>":""}${esc(o.token||"")}`);
   }).join("");
 }
 

@@ -117,10 +117,21 @@ def _rug_from_gmgn(t: dict) -> dict:
 
 
 def opportunities(chains=("sol", "bsc", "base", "eth"), min_smart: int = 2,
-                  tf: str = "1h", per_chain: int = 25) -> list[dict] | None:
-    """Cross-chain '聪明钱在买什么' feed. Returns None if FlareSolverr is unusable
-    (caller falls back to the home-grown radar). Filters honeypots, requires
-    >=min_smart smart-money wallets, ranks by smart-money count."""
+                  tf: str = "5m", per_chain: int = 40,
+                  max_age_hours: float = 48.0) -> list[dict] | None:
+    """Cross-chain 'EARLY smart-money entries' feed. Returns None if FlareSolverr is
+    unusable (caller falls back).
+
+    EARLINESS is the whole point (a token with 167 smart wallets over 25 days is EXIT
+    liquidity, not an entry). So:
+      · tf='5m' — smart money active in the LAST 5 MINUTES, not a 1h/24h aggregate.
+      · age filter — drop anything older than max_age_hours; the money in structure #1
+        is on the diffusion curve's early slope, not the plateau.
+      · rank by FRESHNESS-WEIGHTED conviction = smart_money / age (a young token with a
+        few smart wallets JUST entering beats an old one with a crowd).
+    Honest ceiling: you are still behind the deployer-funded snipers who buy in the
+    creation block; the earliest a dashboard realistically gets you is minutes-fresh
+    diffusion, not the insider entry."""
     if not usable():
         return None
     out = []
@@ -130,10 +141,24 @@ def opportunities(chains=("sol", "bsc", "base", "eth"), min_smart: int = 2,
                 continue
             if (t.get("smart_money") or 0) < min_smart:
                 continue
+            age = t.get("age_hours")
+            if age is not None and age > max_age_hours:
+                continue                       # already past the early slope → skip
             t["rug"] = _rug_from_gmgn(t)
-            t["strength"] = "强" if t["smart_money"] >= 5 else "弱"
+            # A huge smart-money count is a LATENESS tell, not conviction — 200 smart
+            # wallets don't pile in during the early slope. So the fresh score REWARDS
+            # young age and CAPS the smart-money contribution (a handful just-entering
+            # on a fresh token beats a crowd on a discovered one). Unknown age is
+            # treated as old (can't confirm it's early), so it can't fake freshness.
+            a = max(age if age is not None else max_age_hours, 0.25)
+            sm_capped = min(t["smart_money"] or 0, 20)     # >20 = already the crowd
+            t["fresh_score"] = round(sm_capped / a, 2)
+            t["confirmed_fresh"] = age is not None and age <= 12
+            t["crowded"] = (t["smart_money"] or 0) > 40     # likely already run
+            t["strength"] = "强" if (t["confirmed_fresh"] and t["smart_money"] >= 3) else "弱"
             out.append(t)
-    out.sort(key=lambda x: -(x.get("smart_money") or 0))
+    # youngest-with-smart-money first; confirmed-fresh always above unknown-age
+    out.sort(key=lambda x: (not x["confirmed_fresh"], -x["fresh_score"]))
     return out
 
 
