@@ -72,6 +72,8 @@ def smart_money_rank(chain: str, tf: str = "1h", limit: int = 40) -> list[dict]:
                 "symbol": t.get("symbol"), "name": t.get("name"),
                 "chain": CHAINS.get(chain, chain), "address": t.get("address"),
                 "price": t.get("price"), "price_chg_1h": t.get("price_change_percent1h"),
+                "pc_1m": t.get("price_change_percent1m"), "pc_5m": t.get("price_change_percent5m"),
+                "pc_1h": t.get("price_change_percent1h"),
                 "liquidity": t.get("liquidity"), "mcap": t.get("market_cap"),
                 "holder_count": t.get("holder_count"), "age_hours": age_h,
                 # smart money (the signal)
