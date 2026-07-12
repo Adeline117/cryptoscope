@@ -31,10 +31,17 @@ logger = structlog.get_logger()
 
 DB = DATA_DIR / "smart_wallets.db"
 
-# discretionary-skilled filter (drop bots / one-lucky-week)
-MIN_WINRATE = 0.55
-MIN_REALIZED_7D = 5_000       # USD actually made this week
-MIN_BUYS_7D = 15
+# discretionary-skilled filter (drop bots / one-lucky-week). Chain-aware: sol/bsc have
+# a fast degen scene (high winrate + many trades), base/eth trade slower (fewer buys,
+# lower winrate is normal), so EVM uses looser activity + a higher profit bar so a
+# lucky-few-wins wallet still can't slip in.
+FILTERS = {
+    "sol": {"winrate": 0.55, "realized": 5_000, "min_buys": 15, "max_buys": 800},
+    "bsc": {"winrate": 0.55, "realized": 5_000, "min_buys": 15, "max_buys": 800},
+    "base": {"winrate": 0.45, "realized": 10_000, "min_buys": 4, "max_buys": 800},
+    "eth": {"winrate": 0.45, "realized": 10_000, "min_buys": 4, "max_buys": 800},
+}
+_DEFAULT_FILTER = {"winrate": 0.5, "realized": 8_000, "min_buys": 6, "max_buys": 800}
 MAX_BUYS_7D = 800             # above this = HFT bot, not copyable
 WATCH_PER_CHAIN = 14          # bounded — each poll is a serial FlareSolverr call
 
@@ -61,10 +68,12 @@ def harvest(chain_code: str) -> int:
     d = _fs_get(f"https://gmgn.ai/defi/quotation/v1/rank/{chain_code}/wallets/7d"
                 f"?orderby=pnl_7d&direction=desc")
     rank = ((d or {}).get("data") or {}).get("rank") or []
+    flt = FILTERS.get(chain_code, _DEFAULT_FILTER)
     kept = []
     for w in rank:
         wr, real, buys = _f(w.get("winrate_7d")), _f(w.get("realized_profit_7d")), int(w.get("buy_7d") or 0)
-        if wr >= MIN_WINRATE and real >= MIN_REALIZED_7D and MIN_BUYS_7D <= buys <= MAX_BUYS_7D:
+        if (wr >= flt["winrate"] and real >= flt["realized"]
+                and flt["min_buys"] <= buys <= flt["max_buys"]):
             kept.append((w.get("address"), wr, real, buys))
     kept.sort(key=lambda x: -x[2])           # by realized profit
     kept = kept[:WATCH_PER_CHAIN]
