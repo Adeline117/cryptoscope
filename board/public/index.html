@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>妖币 & Trader 证伪板 — 人话版</title>
+<title>加密赚钱机会雷达 — 五类结构</title>
 <style>
   :root{
     --bg:#0b0d11; --surface:#14171e; --surface2:#191d26; --line:#262c37;
@@ -19,216 +19,209 @@
     --good:#2f9e63; --warn:#b47613; --danger:#c93a3f; --info:#3a6fd6; --violet:#6a58d6; --accent:#1a8f7f;}}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:1120px;margin:0 auto;padding:28px 18px 72px}
-  h1{font-size:21px;font-weight:700;margin:0;letter-spacing:-.01em}
+  .wrap{max-width:1120px;margin:0 auto;padding:26px 16px 72px}
+  h1{font-size:21px;font-weight:700;margin:0}
   .sub{color:var(--ink2);font-size:13px;margin:3px 0 0}
-  header{display:flex;gap:13px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding-bottom:15px;border-bottom:1px solid var(--line)}
+  header{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding-bottom:14px;border-bottom:1px solid var(--line)}
   .brand{display:flex;gap:11px;align-items:center}
-  .logo{width:36px;height:36px;border-radius:9px;background:linear-gradient(150deg,var(--danger),var(--warn));display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:17px;color:#160404}
+  .logo{width:36px;height:36px;border-radius:9px;background:linear-gradient(150deg,var(--accent),var(--info));display:grid;place-items:center;font-weight:700;font-size:19px;color:#04120f}
   .stale{font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface)}
   .stale.ok{color:var(--good)} .stale.old{color:var(--warn)} .stale.dead{color:var(--danger)}
-
-  .lead{margin:18px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
-  .lead .big{font-size:16px;font-weight:600;line-height:1.5}
-  .lead .big b{color:var(--danger)}
-  .lead .note{font-size:12.5px;color:var(--muted);margin-top:8px}
-
-  .tabs{display:flex;gap:8px;margin:20px 0 4px}
-  .tab{font-size:14px;font-weight:600;padding:8px 17px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer}
+  .tabs{display:flex;gap:7px;margin:18px 0 4px;flex-wrap:wrap}
+  .tab{font-size:13.5px;font-weight:600;padding:8px 15px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink2);cursor:pointer}
   .tab.on{color:#fff;background:var(--accent);border-color:var(--accent)}
   .tab:focus-visible{outline:2px solid var(--info);outline-offset:2px}
-  .legend{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0 4px}
-  .lg{font-size:12px;padding:4px 11px;border-radius:999px;display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line)}
+  .lead{margin:8px 0 0;font-size:14.5px;line-height:1.55;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:13px 16px}
+  .lead b{color:var(--danger)} .lead .note{font-size:12px;color:var(--muted);margin-top:7px}
+  .legend{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 4px}
+  .lg{font-size:12px;padding:3px 10px;border-radius:999px;display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line)}
   .lg .d{width:8px;height:8px;border-radius:50%;flex:none}
-  .lg small{color:var(--muted)}
-  .summary{font-size:12.5px;color:var(--muted);margin:12px 0 16px}
-
+  .summary{font-size:12px;color:var(--muted);margin:10px 0 14px}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:13px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;overflow:hidden;display:flex;flex-direction:column}
-  .card .top{padding:13px 16px 11px;display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .card .top{padding:13px 16px 10px;display:flex;justify-content:space-between;gap:10px;align-items:center}
   .sym{font-size:17px;font-weight:700;display:flex;gap:8px;align-items:center;min-width:0}
   .sym .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .chip{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--muted);background:var(--surface2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;text-transform:uppercase;flex:none}
   .verdict{font-size:13px;font-weight:700;padding:5px 12px;border-radius:999px;white-space:nowrap;flex:none}
   .body{padding:2px 16px 15px;display:flex;flex-direction:column;gap:10px}
-  .human{font-size:14.5px;color:var(--ink);line-height:1.5}
+  .human{font-size:14px;color:var(--ink);line-height:1.5}
   .so{font-size:13.5px;font-weight:600;padding:9px 12px;border-radius:9px;background:var(--surface2);line-height:1.5}
   .so .lab{font-weight:700;margin-right:5px}
   .facts{font-size:12.5px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:4px 14px}
   .facts b{color:var(--ink);font-family:var(--mono);font-weight:600}
   .up{color:var(--good)} .down{color:var(--danger)}
   details.tech{font-size:11.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px}
-  details.tech summary{cursor:pointer;color:var(--muted);font-size:11.5px;list-style:none;user-select:none}
-  details.tech summary::before{content:"▸ ";}
-  details.tech[open] summary::before{content:"▾ ";}
+  details.tech summary{cursor:pointer;list-style:none;user-select:none}
+  details.tech summary::before{content:"▸ 细节"} details.tech[open] summary::before{content:"▾ 细节"}
   details.tech .raw{font-family:var(--mono);margin-top:6px;word-break:break-all;line-height:1.6}
-
-  /* verdict colors */
-  .c-dump{color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent)}
-  .c-armed{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
-  .c-accum{color:var(--good);background:color-mix(in srgb,var(--good) 15%,transparent)}
-  .c-issuer{color:var(--violet);background:color-mix(in srgb,var(--violet) 15%,transparent)}
-  .c-faded{color:var(--muted);background:color-mix(in srgb,var(--muted) 18%,transparent)}
-  .c-unknown{color:var(--info);background:color-mix(in srgb,var(--info) 14%,transparent)}
-  .s-dump{box-shadow:inset 4px 0 0 var(--danger)} .s-armed{box-shadow:inset 4px 0 0 var(--warn)}
-  .s-accum{box-shadow:inset 4px 0 0 var(--good)} .s-issuer{box-shadow:inset 4px 0 0 var(--violet)}
-  .s-faded{box-shadow:inset 4px 0 0 var(--muted)} .s-unknown{box-shadow:inset 4px 0 0 var(--info)}
-  .err{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--danger);border-radius:11px;padding:16px;font-size:13.5px;color:var(--ink2)}
-  .foot{margin-top:32px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
+  .c-danger{color:var(--danger);background:color-mix(in srgb,var(--danger) 15%,transparent)}
+  .c-warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 15%,transparent)}
+  .c-good{color:var(--good);background:color-mix(in srgb,var(--good) 15%,transparent)}
+  .c-violet{color:var(--violet);background:color-mix(in srgb,var(--violet) 15%,transparent)}
+  .c-muted{color:var(--muted);background:color-mix(in srgb,var(--muted) 18%,transparent)}
+  .c-info{color:var(--info);background:color-mix(in srgb,var(--info) 14%,transparent)}
+  .s-danger{box-shadow:inset 4px 0 0 var(--danger)} .s-warn{box-shadow:inset 4px 0 0 var(--warn)}
+  .s-good{box-shadow:inset 4px 0 0 var(--good)} .s-violet{box-shadow:inset 4px 0 0 var(--violet)}
+  .s-muted{box-shadow:inset 4px 0 0 var(--muted)} .s-info{box-shadow:inset 4px 0 0 var(--info)}
+  .err{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:11px;padding:16px;font-size:13.5px;color:var(--ink2)}
+  .foot{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);font-size:11.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
   @media(max-width:540px){.grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="brand">
-      <div class="logo">妖</div>
-      <div><h1>妖币 & Trader 证伪板</h1><p class="sub">一句话说清:这个币/这个人,到底是真本事还是运气/骗局</p></div>
-    </div>
+    <div class="brand"><div class="logo">📡</div>
+      <div><h1>加密赚钱机会雷达</h1><p class="sub">五类暴富结构的实时信号 · 只是雷达,不是买卖指令</p></div></div>
     <span class="stale" id="stale">加载中…</span>
   </header>
 
-  <div class="lead"><div class="big" id="lead-big">加载中…</div>
-    <div class="note" id="lead-note"></div></div>
-
   <div class="tabs" role="tablist">
-    <button class="tab on" id="tab-op" role="tab">💰 币 · 有没有庄在做盘</button>
-    <button class="tab" id="tab-tr" role="tab">📈 人 · 是技能还是运气</button>
+    <button class="tab on" data-v="perp" role="tab">🔥 永续拥挤/点火</button>
+    <button class="tab" data-v="opp" role="tab">💎 早期聪明钱在买</button>
+    <button class="tab" data-v="op" role="tab">💰 庄在做盘</button>
   </div>
+  <div class="lead" id="lead">加载中…</div>
   <div class="legend" id="legend"></div>
   <p class="summary" id="summary"></p>
   <div class="grid" id="grid"></div>
-  <div class="foot"><span id="gen">—</span><span>每小时自动刷新 · 只是信号,不是投资建议</span></div>
+  <div class="foot"><span id="gen">—</span><span>每小时自动刷新 · 仅信号,风险自负</span></div>
 </div>
 
 <script>
-// 每个类别:颜色 + 人话含义 + "所以我该怎么想"
-const OP = {
-  dump:  {label:"正在出货",  c:"c-dump",  s:"s-dump",  rank:0, meaning:"持币的庄正在往外卖。",                       so:"对手盘就是庄,别接飞刀;真要动只能做空。"},
-  armed: {label:"庄在场·待动",c:"c-armed", s:"s-armed", rank:1, meaning:"有一伙从市场买入的协同钱包(真庄)持着货,暂时按兵不动。", so:"盯着它等它出手;现在既不是买点也不是卖点。"},
-  accum: {label:"疑似吸筹",  c:"c-accum", s:"s-accum", rank:2, meaning:"有庄在悄悄买入建仓。",                         so:"唯一带正向的形态,但何时拉不确定,别重仓赌。"},
-  issuer:{label:"项目方持币", c:"c-issuer",s:"s-issuer",rank:3, meaning:"集中的那些钱包是团队/金库仓(被分配的,不是买来的)—— 不是有人在操盘。", so:"别把它当妖币。要防的是团队解锁砸盘,不是庄拉盘。"},
-  faded: {label:"庄已走·散盘",c:"c-faded", s:"s-faded", rank:4, meaning:"庄早就派发完跑了,现在是普通散户盘。",             so:"没庄了,当普通币看。"},
-  unknown:{label:"查不清",   c:"c-unknown",s:"s-unknown",rank:5,meaning:"数据不足,或判决自相矛盾,不下结论。",             so:"别信这一条,等更多数据。"},
-};
-const TR = {
-  lottery_leverage:{label:"高风险·会爆型",c:"c-dump",s:"s-dump",rank:0, meaning:"靠高杠杆 / 接近爆仓 / 异常高胜率撑出来的战绩。", so:"典型迟早爆的那类,别跟。"},
-  tail_luck:      {label:"多半靠运气", c:"c-dump", s:"s-dump", rank:1, meaning:"盈利集中在一两笔大的,不可重复。",             so:"别跟。"},
-  sniper_timing:  {label:"靠抢跑狙击", c:"c-issuer",s:"s-issuer",rank:2, meaning:"赚的是抢跑 / 狙击时序,不是判断力。",           so:"复制不了(实测跟单只有本人的零头),别跟。"},
-  unfalsified:    {label:"暂没查出问题",c:"c-unknown",s:"s-unknown",rank:3, meaning:"通过了基本筛查:交易够多、没爆仓、胜率不诡异。", so:"但这≠有可复制的技能。真技能是不到 2% 的极少数,现在还没到能盖章的程度。"},
-  insufficient_data:{label:"交易太少",c:"c-faded",s:"s-faded",rank:4, meaning:"样本太少,任何判断都是噪声。",                 so:"没法评。"},
-};
-let view = "op", data = {op:null, tr:null};
+let view="perp", data={perp:null,opp:null,op:null};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtUsd=n=>n==null?"—":(n=+n,n>=1e6?"$"+(n/1e6).toFixed(1)+"M":n>=1e3?"$"+Math.round(n/1e3)+"k":"$"+Math.round(n));
+const pct=n=>n==null?"—":(+n).toFixed(1)+"%";
+const chg=n=>n==null?"":`<span class="${n>0?'up':n<0?'down':''}">${n>0?'+':''}${(+n).toFixed(1)}%</span>`;
+const card=(sym,chip,vlabel,vc,vs,human,so,facts,tech)=>`<div class="card ${vs}">
+  <div class="top"><div class="sym"><span class="name">${esc(sym)}</span>${chip?`<span class="chip">${esc(chip)}</span>`:''}</div>
+    <span class="verdict ${vc}">${vlabel}</span></div>
+  <div class="body"><div class="human">${human}</div>
+    <div class="so"><span class="lab">所以 👉</span>${so}</div>
+    <div class="facts">${facts.filter(Boolean).join("")}</div>
+    ${tech?`<details class="tech"><summary></summary><div class="raw">${tech}</div></details>`:''}
+  </div></div>`;
+const dot=v=>`<span class="d" style="background:var(--${v})"></span>`;
+function setLegend(a){document.getElementById("legend").innerHTML=a.map(([c,t])=>`<span class="lg">${dot(c)}${t}</span>`).join("")}
 
+// ---- PERP (#2 ignition + #3 cascade) ----
+const PSIG={
+  longs_crowded:{label:"多头拥挤·防砸",vc:"c-danger",vs:"s-danger"},
+  shorts_crowded:{label:"空头拥挤·防轧空",vc:"c-warn",vs:"s-warn"},
+  up:{label:"点火·向上",vc:"c-good",vs:"s-good"},
+  down:{label:"点火·向下",vc:"c-danger",vs:"s-danger"},
+};
+function renderPerp(){
+  const d=data.perp; if(!d) return '<div class="err">还没数据 — 等第一次推送。</div>';
+  if(d.scan_error) return `<div class="err">Hyperliquid 取数失败: ${esc(d.scan_error)}</div>`;
+  setLegend([["danger","多头拥挤/点火向下(防砸)"],["warn","空头拥挤(防轧空)"],["good","点火向上"]]);
+  const s=d.perps||[];
+  document.getElementById("lead").innerHTML=`永续合约里,资金费/未平仓正在告诉你<b>哪一边的杠杆拥挤了</b>——拥挤的一边就是清算燃料。`+
+    ` 现在有 <b>${s.length}</b> 个信号(数据来自 Hyperliquid,实时无门槛)。`+
+    `<div class="note">拥挤=那一侧在付极高资金费死扛,一旦反向就连环爆;点火=未平仓和价格同向放量=新杠杆进场,趋势有燃料。第2轮起才有点火。</div>`;
+  document.getElementById("summary").textContent=s.length?`${s.length} 个永续信号`:"暂无极端信号(市场不拥挤)";
+  if(!s.length) return '<div class="err">当前没有资金费极端/点火的币 —— 说明市场杠杆不拥挤,这本身是个信息。</div>';
+  return s.map(p=>{
+    const m=PSIG[p.direction]||{label:p.direction,vc:"c-info",vs:"s-info"};
+    return card(p.symbol,"永续",m.label+(p.strength?` ${p.strength}`:""),m.vc,m.vs,
+      esc(p.why),
+      p.signal==="cascade"?"别站在拥挤那一边;要赌就赌它被清算的方向,带止损。":"顺势小仓跟,别追高;点火会熄。",
+      [`资金费 <b>${p.funding_ann>0?'+':''}${p.funding_ann}%/年</b>`,`未平仓 <b>${fmtUsd(p.oi_usd)}</b>`,
+       (p.price_chg_24h!=null?`24h ${chg(p.price_chg_24h)}`:``),(p.oi_chg_pct!=null?`OI变 ${chg(p.oi_chg_pct)}`:``)],
+      `信号 ${esc(p.signal)}/${esc(p.direction)} · 24h量 ${fmtUsd(p.vol24)}`);
+  }).join("");
+}
+
+// ---- OPP (#1 early smart money) ----
+function renderOpp(){
+  const d=data.opp; if(!d) return '<div class="err">还没数据 — 等第一次推送。</div>';
+  const s=(d.opportunities||[]).slice().sort((a,b)=>(b.smart_actors||0)-(a.smart_actors||0));
+  setLegend([["good","强·≥3个独立聪明钱"],["warn","弱·1-2个(仅线索)"]]);
+  document.getElementById("lead").innerHTML=`新上的低流通币里,<b>有已实现盈利、且互相独立(非同一钱包农场)的钱包正在买入</b>的。`+
+    ` 扫了 ${d.scanned??"?"} 个,命中 <b>${s.length}</b> 个。`+
+    `<div class="note">这是自建雷达(慢、稀疏,常撞刷量农场——已自动剔除)。接 Cielo 聪明钱名单会强很多,需一个免费 key。诚实:你看到时已落后他们入场价,多数会归零。</div>`;
+  document.getElementById("summary").textContent=s.length?`${s.length} 个命中`:"这轮没扫到聪明钱在买的新币";
+  if(!s.length) return '<div class="err">这轮没有"独立聪明钱正在买"的新币。自建雷达信号本就稀疏——接 Cielo/GMGN 的策展聪明钱名单是正解(需免费 key)。</div>';
+  return s.map(o=>{
+    const strong=o.smart_actors>=3;
+    return card(o.symbol,o.chain,strong?"强·聪明钱进场":"弱·有线索",strong?"c-good":"c-warn",strong?"s-good":"s-warn",
+      `${o.smart_actors} 个已实现盈利的<b>独立</b>钱包正在买${o.farm_collapsed>0?`(另有 ${o.farm_collapsed} 个是同一农场,已剔除)`:''}。`,
+      strong?"值得盯紧、快查合约安全再说,别当必赚。":"只有 1-2 个,当线索看,别重仓。",
+      [`${(o.age_days!=null?o.age_days.toFixed(1)+'天新':'')}`,`流动性 <b>${fmtUsd(o.liq)}</b>`,
+       (o.buy_ratio_h1!=null?`买卖比 <b>${o.buy_ratio_h1}</b>`:``)],
+      `买入钱包(可自查): ${(o.sample_wallets||[]).map(esc).join(", ")||"—"}<br>${esc(o.token||"")}`);
+  }).join("");
+}
+
+// ---- OP (庄 operator) ----
+const OP={
+  dump:{label:"正在出货",c:"c-danger",s:"s-danger",rank:0,mean:"持币的庄正在往外卖。",so:"对手盘就是庄,别接飞刀;要动只能空。"},
+  armed:{label:"庄在场·待动",c:"c-warn",s:"s-warn",rank:1,mean:"一伙从市场买入的协同钱包(真庄)持着货,暂时没动作。",so:"盯着等它出手;现在不是买卖点。"},
+  accum:{label:"疑似吸筹",c:"c-good",s:"s-good",rank:2,mean:"有庄在悄悄买入建仓。",so:"唯一带正向的形态,但何时拉不确定。"},
+  issuer:{label:"项目方持币",c:"c-violet",s:"s-violet",rank:3,mean:"集中的钱包是团队/金库仓(分配的,不是买的)——不是有人操盘。",so:"别当妖币;防的是团队解锁砸盘。"},
+  faded:{label:"庄已走·散盘",c:"c-muted",s:"s-muted",rank:4,mean:"庄早派发完跑了,现在是散户盘。",so:"当普通币看。"},
+  unknown:{label:"查不清",c:"c-info",s:"s-info",rank:5,mean:"数据不足或判决矛盾。",so:"别信这条。"},
+};
 function classifyOp(r){
   if(!r.ok) return "unknown";
-  const v=r.verdict||"", acq=r.acquisition||"";
+  const v=r.verdict||"",acq=r.acquisition||"";
   if(acq==="allocated") return "issuer";
   if(["distributing","exited_by_selling","present_rotating_confirmed","distributing_or_churn"].includes(v))
-    return ((r.largest_entity_pct||0)<5 && (r.dominant_wallets||0)<=1) ? "faded" : "dump";
+    return ((r.largest_entity_pct||0)<5&&(r.dominant_wallets||0)<=1)?"faded":"dump";
   if(v==="loaded_accumulating") return "accum";
-  if(["loaded_live_operator","live_operator"].includes(v))
-    return (r.current_graph_available && (r.largest_entity_pct||0)<2) ? "unknown" : "armed";
+  if(["loaded_live_operator","live_operator"].includes(v)) return (r.current_graph_available&&(r.largest_entity_pct||0)<2)?"unknown":"armed";
   if(v==="loaded_dormant") return "armed";
   if(["dispersed","treasury","treasury_only"].includes(v)) return "faded";
   return "unknown";
 }
-const fmtUsd=n=>n==null?"—":(n=+n,n>=1e6?"$"+(n/1e6).toFixed(1)+"M":n>=1e3?"$"+Math.round(n/1e3)+"k":"$"+Math.round(n));
-const pct=n=>n==null?"—":(+n).toFixed(1)+"%";
-const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const chg=n=>n==null?"":`<span class="${n>0?'up':n<0?'down':''}">${n>0?'+':''}${(+n).toFixed(1)}%</span>`;
-
-const DOT={"c-dump":"--danger","c-armed":"--warn","c-accum":"--good","c-issuer":"--violet","c-faded":"--muted","c-unknown":"--info"};
-function legend(map){
-  document.getElementById("legend").innerHTML = Object.values(map).sort((a,b)=>a.rank-b.rank)
-    .map(x=>`<span class="lg"><span class="d" style="background:var(${DOT[x.c]})"></span>${x.label}</span>`).join("");
-}
-
 function renderOp(){
-  const d=data.op; if(!d) return '<div class="err">还没数据 — 等本地第一次推送(约几分钟)。</div>';
-  const items=(d.operators||[]).map(r=>({r,k:classifyOp(r)})).sort((a,b)=>OP[a.k].rank-OP[b.k].rank||(b.r.confidence||0)-(a.r.confidence||0));
+  const d=data.op; if(!d) return '<div class="err">还没数据 — 庄分析较慢,等推送。</div>';
+  const items=(d.operators||[]).map(r=>({r,k:classifyOp(r)})).sort((a,b)=>OP[a.k].rank-OP[b.k].rank);
   const c={}; items.forEach(i=>c[i.k]=(c[i.k]||0)+1);
-  legend(OP);
-  const n=items.length;
-  document.getElementById("lead-big").innerHTML =
-    `这 ${n} 个盯着的币里 —— <b>真有庄在做盘的只有 ${(c.armed||0)+(c.accum||0)+(c.dump||0)} 个</b>,其中在出货别接的 ${c.dump||0} 个、庄在场待动的 ${c.armed||0} 个;`+
-    ` 另有 <b style="color:var(--violet)">${c.issuer||0} 个其实是项目方/团队持币,根本不是妖币</b>;${c.faded||0} 个庄已走、${c.unknown||0} 个查不清。`;
-  document.getElementById("lead-note").textContent = "「项目方持币」最容易被误当妖币——集中≠有人操盘。这里用链上首笔资金来源把两者分开了。";
-  document.getElementById("summary").textContent = Object.keys(OP).filter(k=>c[k]).map(k=>OP[k].label+" "+c[k]).join(" · ");
-  return items.map(({r,k})=>{
-    const o=OP[k];
-    const facts=[`最大持有 <b>${pct(r.largest_entity_pct)}</b>${r.supply_verified===false?'<span style="color:var(--warn)">(未核实)</span>':''}`,
-      (r.dominant_wallets>1?`<b>${r.dominant_wallets}</b> 个钱包协同`:``),
-      `流动性 <b>${fmtUsd(r.liquidity_usd)}</b>`,
-      (r.pc_h24!=null?`24h ${chg(r.pc_h24)}`:``)].filter(Boolean);
-    return `<div class="card ${o.s}">
-      <div class="top"><div class="sym"><span class="name">${esc(r.symbol)}</span><span class="chip">${esc(r.chain)}</span></div>
-        <span class="verdict ${o.c}">${o.label}</span></div>
-      <div class="body">
-        <div class="human">${o.meaning}</div>
-        <div class="so"><span class="lab">所以 👉</span>${o.so}</div>
-        <div class="facts">${facts.join("")}</div>
-        <details class="tech"><summary>技术细节</summary><div class="raw">判决 ${esc(r.verdict||"—")} · 置信 ${r.confidence??"—"} · 获取方式 ${esc(r.acquisition||"—")}<br>簇最大 ${pct(r.largest_entity_pct)} / 单钱包 ${pct(r.largest_address_pct)} · 实体数 ${r.entity_count??"—"} · 供应核实 ${r.supply_verified===true?"是":r.supply_verified===false?"否":"—"}${(r.caveats&&r.caveats.length)?"<br>"+r.caveats.map(esc).join("<br>"):""}${!r.ok?'<br><span style="color:var(--danger)">引擎错误: '+esc(r.error||"?")+'</span>':""}<br><span style="color:var(--muted)">${esc(r.token||"")}</span></div></details>
-      </div></div>`;
-  }).join("");
-}
-
-function renderTr(){
-  const d=data.tr; if(!d) return '<div class="err">还没数据 — 等本地第一次推送。</div>';
-  if(d.source_ok===false) return `<div class="err">拉不到 Arena 排行榜数据(${esc(d.source_error||"?")})。显示的是上次成功的快照或空。</div>`;
-  const items=(d.traders||[]).slice().sort((a,b)=>(TR[a.falsifier.verdict]?.rank??9)-(TR[b.falsifier.verdict]?.rank??9)||(a.rank??999)-(b.rank??999));
-  const c={}; items.forEach(t=>{const k=t.falsifier.verdict;c[k]=(c[k]||0)+1});
-  legend(TR);
-  document.getElementById("lead-big").innerHTML =
-    `排行榜前 ${items.length} 名里 —— <b>没有一个能盖章"有可复制的技能"</b>(真技能是不到 2% 的极少数,靠短期榜单根本认证不了)。`+
-    ` 明确该避开的:<b style="color:var(--danger)">${(c.lottery_leverage||0)+(c.tail_luck||0)+(c.sniper_timing||0)} 个</b>(高风险/靠运气/靠抢跑);${c.insufficient_data||0} 个交易太少没法评;` +
-    ` 剩下 ${c.unfalsified||0} 个只是"暂时没查出问题",不等于能跟。`;
-  document.getElementById("lead-note").textContent = "这一栏是给榜单泼冷水的:排行榜奖励的是敢梭哈的幸存者,不是有本事的人。所以这里只做减法(帮你排除),不推荐跟单。";
-  document.getElementById("summary").textContent = Object.keys(TR).filter(k=>c[k]).map(k=>TR[k].label+" "+c[k]).join(" · ");
-  return items.map(t=>{
-    const o=TR[t.falsifier.verdict]||TR.insufficient_data;
-    const facts=[`榜位 <b>#${t.rank??"—"}</b>`,`ROI ${chg(t.roi)}`,`胜率 <b>${pct(t.win_rate)}</b>`,`<b>${t.trades_count??"—"}</b> 单`,`最大回撤 <b>${pct(t.max_drawdown)}</b>`];
-    return `<div class="card ${o.s}">
-      <div class="top"><div class="sym"><span class="name">${esc(t.handle||t.trader_id||"?")}</span><span class="chip">${esc(t.source||"?")}</span></div>
-        <span class="verdict ${o.c}">${o.label}</span></div>
-      <div class="body">
-        <div class="human">${o.meaning}</div>
-        <div class="so"><span class="lab">所以 👉</span>${o.so}</div>
-        <div class="facts">${facts.join("")}</div>
-        <details class="tech"><summary>技术细节</summary><div class="raw">证伪判决 ${esc(t.falsifier.verdict)} · ${esc(t.falsifier.why)}<br>还算不了(缺逐笔/链上入场数据): ${(t.unavailable||[]).join(", ")||"—"}</div></details>
-      </div></div>`;
+  setLegend([["danger","正在出货"],["warn","庄在场待动"],["good","吸筹"],["violet","项目方持币(非妖币)"],["muted","庄已走"]]);
+  document.getElementById("lead").innerHTML=`这些盯着的币里,<b>真有庄在做盘的只有 ${(c.armed||0)+(c.accum||0)+(c.dump||0)} 个</b>;`+
+    ` <b style="color:var(--violet)">${c.issuer||0} 个其实是项目方持币,不是妖币</b>;${c.faded||0} 个庄已走。`+
+    `<div class="note">「集中」最容易被误当妖币——这里用链上首笔资金来源把"庄买入"和"项目方分配"分开了。</div>`;
+  document.getElementById("summary").textContent=Object.keys(OP).filter(k=>c[k]).map(k=>OP[k].label+" "+c[k]).join(" · ");
+  return items.map(({r,k})=>{const o=OP[k];
+    return card(r.symbol,r.chain,o.label,o.c,o.s,o.mean,o.so,
+      [`最大持有 <b>${pct(r.largest_entity_pct)}</b>${r.supply_verified===false?'(未核实)':''}`,
+       (r.dominant_wallets>1?`<b>${r.dominant_wallets}</b> 钱包协同`:``),`流动性 <b>${fmtUsd(r.liquidity_usd)}</b>`],
+      `判决 ${esc(r.verdict||"—")} · 置信 ${r.confidence??"—"} · 获取 ${esc(r.acquisition||"—")}${(r.caveats&&r.caveats.length)?"<br>"+r.caveats.map(esc).join("<br>"):""}<br>${esc(r.token||"")}`);
   }).join("");
 }
 
 function staleness(){
-  const d=data[view]; const el=document.getElementById("stale");
+  const d=data[view], el=document.getElementById("stale");
   if(!d){el.textContent="无数据";el.className="stale dead";return}
-  const gen=new Date(d.generated_at), next=new Date(d.next_expected_at), now=new Date();
-  const ageMin=Math.round((now-gen)/60000);
-  document.getElementById("gen").textContent="数据更新于 "+gen.toLocaleString();
-  if(now.getTime()<next.getTime()+15*60000){el.textContent="🟢 "+ageMin+" 分钟前更新";el.className="stale ok"}
-  else if(ageMin<24*60){el.textContent="🟡 已 "+ageMin+" 分钟没更新";el.className="stale old"}
-  else{el.textContent="🔴 超过 24h 没更新,别信这页";el.className="stale dead"}
+  const gen=new Date(d.generated_at),next=new Date(d.next_expected_at),now=new Date(),age=Math.round((now-gen)/60000);
+  document.getElementById("gen").textContent="更新于 "+gen.toLocaleString();
+  if(now.getTime()<next.getTime()+15*60000){el.textContent="🟢 "+age+" 分钟前";el.className="stale ok"}
+  else if(age<24*60){el.textContent="🟡 已 "+age+" 分钟没更新";el.className="stale old"}
+  else{el.textContent="🔴 超24h没更新,别信";el.className="stale dead"}
 }
 function paint(){
-  document.getElementById("grid").innerHTML = view==="op"?renderOp():renderTr();
-  document.getElementById("tab-op").className="tab"+(view==="op"?" on":"");
-  document.getElementById("tab-tr").className="tab"+(view==="tr"?" on":"");
+  document.getElementById("grid").innerHTML = view==="perp"?renderPerp():view==="opp"?renderOpp():renderOp();
+  document.querySelectorAll(".tab").forEach(t=>t.className="tab"+(t.dataset.v===view?" on":""));
   staleness();
 }
-document.getElementById("tab-op").onclick=()=>{view="op";paint()};
-document.getElementById("tab-tr").onclick=()=>{view="tr";paint()};
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.v;paint()});
 async function load(){
-  const bust="?t="+Math.floor(Date.now()/60000);
-  const [op,tr]=await Promise.allSettled([
-    fetch("/data/operators.json"+bust).then(r=>r.ok?r.json():null),
-    fetch("/data/traders.json"+bust).then(r=>r.ok?r.json():null),
+  const b="?t="+Math.floor(Date.now()/60000);
+  const r=await Promise.allSettled([
+    fetch("/data/perps.json"+b).then(x=>x.ok?x.json():null),
+    fetch("/data/opportunities.json"+b).then(x=>x.ok?x.json():null),
+    fetch("/data/operators.json"+b).then(x=>x.ok?x.json():null),
   ]);
-  if(op.status==="fulfilled"&&op.value&&op.value.schema_version===1) data.op=op.value;
-  if(tr.status==="fulfilled"&&tr.value&&tr.value.schema_version===1) data.tr=tr.value;
+  const [p,o,op]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  if(p&&p.schema_version===1) data.perp=p;
+  if(o&&o.schema_version===1) data.opp=o;
+  if(op&&op.schema_version===1) data.op=op;
   paint();
 }
-load(); setInterval(load, 60000);
+load(); setInterval(load,60000);
 </script>
 </body>
 </html>

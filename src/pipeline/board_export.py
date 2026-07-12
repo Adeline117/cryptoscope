@@ -91,6 +91,75 @@ def render_operators() -> dict:
     return _envelope({"operators": records})
 
 
+def render_opportunities(chains=("bsc", "base"), max_scan: int = 22) -> dict:
+    """THE offense view: fresh low-float tokens that PROVEN-PROFITABLE, INDEPENDENT
+    wallets are buying right now — category #1 (get in early on the diffusion curve).
+
+    Reuses the hardened pieces: _gather_young (fresh-pool discovery), convergence
+    (realized-PnL skilled wallets, with the wallet-farm collapse so a churn farm can't
+    fake it), _buy_pressure. Shows the actual buyer wallets so 'what are they buying'
+    is literal and verifiable. Ranked by how many INDEPENDENT skilled actors are in,
+    then freshness. Honest strength: 强 = >=3 independent actors (true convergence),
+    弱 = 1-2 (a lead, not a conviction).
+    """
+    from src.onchain.smart_money import convergence
+    from src.pipeline.yaobi_finder import _buy_pressure, _gather_young
+
+    try:
+        fresh = _gather_young(chains, pages=2)
+    except Exception as e:
+        return _envelope({"opportunities": [], "scanned": 0, "scan_error": str(e)[:120]})
+
+    out = []
+    scanned = 0
+    for cand in fresh[:max_scan]:
+        tok, ch = cand.get("address"), cand["chain"]
+        if not tok:
+            continue
+        scanned += 1
+        try:
+            conv = convergence(tok, ch, max_check=12)
+        except Exception:
+            continue
+        actors = conv.get("skilled_entities", 0)          # behavior-deduped
+        if actors < 1:                                     # no proven-profitable buyer → skip
+            continue
+        bp = _buy_pressure(cand)
+        wallets = [w.get("wallet") for w in (conv.get("skilled_wallets") or [])][:4]
+        out.append({
+            "symbol": cand.get("symbol", "?"), "chain": ch, "token": tok,
+            "age_days": cand.get("age_days"),
+            "price": cand.get("price"), "liq": cand.get("liq") or cand.get("liquidity"),
+            "mcap": cand.get("mcap"),
+            "smart_actors": actors,                        # independent proven-profit wallets
+            "smart_wallets_seen": conv.get("skilled_wallets_n", actors),
+            "farm_collapsed": (conv.get("skilled_wallets_n", actors) or 0) - actors,
+            "buy_ratio_h1": bp.get("ratio_h1"),
+            "buys_h1": bp.get("buys_h1"), "sells_h1": bp.get("sells_h1"),
+            "strength": "强" if actors >= 3 else "弱",
+            "sample_wallets": wallets,
+        })
+    out.sort(key=lambda x: (-(x["smart_actors"] or 0), x["age_days"] if x["age_days"] is not None else 999))
+    return _envelope({"opportunities": out, "scanned": scanned,
+                      "note": ("聪明钱=有已实现盈利历史、且相互独立(非同一钱包农场)的钱包正在买入。"
+                               "强=≥3个独立主体收敛;弱=1-2个,只是线索。诚实边界:你看到时已落后他们入场价,"
+                               "多数会归零,这是雷达不是必赚。")})
+
+
+def render_perps() -> dict:
+    """Structure #2 (trend ignition) + #3 (liquidation-cascade right side) from
+    Hyperliquid — keyless, live, no home-grown detection needed."""
+    from src.onchain.hyperliquid import perp_signals
+    try:
+        sigs = perp_signals()
+        return _envelope({"perps": sigs, "source": "Hyperliquid (keyless)",
+                          "note": ("拥挤=资金费极端,那一侧在付费死扛=清算燃料(防它被清算的方向)。"
+                                   "点火=未平仓与价同向放量=新杠杆进场,趋势有燃料。第2轮起才有点火(需OI历史)。"
+                                   "诚实边界:抬高的是概率不是时点,不是买卖指令。")})
+    except Exception as e:
+        return _envelope({"perps": [], "source": "Hyperliquid", "scan_error": str(e)[:120]})
+
+
 def _dex_direction(token: str, chain: str) -> dict:
     """Cheap tape context: price change + buy/sell counts (DexScreener, keyless)."""
     try:
@@ -202,14 +271,14 @@ def _envelope(body: dict) -> dict:
             **body}
 
 
-def write_views(operators: dict | None = None, traders: dict | None = None) -> list:
+def write_views(**views: dict) -> list:
+    """views: {view_name: payload} → writes <view_name>.json for each non-None."""
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     paths = []
-    views = {"operators.json": operators, "traders.json": traders}
     for name, payload in views.items():
         if payload is None:
             continue
-        p = EXPORT_DIR / name
+        p = EXPORT_DIR / f"{name}.json"
         p.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         paths.append(p)
     meta = _envelope({"views": [n for n, v in views.items() if v is not None]})
@@ -250,11 +319,17 @@ def push_to_blob(paths: list) -> int:
 
 
 def run(push: bool = True, include_operators: bool = True) -> dict:
+    """Render the money-making lanes → Blob. perps (#2/#3) is keyless & fast;
+    opportunities (#1) is the home-grown smart-money radar; operators (庄) is the
+    verdict engine (slow). Each lane fails independently to null, never blocks."""
+    perps = render_perps()                              # #2 ignition + #3 cascade
+    opportunities = render_opportunities()              # #1 early smart-money buys
     operators = render_operators() if include_operators else None
-    traders = render_traders()
-    paths = write_views(operators, traders)
+    paths = write_views(perps=perps, opportunities=opportunities, operators=operators)
     n = push_to_blob(paths) if push else 0
     return {"views_written": len(paths), "views_pushed": n,
+            "perps": len((perps or {}).get("perps", [])),
+            "opportunities": len((opportunities or {}).get("opportunities", [])),
             "export_dir": str(EXPORT_DIR)}
 
 
