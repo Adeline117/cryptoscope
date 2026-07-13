@@ -146,6 +146,21 @@ def create_scheduler() -> AsyncIOScheduler:
         id="smart_wallet_watch",
         name="聪明钱实时监听 (watched wallets 刚买入 → Blob)",
     )
+    # Low-float launch discovery is a separate event feed. It must run far more
+    # often than the 45-minute board export, otherwise the "first seen" price is
+    # already a hindsight snapshot.
+    scheduler.add_job(
+        _run_launch_radar,
+        CronTrigger(minute="*/3"),
+        id="launch_radar",
+        name="Launch Radar (首池/低流通事件账本)",
+    )
+    scheduler.add_job(
+        _run_structure_radar,
+        CronTrigger(minute="*/2"),
+        id="structure_radar",
+        name="Structure Radar (公开上币事件账本)",
+    )
     # Refresh the proven-wallet watchlist daily (the skilled set is stable day-to-day).
     scheduler.add_job(
         _run_harvest_wallets,
@@ -554,6 +569,44 @@ async def _run_harvest_wallets():
         logger.info("harvest_wallets_done", **res)
     except Exception as e:
         logger.error("harvest_wallets_failed", error=str(e)[:120])
+
+
+async def _run_launch_radar():
+    """Ingest new DEX launch events separately from board rendering."""
+    import asyncio
+
+    logger.info("scheduled_launch_radar")
+    try:
+        from src.pipeline.launch_radar import scan
+        res = await asyncio.to_thread(scan)
+        # Publish the event lane immediately; waiting for the 45-minute full board
+        # export would destroy the very latency advantage this lane is meant to test.
+        from src.pipeline import board_export
+        launch = await asyncio.to_thread(board_export.render_launch)
+        paths = await asyncio.to_thread(board_export.write_views, launch=launch)
+        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("launch_radar_done", scanned=res["scanned"], inserted=res["inserted"],
+                    active=len(res["events"]), pushed=pushed)
+    except Exception as e:
+        logger.error("launch_radar_failed", error=str(e)[:120])
+
+
+async def _run_structure_radar():
+    """Ingest public exchange-listing events; no rumor feed or directional call."""
+    import asyncio
+
+    logger.info("scheduled_structure_radar")
+    try:
+        from src.pipeline.structure_radar import scan
+        from src.pipeline import board_export
+        res = await asyncio.to_thread(scan)
+        structure = await asyncio.to_thread(board_export.render_structure)
+        paths = await asyncio.to_thread(board_export.write_views, structure=structure)
+        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("structure_radar_done", **{k: res[k] for k in ("scanned", "inserted")},
+                    active=len(res["events"]), pushed=pushed)
+    except Exception as e:
+        logger.error("structure_radar_failed", error=str(e)[:120])
 
 
 async def _run_board_export():

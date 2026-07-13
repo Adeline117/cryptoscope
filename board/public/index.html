@@ -128,6 +128,19 @@
   .skl{height:var(--row-h);border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--s1) 25%,var(--s3) 50%,var(--s1) 75%);background-size:200% 100%;animation:sk 1.3s infinite}
   @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
 
+  /* 📋 打法 synthesis */
+  .play{display:flex;flex-direction:column;gap:14px;max-width:900px}
+  .play-sec{border:1px solid var(--border);border-radius:12px;padding:14px 16px;background:var(--s1)}
+  .play-sec .ph{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+  .play-sec .ph .pd{font-size:11px;font-weight:500;color:var(--dim);letter-spacing:.02em}
+  .pnote{font-size:12.5px;line-height:1.6;color:var(--muted);margin:6px 0}
+  .pnote.dim{color:var(--dim)}
+  .prow{font-size:13px;line-height:1.5;padding:7px 0;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
+  .prow:first-of-type{border-top:0}
+  .prow .tag{font-size:10px;padding:1px 5px;border-radius:5px;font-weight:600}
+  .prow .tag.b-good{background:var(--good-bg);color:var(--good)}
+  .prow .tag.b-warn{background:var(--warn-bg);color:var(--warn)}
+  .play-verdict{border:1px solid var(--accent-b);border-radius:12px;padding:13px 16px;background:var(--accent-bg);font-size:13px;line-height:1.6;color:var(--text)}
   /* perp: carry section header + heatmap */
   .perp-sec{font-size:12px;font-weight:650;color:var(--text);margin:2px 0 9px;letter-spacing:.02em}
   .perp-sec small{font-weight:500;color:var(--dim);letter-spacing:0}
@@ -161,7 +174,12 @@
 
   <div class="tabs" role="tablist" id="tabs">
     <div class="grp">
-      <button class="tab on" data-v="watch" role="tab">🐋 实时买入 <span class="ct" id="ct-watch"></span></button>
+      <button class="tab on" data-v="play" role="tab">📋 打法</button>
+    </div>
+    <div class="grp">
+      <button class="tab" data-v="launch" role="tab">🚀 Launch <span class="ct" id="ct-launch"></span></button>
+      <button class="tab" data-v="structure" role="tab">🏗 结构 <span class="ct" id="ct-structure"></span></button>
+      <button class="tab" data-v="watch" role="tab">🐋 实时买入 <span class="ct" id="ct-watch"></span></button>
       <button class="tab" data-v="opp" role="tab">💎 早期扫描 <span class="ct" id="ct-opp"></span></button>
       <button class="tab" data-v="avoid" role="tab">🛡️ 避雷 <span class="ct" id="ct-avoid"></span></button>
     </div>
@@ -195,7 +213,7 @@ const ageStr=h=>h==null?"—":h<1/60?"<1m":h<1?Math.round(h*60)+"m":h<24?h.toFix
 function rel(ts){if(!ts)return"—";const s=Math.round(Date.now()/1000-ts);return s<5?"刚刚":s<60?s+"秒前":s<3600?Math.floor(s/60)+"分前":Math.floor(s/3600)+"时前"}
 function relMs(t){const s=Math.round((Date.now()-t)/1000);return s<5?"刚刚":s<60?s+"s前":s<3600?Math.floor(s/60)+"分前":Math.floor(s/3600)+"时前"}
 
-let view="watch", data={watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
+let view="play", data={launch:null,structure:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 
@@ -230,6 +248,44 @@ const CHAIN={solana:"SOL",bsc:"BSC",ethereum:"ETH",base:"BASE",arbitrum:"ARB"};
 function walletName(w,i){return "聪明钱#"+(i+1)}
 
 const LANES={
+  play:{
+    title:d=>{const l=(data.launch?.events||[]).filter(x=>x.decision==="SMALL_PROBE").length;const cr=(data.perp?.carry||[]).filter(x=>x.net_ann>0).length;return `<b>先看这里</b>:${l?`有 <b style="color:var(--good)">${l}</b> 个低流通 Launch 可小额试错`:'此刻没有通过可执行门槛的早期 Launch'}${cr?`；另有 <b style="color:var(--good)">${cr}</b> 个跨所carry候选(验证中)`:''}。`},
+    stat:d=>{const c=data.perp?.carry||[];const l=data.launch?.events||[];const dep=(data.op?.operators||[]).filter(depNow).length;return [["Launch",l.filter(x=>x.decision==="SMALL_PROBE").length,"可小额试错"],["carry",c.filter(x=>x.net_ann>0).length,"净>0·验证中"],["该避开",dep+avoidRows(data.opp).length,"别接盘"]]},
+    readme:"目标是提高抓住极端右尾机会的概率，不是制造买入理由。<b>Launch</b>盯低流通早期重定价，必须先过流动性/时延/成交门；<b>carry</b>是低波动结构线；其余多数线用于防守。每个候选保留首次发现价、失效价和最大可成交仓位，方便事后复盘，而不是事后挑赢家。",
+    custom:true,
+  },
+  launch:{
+    title:d=>{const e=d?.events||[];const p=e.filter(x=>x.decision==="SMALL_PROBE").length;return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个满足最小可执行门槛`:'暂无可执行候选'}。`},
+    stat:d=>{const e=d?.events||[];return [["首池事件",e.length,"首次发现价已锁定"],["小额试错",e.filter(x=>x.decision==="SMALL_PROBE").length,"非追涨指令"],["观察",e.filter(x=>x.decision==="WATCH").length,"条件未齐"]]},
+    readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。<b>SMALL_PROBE</b> 只代表池龄、流动性和短线成交满足最低执行门，不代表项目优质、更不保证上涨。表内首次发现价不会随轮询后移；失效价和最大仓位是为了把单次归零限制在可承受范围。",
+    rows:d=>d?.events||[],
+    id:r=>r.id||r.chain+r.token, flash:r=>r.entry_price,
+    empty:"暂时没有合格首池事件。Launch 是事件流，不是热榜；空白是正常输出。",
+    cols:[
+      {k:"sym",label:"代币",cell:r=>idc(r.symbol,(CHAIN[r.chain]||r.chain)+" · "+(r.age_min<60?Math.round(r.age_min)+"m":(r.age_min/60).toFixed(1)+"h")),sort:r=>r.symbol||""},
+      {k:"d",label:"决策",c:1,cell:r=>r.decision==="SMALL_PROBE"?'<span class="chip b-good">小额试错</span>':'<span class="chip b-warn">观察</span>',sort:r=>r.decision==="SMALL_PROBE"?1:0},
+      {k:"px",label:"首次价",n:1,cell:r=>r.entry_price?`<span class="num">$${r.entry_price}</span>`:"—",sort:r=>r.entry_price||0},
+      {k:"fdv",label:"FDV / 流动性",n:1,cell:r=>`$${fmtUsd(r.fdv)} <small class="dim">/ ${usd(r.liquidity_usd)}</small>`,sort:r=>r.fdv||0},
+      {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
+      {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 -30%</small>`,sort:r=>r.max_notional_usd||0},
+    ],
+    detail:r=>`<span class="so">所以👉</span> ${r.decision==="SMALL_PROBE"?"只可按上限小额试错；若触及失效价，退出而不是补仓。":"条件尚不完整，只观察，不能因为新而买。"}<br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}<br>失效价: $${esc(r.invalidation_price)} · 最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}`,
+  },
+  structure:{
+    title:d=>{const e=d?.events||[];return `<b style="color:var(--violet)">公开市场结构事件</b>: ${e.length} 个已入账。上币、解锁、CEX 流入会在这里按实际发生时间分线记录。`},
+    stat:d=>{const e=d?.events||[];return [["公开事件",e.length,"不含传闻"],["新上币",e.filter(x=>x.event_type==="new_listing").length,"待测价格影响"],["交易指令",0,"默认只观察"]]},
+    readme:"结构事件会改变流动性、可得性或供给，但本身<b>不是方向交易信号</b>。当前只接入交易所公开新增交易对；解锁、CEX 流和跨所结构价差会在各自数据源可靠后接入。每个事件先记录，再独立测量价格和流动性影响，不能从消息标题直接推导做多或做空。",
+    rows:d=>d?.events||[],
+    id:r=>r.id||r.event_key||r.symbol+r.event_at, flash:null,
+    empty:"当前没有新的已验证公开结构事件。没有消息不是故障，也不应以传闻填充。",
+    cols:[
+      {k:"sym",label:"标的",cell:r=>idc(r.symbol,r.source||"CEX"),sort:r=>r.symbol||""},
+      {k:"type",label:"事件",c:1,cell:r=>r.event_type==="new_listing"?'<span class="chip b-violet">新上币</span>':'<span class="chip">结构</span>',sort:r=>r.event_type||""},
+      {k:"decision",label:"当前动作",c:1,cell:r=>'<span class="chip b-warn">观察</span>',sort:r=>0},
+      {k:"time",label:"记录时间",n:1,cell:r=>esc(r.event_at||r.detected_at||"—"),sort:r=>new Date(r.event_at||r.detected_at||0).getTime()},
+    ],
+    detail:r=>`<span class="so">所以👉</span> 这是公开事件账本，不是抢消息指令。先观察成交量、深度和价格反应；结果会被后续回写。<br>${esc(r.message||"")}<br>${(r.reasons||[]).map(esc).join(" · ")}`,
+  },
   watch:{
     title:d=>`最早的信号:盯 <b>${d?.watched_wallets||0}</b> 个已验证盈利钱包,谁<b>刚买了什么</b>——分钟级,早于任何排名。`,
     stat:d=>{const s=d?.watch||[];const c=s.filter(x=>x.n_buyers>=2).length;return[["窗口内",s.length,""],["收敛",c,"个多钱包同买"]]},
@@ -315,11 +371,46 @@ const OPRANK={dump:0,armed:1,accum:2,issuer:3,faded:4,unknown:5};
 function depNow(r){return r&&r.live_phase==="deposit"&&r.flow_scan_ts&&(Date.now()-new Date(r.flow_scan_ts).getTime()<3*3600*1000)?1:0}
 function classOp(r){if(!r.ok)return"unknown";const v=r.verdict||"",a=r.acquisition||"";if(a==="allocated")return"issuer";if(["distributing","exited_by_selling","present_rotating_confirmed","distributing_or_churn"].includes(v))return((r.largest_entity_pct||0)<5&&(r.dominant_wallets||0)<=1)?"faded":"dump";if(v==="loaded_accumulating")return"accum";if(["loaded_live_operator","live_operator"].includes(v))return(r.current_graph_available&&(r.largest_entity_pct||0)<2)?"unknown":"armed";if(v==="loaded_dormant")return"armed";if(["dispersed","treasury","treasury_only"].includes(v))return"faded";return"unknown"}
 
+// 📋 打法 — the synthesis: what to consider, what to avoid, what NOT to do. Turns the
+// board from a data dashboard into a clear, honest, ranked trading thesis.
+function renderPlay(){
+  const carry=(data.perp?.carry||[]).filter(x=>x.net_ann>0);
+  const pp=data.perp?.carry_paper;
+  const dep=(data.op?.operators||[]).filter(depNow);
+  const avoid=avoidRows(data.opp);
+  let h='<div class="scroll play">';
+  // 1) EDGE
+  h+='<div class="play-sec"><div class="ph">✅ 有结构 edge 的打法 <span class="pd">正EV · 纸面验证中 · 小仓</span></div>';
+  if(carry.length){
+    h+='<div class="pnote">唯一有结构 edge 的:<b>跨所资金费差</b>——HL 资金费结构性高于 CEX(机构够不着 DEX 腿)。<b>空HL + 多OKX 两永续,delta 中性不赌方向</b>。净额=毛差扣真实成本(费/滑点/再平衡)。</div>';
+    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 净 <span class="num" style="color:var(--good)">+${c.net_ann}%/年</span> <small class="dim">毛${c.edge_ann} · ${c.hold_measured?c.hold_days+'d实测':'持仓未测(14d假设)'} · 尾部ADL</small></div>`).join('');
+    if(pp&&(pp.n_open||pp.n_closed)) h+=`<div class="pnote">📊 纸面验证:${pp.n_closed&&pp.avg_realized_net!=null?`已平仓 ${pp.n_closed} 个,<b>实测净 ${pp.avg_realized_net>0?'+':''}${pp.avg_realized_net}%</b>(当初预测 ${pp.avg_predicted_net}%,实测持仓 ${pp.avg_hold_days}d,滑点 ${pp.avg_slip_pct}%)`:`${pp.n_open} 仓运行中,等差价衰减自然平仓→给实测数字。<b>在此之前净额是模型估,别当已证</b>`}。</div>`;
+  } else h+='<div class="pnote dim">此刻无净&gt;0 的跨所 carry 机会。没有就没有,不硬凑一个给你。</div>';
+  h+='</div>';
+  // 2) DEFENSE
+  h+='<div class="play-sec"><div class="ph">🛡️ 防守:别当接盘侠 <span class="pd">散户最持久的 edge 在这</span></div>';
+  let any=false;
+  if(dep.length){any=true;h+=`<div class="prow"><span class="chip b-danger">🔴 派发启动</span> ${dep.map(x=>esc(x.symbol)).join("、")} —— 操盘簇正往交易所转币(领先砸盘)→ <b>别买、别接飞刀</b>。</div>`;}
+  if(avoid.length){any=true;h+=`<div class="prow"><span class="chip b-warn">🟠 有雷/高接盘险</span> ${avoid.slice(0,8).map(x=>esc(x.symbol||(x.token||'').slice(0,6))).join("、")} —— 避开。</div>`;}
+  if(!any) h+='<div class="pnote dim">此刻无明确派发/避雷项。</div>';
+  h+='</div>';
+  // 3) DON'T
+  h+='<div class="play-sec"><div class="ph">🚫 别做:顶刊实证的散户负EV陷阱</div><div class="pnote">跟 🐋 聪明钱买入去接盘 · 追 💎 早期扫描的币做多 · 买 💰 庄吸筹跟庄 · 裸做空高资金费。这些标签是让你<b>看清结构、别当接盘侠</b>,不是让你照着买。跟买吸筹:pump 后 ~18 秒见顶、跟随者胜率 48%&lt;50%、非 insider 负回报。</div></div>';
+  // VERDICT
+  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个跨所 carry 候选(验证中,小仓+为ADL崩盘sizing)`:'进攻端无稳赚打法'}。真 edge 只有跨所 carry 且仍在自证;<b>这个看板最大的价值是帮你不亏、不当接盘,不是保证暴富</b>。没有清晰打法时,不做 也是一种打法。</div>`;
+  return h+'</div>';
+}
+
 // perp: carry screener (the real edge, on top) + crowding/ignition heatmap (defense, below)
 function renderPerp(d){
   const carry=d?.carry||[], s=d?.perps||[];
-  if(!carry.length && !s.length) return `<div class="scroll"><div class="empty">当前无正资金费机会,市场杠杆也不拥挤 —— 这本身是个信息。</div></div>`;
+  const cascadeEvents=d?.cascade_events||[];
+  if(!carry.length && !s.length && !cascadeEvents.length) return `<div class="scroll"><div class="empty">当前无正资金费机会,市场杠杆也不拥挤 —— 这本身是个信息。</div></div>`;
   let html="";
+  if(cascadeEvents.length){
+    html+=`<div class="play-sec" style="margin-bottom:14px"><div class="ph">⚡ 已入账的级联/点火事件 <span class="pd">首次价已锁定 · 仅强触发</span></div>`+
+      cascadeEvents.slice(0,4).map(e=>`<div class="prow"><span class="chip ${e.side==='SHORT'?'b-warn':'b-good'}">${esc(e.side)}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · ${esc(e.signal)}</small></div>`).join("")+`</div>`;
+  }
   // ── CARRY: delta-neutral funding arbitrage — the ONE replicable positive-EV core ──
   if(carry.length){
     const rows=carry.slice(0,20).map(c=>{
@@ -396,7 +487,7 @@ function paint(){
     } else st.push(["本线命中率","不可判",`积累${ls.n}/20`]); }
   $("lanestat").innerHTML=st.map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
   $("rd").innerHTML=L.readme;
-  $("view").innerHTML = view==="perp"?renderPerp(d) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
+  $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
   // counts
   for(const [k,l] of Object.entries(LANES)){const dd=data[k==="avoid"?"opp":k];const n=dd?(l.rows?l.rows(dd).length:0):0;const el=$("ct-"+k);if(el)el.textContent=n||""}
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===view));
@@ -410,7 +501,13 @@ function wireRows(){
     th.onclick=()=>{const ss=sortState[view]||{};sortState[view]=ss.col===c.k?{col:c.k,dir:ss.dir==="desc"?"asc":"desc"}:{col:c.k,dir:"desc"};paint()}});
 }
 function staleness(){
-  const d=data[view==="avoid"?"opp":view], el=$("live");
+  // The synthesis page has no endpoint of its own.  Its freshness is only as good
+  // as its stalest loaded input, so do not accidentally show "无数据" just because
+  // `data.play` does not exist.
+  const sources=view==="play"
+    ?[data.launch,data.structure,data.perp,data.op,data.opp,data.watch].filter(Boolean)
+    :[data[view==="avoid"?"opp":view]].filter(Boolean);
+  const d=sources.sort((a,b)=>new Date(a.generated_at)-new Date(b.generated_at))[0], el=$("live");
   if(!d){el.className="live dead";$("livet").textContent="无数据";return}
   const gen=new Date(d.generated_at).getTime(), next=new Date(d.next_expected_at).getTime(), now=Date.now();
   $("gen").textContent="数据更新于 "+relMs(gen);
@@ -428,8 +525,10 @@ let pt=0; setInterval(()=>{pt=(pt+1)%60;$("prog").style.width=(pt/60*100)+"%"},1
 
 async function load(){
   const b="?t="+Math.floor(Date.now()/6e4);
-  const r=await Promise.allSettled(["watch","perps","opportunities","operators","stats"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
-  const [wt,p,o,op,st]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  const r=await Promise.allSettled(["launch","structure","watch","perps","opportunities","operators","stats"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
+  const [la,su,wt,p,o,op,st]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  if(la&&la.schema_version===1)data.launch=la;
+  if(su&&su.schema_version===1)data.structure=su;
   if(wt&&wt.schema_version===1)data.watch=wt;
   if(p&&p.schema_version===1)data.perp=p;
   if(o&&o.schema_version===1)data.opp=o;

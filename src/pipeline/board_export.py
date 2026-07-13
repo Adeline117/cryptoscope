@@ -251,6 +251,32 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
                                "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")})
 
 
+def render_launch() -> dict:
+    """The dedicated low-float event lane.
+
+    Ingestion runs independently every few minutes. Export must stay read-only so a
+    slow board refresh cannot make the first-observed price later than the event.
+    """
+    try:
+        from src.pipeline.launch_radar import view
+        return _envelope(view())
+    except Exception as e:
+        logger.warning("render_launch_failed", error=str(e)[:120])
+        return _envelope({"events": [], "scan_error": str(e)[:120],
+                          "source": "Launch event ledger"})
+
+
+def render_structure() -> dict:
+    """Public listing/flow/unlock events, kept distinct from directional calls."""
+    try:
+        from src.pipeline.structure_radar import view
+        return _envelope(view())
+    except Exception as e:
+        logger.warning("render_structure_failed", error=str(e)[:120])
+        return _envelope({"events": [], "scan_error": str(e)[:120],
+                          "source": "Public structure event ledger"})
+
+
 def render_stats(opportunities: dict | None) -> dict:
     """Measurement layer: log this round's opp picks (with entry price), resolve any
     due, and emit the honest per-lane hit rate. The board shows '不可判' until the
@@ -303,6 +329,13 @@ def render_perps() -> dict:
         if rows:
             _store_and_diff(rows)          # one snapshot shared by both screens
         sigs = perp_signals(rows) if rows else []
+        cascade_events = []
+        try:
+            from src.pipeline.cascade_radar import record_signals, view as cascade_view
+            record_signals(sigs)
+            cascade_events = cascade_view().get("events", [])
+        except Exception as e:
+            logger.debug("cascade_ledger_failed", error=str(e)[:80])
         carry = carry_signals(rows) if rows else []
         scorecard = carry_scorecard()      # realized-carry track record (honest measurement)
         paper = {}
@@ -311,7 +344,7 @@ def render_perps() -> dict:
             paper = paper_run(carry)                                # last two assumptions)
         except Exception as e:
             logger.debug("carry_paper_failed", error=str(e)[:80])
-        return _envelope({"perps": sigs, "carry": carry, "carry_scorecard": scorecard,
+        return _envelope({"perps": sigs, "carry": carry, "cascade_events": cascade_events, "carry_scorecard": scorecard,
                           "carry_paper": paper, "source": "Hyperliquid (keyless)",
                           "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
                                    "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
@@ -483,13 +516,17 @@ def run(push: bool = True, include_operators: bool = True) -> dict:
     opportunities (#1) is the home-grown smart-money radar; operators (庄) is the
     verdict engine (slow). Each lane fails independently to null, never blocks."""
     perps = render_perps()                              # #2 ignition + #3 cascade
+    launch = render_launch()                            # #1 low-float first-seen events
+    structure = render_structure()                      # public listings / later unlocks
     opportunities = render_opportunities()              # #1 early smart-money buys
     operators = render_operators() if include_operators else None
     stats = render_stats(opportunities)                 # measurement: log + resolve + hit rate
-    paths = write_views(perps=perps, opportunities=opportunities, operators=operators, stats=stats)
+    paths = write_views(launch=launch, structure=structure, perps=perps, opportunities=opportunities, operators=operators, stats=stats)
     n = push_to_blob(paths) if push else 0
     return {"views_written": len(paths), "views_pushed": n,
             "perps": len((perps or {}).get("perps", [])),
+            "launch": len((launch or {}).get("events", [])),
+            "structure": len((structure or {}).get("events", [])),
             "opportunities": len((opportunities or {}).get("opportunities", [])),
             "export_dir": str(EXPORT_DIR)}
 

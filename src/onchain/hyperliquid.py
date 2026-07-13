@@ -182,7 +182,7 @@ def perp_signals(rows: list[dict] | None = None) -> list[dict]:
         out.append({
             "symbol": r["name"], "signal": sig["kind"], "direction": sig["direction"],
             "strength": sig["strength"], "why": sig["why"],
-            "funding_ann": round(r["funding_ann"], 1), "oi_usd": round(r["oi_usd"]),
+            "mark_price": r["markPx"], "funding_ann": round(r["funding_ann"], 1), "oi_usd": round(r["oi_usd"]),
             "vol24": round(r["vol24"]), "price_chg_24h": r["price_chg_24h"],
             "oi_chg_pct": r.get("oi_chg_pct"),
         })
