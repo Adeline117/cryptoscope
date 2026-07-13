@@ -277,6 +277,17 @@ def render_structure() -> dict:
                           "source": "Public structure event ledger"})
 
 
+def render_airdrop() -> dict:
+    """User-curated official campaigns; missing wallet evidence remains unknown."""
+    try:
+        from src.pipeline.airdrop_radar import sync
+        return _envelope(sync())
+    except Exception as e:
+        logger.warning("render_airdrop_failed", error=str(e)[:120])
+        return _envelope({"events": [], "scan_error": str(e)[:120],
+                          "source": "official campaign watchlist"})
+
+
 def render_stats(opportunities: dict | None) -> dict:
     """Measurement layer: log this round's opp picks (with entry price), resolve any
     due, and emit the honest per-lane hit rate. The board shows '不可判' until the
@@ -518,15 +529,17 @@ def run(push: bool = True, include_operators: bool = True) -> dict:
     perps = render_perps()                              # #2 ignition + #3 cascade
     launch = render_launch()                            # #1 low-float first-seen events
     structure = render_structure()                      # public listings / later unlocks
+    airdrop = render_airdrop()                          # official, owned-wallet workbench
     opportunities = render_opportunities()              # #1 early smart-money buys
     operators = render_operators() if include_operators else None
     stats = render_stats(opportunities)                 # measurement: log + resolve + hit rate
-    paths = write_views(launch=launch, structure=structure, perps=perps, opportunities=opportunities, operators=operators, stats=stats)
+    paths = write_views(launch=launch, structure=structure, airdrop=airdrop, perps=perps, opportunities=opportunities, operators=operators, stats=stats)
     n = push_to_blob(paths) if push else 0
     return {"views_written": len(paths), "views_pushed": n,
             "perps": len((perps or {}).get("perps", [])),
             "launch": len((launch or {}).get("events", [])),
             "structure": len((structure or {}).get("events", [])),
+            "airdrop": len((airdrop or {}).get("events", [])),
             "opportunities": len((opportunities or {}).get("opportunities", [])),
             "export_dir": str(EXPORT_DIR)}
 

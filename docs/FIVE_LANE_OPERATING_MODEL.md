@@ -15,7 +15,7 @@
 | Launch | 低流通早期定价重估，右尾主引擎 | `launch_radar.py`、`meme_pipeline.py`、GMGN | Solana/Base 流式首池与首批钱包、真实成交回放 | 用热度/单一分数代替时延和可卖性 |
 | Cascade | 杠杆拥挤开始平仓时的流动性真空 | `hyperliquid.py`、`liquidation_monitor.py` | WebSocket、OI/盘口/清算事件状态机、双向结果账本 | 仅因高资金费裸做反向 |
 | Structure | 公开催化剂、上币、解锁、CEX 流、跨所结构价差 | `listing_detector.py`、`cex_flow.py`、`token_unlocks.py`、`carry_paper.py` | 统一日历与可交易窗口、来源可信度 | 漏洞、未公开信息抢跑、攻击或恶意 MEV |
-| Airdrop | 低下行的长期期权/劳务回报 | points/unlock 配置与收集器 | 项目资格、成本、快照证据、领取/卖出追踪 | 多号 Sybil 或违反项目条款的自动化 |
+| Airdrop | 低下行的长期期权/劳务回报 | `airdrop_radar.py`、官方活动清单 | 项目资格、成本、快照证据、领取/卖出追踪 | 多号 Sybil 或违反项目条款的自动化 |
 | Convexity | 高杠杆单边行情的严格限额彩票仓 | `perp_scanner.py`、`execution_advisor.py` | 与主账户隔离的风险预算、失效和爆仓模拟 | 把幸存者收益当可重复 alpha |
 
 ## 第一阶段：Launch Radar
@@ -36,6 +36,10 @@
 3. **独立事件数**：同一币的一连串轮询只算一个 Launch；Cascade 按一次启动—结束算一个 episode。
 4. **净结果分布**：1h、24h、7d、峰值、最大回撤、含费用/滑点的净额；展示中位数和 P90/P99，而不是只列赢家。
 5. **生存约束**：每线都有最大损失/最大并发/停机条件；右尾策略最先优化的是活到下一次机会。
+
+## 空投的证据门
+
+`config/airdrop_watchlist.yaml` 是故意为空的官方活动清单。每一项必须有 HTTPS 官方链接；只有填写了自己控制的钱包且每项任务附有证据后，才会显示为“已记录”。系统不会读取私钥、不会猜测资格、不会做 Sybil 或自动交互。
 
 ## 产品原则
 

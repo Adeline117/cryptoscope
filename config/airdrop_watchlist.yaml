@@ -1,0 +1,17 @@
+# Only add campaigns from their official project/claim URLs. This file intentionally
+# starts empty: an unverified rumour is not an airdrop opportunity.
+#
+# campaigns:
+#   - id: example-season-1
+#     project: Example Protocol
+#     chain: ethereum
+#     official_url: https://example.org/airdrop
+#     status: research            # research | active | claimable | expired
+#     deadline: "2026-12-31T00:00:00+00:00"
+#     estimated_cost_usd: 20
+#     wallets:
+#       - "0x..."                # a wallet you control; never add seed phrases
+#     tasks:
+#       - name: "Provide liquidity"
+#         evidence: "tx hash / dashboard screenshot / manual check"
+campaigns: []

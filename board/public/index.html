@@ -179,6 +179,7 @@
     <div class="grp">
       <button class="tab" data-v="launch" role="tab">🚀 Launch <span class="ct" id="ct-launch"></span></button>
       <button class="tab" data-v="structure" role="tab">🏗 结构 <span class="ct" id="ct-structure"></span></button>
+      <button class="tab" data-v="airdrop" role="tab">🪂 空投 <span class="ct" id="ct-airdrop"></span></button>
       <button class="tab" data-v="watch" role="tab">🐋 实时买入 <span class="ct" id="ct-watch"></span></button>
       <button class="tab" data-v="opp" role="tab">💎 早期扫描 <span class="ct" id="ct-opp"></span></button>
       <button class="tab" data-v="avoid" role="tab">🛡️ 避雷 <span class="ct" id="ct-avoid"></span></button>
@@ -213,7 +214,7 @@ const ageStr=h=>h==null?"—":h<1/60?"<1m":h<1?Math.round(h*60)+"m":h<24?h.toFix
 function rel(ts){if(!ts)return"—";const s=Math.round(Date.now()/1000-ts);return s<5?"刚刚":s<60?s+"秒前":s<3600?Math.floor(s/60)+"分前":Math.floor(s/3600)+"时前"}
 function relMs(t){const s=Math.round((Date.now()-t)/1000);return s<5?"刚刚":s<60?s+"s前":s<3600?Math.floor(s/60)+"分前":Math.floor(s/3600)+"时前"}
 
-let view="play", data={launch:null,structure:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
+let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 
@@ -285,6 +286,22 @@ const LANES={
       {k:"time",label:"记录时间",n:1,cell:r=>esc(r.event_at||r.detected_at||"—"),sort:r=>new Date(r.event_at||r.detected_at||0).getTime()},
     ],
     detail:r=>`<span class="so">所以👉</span> 这是公开事件账本，不是抢消息指令。先观察成交量、深度和价格反应；结果会被后续回写。<br>${esc(r.message||"")}<br>${(r.reasons||[]).map(esc).join(" · ")}`,
+  },
+  airdrop:{
+    title:d=>{const e=d?.events||[];const claim=e.filter(x=>x.decision==="CLAIM_CHECK").length;return `<b style="color:var(--accent)">官方空投工作台</b>: ${e.length?`${e.length} 个已验证官方活动，${claim} 个待检查领取资格`:'尚未配置官方活动'}。`},
+    stat:d=>{const e=d?.events||[];return [["官方活动",e.length,"不抓传闻"],["待查领取",e.filter(x=>x.decision==="CLAIM_CHECK").length,"有自有钱包"],["资格未知",e.filter(x=>x.evidence_state!=="recorded").length,"需要补证据"]]},
+    readme:"空投是长期低下行期权，不是自动化多号农场。本页只读取 <code>config/airdrop_watchlist.yaml</code> 中的官方项目链接、你控制的钱包、任务和证据；没有钱包/证据会明确显示未知。不会保存私钥，也不会自动提交交易。",
+    rows:d=>d?.events||[],
+    id:r=>r.id||r.token, flash:null,
+    empty:"尚未配置官方空投活动。请在 config/airdrop_watchlist.yaml 添加官方链接、钱包和任务证据；没有配置时不展示猜测名单。",
+    cols:[
+      {k:"project",label:"项目",cell:r=>idc(r.symbol,r.chain||"multi"),sort:r=>r.symbol||""},
+      {k:"state",label:"状态",c:1,cell:r=>r.state==="claimable"?'<span class="chip b-good">可领取</span>':r.state==="active"?'<span class="chip b-accent">进行中</span>':'<span class="chip b-warn">研究</span>',sort:r=>r.state||""},
+      {k:"evidence",label:"资格证据",c:1,cell:r=>r.evidence_state==="recorded"?'<span class="chip b-good">已记录</span>':'<span class="chip b-warn">未知</span>',sort:r=>r.evidence_state==="recorded"?1:0},
+      {k:"cost",label:"预估成本",n:1,cell:r=>usd(r.estimated_cost_usd),sort:r=>r.estimated_cost_usd||0},
+      {k:"deadline",label:"截止日",n:1,cell:r=>esc(r.deadline||"—"),sort:r=>new Date(r.deadline||0).getTime()},
+    ],
+    detail:r=>`<span class="so">所以👉</span> ${r.decision==="CLAIM_CHECK"?"打开官方领取页，使用自己的钱包核验资格；不要签署不明交易。":"先补全自有钱包与任务证据，不能根据项目名称假定有资格。"}<br>官方链接: ${esc(r.official_url||"—")}<br>钱包 ${r.wallet_count??0} · 任务 ${r.task_count??0}<br>${(r.tasks||[]).map(t=>esc(t.name)+(t.evidence?" ✓":" · 未证")).join("<br>")}`,
   },
   watch:{
     title:d=>`最早的信号:盯 <b>${d?.watched_wallets||0}</b> 个已验证盈利钱包,谁<b>刚买了什么</b>——分钟级,早于任何排名。`,
@@ -505,7 +522,7 @@ function staleness(){
   // as its stalest loaded input, so do not accidentally show "无数据" just because
   // `data.play` does not exist.
   const sources=view==="play"
-    ?[data.launch,data.structure,data.perp,data.op,data.opp,data.watch].filter(Boolean)
+    ?[data.launch,data.structure,data.airdrop,data.perp,data.op,data.opp,data.watch].filter(Boolean)
     :[data[view==="avoid"?"opp":view]].filter(Boolean);
   const d=sources.sort((a,b)=>new Date(a.generated_at)-new Date(b.generated_at))[0], el=$("live");
   if(!d){el.className="live dead";$("livet").textContent="无数据";return}
@@ -525,10 +542,11 @@ let pt=0; setInterval(()=>{pt=(pt+1)%60;$("prog").style.width=(pt/60*100)+"%"},1
 
 async function load(){
   const b="?t="+Math.floor(Date.now()/6e4);
-  const r=await Promise.allSettled(["launch","structure","watch","perps","opportunities","operators","stats"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
-  const [la,su,wt,p,o,op,st]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  const r=await Promise.allSettled(["launch","structure","airdrop","watch","perps","opportunities","operators","stats"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
+  const [la,su,ad,wt,p,o,op,st]=r.map(x=>x.status==="fulfilled"?x.value:null);
   if(la&&la.schema_version===1)data.launch=la;
   if(su&&su.schema_version===1)data.structure=su;
+  if(ad&&ad.schema_version===1)data.airdrop=ad;
   if(wt&&wt.schema_version===1)data.watch=wt;
   if(p&&p.schema_version===1)data.perp=p;
   if(o&&o.schema_version===1)data.opp=o;
