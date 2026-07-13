@@ -1153,10 +1153,16 @@ def check_run(use_transfers: bool = False) -> list[dict]:
             # immediately (no time delay).
             if fired:
                 kset = {k for k, _ in fired}
-                # `arm` is its OWN phase: mobilization precedes selling, so it must not
-                # be swallowed by (or collapse into) the sell phase — otherwise the
-                # early warning is suppressed as a "repeat" of the dump it precedes.
-                phase = ("sell" if kset & {"庄在卖", "阴跌出货", "RUG", "CEX充值"} else
+                # `arm` and `deposit` are their OWN phases: mobilization AND the CEX
+                # deposit both PRECEDE selling, so neither may collapse into the sell
+                # phase — otherwise the early warning is suppressed as a "repeat" of the
+                # dump it precedes. deposit is split out for a second reason: the generic
+                # short alerts measured 1/16 (no edge, fires late); CEX充值 is the one
+                # signal with a lead-time mechanism (deposit precedes the sell), so it
+                # gets its own phase → its own measured episode, isolated from the sell
+                # bucket that already failed. Timeline: arm → deposit → sell.
+                phase = ("deposit" if kset & {"CEX充值"} else
+                         "sell" if kset & {"庄在卖", "阴跌出货", "RUG"} else
                          "arm" if kset & {"授权路由", "注入gas"} else
                          "buy" if kset & {"庄在买", "控盘突破", "浮筹收紧"} else
                          "stall" if kset & {"庄停手", "动能熄火"} else "other")
@@ -1169,7 +1175,15 @@ def check_run(use_transfers: bool = False) -> list[dict]:
                 fund = cur.get("funding")
                 kinds = {k for k, _ in fired}
                 fstr = f"(费率 {fund:+.3f}%)" if fund is not None else ""
-                if kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG", "CEX充值"}:    # operator exiting / dump
+                if kinds & {"CEX充值"} and not (kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG"}):
+                    # LEADING dump signal IN ISOLATION — deposit precedes the sell. Its
+                    # own measured episode; unproven (generic shorts hit 1/16), so a
+                    # candidate to short/avoid, NOT an instruction. Stays muted until
+                    # THIS signal's own measurement shows edge.
+                    action = "🔴 派发启动:操盘簇正在向交易所充值(领先砸盘数分钟-数小时)→ 做空/避开候选·edge测量中"
+                    if fund is not None and fund > 0.03:
+                        action += f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
+                elif kinds & {"庄在卖", "阴跌出货", "砸盘", "RUG", "CEX充值"}:    # operator exiting / dump
                     action = "🔴 顶部跑 / 做空"
                     if fund is not None and fund > 0.03:
                         fstr = f"(费率 +{fund:.3f}% 多头拥挤,做空顺风)"
