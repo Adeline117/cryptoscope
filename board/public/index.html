@@ -288,14 +288,14 @@ const LANES={
     custom:true,
   },
   op:{
-    title:d=>{const o=(d?.operators||[]).filter(x=>x.ok);const c={};o.forEach(x=>c[classOp(x)]=(c[classOp(x)]||0)+1);return `盯着的币里<b>真有庄在做盘的只有 ${(c.armed||0)+(c.accum||0)+(c.dump||0)} 个</b>;<b style="color:var(--violet)">${c.issuer||0} 个其实是项目方持币不是妖币</b>。`},
-    stat:d=>{const o=d?.operators||[];return[["哨兵",o.length,""],["真操盘",o.filter(x=>["armed","accum","dump"].includes(classOp(x))).length,""]]},
-    readme:"这条线是<b>派发/做空探测器 + 庄vs发行方判别器,不是跟买器</b>。顶刊实证:跟庄买吸筹对散户是<b>负EV</b>(pump 后~18秒见顶、非insider负回报、跟随者胜率48%)。你检测到的「吸筹」很可能是庄的 183-22832 地址 wash farm 专门造给你的诱饵。有结构性 edge 的只在<b>派发(可做空/避开)</b>和 operator-vs-issuer 判别,不在买。集中≠妖币——用链上首笔资金来源把「庄买入」和「项目方分配」分开。",
-    rows:d=>(d?.operators||[]).slice().sort((a,b)=>OPRANK[classOp(a)]-OPRANK[classOp(b)]),
+    title:d=>{const o=(d?.operators||[]).filter(x=>x.ok);const c={};o.forEach(x=>c[classOp(x)]=(c[classOp(x)]||0)+1);const dn=o.filter(depNow).length;return (dn?`<b style="color:var(--danger)">🔴 ${dn} 个操盘簇正在向交易所充值(派发启动·领先砸盘)→ 避开</b>。`:'')+`盯着的币里<b>真有庄在做盘的只有 ${(c.armed||0)+(c.accum||0)+(c.dump||0)} 个</b>;<b style="color:var(--violet)">${c.issuer||0} 个其实是项目方持币不是妖币</b>。`},
+    stat:d=>{const o=d?.operators||[];return[["哨兵",o.length,""],["真操盘",o.filter(x=>["armed","accum","dump"].includes(classOp(x))).length,""],["🔴正在派发",o.filter(depNow).length,"避开"]]},
+    readme:"这条线是<b>派发/做空探测器 + 庄vs发行方判别器,不是跟买器</b>。<b>🔴派发启动</b>=操盘簇正在往交易所充值(领先砸盘数分钟-数小时)——诚实用法是<b>避开(别接盘)</b>;做空是候选,<b>edge仍在测量</b>(通用短信号实测16次仅命中1次、疑似负edge/响得晚,所以此领先信号单独隔离测、Telegram暂静音)。顶刊实证:跟庄买吸筹对散户是<b>负EV</b>。有结构性 edge 的只在<b>派发(可做空/避开)</b>和 operator-vs-issuer 判别,不在买。集中≠妖币。",
+    rows:d=>(d?.operators||[]).slice().sort((a,b)=>(depNow(b)-depNow(a))||(OPRANK[classOp(a)]-OPRANK[classOp(b)])),
     id:r=>r.chain+r.token, flash:null,
     cols:[
       {k:"sym",label:"代币",cell:r=>idc(r.symbol,CHAIN[r.chain]||r.chain),sort:r=>r.symbol||""},
-      {k:"v",label:"判读",c:1,cell:r=>{const k=classOp(r);const m=OPMAP[k];return `<span class="chip b-${m.b}">${m.label}</span>`},sort:r=>OPRANK[classOp(r)]},
+      {k:"v",label:"判读",c:1,cell:r=>{const k=classOp(r);const m=OPMAP[k];const dep=depNow(r)?`<span class="chip b-danger" title="操盘簇正在向交易所充值=领先砸盘信号(先于卖出数分钟-数小时)。诚实用法:避开别接盘。做空是候选,edge测量中(通用短信号实测1/16、疑似负edge)。${esc(rel(Math.round(new Date(r.flow_scan_ts).getTime()/1000)))}扫描">🔴派发启动</span> `:'';return dep+`<span class="chip b-${m.b}">${m.label}</span>`},sort:r=>depNow(r)?-1:OPRANK[classOp(r)]},
       {k:"conc",label:"最大持有",n:1,cell:r=>{const p=r.largest_entity_pct;return p==null?"—":`<span class="num">${(+p).toFixed(1)}%</span> <span class="bar" style="width:${Math.min(p,40)*1.4}px;background:var(--${classOp(r)==='issuer'?'violet':'accent'})"></span>`+(r.supply_verified===false?' <span class="chip b-warn">未核实</span>':'')},sort:r=>r.largest_entity_pct||0},
       {k:"acq",label:"获取",c:1,cell:r=>{const a=r.acquisition;return a==="bought"?'<span class="chip b-good">买入</span>':a==="allocated"?'<span class="chip b-violet">分配</span>':'<span class="chip">?</span>'},sort:r=>r.acquisition||""},
       {k:"liq",label:"流动性",n:1,cell:r=>usd(r.liquidity_usd),sort:r=>r.liquidity_usd||0},
@@ -310,6 +310,9 @@ function avoidRows(d){return (d?.opportunities||[]).filter(o=>["avoid","caution"
 // operator classifier
 const OPMAP={dump:{label:"正在出货",b:"danger",so:"对手盘就是庄,别接飞刀,要动只能空。"},armed:{label:"庄在场·待动",b:"warn",so:"盯着等它出手,现在不是买卖点。"},accum:{label:"疑似吸筹",b:"warn",so:"别跟买——跟庄吸筹对散户是负EV,且这「吸筹」可能是庄的wash farm诱饵。当观察,不当买入信号。"},issuer:{label:"项目方持币",b:"violet",so:"别当妖币,防的是团队解锁砸盘。"},faded:{label:"庄已走·散",b:"",so:"当普通币看。"},unknown:{label:"查不清",b:"accent",so:"数据不足,别信这条。"}};
 const OPRANK={dump:0,armed:1,accum:2,issuer:3,faded:4,unknown:5};
+// live 'deposit' event = operator cluster moving inventory to a CEX right now (leading
+// dump signal). Fresh only (flow scan within 3h) so a stale phase isn't shown as live.
+function depNow(r){return r&&r.live_phase==="deposit"&&r.flow_scan_ts&&(Date.now()-new Date(r.flow_scan_ts).getTime()<3*3600*1000)?1:0}
 function classOp(r){if(!r.ok)return"unknown";const v=r.verdict||"",a=r.acquisition||"";if(a==="allocated")return"issuer";if(["distributing","exited_by_selling","present_rotating_confirmed","distributing_or_churn"].includes(v))return((r.largest_entity_pct||0)<5&&(r.dominant_wallets||0)<=1)?"faded":"dump";if(v==="loaded_accumulating")return"accum";if(["loaded_live_operator","live_operator"].includes(v))return(r.current_graph_available&&(r.largest_entity_pct||0)<2)?"unknown":"armed";if(v==="loaded_dormant")return"armed";if(["dispersed","treasury","treasury_only"].includes(v))return"faded";return"unknown"}
 
 // perp: carry screener (the real edge, on top) + crowding/ignition heatmap (defense, below)

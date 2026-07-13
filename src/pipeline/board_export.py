@@ -69,6 +69,13 @@ def _analyze_sentinel(v: dict) -> dict:
             "liquidity_usd": mkt.get("liquidity_usd"),
             "volume_h24": mkt.get("volume_h24"),
             "caveats": (r.get("caveats") or [])[:3],
+            # live event from the sentinel's last fired phase. 'deposit' = operator
+            # moving inventory to an exchange right now — the LEADING dump signal, its
+            # own measured episode (generic shorts hit 1/16, so short is a candidate;
+            # AVOID is the defensible read — don't be exit liquidity). Board gates on
+            # flow_scan_ts freshness so a stale phase isn't shown as happening now.
+            "live_phase": v.get("last_phase"),
+            "flow_scan_ts": v.get("flow_scan_ts"),
         })
         rec.update(_dex_direction(tok, ch))
     except Exception as e:
