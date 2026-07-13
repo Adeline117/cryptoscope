@@ -323,11 +323,13 @@ function renderPerp(d){
       const pf=c.pos_frac, drift=c.sustained_ann!==c.funding_ann;
       const flags=c.flags.length?c.flags.map(f=>`<span class="chip b-warn">${esc(f.split(":")[0].split("(")[0])}</span>`).join(" ")
                                 :'<span class="chip b-good">干净</span>';
+      const hedge=(c.hedge||"").includes("HL")?'<span class="chip b-accent">HL现货</span>':'<span class="chip b-good">CEX现货</span>';
       return `<tr title="${esc(c.note)}">
         <td>${idc(c.symbol,c.tier)}</td>
         <td class="n"><span class="num" style="color:var(--good)">+${c.sustained_ann}%</span>${drift?`<small class="dim"> 现${c.funding_ann>0?'+':''}${c.funding_ann}%</small>`:''}</td>
         <td class="n">${pf!=null?`<span class="num">${(pf*100).toFixed(0)}%</span>`:'<small class="dim">积累中</small>'}</td>
         <td class="n"><span class="num">${usd(c.oi_usd)}</span></td>
+        <td>${hedge}</td>
         <td>${flags}</td></tr>`}).join("");
     const sc=d?.carry_scorecard;
     let scBanner="";
@@ -337,10 +339,10 @@ function renderPerp(d){
           <span class="v"><span class="num">${(sc.pos_frac*100).toFixed(0)}%</span><small>时间正费</small></span>
           <span class="v"><span class="num" style="color:var(--danger)">${sc.worst_ann}%</span><small>最差瞬时</small></span></div>`;
       } else scBanner=`<div class="sc-card muted"><span class="k">主流carry已实现战绩</span><span class="v">不可判 <small>${esc(sc.note||'')}</small></span></div>`; }
-    html+=`<div class="perp-sec">💰 资金费套利 · delta中性 <small>现货多+永续空,吃杠杆多头付的费,不赌方向 · 主流优先 · 年化为毛(未扣手续费/滑点)</small></div>
+    html+=`<div class="perp-sec">💰 资金费套利 · delta中性 <small>现货多+永续空,吃杠杆多头付的费,不赌方向 · 只列有现货腿可真对冲的(不可对冲的极端费率在下面拥挤图)· 年化为毛</small></div>
       ${scBanner}
       <div class="scroll"><table class="tbl"><thead><tr>
-        <th>代币</th><th class="n">年化资金费</th><th class="n">持续性</th><th class="n">OI深度</th><th>风险</th>
+        <th>代币</th><th class="n">年化资金费</th><th class="n">持续性</th><th class="n">OI深度</th><th>对冲</th><th>风险</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   // ── CROWDING / IGNITION: directional observation — defensive, not a trade button ──

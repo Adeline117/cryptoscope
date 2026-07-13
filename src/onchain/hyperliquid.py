@@ -209,6 +209,29 @@ CARRY_MAJORS = {"BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "AVAX", "LTC", "LINK"
                 "ADA", "SUI", "APT", "ARB", "OP", "TON", "TRX"}
 
 
+def _hl_spot_tokens() -> set[str]:
+    """Coin names with a USDC spot market on Hyperliquid — the carry can be run
+    single-venue there (buy HL spot, short HL perp). Keyless. Empty set on failure so we
+    fall back to major-only executability, NEVER a false 'hedgeable'. Note BTC/ETH/SOL
+    are perp-only on HL — their spot lives on CEXes, handled via the is_major path."""
+    try:
+        req = urllib.request.Request(
+            INFO_URL, data=json.dumps({"type": "spotMeta"}).encode(),
+            headers={"Content-Type": "application/json"})
+        d = json.loads(urllib.request.urlopen(req, timeout=15).read())
+        idx = {t["index"]: t["name"] for t in d.get("tokens", [])}
+        bases = set()
+        for u in d.get("universe", []):
+            ts = u.get("tokens", [])
+            if len(ts) == 2 and idx.get(ts[1]) == "USDC":
+                bases.add(idx.get(ts[0]))
+        bases.discard(None)
+        return bases
+    except Exception as e:
+        logger.warning("hl_spot_fetch_failed", error=str(e)[:100])
+        return set()
+
+
 def _funding_persistence(window_h: int = CARRY_WINDOW_H) -> dict[str, dict]:
     """Per coin over the last `window_h`: {coin: {mean_ann, pos_frac, n}} from the
     persisted snapshots. Empty until snapshots accrue — honestly absent, not faked."""
@@ -291,6 +314,7 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
             return []
         _store_and_diff(rows)      # also records funding for persistence history
     hist = _funding_persistence()
+    hl_spot = _hl_spot_tokens()    # coins with a HL spot leg (single-venue hedge)
     out = []
     for r in rows:
         fa = r["funding_ann"]
@@ -301,6 +325,18 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
         sustained = h["mean_ann"] if h and h["n"] >= 3 else fa
         pos_frac = h["pos_frac"] if h and h["n"] >= 3 else None
         is_major = r["name"] in CARRY_MAJORS
+        # executability: you can only run delta-neutral if a SPOT leg exists to hedge.
+        # majors → CEX spot; HL-spot coins → single-venue; neither → NOT executable.
+        has_hl_spot = r["name"] in hl_spot
+        if is_major:
+            hedge = "外部现货(CEX)可对冲"
+        elif has_hl_spot:
+            hedge = "HL现货可单所对冲"
+        else:
+            # no spot leg → NOT a carry at all (a naked short = directional bet). Its
+            # extreme funding IS a crowded-longs signal — that lives in the heatmap
+            # below (perp_signals cascade), not in a table titled 'carry opportunities'.
+            continue
         flags = []
         if not is_major:
             flags.append("非主流:清算/脱锚/深度风险高")
@@ -310,16 +346,16 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
             flags.append(f"费率不稳:仅{pos_frac*100:.0f}%时间为正,会倒付")
         if pos_frac is None:
             flags.append("持续性积累中(需多轮快照)")
-        # quality: reward sustained carry AND persistence AND depth; majors get a lift
+        # quality: reward sustained carry AND persistence AND depth; majors lifted.
         pf = pos_frac if pos_frac is not None else 0.5
         quality = sustained * pf * (1.3 if is_major else 1.0)
         out.append({
             "symbol": r["name"], "funding_ann": round(fa, 1),
             "sustained_ann": round(sustained, 1), "pos_frac": pos_frac,
             "oi_usd": round(r["oi_usd"]), "is_major": is_major,
-            "tier": "主流" if is_major else "山寨", "flags": flags,
-            "n_snaps": h["n"] if h else 0, "_q": quality,
-            "note": (f"现货多+永续空,吃约 {sustained:.0f}%/年(毛,未扣手续费/滑点)。"
+            "tier": "主流" if is_major else "山寨", "hedge": hedge,
+            "flags": flags, "n_snaps": h["n"] if h else 0, "_q": quality,
+            "note": (f"现货多+永续空,吃约 {sustained:.0f}%/年(毛,未扣手续费/滑点)。对冲:{hedge}。"
                      "这是carry不是无风险套利——费率翻负要倒付,空腿保证金留足防挤压强平。"),
         })
     out.sort(key=lambda x: -x["_q"])
@@ -342,7 +378,7 @@ if __name__ == "__main__":
     print(f"\n{len(carry)} funding-carry opportunities (delta-neutral)")
     for s in carry[:15]:
         print(f"  {s['symbol']:9} [{s['tier']}] ann {s['funding_ann']:+.0f}% sustained "
-              f"{s['sustained_ann']:+.0f}% OI ${s['oi_usd']/1e6:.1f}M "
+              f"{s['sustained_ann']:+.0f}% OI ${s['oi_usd']/1e6:.1f}M {s['hedge']} "
               f"{'· '.join(s['flags']) if s['flags'] else 'clean'}")
     sc = carry_scorecard()
     print(f"\ncarry scorecard: {sc.get('note')}")
