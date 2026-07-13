@@ -337,14 +337,17 @@ def format_performance_message() -> str:
         f"📈 均赢: {p['avg_win_pct']:+.1f}% | 📉 均亏: {p['avg_loss_pct']:+.1f}%",
     ]
 
-    # Verdict
+    # Verdict. A paper PnL/20-trade win rate is not proof of an edge: it can repeat
+    # one market episode, omit executable slippage/funding, and has no matched base
+    # rate. Keep this dashboard useful without granting a false "go live" licence.
     if p["closed_trades"] >= 20:
         if p["win_rate"] > 50 and p["total_pnl_sol"] > 0:
-            lines.append(f"\n✅ <b>系统有正EV — 可以考虑实盘</b>")
+            lines.append("\n🟡 <b>纸面结果为正，仍不可据此授权实盘</b>"
+                         " — 还需独立事件、净成本和基准率验证")
         elif p["win_rate"] > 40:
-            lines.append(f"\n🟡 <b>边缘EV — 继续观察</b>")
+            lines.append("\n🟡 <b>纸面结果边缘，继续积累独立样本</b>")
         else:
-            lines.append(f"\n❌ <b>负EV — 不要用真钱</b>")
+            lines.append("\n🔴 <b>纸面结果为负，停止扩大风险</b>")
     else:
         remaining = 20 - p["closed_trades"]
         lines.append(f"\n⏳ 还需 {remaining} 笔交易才能判断")
