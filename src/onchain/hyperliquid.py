@@ -208,6 +208,29 @@ CARRY_WINDOW_H = 48            # persistence window
 CARRY_MAJORS = {"BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "AVAX", "LTC", "LINK",
                 "ADA", "SUI", "APT", "ARB", "OP", "TON", "TRX"}
 
+# ── Net-of-cost model for the cross-venue carry ──────────────────────────────────────
+# The gross differential is a %/yr RATE; the entry/exit cost is a ONE-TIME % that
+# amortizes over how long you hold. Short holds (differential flips fast) = crippling
+# drag. Every number below is a stated, arguable COST assumption — conservative, never a
+# favorable fudge. This is the calculation that turns an exciting gross number into the
+# truth: after costs, most differentials are thin or NEGATIVE, and only the fat ones on
+# a long-enough hold survive.
+CARRY_ROUNDTRIP_COST_PCT = 0.35   # both legs × (in+out): ~maker fees + realistic cross-
+                                  # leg slippage (research: 20-50bps/leg). One-time.
+CARRY_REBALANCE_DRAG_ANN = 1.5    # ongoing %/yr to keep the two legs delta-neutral as
+                                  # price moves (periodic rebalances cost fee+slippage).
+CARRY_DEFAULT_HOLD_DAYS = 14      # amortize the one-time cost over this hold. This is the
+                                  # single biggest lever — and it EQUALS how long the
+                                  # differential stays positive (measured, not assumed).
+
+
+def _carry_net_ann(gross_edge_ann: float, hold_days: float = CARRY_DEFAULT_HOLD_DAYS) -> float:
+    """Net %/yr after amortized entry/exit cost + ongoing rebalance drag. hold_days is the
+    lever: at 14d a 0.35% round-trip = ~9%/yr drag, so a +7% gross differential nets
+    NEGATIVE — only fat differentials survive a short hold. Longer persistence → less drag."""
+    amortized_drag = CARRY_ROUNDTRIP_COST_PCT / max(hold_days / 365.0, 1e-6)
+    return gross_edge_ann - amortized_drag - CARRY_REBALANCE_DRAG_ANN
+
 
 def _hl_spot_tokens() -> set[str]:
     """Coin names with a USDC spot market on Hyperliquid — the carry can be run
@@ -233,6 +256,58 @@ def _hl_spot_tokens() -> set[str]:
 
 
 OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate?instId={}-USDT-SWAP"
+
+
+def _store_xdiff(diffs: dict[str, float]) -> None:
+    """Persist each coin's HL-OKX differential per run, so xdiff_stats can measure how
+    long the differential actually STAYS positive — that persistence IS the hold period,
+    which is the single biggest lever on net-of-cost. Never raises."""
+    if not diffs:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        c = _conn()
+        c.execute("CREATE TABLE IF NOT EXISTS xdiff(coin TEXT, ts TEXT, diff_ann REAL)")
+        c.executemany("INSERT INTO xdiff(coin, ts, diff_ann) VALUES (?,?,?)",
+                      [(k, now, v) for k, v in diffs.items()])
+        # prune > 30d
+        from datetime import timedelta
+        cut = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        c.execute("DELETE FROM xdiff WHERE ts < ?", (cut,))
+        c.commit()
+        c.close()
+    except Exception as e:
+        logger.debug("xdiff_store_failed", error=str(e)[:80])
+
+
+def xdiff_stats(window_h: int = 7 * 24) -> dict[str, dict]:
+    """Per coin over the window: {coin: {pos_frac, mean, n, span_h}} for the HL-OKX
+    differential. Empty until history accrues — honestly absent, not faked."""
+    from datetime import timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_h)).isoformat()
+    agg: dict[str, list] = {}
+    try:
+        c = _conn()
+        c.execute("CREATE TABLE IF NOT EXISTS xdiff(coin TEXT, ts TEXT, diff_ann REAL)")
+        for coin, ts, dv in c.execute(
+                "SELECT coin, ts, diff_ann FROM xdiff WHERE ts >= ?", (cutoff,)):
+            agg.setdefault(coin, []).append((ts, dv))
+        c.close()
+    except Exception:
+        return {}
+    out = {}
+    for coin, pts in agg.items():
+        vals = [v for _, v in pts]
+        if len(vals) < 3:
+            continue
+        tss = sorted(t for t, _ in pts)
+        try:
+            span = (datetime.fromisoformat(tss[-1]) - datetime.fromisoformat(tss[0])).total_seconds() / 3600
+        except Exception:
+            span = 0
+        out[coin] = {"pos_frac": sum(1 for v in vals if v > 0) / len(vals),
+                     "mean": sum(vals) / len(vals), "n": len(vals), "span_h": round(span, 1)}
+    return out
 
 
 def okx_funding_map(coins: list[str], cap: int = 45) -> dict[str, float]:
@@ -344,10 +419,12 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
         _store_and_diff(rows)      # also records funding for persistence history
     hist = _funding_persistence()
     hl_spot = _hl_spot_tokens()    # coins with a HL spot leg (single-venue hedge)
+    xstats = xdiff_stats()         # measured persistence of the HL-OKX differential
     # candidates = coins with notable HL funding; fetch the OKX leg for just these.
     cands = [r["name"] for r in rows
              if r["oi_usd"] >= CARRY_MIN_OI_USD and r["funding_ann"] >= CARRY_MIN_ANN]
     okx = okx_funding_map(cands)   # {coin: OKX ann %}; absent = no OKX perp
+    diffs_to_store: dict[str, float] = {}
     out = []
     for r in rows:
         fa = r["funding_ann"]
@@ -365,6 +442,7 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
             cross_diff = sustained - okx_ann             # net you collect, delta-neutral
             edge_ann = cross_diff
             hedge = "跨所两永续(空HL多OKX)· 无需现货"
+            diffs_to_store[r["name"]] = cross_diff        # for persistence measurement
         elif is_major:
             edge_ann = sustained; hedge = "外部现货(CEX)可对冲"
         elif has_hl_spot:
@@ -385,22 +463,43 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
         if pos_frac is None:
             flags.append("持续性积累中(需多轮快照)")
         flags.append("尾部:ADL级联(2025-10-10)会强平对冲腿——为崩盘sizing")
+        # hold_days = how long the differential actually STAYS positive (measured), which
+        # sets the cost amortization. Until history accrues, use the conservative default
+        # and say so — never assume a long hold we haven't observed.
+        xs = xstats.get(r["name"]) if cross else None
+        if xs and xs["n"] >= 6 and xs["pos_frac"] >= 0.8:
+            hold_days = min(max(xs["span_h"] / 24.0, 1.0), 30.0)
+            hold_measured = True
+        else:
+            hold_days = CARRY_DEFAULT_HOLD_DAYS
+            hold_measured = False
+        # NET after costs — the number that matters. Rank by this, not the gross edge.
+        net_ann = _carry_net_ann(edge_ann, hold_days)
+        if net_ann <= 0:
+            flags.insert(0, f"净额≤0:毛{edge_ann:.0f}%扣成本后不划算(需差价更肥或持仓更久)")
+        if cross and not hold_measured:
+            flags.append("差价持续性未测(净额按14天假设,真值取决于差价能撑多久)")
         pf = pos_frac if pos_frac is not None else 0.5
-        quality = edge_ann * pf * (1.3 if is_major else 1.0)
-        note = (f"跨所差 {edge_ann:.0f}%/年:空HL(+{sustained:.0f}%)、多OKX({okx_ann:+.0f}%),"
-                "两永续delta中性,不需现货。毛值未扣手续费/滑点/双所保证金。"
+        quality = net_ann * pf * (1.3 if is_major else 1.0)
+        note = (f"跨所差(毛){edge_ann:.0f}%:空HL(+{sustained:.0f}%)、多OKX({okx_ann:+.0f}%)。"
+                f"扣成本(往返~{CARRY_ROUNDTRIP_COST_PCT}%按{CARRY_DEFAULT_HOLD_DAYS}天摊+再平衡{CARRY_REBALANCE_DRAG_ANN}%)"
+                f"净约 {net_ann:.0f}%/年。两永续delta中性,不需现货。持仓越久摊得越薄(=差价持续多久,测量中)。"
                 if cross else
-                f"现货多+永续空,吃约 {sustained:.0f}%/年(毛)。对冲:{hedge}。这是carry不是无风险套利。")
+                f"现货多+永续空,毛{sustained:.0f}%,扣成本净约{net_ann:.0f}%/年。对冲:{hedge}。")
         out.append({
             "symbol": r["name"], "funding_ann": round(fa, 1),
             "sustained_ann": round(sustained, 1), "pos_frac": pos_frac,
             "okx_ann": round(okx_ann, 1) if cross else None,
             "cross_diff": round(cross_diff, 1) if cross else None, "cross": cross,
-            "edge_ann": round(edge_ann, 1), "trade": ("空HL·多OKX" if cross else "现货多·永续空"),
+            "edge_ann": round(edge_ann, 1), "net_ann": round(net_ann, 1),
+            "hold_days": round(hold_days, 1), "hold_measured": (hold_measured if cross else None),
+            "diff_pos_frac": (round(xs["pos_frac"], 2) if xs else None),
+            "trade": ("空HL·多OKX" if cross else "现货多·永续空"),
             "oi_usd": round(r["oi_usd"]), "is_major": is_major,
             "tier": "主流" if is_major else "山寨", "hedge": hedge,
             "flags": flags, "n_snaps": h["n"] if h else 0, "_q": quality, "note": note,
         })
+    _store_xdiff(diffs_to_store)   # persist this run's differentials for persistence stats
     out.sort(key=lambda x: -x["_q"])
     for x in out:
         del x["_q"]

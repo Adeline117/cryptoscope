@@ -281,8 +281,8 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>{const c=d?.carry||[];const cr=c.filter(x=>x.cross).length;const top=c[0];return `<b style="color:var(--good)">跨所资金费差是研究验证的真核</b>:HL资金费结构性高于CEX(机构够不着DEX腿),空HL+多OKX两永续吃差价,不需现货。当前 <b>${cr}</b> 个跨所机会${top?`,最高净差 <b style="color:var(--good)">+${top.edge_ann}%/年</b>`:''}。下面拥挤/点火是方向观测。`},
-    stat:d=>{const c=d?.carry||[];const cr=c.filter(x=>x.cross).length;const top=c[0];return[["跨所机会",cr,""],["最高净差",top?`+${top.edge_ann}%`:"—",top?top.trade:""],["主流",c.filter(x=>x.is_major).length,""]]},
+    title:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0];return `<b style="color:var(--good)">跨所资金费差(HL vs OKX)</b>:HL结构性高于CEX,空HL+多OKX两永续吃差价。<b>但扣完成本(往返费/滑点/再平衡)只有 ${pos}/${c.length} 个净>0</b>——毛差的兴奋多是幻觉${top?`。最肥净 <b style="color:var(--good)">+${top.net_ann}%</b>(${top.symbol})`:''}。`},
+    stat:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0];return[["净>0机会",`${pos}/${c.length}`,"扣成本后"],["最肥净额",top?`+${top.net_ann}%`:"—",top?top.symbol:""],["主流(薄)",c.filter(x=>x.is_major&&x.net_ann>0).length,""]]},
     readme:"这条线的<b>真核是💰资金费套利</b>(delta中性:现货多+永续空,吃杠杆多头付的费,~8%基准起,主流更净)——研究里唯一「个人真能做出正EV」的核。<b>但这是carry不是无风险套利</b>:费率翻负要倒付、空腿被挤压强平、交易所暴雷/脱锚(2025-10-10 USDe 在 Binance 砸到 $0.65 强平了偿付充足的账户)。年化为毛,未扣手续费/滑点。下面的拥挤/点火是<b>方向观测</b>:裸做多散户 74-89% 亏,当「我是不是站在被清算那侧」的防御用,不是做空按钮。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -330,12 +330,17 @@ function renderPerp(d){
         ?`<span class="num">HL <span style="color:var(--good)">+${c.sustained_ann}</span> · OKX <span style="color:${c.okx_ann>0?'var(--good)':'var(--danger)'}">${c.okx_ann>0?'+':''}${c.okx_ann}</span></span>`
         :`<span class="num" style="color:var(--good)">HL +${c.sustained_ann}%</span>`;
       const trade=c.cross?'<span class="chip b-accent">空HL·多OKX</span>':`<span class="chip b-good">${esc(c.hedge.includes("HL")?"HL现货":"CEX现货")}</span>`;
+      // NET is the honest headline (gross − amortized costs − rebalance). Gross secondary.
+      const netcol=c.net_ann>0
+        ?`<span class="num" style="color:var(--good);font-weight:650">+${c.net_ann}%</span>`
+        :`<span class="num" style="color:var(--danger)">${c.net_ann}%</span>`;
+      const hold=c.cross?(c.hold_measured?`<span class="num">${c.hold_days}d</span><small class="dim"> 实测</small>`:`<small class="dim">14d假设·未测</small>`):'<small class="dim">—</small>';
       return `<tr title="${esc(c.note)}">
         <td>${idc(c.symbol,c.tier)}</td>
-        <td class="n"><span class="num" style="color:var(--good);font-weight:650">+${c.edge_ann}%</span>${c.cross?'<small class="dim"> 跨所</small>':'<small class="dim"> 单腿</small>'}</td>
+        <td class="n">${netcol}<small class="dim"> 毛${c.edge_ann}</small></td>
         <td class="n">${struct}</td>
         <td>${trade}</td>
-        <td class="n">${pf!=null?`<span class="num">${(pf*100).toFixed(0)}%</span>`:'<small class="dim">积累中</small>'}</td>
+        <td class="n">${hold}</td>
         <td>${flags}</td></tr>`}).join("");
     const sc=d?.carry_scorecard;
     let scBanner="";
@@ -345,10 +350,10 @@ function renderPerp(d){
           <span class="v"><span class="num">${(sc.pos_frac*100).toFixed(0)}%</span><small>时间正费</small></span>
           <span class="v"><span class="num" style="color:var(--danger)">${sc.worst_ann}%</span><small>最差瞬时</small></span></div>`;
       } else scBanner=`<div class="sc-card muted"><span class="k">主流carry已实现战绩</span><span class="v">不可判 <small>${esc(sc.note||'')}</small></span></div>`; }
-    html+=`<div class="perp-sec">💰 跨所资金费套利 · delta中性 <small>研究验证的真核:HL资金费结构性高于CEX(机构够不着DEX腿)→ 空HL+多OKX两永续,吃差价,不需现货 · 年化为毛,未扣双所手续费/滑点 · 尾部=ADL级联(为崩盘sizing)</small></div>
+    html+=`<div class="perp-sec">💰 跨所资金费套利 · delta中性 <small>空HL+多OKX两永续吃差价,不需现货 · <b>净额=毛差 − 往返成本(~0.35%按持仓天数摊)− 再平衡~1.5%/年</b>,这才是真数 · 扣完成本多数机会薄甚至负 · 尾部=ADL级联(为崩盘sizing)</small></div>
       ${scBanner}
       <div class="scroll"><table class="tbl"><thead><tr>
-        <th>代币</th><th class="n">净差/年</th><th class="n">构成(HL/OKX)</th><th>交易</th><th class="n">持续性</th><th>风险</th>
+        <th>代币</th><th class="n">净额/年(毛)</th><th class="n">构成(HL/OKX)</th><th>交易</th><th class="n">持仓/摊销</th><th>风险</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   // ── CROWDING / IGNITION: directional observation — defensive, not a trade button ──
