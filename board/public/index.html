@@ -350,8 +350,20 @@ function renderPerp(d){
           <span class="v"><span class="num">${(sc.pos_frac*100).toFixed(0)}%</span><small>时间正费</small></span>
           <span class="v"><span class="num" style="color:var(--danger)">${sc.worst_ann}%</span><small>最差瞬时</small></span></div>`;
       } else scBanner=`<div class="sc-card muted"><span class="k">主流carry已实现战绩</span><span class="v">不可判 <small>${esc(sc.note||'')}</small></span></div>`; }
+    // paper-trade tracker: MEASURED hold_days + real slippage + realized-vs-predicted net
+    const pp=d?.carry_paper; let ppBanner="";
+    if(pp&&(pp.n_open||pp.n_closed)){
+      if(pp.n_closed&&pp.avg_realized_net!=null){
+        ppBanner=`<div class="sc-card"><span class="k">纸面实测·${pp.n_closed}个已平仓</span>
+          <span class="v"><span class="num" style="color:${pp.avg_realized_net>0?'var(--good)':'var(--danger)'}">${pp.avg_realized_net>0?'+':''}${pp.avg_realized_net}%</span><small>实测净额</small></span>
+          <span class="v"><span class="num dim">${pp.avg_predicted_net>0?'+':''}${pp.avg_predicted_net}%</span><small>当初预测</small></span>
+          <span class="v"><span class="num">${pp.avg_hold_days}d</span><small>实测持仓</small></span>
+          <span class="v"><span class="num">${pp.avg_slip_pct}%</span><small>实测滑点</small></span>
+          <span class="v"><span class="num dim">${pp.n_open}</span><small>运行中</small></span></div>`;
+      } else ppBanner=`<div class="sc-card muted"><span class="k">纸面追踪(实测持仓/滑点/净额)</span><span class="v">${pp.n_open}仓运行中·0平仓 <small>等差价衰减自然平仓→给真实持仓天数和净额,替掉假设</small></span></div>`;
+    }
     html+=`<div class="perp-sec">💰 跨所资金费套利 · delta中性 <small>空HL+多OKX两永续吃差价,不需现货 · <b>净额=毛差 − 往返成本(~0.35%按持仓天数摊)− 再平衡~1.5%/年</b>,这才是真数 · 扣完成本多数机会薄甚至负 · 尾部=ADL级联(为崩盘sizing)</small></div>
-      ${scBanner}
+      ${scBanner}${ppBanner}
       <div class="scroll"><table class="tbl"><thead><tr>
         <th>代币</th><th class="n">净额/年(毛)</th><th class="n">构成(HL/OKX)</th><th>交易</th><th class="n">持仓/摊销</th><th>风险</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;

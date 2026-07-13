@@ -305,8 +305,14 @@ def render_perps() -> dict:
         sigs = perp_signals(rows) if rows else []
         carry = carry_signals(rows) if rows else []
         scorecard = carry_scorecard()      # realized-carry track record (honest measurement)
+        paper = {}
+        try:                               # paper-trade tracker: measures hold_days + real
+            from src.pipeline.carry_paper import run as paper_run   # slippage (replaces the
+            paper = paper_run(carry)                                # last two assumptions)
+        except Exception as e:
+            logger.debug("carry_paper_failed", error=str(e)[:80])
         return _envelope({"perps": sigs, "carry": carry, "carry_scorecard": scorecard,
-                          "source": "Hyperliquid (keyless)",
+                          "carry_paper": paper, "source": "Hyperliquid (keyless)",
                           "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
                                    "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
                                    "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")})
