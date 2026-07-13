@@ -104,11 +104,18 @@ def _get_prices(ids: str = "bitcoin,ethereum,solana") -> dict[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# 1. TOKEN UNLOCK SIGNALS (highest documented edge)
+# 1. TOKEN UNLOCK EVENTS (directional rule parked)
 # ---------------------------------------------------------------------------
 
+# The repository's former YAML calendar is stale and the free third-party unlock
+# feed was independently found to fabricate loosely matched schedules.  An unlock
+# is still a useful *structure event*, but it must not produce an automated short
+# until a source with asset-level provenance is wired and replayed.  Keep this gate
+# explicit rather than silently trusting whichever YAML happens to be edited next.
+UNLOCK_DIRECTIONAL_SIGNAL_ENABLED = False
+
 def check_token_unlocks() -> list[TradeSignal]:
-    """Generate SHORT signals for upcoming large token unlocks.
+    """Generate SHORT signals for verified upcoming large token unlocks.
 
     Evidence: Keyrock study of 16,000 unlock events:
     - 90% of unlocks create negative price pressure
@@ -116,6 +123,11 @@ def check_token_unlocks() -> list[TradeSignal]:
     - Price impact begins 30 days before unlock
     - Unlocks >1% of supply: meaningful negative correlation (~16%)
     """
+    if not UNLOCK_DIRECTIONAL_SIGNAL_ENABLED:
+        logger.info("unlock_directional_rule_parked",
+                    reason="calendar/feed lacks verified asset-level provenance")
+        return []
+
     signals: list[TradeSignal] = []
 
     # Load unlock calendar
@@ -457,7 +469,8 @@ def generate_signals() -> list[TradeSignal]:
 
     all_signals: list[TradeSignal] = []
 
-    # 1. Token unlocks (highest edge, documented)
+    # 1. Token unlocks are currently event-only; no directional signal is emitted
+    # until a verifiable source and replay pass are available.
     try:
         all_signals.extend(check_token_unlocks())
     except Exception as e:
