@@ -281,8 +281,8 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>{const c=d?.carry||[];const mj=c.filter(x=>x.is_major).length;return `<b style="color:var(--good)">资金费套利是这里唯一对个人可复制的正EV核</b>:现货多+永续空,吃杠杆多头付的费,不赌方向。当前 <b>${c.length}</b> 个机会(<b>${mj}</b> 个主流)。下面拥挤/点火是方向观测,防御用不是买卖指令。`},
-    stat:d=>{const c=d?.carry||[];const mj=c.filter(x=>x.is_major).length;const top=c[0];return[["套利机会",c.length,""],["主流(较净)",mj,""],["最高年化",top?`+${top.sustained_ann}%`:"—",top?top.tier:""]]},
+    title:d=>{const c=d?.carry||[];const cr=c.filter(x=>x.cross).length;const top=c[0];return `<b style="color:var(--good)">跨所资金费差是研究验证的真核</b>:HL资金费结构性高于CEX(机构够不着DEX腿),空HL+多OKX两永续吃差价,不需现货。当前 <b>${cr}</b> 个跨所机会${top?`,最高净差 <b style="color:var(--good)">+${top.edge_ann}%/年</b>`:''}。下面拥挤/点火是方向观测。`},
+    stat:d=>{const c=d?.carry||[];const cr=c.filter(x=>x.cross).length;const top=c[0];return[["跨所机会",cr,""],["最高净差",top?`+${top.edge_ann}%`:"—",top?top.trade:""],["主流",c.filter(x=>x.is_major).length,""]]},
     readme:"这条线的<b>真核是💰资金费套利</b>(delta中性:现货多+永续空,吃杠杆多头付的费,~8%基准起,主流更净)——研究里唯一「个人真能做出正EV」的核。<b>但这是carry不是无风险套利</b>:费率翻负要倒付、空腿被挤压强平、交易所暴雷/脱锚(2025-10-10 USDe 在 Binance 砸到 $0.65 强平了偿付充足的账户)。年化为毛,未扣手续费/滑点。下面的拥挤/点火是<b>方向观测</b>:裸做多散户 74-89% 亏,当「我是不是站在被清算那侧」的防御用,不是做空按钮。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -323,16 +323,19 @@ function renderPerp(d){
   // ── CARRY: delta-neutral funding arbitrage — the ONE replicable positive-EV core ──
   if(carry.length){
     const rows=carry.slice(0,20).map(c=>{
-      const pf=c.pos_frac, drift=c.sustained_ann!==c.funding_ann;
-      const flags=c.flags.length?c.flags.map(f=>`<span class="chip b-warn">${esc(f.split(":")[0].split("(")[0])}</span>`).join(" ")
-                                :'<span class="chip b-good">干净</span>';
-      const hedge=(c.hedge||"").includes("HL")?'<span class="chip b-accent">HL现货</span>':'<span class="chip b-good">CEX现货</span>';
+      const pf=c.pos_frac;
+      const flags=c.flags.filter(f=>!f.includes("ADL")).map(f=>`<span class="chip b-warn">${esc(f.split(":")[0].split("(")[0])}</span>`).join(" ")||'<span class="chip b-good">干净</span>';
+      // structure: cross-venue two-perp (HL vs OKX) or single-venue spot hedge
+      const struct=c.cross
+        ?`<span class="num">HL <span style="color:var(--good)">+${c.sustained_ann}</span> · OKX <span style="color:${c.okx_ann>0?'var(--good)':'var(--danger)'}">${c.okx_ann>0?'+':''}${c.okx_ann}</span></span>`
+        :`<span class="num" style="color:var(--good)">HL +${c.sustained_ann}%</span>`;
+      const trade=c.cross?'<span class="chip b-accent">空HL·多OKX</span>':`<span class="chip b-good">${esc(c.hedge.includes("HL")?"HL现货":"CEX现货")}</span>`;
       return `<tr title="${esc(c.note)}">
         <td>${idc(c.symbol,c.tier)}</td>
-        <td class="n"><span class="num" style="color:var(--good)">+${c.sustained_ann}%</span>${drift?`<small class="dim"> 现${c.funding_ann>0?'+':''}${c.funding_ann}%</small>`:''}</td>
+        <td class="n"><span class="num" style="color:var(--good);font-weight:650">+${c.edge_ann}%</span>${c.cross?'<small class="dim"> 跨所</small>':'<small class="dim"> 单腿</small>'}</td>
+        <td class="n">${struct}</td>
+        <td>${trade}</td>
         <td class="n">${pf!=null?`<span class="num">${(pf*100).toFixed(0)}%</span>`:'<small class="dim">积累中</small>'}</td>
-        <td class="n"><span class="num">${usd(c.oi_usd)}</span></td>
-        <td>${hedge}</td>
         <td>${flags}</td></tr>`}).join("");
     const sc=d?.carry_scorecard;
     let scBanner="";
@@ -342,10 +345,10 @@ function renderPerp(d){
           <span class="v"><span class="num">${(sc.pos_frac*100).toFixed(0)}%</span><small>时间正费</small></span>
           <span class="v"><span class="num" style="color:var(--danger)">${sc.worst_ann}%</span><small>最差瞬时</small></span></div>`;
       } else scBanner=`<div class="sc-card muted"><span class="k">主流carry已实现战绩</span><span class="v">不可判 <small>${esc(sc.note||'')}</small></span></div>`; }
-    html+=`<div class="perp-sec">💰 资金费套利 · delta中性 <small>现货多+永续空,吃杠杆多头付的费,不赌方向 · 只列有现货腿可真对冲的(不可对冲的极端费率在下面拥挤图)· 年化为毛</small></div>
+    html+=`<div class="perp-sec">💰 跨所资金费套利 · delta中性 <small>研究验证的真核:HL资金费结构性高于CEX(机构够不着DEX腿)→ 空HL+多OKX两永续,吃差价,不需现货 · 年化为毛,未扣双所手续费/滑点 · 尾部=ADL级联(为崩盘sizing)</small></div>
       ${scBanner}
       <div class="scroll"><table class="tbl"><thead><tr>
-        <th>代币</th><th class="n">年化资金费</th><th class="n">持续性</th><th class="n">OI深度</th><th>对冲</th><th>风险</th>
+        <th>代币</th><th class="n">净差/年</th><th class="n">构成(HL/OKX)</th><th>交易</th><th class="n">持续性</th><th>风险</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   // ── CROWDING / IGNITION: directional observation — defensive, not a trade button ──
