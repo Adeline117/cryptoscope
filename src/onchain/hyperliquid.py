@@ -232,6 +232,31 @@ def _hl_spot_tokens() -> set[str]:
         return set()
 
 
+OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate?instId={}-USDT-SWAP"
+
+
+def okx_funding_map(coins: list[str], cap: int = 45) -> dict[str, float]:
+    """{coin: OKX annualized funding %} for the given coins (bounded loop, keyless).
+    OKX funds every 8h → *3*365. The cross-exchange EDGE lives here: HL is structurally
+    higher than CEX (institutions can't touch the DEX leg), so HL_ann − OKX_ann is a
+    delta-neutral two-perp carry (short the high-funding venue, long the low). Never
+    raises; a coin absent from OKX or a failed fetch is simply omitted (→ no false diff).
+    Binance/Bybit are geo-blocked (451/403) from here; OKX is the reachable CEX leg."""
+    out: dict[str, float] = {}
+    for c in coins[:cap]:
+        base = c[1:] if c.startswith("k") else c        # HL kPEPE → OKX PEPE
+        try:
+            req = urllib.request.Request(OKX_FUNDING_URL.format(base),
+                                         headers={"User-Agent": "Mozilla/5.0"})
+            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            rows = d.get("data") or []
+            if rows and rows[0].get("fundingRate") not in (None, ""):
+                out[c] = float(rows[0]["fundingRate"]) * 3 * 365 * 100
+        except Exception:
+            continue
+    return out
+
+
 def _funding_persistence(window_h: int = CARRY_WINDOW_H) -> dict[str, dict]:
     """Per coin over the last `window_h`: {coin: {mean_ann, pos_frac, n}} from the
     persisted snapshots. Empty until snapshots accrue — honestly absent, not faked."""
@@ -305,9 +330,13 @@ def carry_scorecard(window_h: int = SCORECARD_WINDOW_H) -> dict:
 
 
 def carry_signals(rows: list[dict] | None = None) -> list[dict]:
-    """Delta-neutral funding-carry opportunities (spot long + perp short), ranked by
-    quality = sustained funding × persistence, majors preferred. Every row carries its
-    tail-risk flags. Pass pre-fetched+stored `rows` to share one call with perp_signals."""
+    """Funding-carry opportunities, with the CROSS-EXCHANGE differential (HL vs OKX) as
+    the primary edge — the one research-validated play our breadth can capture: HL funding
+    is structurally higher than CEX (institutions can't touch the DEX leg), so short the
+    high-funding venue + long the low = a delta-neutral TWO-PERP carry, NO spot leg needed.
+    Falls back to single-venue (spot-hedged) carry when OKX lacks the perp. Ranked by the
+    cross-venue differential (or sustained HL funding), persistence-weighted, majors lifted.
+    Pass pre-fetched+stored `rows` to share one call with perp_signals."""
     if rows is None:
         rows = _fetch_ctxs()
         if not rows:
@@ -315,28 +344,37 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
         _store_and_diff(rows)      # also records funding for persistence history
     hist = _funding_persistence()
     hl_spot = _hl_spot_tokens()    # coins with a HL spot leg (single-venue hedge)
+    # candidates = coins with notable HL funding; fetch the OKX leg for just these.
+    cands = [r["name"] for r in rows
+             if r["oi_usd"] >= CARRY_MIN_OI_USD and r["funding_ann"] >= CARRY_MIN_ANN]
+    okx = okx_funding_map(cands)   # {coin: OKX ann %}; absent = no OKX perp
     out = []
     for r in rows:
         fa = r["funding_ann"]
         if r["oi_usd"] < CARRY_MIN_OI_USD or fa < CARRY_MIN_ANN:
             continue
         h = hist.get(r["name"])
-        # sustained = mean over window if we have history, else the current snapshot
-        sustained = h["mean_ann"] if h and h["n"] >= 3 else fa
+        sustained = h["mean_ann"] if h and h["n"] >= 3 else fa   # HL sustained funding
         pos_frac = h["pos_frac"] if h and h["n"] >= 3 else None
         is_major = r["name"] in CARRY_MAJORS
-        # executability: you can only run delta-neutral if a SPOT leg exists to hedge.
-        # majors → CEX spot; HL-spot coins → single-venue; neither → NOT executable.
         has_hl_spot = r["name"] in hl_spot
-        if is_major:
-            hedge = "外部现货(CEX)可对冲"
+        okx_ann = okx.get(r["name"])
+        cross = okx_ann is not None                      # both venues have the perp
+        # PRIMARY: cross-venue two-perp arb (no spot). FALLBACK: single-venue spot-hedge.
+        if cross:
+            cross_diff = sustained - okx_ann             # net you collect, delta-neutral
+            edge_ann = cross_diff
+            hedge = "跨所两永续(空HL多OKX)· 无需现货"
+        elif is_major:
+            edge_ann = sustained; hedge = "外部现货(CEX)可对冲"
         elif has_hl_spot:
-            hedge = "HL现货可单所对冲"
+            edge_ann = sustained; hedge = "HL现货可单所对冲"
         else:
-            # no spot leg → NOT a carry at all (a naked short = directional bet). Its
-            # extreme funding IS a crowded-longs signal — that lives in the heatmap
-            # below (perp_signals cascade), not in a table titled 'carry opportunities'.
+            # no OKX perp AND no spot leg → can't run delta-neutral. A naked short is a
+            # directional bet, not a carry — its extreme funding shows in the heatmap.
             continue
+        if cross and edge_ann < 3.0:
+            continue                                     # differential too thin to bother
         flags = []
         if not is_major:
             flags.append("非主流:清算/脱锚/深度风险高")
@@ -346,17 +384,22 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
             flags.append(f"费率不稳:仅{pos_frac*100:.0f}%时间为正,会倒付")
         if pos_frac is None:
             flags.append("持续性积累中(需多轮快照)")
-        # quality: reward sustained carry AND persistence AND depth; majors lifted.
+        flags.append("尾部:ADL级联(2025-10-10)会强平对冲腿——为崩盘sizing")
         pf = pos_frac if pos_frac is not None else 0.5
-        quality = sustained * pf * (1.3 if is_major else 1.0)
+        quality = edge_ann * pf * (1.3 if is_major else 1.0)
+        note = (f"跨所差 {edge_ann:.0f}%/年:空HL(+{sustained:.0f}%)、多OKX({okx_ann:+.0f}%),"
+                "两永续delta中性,不需现货。毛值未扣手续费/滑点/双所保证金。"
+                if cross else
+                f"现货多+永续空,吃约 {sustained:.0f}%/年(毛)。对冲:{hedge}。这是carry不是无风险套利。")
         out.append({
             "symbol": r["name"], "funding_ann": round(fa, 1),
             "sustained_ann": round(sustained, 1), "pos_frac": pos_frac,
+            "okx_ann": round(okx_ann, 1) if cross else None,
+            "cross_diff": round(cross_diff, 1) if cross else None, "cross": cross,
+            "edge_ann": round(edge_ann, 1), "trade": ("空HL·多OKX" if cross else "现货多·永续空"),
             "oi_usd": round(r["oi_usd"]), "is_major": is_major,
             "tier": "主流" if is_major else "山寨", "hedge": hedge,
-            "flags": flags, "n_snaps": h["n"] if h else 0, "_q": quality,
-            "note": (f"现货多+永续空,吃约 {sustained:.0f}%/年(毛,未扣手续费/滑点)。对冲:{hedge}。"
-                     "这是carry不是无风险套利——费率翻负要倒付,空腿保证金留足防挤压强平。"),
+            "flags": flags, "n_snaps": h["n"] if h else 0, "_q": quality, "note": note,
         })
     out.sort(key=lambda x: -x["_q"])
     for x in out:
