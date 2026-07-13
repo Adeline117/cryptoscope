@@ -33,9 +33,10 @@ DB = DATA_DIR / "carry_paper.db"
 NOTIONAL = 10_000.0        # paper size per leg — small enough that book slippage is real
 OPEN_MIN_NET = 8.0         # only paper-trade carries whose PREDICTED net clears this
 CLOSE_DIFF_FLOOR = 2.0     # differential decayed below this (ann %) → natural exit
-# fees are known, not assumed: HL taker 0.045%, OKX taker 0.05% → ~0.095%/leg, ×2 legs
-# ×(in+out) is folded in at close; slippage is MEASURED from the book, not assumed.
-FEE_PCT_PER_SIDE = 0.095
+# fees are known, not assumed. ONE direction across BOTH legs = HL taker 0.045% + OKX
+# taker 0.05% = 0.095%. A round trip (enter + exit) is 2× that = 0.19%. Slippage is
+# MEASURED from the book separately (entry_slip + exit_slip), never folded in here.
+FEE_PCT_ONEWAY_BOTHLEGS = 0.095
 _OKX_CTVAL: dict[str, float] = {}
 
 
@@ -155,7 +156,8 @@ def run(carries: list[dict]) -> dict:
                 # realized net %/yr = accrued funding annualized − all costs (slippage both
                 # sides + fees both legs both sides), amortized over the real hold.
                 hold_yr = max(hold_h / 8760.0, 1e-6)
-                cost = (entry_slip or 0) + exit_slip + 2 * FEE_PCT_PER_SIDE * 2  # 2 legs×(in+out)
+                # one-time round-trip cost = slippage in + slippage out + fees(2× one-way)
+                cost = (entry_slip or 0) + exit_slip + 2 * FEE_PCT_ONEWAY_BOTHLEGS
                 realized_net = accrued / hold_yr - cost / hold_yr
                 c.execute("UPDATE paper SET status='closed', exit_ts=?, exit_slip=?, hold_h=?, "
                           "accrued_pct=?, realized_net=?, last_ts=?, last_diff=? WHERE id=?",
