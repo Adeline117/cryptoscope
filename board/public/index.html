@@ -499,9 +499,12 @@ function paint(){
   const st=(L.stat(d)||[]).slice();
   const ls=data.stats?.lanes?.[view];
   if(ls){ if(ls.verdict==="measured"){
-      st.push(["本线命中率",`${(ls.rate*100).toFixed(0)}%`,`${ls.hits}/${ls.n} Wilson[${(ls.lo*100).toFixed(0)}-${(ls.hi*100).toFixed(0)}%]`]);
+      const measuredCost=ls.metric==="positive_after_estimated_cost";
+      st.push([measuredCost?"24h成本后为正":"本线命中率",`${(ls.rate*100).toFixed(0)}%`,`${ls.hits}/${ls.n} Wilson[${(ls.lo*100).toFixed(0)}-${(ls.hi*100).toFixed(0)}%]`]);
+      if(measuredCost) st.push(["24h净分布",`中位 ${ls.median_net_24h}%`,`P90 ${ls.p90_net_24h}% · P99 ${ls.p99_net_24h}% · 成本为估算,非实盘成交`]);
+      if(ls.edge_verdict) st.push(["相对优势",ls.edge_verdict,ls.edge_note||""]);
       if(ls.base_rate!=null) st.push(["vs 基准率",`${(ls.base_rate*100).toFixed(0)}%`,`lift ${ls.lift} · ${ls.edge||''}`]);
-    } else st.push(["本线命中率","不可判",`积累${ls.n}/20`]); }
+    } else if(ls.verdict==="不可判") st.push(["24h结果","不可判",`积累${ls.n}/20 · ${ls.edge_note||""}`]); }
   $("lanestat").innerHTML=st.map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
   $("rd").innerHTML=L.readme;
   $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));

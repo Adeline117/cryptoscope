@@ -1128,9 +1128,17 @@ async def _run_second_leg_assess():
 
 async def _run_resolve_outcomes():
     logger.info("scheduled_resolve_outcomes")
-    from src.pipeline.outcome_tracker import resolve_outcomes
+    import asyncio
 
-    resolve_outcomes()
+    from src.pipeline.outcome_tracker import resolve_outcomes
+    from src.pipeline.opportunity_outcomes import resolve as resolve_opportunities
+
+    # Both resolvers perform synchronous historical-price I/O. Keep them off the
+    # event loop and run sequentially inside the shared bounded executor so outcome
+    # measurement cannot starve the 3-minute discovery jobs or reopen the old FD leak.
+    alerts = await asyncio.to_thread(resolve_outcomes)
+    opportunities = await asyncio.to_thread(resolve_opportunities)
+    logger.info("scheduled_resolve_outcomes_done", alerts=alerts, **opportunities)
 
 
 async def _run_majors_monitor():

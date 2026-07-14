@@ -76,6 +76,11 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     # $25 is a hard cap for the first probe at $5k liquidity, rising only with depth.
     # This prevents a visual "opportunity" from silently implying an unfillable bet.
     max_notional = round(min(500.0, max(25.0, liq * 0.003)), 2)
+    # Frozen at discovery so later validation cannot choose a friendlier cost after
+    # seeing the return. This is a conservative model, not a claim of a real fill:
+    # constant-product impact on entry+exit plus a 0.60% DEX fee/routing buffer.
+    from src.pipeline.slippage import price_impact
+    roundtrip_cost = round(2 * price_impact(liq, max_notional) + 0.60, 3)
     ready = age_min <= 180 and buys >= 3 and flow_ratio >= 1.15 and vol5 >= liq * 0.015
     decision = "SMALL_PROBE" if ready else "WATCH"
     reasons = [f"首池 {age_min:.0f}m", f"FDV ${fdv:,.0f}", f"流动性 ${liq:,.0f}"]
@@ -90,6 +95,8 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
         "decision": decision, "entry_price": price,
         "invalidation_price": round(price * 0.70, 12),
         "max_notional_usd": max_notional, "age_min": round(age_min, 1),
+        "roundtrip_cost_pct_est": roundtrip_cost,
+        "cost_model": "constant_product_roundtrip_plus_0.60pct_buffer",
         "fdv": fdv, "liquidity_usd": liq, "volume_m5": vol5,
         "buys_m5": buys, "sells_m5": sells, "flow_ratio": round(flow_ratio, 2),
         "boost_active": boost, "pair": pair.get("pairAddress"), "url": pair.get("url"),

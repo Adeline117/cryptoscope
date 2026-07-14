@@ -35,6 +35,10 @@ def record_signals(signals: list[dict], now: datetime | None = None) -> int:
             "entry_price": float(price),
             "invalidation_price": round(float(price) * (1.03 if is_down else 0.97), 8),
             "max_notional_usd": 100.0,  # fixed probe while the lane earns its data
+            # Fixed conservative paper-cost buffer until live entry/exit book replay is
+            # wired. It is explicitly an estimate and never presented as a real fill.
+            "roundtrip_cost_pct_est": 0.20,
+            "cost_model": "perp_roundtrip_0.20pct_buffer",
             "signal": sig.get("signal"), "direction": direction,
             "funding_ann": sig.get("funding_ann"), "oi_usd": sig.get("oi_usd"),
             "oi_chg_pct": sig.get("oi_chg_pct"), "why": sig.get("why"),

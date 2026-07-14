@@ -37,14 +37,17 @@ def test_ledger_keeps_first_seen_entry_when_event_is_refreshed(tmp_path, monkeyp
     import src.pipeline.opportunity_ledger as ol
     monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
     first = {"lane": "launch", "chain": "solana", "token": "Token", "symbol": "T",
-             "entry_price": 0.01, "state": "live", "decision": "WATCH"}
+             "entry_price": 0.01, "state": "live", "decision": "WATCH",
+             "roundtrip_cost_pct_est": 1.2, "cost_model": "first_snapshot"}
     _, inserted = ol.record(first)
     assert inserted
-    second = {**first, "entry_price": 0.10, "decision": "SMALL_PROBE"}
+    second = {**first, "entry_price": 0.10, "decision": "SMALL_PROBE",
+              "roundtrip_cost_pct_est": 9.9, "cost_model": "later_refresh"}
     _, inserted = ol.record(second)
     assert not inserted
     row = ol.active("launch")[0]
     assert row["entry_price"] == 0.01
+    assert row["cost_pct_est"] == 1.2 and row["cost_model"] == "first_snapshot"
     assert row["decision"] == "SMALL_PROBE"
 
 

@@ -21,14 +21,22 @@ LANES = {"launch", "cascade", "structure", "airdrop", "carry"}
 def _conn() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=10)
+    c.execute("PRAGMA busy_timeout=8000")
     c.execute("""CREATE TABLE IF NOT EXISTS opportunities(
         id TEXT PRIMARY KEY, lane TEXT NOT NULL, chain TEXT, token TEXT,
         symbol TEXT, detected_at TEXT NOT NULL, event_at TEXT, source TEXT,
         state TEXT NOT NULL, decision TEXT NOT NULL, entry_price REAL,
-        invalidation_price REAL, max_notional_usd REAL, payload TEXT NOT NULL,
+        invalidation_price REAL, max_notional_usd REAL, cost_pct_est REAL,
+        cost_model TEXT, payload TEXT NOT NULL,
         outcome_state TEXT NOT NULL DEFAULT 'open', outcome TEXT,
         updated_at TEXT NOT NULL
     )""")
+    # Additive migration for ledgers created before discovery-time costs were frozen.
+    cols = {r[1] for r in c.execute("PRAGMA table_info(opportunities)").fetchall()}
+    if "cost_pct_est" not in cols:
+        c.execute("ALTER TABLE opportunities ADD COLUMN cost_pct_est REAL")
+    if "cost_model" not in cols:
+        c.execute("ALTER TABLE opportunities ADD COLUMN cost_model TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_lane_open "
               "ON opportunities(lane, outcome_state, detected_at DESC)")
     return c
@@ -62,14 +70,15 @@ def record(candidate: dict) -> tuple[str, bool]:
               candidate.get("source", "unknown"), candidate.get("state", "new"),
               candidate.get("decision", "WATCH"), candidate.get("entry_price"),
               candidate.get("invalidation_price"), candidate.get("max_notional_usd"),
-              payload, now)
+              candidate.get("roundtrip_cost_pct_est"), candidate.get("cost_model"), payload, now)
     c = _conn()
     try:
         inserted = c.execute("SELECT 1 FROM opportunities WHERE id=?", (ident,)).fetchone() is None
         c.execute("""INSERT INTO opportunities(
               id,lane,chain,token,symbol,detected_at,event_at,source,state,decision,
-              entry_price,invalidation_price,max_notional_usd,payload,updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
+              payload,updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO UPDATE SET
                 state=excluded.state, decision=excluded.decision, payload=excluded.payload,
                 updated_at=excluded.updated_at
@@ -88,7 +97,8 @@ def active(lane: str, limit: int = 50) -> list[dict]:
     try:
         rows = c.execute("""SELECT id, lane, chain, token, symbol, detected_at, event_at,
                                   source, state, decision, entry_price, invalidation_price,
-                                  max_notional_usd, payload
+                                  max_notional_usd, cost_pct_est, cost_model, payload,
+                                  outcome_state, outcome
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
     finally:
@@ -97,7 +107,8 @@ def active(lane: str, limit: int = 50) -> list[dict]:
     for row in rows:
         keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
                 "source", "state", "decision", "entry_price", "invalidation_price",
-                "max_notional_usd", "payload")
+                "max_notional_usd", "cost_pct_est", "cost_model", "payload",
+                "outcome_state", "outcome")
         item = dict(zip(keys, row))
         try:
             payload = json.loads(item.pop("payload"))
@@ -105,9 +116,64 @@ def active(lane: str, limit: int = 50) -> list[dict]:
             # Enrichment payload may contain newer market values, but it must never
             # rewrite the entry, invalidation, size cap, or discovery timestamp.
             for key, value in payload.items():
-                if key not in {"entry_price", "invalidation_price", "max_notional_usd", "detected_at"}:
+                if key not in {"entry_price", "invalidation_price", "max_notional_usd",
+                               "roundtrip_cost_pct_est", "cost_model", "detected_at"}:
                     item[key] = value
         except (TypeError, json.JSONDecodeError):
             item.pop("payload", None)
+        if item.get("outcome"):
+            try:
+                item["outcome"] = json.loads(item["outcome"])
+            except (TypeError, json.JSONDecodeError):
+                item["outcome"] = None
         out.append(item)
     return out
+
+
+def outcome_rows(*, open_only: bool = False) -> list[dict]:
+    """Return immutable event facts plus their mutable measurement record.
+
+    This is intentionally a separate read surface from :func:`active`: the board's
+    live-event list can age out, while the validation sample must retain every trial.
+    The first-seen price/plan comes from columns, never from the refreshable payload.
+    """
+    c = _conn()
+    try:
+        where = "WHERE outcome_state='open'" if open_only else ""
+        rows = c.execute(f"""SELECT id,lane,chain,token,symbol,detected_at,event_at,
+                                    source,state,decision,entry_price,invalidation_price,
+                                    max_notional_usd,cost_pct_est,cost_model,payload,
+                                    outcome_state,outcome,updated_at
+                             FROM opportunities {where}
+                             ORDER BY detected_at ASC""").fetchall()
+    finally:
+        c.close()
+    keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
+            "source", "state", "decision", "entry_price", "invalidation_price",
+            "max_notional_usd", "cost_pct_est", "cost_model", "payload",
+            "outcome_state", "outcome", "updated_at")
+    out = []
+    for row in rows:
+        item = dict(zip(keys, row))
+        for key in ("payload", "outcome"):
+            try:
+                item[key] = json.loads(item[key]) if item.get(key) else {}
+            except (TypeError, json.JSONDecodeError):
+                item[key] = {}
+        out.append(item)
+    return out
+
+
+def save_outcome(ident: str, outcome: dict, state: str = "open") -> None:
+    """Update only the measurement side of an event; never its entry snapshot."""
+    if state not in {"open", "resolved", "unresolvable"}:
+        raise ValueError(f"unknown outcome state: {state}")
+    now = datetime.now(timezone.utc).isoformat()
+    c = _conn()
+    try:
+        c.execute("UPDATE opportunities SET outcome_state=?,outcome=?,updated_at=? WHERE id=?",
+                  (state, json.dumps(outcome, ensure_ascii=False, separators=(",", ":")),
+                   now, ident))
+        c.commit()
+    finally:
+        c.close()

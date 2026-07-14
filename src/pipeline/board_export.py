@@ -306,9 +306,15 @@ def render_stats(opportunities: dict | None) -> dict:
         # fake number.
         board_outcomes.log_picks("opp", picks)
         board_outcomes.resolve()
-        return _envelope({"lanes": board_outcomes.lane_stats(),
-                          "note": "每条线 pick 的事后命中率(对照滑点门槛,4h/24h,GeckoTerminal取价)。"
-                                  "样本<20 显示'不可判'——不拿不足的样本报假数字(44%教训)。刚开始积累。"})
+        lanes = board_outcomes.lane_stats()
+        # The five-lane ledger has its own immutable first-seen snapshots and is
+        # resolved hourly by the scheduler. Rendering stays read-only: a dashboard
+        # refresh must never choose the observation time or trigger a large backfill.
+        from src.pipeline.opportunity_outcomes import lane_stats as opportunity_lane_stats
+        lanes.update(opportunity_lane_stats())
+        return _envelope({"lanes": lanes,
+                          "note": "五线事件按首次价结算1h/24h/7d并扣发现时冻结的成本估算。"
+                                  "样本<20或缺同期对照时只报不可判；纸面成本不冒充真实成交。"})
     except Exception as e:
         logger.warning("render_stats_failed", error=str(e)[:120])
         return _envelope({"lanes": {}, "error": str(e)[:120]})
