@@ -130,7 +130,8 @@ def _cielo_smart_buys(chains: str = "eth,bsc,base,solana", list_id: int = 75168,
                f"&txTypes=swap&newTrades=true&chains={chains}&minUSD={min_usd}&limit={limit}")
         req = urllib.request.Request(url, headers={"X-API-KEY": key,
                                                    "User-Agent": "falsifier-board/0.1"})
-        d = json.loads(urllib.request.urlopen(req, timeout=20).read())
+        with urllib.request.urlopen(req, timeout=20) as response:
+            d = json.loads(response.read())
     except Exception as e:
         logger.warning("cielo_fetch_failed", error=str(e)[:100])
         return None
@@ -369,7 +370,8 @@ def _dex_direction(token: str, chain: str) -> dict:
     try:
         u = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
         req = urllib.request.Request(u, headers={"User-Agent": "CryptoScope/1.0"})
-        d = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+        with urllib.request.urlopen(req, timeout=15) as response:
+            d = json.loads(response.read().decode())
         pairs = d if isinstance(d, list) else d.get("pairs", [])
         if not pairs:
             return {}

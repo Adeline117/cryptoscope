@@ -91,9 +91,9 @@ def _events_etherscan(token: str, chainid: int, decimals: int, max_pages: int = 
              f"&address={token}&topic0={_TRANSFER_TOPIC}&fromBlock={frm}&toBlock={to_block}"
              f"&page=1&offset=1000&apikey={keys[p % len(keys)]}")
         try:
-            r = json.loads(urllib.request.urlopen(
-                urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=25
-            ).read().decode())
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=25) as response:
+                r = json.loads(response.read().decode())
         except Exception:
             return ((inflow, net, False) if inflow else (None, None, False))
         res = r.get("result")
@@ -448,7 +448,8 @@ def _dexscreener(token: str) -> dict:
         req = urllib.request.Request(
             f"https://api.dexscreener.com/latest/dex/tokens/{token}",
             headers={"User-Agent": "Mozilla/5.0"})
-        d = json.loads(urllib.request.urlopen(req, timeout=15).read().decode()) or {}
+        with urllib.request.urlopen(req, timeout=15) as response:
+            d = json.loads(response.read().decode()) or {}
     except Exception:
         d = {}
     _DS_CACHE[tl] = d

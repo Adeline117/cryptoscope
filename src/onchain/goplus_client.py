@@ -72,7 +72,8 @@ def token_security(token: str, chain: str, timeout: int = 20) -> dict:
     url = f"{_API}/{cid}?contract_addresses={token}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        d = json.loads(urllib.request.urlopen(req, timeout=timeout).read().decode())
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            d = json.loads(response.read().decode())
     except Exception as e:
         logger.debug("goplus_fetch_failed", token=token, error=str(e)[:60])
         return {"available": False, "reason": f"fetch failed: {str(e)[:40]}"}

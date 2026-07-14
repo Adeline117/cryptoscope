@@ -35,7 +35,8 @@ def _fs_get(url: str, timeout: int = 75) -> dict | None:
         body = json.dumps({"cmd": "request.get", "url": url, "maxTimeout": 60000}).encode()
         req = urllib.request.Request(FLARESOLVERR_URL, data=body,
                                      headers={"Content-Type": "application/json"})
-        r = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            r = json.loads(response.read())
         sol = r.get("solution") or {}
         if sol.get("status") != 200:
             return None

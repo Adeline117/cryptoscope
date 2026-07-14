@@ -77,10 +77,11 @@ def _token_liquidity(token: str, chain: str) -> float | None:
     import json
     import urllib.request
     try:
-        r = urllib.request.urlopen(urllib.request.Request(
+        req = urllib.request.Request(
             f"https://api.dexscreener.com/tokens/v1/{chain}/{token}",
-            headers={"User-Agent": "Mozilla/5.0"}), timeout=15)
-        data = json.loads(r.read().decode())
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode())
     except Exception:
         return None
     pairs = data if isinstance(data, list) else (data.get("pairs") or [])

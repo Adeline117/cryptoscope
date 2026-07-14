@@ -45,7 +45,8 @@ def _fetch_ctxs() -> list[dict]:
         req = urllib.request.Request(
             INFO_URL, data=json.dumps({"type": "metaAndAssetCtxs"}).encode(),
             headers={"Content-Type": "application/json"})
-        d = json.loads(urllib.request.urlopen(req, timeout=20).read())
+        with urllib.request.urlopen(req, timeout=20) as response:
+            d = json.loads(response.read())
     except Exception as e:
         logger.warning("hyperliquid_fetch_failed", error=str(e)[:100])
         return []
@@ -241,7 +242,8 @@ def _hl_spot_tokens() -> set[str]:
         req = urllib.request.Request(
             INFO_URL, data=json.dumps({"type": "spotMeta"}).encode(),
             headers={"Content-Type": "application/json"})
-        d = json.loads(urllib.request.urlopen(req, timeout=15).read())
+        with urllib.request.urlopen(req, timeout=15) as response:
+            d = json.loads(response.read())
         idx = {t["index"]: t["name"] for t in d.get("tokens", [])}
         bases = set()
         for u in d.get("universe", []):
@@ -323,7 +325,8 @@ def okx_funding_map(coins: list[str], cap: int = 45) -> dict[str, float]:
         try:
             req = urllib.request.Request(OKX_FUNDING_URL.format(base),
                                          headers={"User-Agent": "Mozilla/5.0"})
-            d = json.loads(urllib.request.urlopen(req, timeout=8).read())
+            with urllib.request.urlopen(req, timeout=8) as response:
+                d = json.loads(response.read())
             rows = d.get("data") or []
             if rows and rows[0].get("fundingRate") not in (None, ""):
                 out[c] = float(rows[0]["fundingRate"]) * 3 * 365 * 100

@@ -139,9 +139,11 @@ def _gather_young(chains=("bsc", "base"), pages: int = 3) -> list[dict]:
     out = []
     for a, ch in addrs:
         try:
-            d = json.loads(urllib.request.urlopen(urllib.request.Request(
+            req = urllib.request.Request(
                 f"https://api.dexscreener.com/tokens/v1/{ch}/{a}",
-                headers={"User-Agent": "Mozilla/5.0"}), timeout=12).read())
+                headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=12) as response:
+                d = json.loads(response.read())
         except Exception:
             continue
         pr = max((x for x in (d if isinstance(d, list) else [])),
@@ -300,9 +302,11 @@ def classify(cand: dict) -> dict | None:
 def _dex_candidate(token: str, chain: str) -> dict | None:
     """Re-fetch a monitored token's current market data so analyze() can run on it."""
     try:
-        d = json.loads(urllib.request.urlopen(urllib.request.Request(
+        req = urllib.request.Request(
             f"https://api.dexscreener.com/tokens/v1/{chain}/{token}",
-            headers={"User-Agent": "Mozilla/5.0"}), timeout=12).read())
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=12) as response:
+            d = json.loads(response.read())
     except Exception:
         return None
     pr = max((x for x in (d if isinstance(d, list) else [])),
