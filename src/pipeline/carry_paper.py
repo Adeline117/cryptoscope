@@ -53,14 +53,16 @@ def _conn() -> sqlite3.Connection:
 
 
 def _get(url: str, timeout: int = 10):
-    return json.loads(urllib.request.urlopen(
-        urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=timeout).read())
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read())
 
 
 def _post(url: str, body: dict, timeout: int = 10):
-    return json.loads(urllib.request.urlopen(urllib.request.Request(
-        url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}),
-        timeout=timeout).read())
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read())
 
 
 def _okx_ctval(coin: str) -> float:

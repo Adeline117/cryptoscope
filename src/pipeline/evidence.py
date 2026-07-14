@@ -160,9 +160,9 @@ def _ohlcv(chain: str, pool: str, before: int | None = None,
     last = None
     for attempt in range(4):                     # free tier ~30/min → pace + retry
         try:
-            r = urllib.request.urlopen(
-                urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=25)
-            d = json.load(r)
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=25) as response:
+                d = json.load(response)
             out = (d.get("data") or {}).get("attributes", {}).get("ohlcv_list") or []
             _CANDLE_CACHE[key] = out
             time.sleep(2.2)
@@ -181,10 +181,11 @@ def _deepest_pool(token: str, chain: str) -> str | None:
     if key in _POOL_CACHE:
         return _POOL_CACHE[key]
     try:
-        r = urllib.request.urlopen(urllib.request.Request(
+        req = urllib.request.Request(
             f"https://api.dexscreener.com/latest/dex/tokens/{token}",
-            headers={"User-Agent": "Mozilla/5.0"}), timeout=20)
-        pairs = [p for p in (json.load(r).get("pairs") or []) if p.get("pairAddress")]
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as response:
+            pairs = [p for p in (json.load(response).get("pairs") or []) if p.get("pairAddress")]
         time.sleep(0.4)
     except Exception:
         return None
