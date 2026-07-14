@@ -2,7 +2,7 @@
 
 
 def test_scheduler_worker_budget_is_bounded(monkeypatch):
-    from src.pipeline.scheduler import _scheduler_worker_count
+    from src.pipeline.scheduler import _scheduler_log_level, _scheduler_worker_count
 
     monkeypatch.delenv("SCHEDULER_MAX_WORKERS", raising=False)
     assert _scheduler_worker_count() == 8
@@ -15,3 +15,12 @@ def test_scheduler_worker_budget_is_bounded(monkeypatch):
 
     monkeypatch.setenv("SCHEDULER_MAX_WORKERS", "not-a-number")
     assert _scheduler_worker_count() == 8
+
+    monkeypatch.delenv("SCHEDULER_LOG_LEVEL", raising=False)
+    assert _scheduler_log_level() == 20  # logging.INFO
+
+    monkeypatch.setenv("SCHEDULER_LOG_LEVEL", "warning")
+    assert _scheduler_log_level() == 30  # logging.WARNING
+
+    monkeypatch.setenv("SCHEDULER_LOG_LEVEL", "not-a-level")
+    assert _scheduler_log_level() == 20

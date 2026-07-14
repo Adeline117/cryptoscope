@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -28,6 +29,24 @@ def _scheduler_worker_count() -> int:
         return max(2, min(12, int(os.getenv("SCHEDULER_MAX_WORKERS", "8"))))
     except ValueError:
         return 8
+
+
+def _scheduler_log_level() -> int:
+    """Resolve the scheduler's durable operational log level safely."""
+    name = os.getenv("SCHEDULER_LOG_LEVEL", "INFO").upper()
+    level = logging.getLevelName(name)
+    return level if isinstance(level, int) else logging.INFO
+
+
+def _configure_runtime_logging() -> None:
+    """Drop per-RPC debug noise from the 24/7 LaunchAgent log.
+
+    The underlying collectors emit one debug line for many ordinary fallback/RPC
+    failures.  With launchd appending stdout indefinitely, that turned into hundreds
+    of MB per day and obscured actionable warnings.  INFO remains the default;
+    operators can set SCHEDULER_LOG_LEVEL=DEBUG temporarily for investigation.
+    """
+    structlog.configure(wrapper_class=structlog.make_filtering_bound_logger(_scheduler_log_level()))
 
 
 def create_scheduler() -> AsyncIOScheduler:
@@ -1392,6 +1411,8 @@ async def main():
     except ImportError:
         pass
 
+    _configure_runtime_logging()
+
     # All ``asyncio.to_thread`` calls share this executor.  Keep it bounded so
     # concurrent recurring scans cannot exhaust sockets/files/SQLite descriptors.
     # APScheduler itself still executes async job coroutines on the event loop.
@@ -1400,7 +1421,8 @@ async def main():
     )
     asyncio.get_running_loop().set_default_executor(executor)
 
-    logger.info("starting_scheduler", io_workers=_scheduler_worker_count())
+    logger.info("starting_scheduler", io_workers=_scheduler_worker_count(),
+                log_level=logging.getLevelName(_scheduler_log_level()))
     scheduler = create_scheduler()
     scheduler.start()
 
