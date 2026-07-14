@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from concurrent.futures import ThreadPoolExecutor
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -11,6 +13,21 @@ from apscheduler.triggers.cron import CronTrigger
 from src.config import load_settings
 
 logger = structlog.get_logger()
+
+
+def _scheduler_worker_count() -> int:
+    """Return a deliberately bounded shared-worker budget.
+
+    The pipelines are I/O heavy and most of their synchronous work is submitted by
+    ``asyncio.to_thread``.  Python's implicit executor can create up to 32 workers,
+    which allowed several overlapping scans to open enough HTTP/SQLite handles to
+    exhaust the macOS process descriptor limit.  A small shared pool is a safety
+    boundary: latency is preferable to a dead scheduler and silently missed events.
+    """
+    try:
+        return max(2, min(12, int(os.getenv("SCHEDULER_MAX_WORKERS", "8"))))
+    except ValueError:
+        return 8
 
 
 def create_scheduler() -> AsyncIOScheduler:
@@ -1375,7 +1392,15 @@ async def main():
     except ImportError:
         pass
 
-    logger.info("starting_scheduler")
+    # All ``asyncio.to_thread`` calls share this executor.  Keep it bounded so
+    # concurrent recurring scans cannot exhaust sockets/files/SQLite descriptors.
+    # APScheduler itself still executes async job coroutines on the event loop.
+    executor = ThreadPoolExecutor(
+        max_workers=_scheduler_worker_count(), thread_name_prefix="cryptoscope-io"
+    )
+    asyncio.get_running_loop().set_default_executor(executor)
+
+    logger.info("starting_scheduler", io_workers=_scheduler_worker_count())
     scheduler = create_scheduler()
     scheduler.start()
 
@@ -1386,6 +1411,8 @@ async def main():
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
         logger.info("scheduler_stopped")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 if __name__ == "__main__":
