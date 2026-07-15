@@ -119,3 +119,24 @@ async def test_wallet_watch_job_never_calls_perps_renderer(monkeypatch):
 
     await scheduler._run_smart_wallet_watch()
     assert rendered == [{"watch"}]
+
+
+@pytest.mark.asyncio
+async def test_regular_board_export_excludes_operator_scan(monkeypatch):
+    from src.pipeline import board_export, scheduler
+
+    calls = []
+    monkeypatch.setattr(board_export, "run",
+                        lambda push, include_operators: calls.append((push, include_operators))
+                        or {"views_written": 0})
+    await scheduler._run_board_export()
+    assert calls == [(True, False)]
+
+
+def test_operator_export_has_an_independent_scheduler_job():
+    from src.pipeline.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    assert "operator_export" in jobs and "board_export" in jobs
+    assert jobs["operator_export"].func is not jobs["board_export"].func

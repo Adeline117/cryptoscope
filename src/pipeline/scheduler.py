@@ -202,13 +202,19 @@ def create_scheduler() -> AsyncIOScheduler:
         name="自检 (标注案例+链上真值网关 → 失败即告警)",
     )
 
-    # Falsifier-board export: render operators/traders JSON views + push to Vercel
-    # Blob (the public board polls those URLs). 45min keeps next_expected_at honest.
+    # General board export excludes the minutes-long operator verdict scan. Operators
+    # have their own guarded job below, so one slow RPC fan-out cannot hold every view.
     scheduler.add_job(
         _run_board_export,
         CronTrigger(minute=50),
         id="board_export",
-        name="证伪器看板导出 (operators/traders JSON → Vercel Blob)",
+        name="证伪器看板常规视图导出 → Vercel Blob",
+    )
+    scheduler.add_job(
+        _run_operator_export,
+        CronTrigger(minute=10),
+        id="operator_export",
+        name="Operators 独立慢速判决导出 → Blob",
     )
 
     # EARLIEST lane: poll watched proven wallets' fresh buys every 15 min (much more
@@ -708,17 +714,33 @@ async def _run_structure_radar():
 
 
 async def _run_board_export():
-    """Render + push the falsifier-board JSON views. render_operators() runs the
-    verdict engine over all sentinels (minutes of RPC) — keep it off the event loop."""
+    """Render regular views without the minutes-long operator verdict scan."""
     import asyncio
 
     logger.info("scheduled_board_export")
     from src.pipeline import board_export
     try:
-        res = await asyncio.to_thread(board_export.run, True)
+        res = await asyncio.to_thread(board_export.run, True, False)
         logger.info("board_export_done", **res)
     except Exception as e:
         logger.error("board_export_failed", error=str(e)[:120])
+
+
+async def _run_operator_export():
+    """Render operators alone and serialize it with other descriptor-heavy scans."""
+    import asyncio
+
+    logger.info("scheduled_operator_export")
+    from src.pipeline import board_export
+    try:
+        async with _heavy_io_lock():
+            operators = await asyncio.to_thread(board_export.render_operators)
+        paths = await asyncio.to_thread(board_export.write_views, operators=operators)
+        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("operator_export_done", operators=len(operators.get("operators", [])),
+                    pushed=pushed)
+    except Exception as e:
+        logger.error("operator_export_failed", error=str(e)[:120])
 
 
 async def _run_health_summary():
