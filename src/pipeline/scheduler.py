@@ -276,8 +276,8 @@ def create_scheduler() -> AsyncIOScheduler:
     )
 
     # Operator sentinel → watch confirmed clusters (BASED…) for distribute/rug/
-    # launch every 15 min. A full 12-target pass normally takes 6-8 minutes, so the
-    # old five-minute trigger guaranteed max_instances skips and noisy false alarms.
+    # launch every 15 min. The transfer-heavy pass rotates a bounded target batch;
+    # the previous full pass could exceed 11 minutes when one RPC fallback stalled.
     # A relative interval also avoids a permanent collision with :00/:30 accumulation.
     scheduler.add_job(
         _run_operator_sentinel,

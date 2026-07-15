@@ -257,6 +257,20 @@ def test_operator_sentinel_interval_matches_observed_runtime():
     assert job.trigger.interval.total_seconds() == 15 * 60
 
 
+def test_transfer_sentinel_rotates_bounded_targets_across_slots():
+    from src.pipeline import operator_sentinel
+
+    targets = {f"target-{i:02d}": {"symbol": f"T{i:02d}"} for i in range(12)}
+    batches = [
+        operator_sentinel._rotating_transfer_targets(targets, slot * 15 * 60)
+        for slot in range(4)
+    ]
+
+    assert all(len(batch) == operator_sentinel.TRANSFER_TARGETS_PER_RUN == 3
+               for batch in batches)
+    assert set().union(*(set(batch) for batch in batches)) == set(targets)
+
+
 def test_launch_quote_refresh_has_bounded_independent_fast_job():
     from src.pipeline.scheduler import create_scheduler
 

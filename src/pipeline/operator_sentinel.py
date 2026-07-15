@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -34,6 +35,7 @@ from src.config import DATA_DIR
 logger = structlog.get_logger()
 
 SENTINELS_FILE = DATA_DIR / "operator_sentinels.json"
+TRANSFER_TARGETS_PER_RUN = 3
 
 
 def _read_json_response(request: urllib.request.Request, timeout: int) -> object:
@@ -891,14 +893,32 @@ def register(token: str, chain: str, symbol: str, wallets: list[str],
     return data[key]
 
 
-def check_run(use_transfers: bool = False) -> list[dict]:
+def _rotating_transfer_targets(targets: dict, now_ts: float) -> dict:
+    """Bound the expensive transfer pass and cover every target across time slots."""
+    if len(targets) <= TRANSFER_TARGETS_PER_RUN:
+        return targets
+    keys = sorted(targets)
+    slot = int(now_ts // (15 * 60))
+    start = (slot * TRANSFER_TARGETS_PER_RUN) % len(keys)
+    selected = [keys[(start + offset) % len(keys)]
+                for offset in range(TRANSFER_TARGETS_PER_RUN)]
+    return {key: targets[key] for key in selected}
+
+
+def check_run(use_transfers: bool = False, *, now_ts: float | None = None) -> list[dict]:
     """One monitoring pass over all registered targets. Returns fired alerts and
     persists updated last-seen state. Network I/O runs OUTSIDE the lock (#7).
 
-    use_transfers=True (5-min scheduler): detect buy/sell via TRANSFERS — reliable
-    even for reflection/wash tokens where balanceOf lies (EVAA). False (20s watcher):
-    cheap balanceOf + price only (fast, free, no Moralis)."""
-    targets = _load()
+    use_transfers=True (15-min rotating scheduler): detect buy/sell via TRANSFERS —
+    reliable even for reflection/wash tokens where balanceOf lies (EVAA). False
+    (20s watcher): cheap balanceOf + price only (fast, free, no Moralis)."""
+    all_targets = _load()
+    targets = (_rotating_transfer_targets(
+        all_targets, now_ts if now_ts is not None else time.time())
+        if use_transfers else all_targets)
+    if use_transfers and len(targets) < len(all_targets):
+        logger.info("operator_sentinel_rotation", selected=len(targets),
+                    total=len(all_targets), symbols=[t.get("symbol") for t in targets.values()])
     measured = {k: _measure(t["token"], t["chain"], t["wallets"], t.get("symbol", ""))
                 for k, t in targets.items()}
     flows = {}
