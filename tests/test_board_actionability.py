@@ -98,6 +98,15 @@ def test_launch_action_requires_statistical_evidence_gate():
     assert "优势门:" in html
 
 
+def test_launch_detail_prefers_current_assessment_gate_evidence():
+    html = BOARD.read_text()
+
+    assert "const ca=r.current_assessment||{}" in html
+    assert "sg=ca.security_gate||r.security_gate||{}" in html
+    assert "ep=ca.execution_probe||r.execution_probe||{}" in html
+    assert "sg=r.security_gate||{},ep=r.execution_probe||{}" not in html
+
+
 def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
     html = BOARD.read_text()
 
