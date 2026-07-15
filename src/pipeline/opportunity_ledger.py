@@ -40,6 +40,7 @@ def _conn() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=10)
     c.execute("PRAGMA busy_timeout=8000")
+    c.execute("PRAGMA foreign_keys=ON")
     c.execute("""CREATE TABLE IF NOT EXISTS opportunities(
         id TEXT PRIMARY KEY, lane TEXT NOT NULL, chain TEXT, token TEXT,
         symbol TEXT, detected_at TEXT NOT NULL, event_at TEXT,
@@ -47,7 +48,8 @@ def _conn() -> sqlite3.Connection:
         source TEXT,
         state TEXT NOT NULL, decision TEXT NOT NULL, entry_price REAL,
         invalidation_price REAL, max_notional_usd REAL, cost_pct_est REAL,
-        cost_model TEXT, cohort_version INTEGER, payload TEXT NOT NULL,
+        cost_model TEXT, cost_contract_version INTEGER, cost_contract TEXT,
+        cohort_version INTEGER, payload TEXT NOT NULL,
         outcome_state TEXT NOT NULL DEFAULT 'open', outcome TEXT,
         updated_at TEXT NOT NULL
     )""")
@@ -61,6 +63,10 @@ def _conn() -> sqlite3.Connection:
         # Deliberately NULL for legacy rows: their decision was mutable before v2,
         # so they must never be smuggled into the frozen WATCH-vs-PROBE comparison.
         c.execute("ALTER TABLE opportunities ADD COLUMN cohort_version INTEGER")
+    if "cost_contract_version" not in cols:
+        c.execute("ALTER TABLE opportunities ADD COLUMN cost_contract_version INTEGER")
+    if "cost_contract" not in cols:
+        c.execute("ALTER TABLE opportunities ADD COLUMN cost_contract TEXT")
     # Canonical event clocks. Only decision_at can be truthfully reconstructed for
     # legacy rows: the old first-seen row proves the decision existed by detected_at.
     # Quote/executable/expiry clocks stay NULL rather than inventing precision.
@@ -70,6 +76,42 @@ def _conn() -> sqlite3.Connection:
     c.execute("UPDATE opportunities SET decision_at=detected_at WHERE decision_at IS NULL")
     c.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_lane_open "
               "ON opportunities(lane, outcome_state, detected_at DESC)")
+    c.execute("""CREATE TABLE IF NOT EXISTS execution_assessments(
+        assessment_id TEXT PRIMARY KEY,
+        opportunity_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('read_only_quote','paper_fill','real_fill')),
+        assessed_at TEXT NOT NULL,
+        security_state TEXT NOT NULL,
+        security_at TEXT,
+        security_expires_at TEXT,
+        route_state TEXT NOT NULL,
+        quote_source TEXT,
+        quote_mode TEXT,
+        quote_at TEXT,
+        quote_expires_at TEXT,
+        expires_at TEXT,
+        notional_usd REAL,
+        entry_reference_price REAL,
+        invalidation_reference_price REAL,
+        roundtrip_back_usd REAL,
+        cost_contract_version INTEGER NOT NULL,
+        cost_contract TEXT NOT NULL,
+        is_real_fill INTEGER NOT NULL DEFAULT 0,
+        reason_code TEXT,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_execution_assessments_latest "
+              "ON execution_assessments(opportunity_id,assessed_at DESC,assessment_id DESC)")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS execution_assessments_no_update
+                 BEFORE UPDATE ON execution_assessments BEGIN
+                   SELECT RAISE(ABORT,'execution assessments are append-only');
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS execution_assessments_no_delete
+                 BEFORE DELETE ON execution_assessments BEGIN
+                   SELECT RAISE(ABORT,'execution assessments are append-only');
+                 END""")
     return c
 
 
@@ -104,6 +146,13 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
         "executable_at": _utc_iso(candidate.get("executable_at"), field="executable_at"),
         "expires_at": _utc_iso(candidate.get("expires_at"), field="expires_at"),
     }
+    cost_contract = candidate.get("cost_contract")
+    if cost_contract is not None:
+        from src.pipeline.execution_cost import validate
+        cost_contract = validate(cost_contract)
+    cost_contract_json = (json.dumps(cost_contract, ensure_ascii=False,
+                                     separators=(",", ":"))
+                          if cost_contract is not None else None)
     payload = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
     values = (ident, lane, chain, token, candidate.get("symbol", "?"),
               detected_at, clocks["event_at"], clocks["decision_at"], clocks["quote_at"],
@@ -111,7 +160,9 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
               candidate.get("source", "unknown"), candidate.get("state", "new"),
               candidate.get("decision", "WATCH"), candidate.get("entry_price"),
               candidate.get("invalidation_price"), candidate.get("max_notional_usd"),
-              candidate.get("roundtrip_cost_pct_est"), candidate.get("cost_model"), 2,
+              candidate.get("roundtrip_cost_pct_est"), candidate.get("cost_model"),
+              cost_contract.get("version") if cost_contract else None,
+              cost_contract_json, candidate.get("cohort_version", 2),
               payload, now)
     c = _conn()
     try:
@@ -121,8 +172,8 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
                   executable_at,expires_at,source,state,decision,
                   entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
-                  cohort_version,payload,updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  cost_contract_version,cost_contract,cohort_version,payload,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO UPDATE SET
                     state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at
             """, values)
@@ -131,8 +182,8 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
                   executable_at,expires_at,source,state,decision,
                   entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
-                  cohort_version,payload,updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  cost_contract_version,cost_contract,cohort_version,payload,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO NOTHING
             """, values).rowcount)
         c.commit()
@@ -146,6 +197,108 @@ def record_if_absent(candidate: dict) -> tuple[str, bool]:
     return record(candidate, refresh_existing=False)
 
 
+def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool]:
+    """Append one immutable security/route measurement for an existing event."""
+    kind = assessment.get("kind", "read_only_quote")
+    if kind not in {"read_only_quote", "paper_fill", "real_fill"}:
+        raise ValueError(f"unknown execution assessment kind: {kind}")
+    is_real_fill = bool(assessment.get("is_real_fill", False))
+    if (kind == "real_fill") != is_real_fill:
+        raise ValueError("real_fill kind and is_real_fill must agree")
+    assessed_at = _utc_iso(assessment.get("assessed_at"), field="assessed_at")
+    if assessed_at is None:
+        raise ValueError("assessed_at is required")
+    clock_names = ("security_at", "security_expires_at", "quote_at",
+                   "quote_expires_at", "expires_at")
+    clocks = {name: _utc_iso(assessment.get(name), field=name) for name in clock_names}
+    if clocks["quote_at"] and clocks["expires_at"]:
+        if datetime.fromisoformat(clocks["expires_at"]) <= datetime.fromisoformat(clocks["quote_at"]):
+            raise ValueError("execution assessment expiry must be after quote_at")
+    from src.pipeline.execution_cost import validate
+    contract = validate(assessment.get("cost_contract"))
+    supplied_notional = assessment.get("notional_usd")
+    if supplied_notional is not None:
+        try:
+            supplied_notional = float(supplied_notional)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("assessment notional_usd must be numeric") from exc
+        if abs(supplied_notional - contract["notional_usd"]) > 1e-6:
+            raise ValueError("assessment notional disagrees with cost contract")
+    normalized = {
+        **assessment, "kind": kind, "assessed_at": assessed_at, **clocks,
+        "security_state": str(assessment.get("security_state") or "unknown"),
+        "route_state": str(assessment.get("route_state") or "unknown"),
+        "cost_contract": contract, "is_real_fill": is_real_fill,
+    }
+    canonical = json.dumps(normalized, ensure_ascii=False, sort_keys=True,
+                           separators=(",", ":"))
+    assessment_id = assessment.get("assessment_id") or hashlib.sha256(
+        f"{ident}:{canonical}".encode()).hexdigest()[:32]
+    created_at = datetime.now(timezone.utc).isoformat()
+    values = (
+        assessment_id, ident, kind, assessed_at, normalized["security_state"],
+        clocks["security_at"], clocks["security_expires_at"], normalized["route_state"],
+        assessment.get("quote_source"), assessment.get("quote_mode"), clocks["quote_at"],
+        clocks["quote_expires_at"], clocks["expires_at"], contract["notional_usd"],
+        assessment.get("entry_reference_price"),
+        assessment.get("invalidation_reference_price"),
+        assessment.get("roundtrip_back_usd"), contract["version"],
+        json.dumps(contract, ensure_ascii=False, separators=(",", ":")),
+        int(is_real_fill), assessment.get("reason_code"), canonical, created_at,
+    )
+    c = _conn()
+    try:
+        if c.execute("SELECT 1 FROM opportunities WHERE id=?", (ident,)).fetchone() is None:
+            raise ValueError(f"unknown opportunity: {ident}")
+        inserted = bool(c.execute("""INSERT INTO execution_assessments(
+            assessment_id,opportunity_id,kind,assessed_at,security_state,security_at,
+            security_expires_at,route_state,quote_source,quote_mode,quote_at,
+            quote_expires_at,expires_at,notional_usd,entry_reference_price,
+            invalidation_reference_price,roundtrip_back_usd,cost_contract_version,
+            cost_contract,is_real_fill,reason_code,payload,created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(assessment_id) DO NOTHING""", values).rowcount)
+        c.commit()
+        return assessment_id, inserted
+    finally:
+        c.close()
+
+
+def _assessment_from_row(row: tuple | None) -> dict | None:
+    if row is None:
+        return None
+    keys = ("assessment_id", "opportunity_id", "kind", "assessed_at",
+            "security_state", "security_at", "security_expires_at", "route_state",
+            "quote_source", "quote_mode", "quote_at", "quote_expires_at", "expires_at",
+            "notional_usd", "entry_reference_price", "invalidation_reference_price",
+            "roundtrip_back_usd", "cost_contract_version", "cost_contract",
+            "is_real_fill", "reason_code", "payload", "created_at")
+    item = dict(zip(keys, row))
+    for name in ("cost_contract", "payload"):
+        try:
+            item[name] = json.loads(item[name])
+        except (TypeError, json.JSONDecodeError):
+            item[name] = {}
+    item["is_real_fill"] = bool(item["is_real_fill"])
+    return item
+
+
+def latest_execution_assessment(ident: str) -> dict | None:
+    """Return the newest append-only measurement; legacy rows return ``None``."""
+    c = _conn()
+    try:
+        row = c.execute("""SELECT assessment_id,opportunity_id,kind,assessed_at,
+            security_state,security_at,security_expires_at,route_state,quote_source,
+            quote_mode,quote_at,quote_expires_at,expires_at,notional_usd,
+            entry_reference_price,invalidation_reference_price,roundtrip_back_usd,
+            cost_contract_version,cost_contract,is_real_fill,reason_code,payload,created_at
+          FROM execution_assessments WHERE opportunity_id=?
+          ORDER BY assessed_at DESC,assessment_id DESC LIMIT 1""", (ident,)).fetchone()
+    finally:
+        c.close()
+    return _assessment_from_row(row)
+
+
 def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[dict]:
     """Return event cards plus a fail-closed current-actionability verdict."""
     if lane not in LANES:
@@ -157,6 +310,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                                   decision_at, quote_at, executable_at, expires_at,
                                   source, state, decision, entry_price, invalidation_price,
                                   max_notional_usd, cost_pct_est, cost_model, cohort_version,
+                                  cost_contract_version,cost_contract,
                                   payload, outcome_state, outcome
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
@@ -176,7 +330,8 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
         keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
                 "decision_at", "quote_at", "executable_at", "expires_at",
                 "source", "state", "decision", "entry_price", "invalidation_price",
-                "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version", "payload",
+                "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version",
+                "cost_contract_version", "cost_contract", "payload",
                 "outcome_state", "outcome")
         item = dict(zip(keys, row))
         try:
@@ -186,10 +341,16 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             # rewrite the entry, invalidation, size cap, or discovery timestamp.
             for key, value in payload.items():
                 if key not in {"entry_price", "invalidation_price", "max_notional_usd",
-                               "roundtrip_cost_pct_est", "cost_model", *CLOCK_FIELDS}:
+                               "roundtrip_cost_pct_est", "cost_model", "cost_contract",
+                               "cost_contract_version", "cohort_version", *CLOCK_FIELDS}:
                     item[key] = value
         except (TypeError, json.JSONDecodeError):
             item.pop("payload", None)
+        try:
+            item["cost_contract"] = (json.loads(item["cost_contract"])
+                                     if item.get("cost_contract") else None)
+        except (TypeError, json.JSONDecodeError):
+            item["cost_contract"] = None
         if item.get("outcome"):
             try:
                 item["outcome"] = json.loads(item["outcome"])
@@ -247,7 +408,8 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
         rows = c.execute(f"""SELECT id,lane,chain,token,symbol,detected_at,event_at,
                                     decision_at,quote_at,executable_at,expires_at,
                                     source,state,decision,entry_price,invalidation_price,
-                                    max_notional_usd,cost_pct_est,cost_model,cohort_version,payload,
+                                    max_notional_usd,cost_pct_est,cost_model,cohort_version,
+                                    cost_contract_version,cost_contract,payload,
                                     outcome_state,outcome,updated_at
                              FROM opportunities {where}
                              ORDER BY detected_at ASC""").fetchall()
@@ -256,16 +418,18 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
     keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
             "decision_at", "quote_at", "executable_at", "expires_at",
             "source", "state", "decision", "entry_price", "invalidation_price",
-            "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version", "payload",
+            "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version",
+            "cost_contract_version", "cost_contract", "payload",
             "outcome_state", "outcome", "updated_at")
     out = []
     for row in rows:
         item = dict(zip(keys, row))
-        for key in ("payload", "outcome"):
+        for key in ("cost_contract", "payload", "outcome"):
             try:
-                item[key] = json.loads(item[key]) if item.get(key) else {}
+                item[key] = json.loads(item[key]) if item.get(key) else (
+                    None if key == "cost_contract" else {})
             except (TypeError, json.JSONDecodeError):
-                item[key] = {}
+                item[key] = None if key == "cost_contract" else {}
         out.append(item)
     return out
 
