@@ -225,6 +225,7 @@ CARRY_REBALANCE_DRAG_ANN = 1.5    # ongoing %/yr to keep the two legs delta-neut
 CARRY_DEFAULT_HOLD_DAYS = 14      # amortize the one-time cost over this hold. This is the
                                   # single biggest lever — and it EQUALS how long the
                                   # differential stays positive (measured, not assumed).
+OKX_FUNDING_REQUEST_CAP = 45
 
 
 def _carry_net_ann(gross_edge_ann: float, hold_days: float = CARRY_DEFAULT_HOLD_DAYS) -> float:
@@ -435,7 +436,8 @@ def carry_scorecard(window_h: int = SCORECARD_WINDOW_H) -> dict:
                      "毛值未扣手续费/滑点,且不含脱锚/挤压尾部。")}
 
 
-def carry_signals(rows: list[dict] | None = None) -> list[dict]:
+def carry_signals(rows: list[dict] | None = None, *,
+                  okx_rates: dict[str, float] | None = None) -> list[dict]:
     """Funding-carry opportunities, with the CROSS-EXCHANGE differential (HL vs OKX) as
     the primary edge — the one research-validated play our breadth can capture: HL funding
     is structurally higher than CEX (institutions can't touch the DEX leg), so short the
@@ -454,7 +456,7 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
     # candidates = coins with notable HL funding; fetch the OKX leg for just these.
     cands = [r["name"] for r in rows
              if r["oi_usd"] >= CARRY_MIN_OI_USD and r["funding_ann"] >= CARRY_MIN_ANN]
-    okx = okx_funding_map(cands)   # {coin: OKX ann %}; absent = no OKX perp
+    okx = okx_rates if okx_rates is not None else okx_funding_map(cands)
     diffs_to_store: dict[str, float] = {}
     out = []
     for r in rows:
@@ -470,10 +472,11 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
         cross = okx_ann is not None                      # both venues have the perp
         # PRIMARY: cross-venue two-perp arb (no spot). FALLBACK: single-venue spot-hedge.
         if cross:
-            cross_diff = sustained - okx_ann             # net you collect, delta-neutral
+            observed_cross_diff = fa - okx_ann            # same-window observation
+            cross_diff = sustained - okx_ann              # persistence-weighted score
             edge_ann = cross_diff
             hedge = "跨所两永续(空HL多OKX)· 无需现货"
-            diffs_to_store[r["name"]] = cross_diff        # for persistence measurement
+            diffs_to_store[r["name"]] = observed_cross_diff
         elif is_major:
             edge_ann = sustained; hedge = "外部现货(CEX)可对冲"
         elif has_hl_spot:
@@ -522,7 +525,9 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
             "sustained_ann": round(sustained, 1), "pos_frac": pos_frac,
             "okx_ann": round(okx_ann, 1) if cross else None,
             "cross_diff": round(cross_diff, 1) if cross else None, "cross": cross,
-            "edge_ann": round(edge_ann, 1), "net_ann": round(net_ann, 1),
+            "edge_ann": round(edge_ann, 1), "score_edge_ann": round(edge_ann, 1),
+            "observed_edge_ann": (observed_cross_diff if cross else None),
+            "current_hl_ann": fa, "net_ann": round(net_ann, 1),
             "hold_days": round(hold_days, 1), "hold_measured": (hold_measured if cross else None),
             "diff_pos_frac": (round(xs["pos_frac"], 2) if xs else None),
             "trade": ("空HL·多OKX" if cross else "现货多·永续空"),
@@ -537,6 +542,76 @@ def carry_signals(rows: list[dict] | None = None) -> list[dict]:
     return out
 
 
+def scan_carry(rows: list[dict] | None = None, *,
+               priority_symbols: list[str] | None = None) -> dict:
+    """Return entry signals separately from current observations of open episodes."""
+    fetched_here = rows is None
+    if rows is None:
+        rows = _fetch_ctxs()
+        if rows:
+            _store_and_diff(rows)
+    priorities = list(dict.fromkeys(str(s) for s in (priority_symbols or []) if s))
+    scan_at = datetime.now(timezone.utc).isoformat()
+    if not rows:
+        statuses = [{"symbol": symbol, "status": "hl_source_unavailable"}
+                    for symbol in priorities]
+        return {
+            "signals": [], "open_observations": [], "open_status": statuses,
+            "source_health": {
+                "state": "unavailable", "scan_at": scan_at,
+                "hl_rows": 0, "open_requested": len(priorities), "open_observed": 0,
+                "okx_requested": 0, "okx_observed": 0, "entry_deferred_by_cap": 0,
+                "fetched_here": fetched_here,
+            },
+        }
+
+    by_symbol = {r.get("name"): r for r in rows if r.get("name")}
+    entry_symbols = [r["name"] for r in rows
+                     if r.get("oi_usd", 0) >= CARRY_MIN_OI_USD
+                     and r.get("funding_ann", 0) >= CARRY_MIN_ANN]
+    requested = list(dict.fromkeys(priorities + entry_symbols))
+    limited = requested[:OKX_FUNDING_REQUEST_CAP]
+    okx = okx_funding_map(limited, cap=len(limited)) if limited else {}
+    limited_set = set(limited)
+    signal_rows = [r for r in rows if r.get("name") in limited_set]
+    signals = carry_signals(signal_rows, okx_rates=okx)
+
+    observations = []
+    statuses = []
+    for symbol in priorities:
+        row = by_symbol.get(symbol)
+        if row is None:
+            status = "hl_symbol_unavailable"
+        elif symbol not in limited_set:
+            status = "okx_request_cap"
+        elif symbol not in okx:
+            status = "okx_rate_unavailable"
+        else:
+            observed_edge = float(row["funding_ann"]) - float(okx[symbol])
+            observation = {
+                "symbol": symbol, "status": "observed", "cross": True,
+                "observation_version": 1, "observed_at": scan_at,
+                "hl_ann": float(row["funding_ann"]), "okx_ann": float(okx[symbol]),
+                "observed_edge_ann": observed_edge, "edge_ann": observed_edge,
+            }
+            observations.append(observation)
+            status = "observed"
+        statuses.append({"symbol": symbol, "status": status})
+
+    observed_n = len(observations)
+    state = "ok" if observed_n == len(priorities) else "partial"
+    return {
+        "signals": signals, "open_observations": observations, "open_status": statuses,
+        "source_health": {
+            "state": state, "scan_at": scan_at, "hl_rows": len(rows),
+            "open_requested": len(priorities), "open_observed": observed_n,
+            "okx_requested": len(limited), "okx_observed": len(okx),
+            "entry_deferred_by_cap": sum(s not in limited_set for s in entry_symbols),
+            "fetched_here": fetched_here,
+        },
+    }
+
+
 if __name__ == "__main__":
     from dotenv import load_dotenv
 
@@ -547,7 +622,7 @@ if __name__ == "__main__":
     for s in sigs[:15]:
         print(f"  {s['symbol']:9} {s['signal']:8} {s['direction']:14} [{s['strength']}] "
               f"fund {s['funding_ann']:+.0f}% OI ${s['oi_usd']/1e6:.1f}M — {s['why'][:60]}")
-    carry = carry_signals()
+    carry = scan_carry()["signals"]
     print(f"\n{len(carry)} funding-carry opportunities (delta-neutral)")
     for s in carry[:15]:
         print(f"  {s['symbol']:9} [{s['tier']}] ann {s['funding_ann']:+.0f}% sustained "

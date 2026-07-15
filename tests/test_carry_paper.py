@@ -9,6 +9,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 
+def _run(cp, carries):
+    observations = [{
+        "symbol": item["symbol"], "status": "observed", "cross": True,
+        "observation_version": 1, "observed_edge_ann": item["edge_ann"],
+    } for item in carries if item.get("cross")]
+    return cp.run(carries, observations=observations)
+
+
 @pytest.fixture
 def cp(tmp_path, monkeypatch):
     import src.pipeline.carry_paper as cp
@@ -23,7 +31,7 @@ def cp(tmp_path, monkeypatch):
 
 
 def test_opens_only_fat_net_cross(cp):
-    cp.run([
+    _run(cp, [
         {"symbol": "FAT", "cross": True, "net_ann": 40, "edge_ann": 40},
         {"symbol": "THIN", "cross": True, "net_ann": 3, "edge_ann": 3},   # < OPEN_MIN_NET
         {"symbol": "SINGLE", "cross": False, "net_ann": 90, "edge_ann": 90},  # not cross
@@ -35,7 +43,7 @@ def test_opens_only_fat_net_cross(cp):
 
 def test_accrues_and_closes_with_correct_realized_net(cp):
     # open a 40%/yr differential position
-    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     import sqlite3
     c = sqlite3.connect(str(cp.DB))
     # backdate entry + last update to 5 days ago, diff held at 40 the whole time
@@ -44,7 +52,10 @@ def test_accrues_and_closes_with_correct_realized_net(cp):
               (past, past))
     c.commit(); c.close()
     # differential decays below the floor → natural close
-    stats = cp.run([{"symbol": "X", "cross": True, "net_ann": 1, "edge_ann": 1}])
+    stats = cp.run([], observations=[{
+        "symbol": "X", "status": "observed", "cross": True,
+        "observation_version": 1, "observed_edge_ann": 1,
+    }])
     assert stats["n_closed"] == 1 and stats["n_open"] == 0
     # Internal raw annualization remains available for long-lived cohorts, but the
     # public summary uses the honest absolute return for this five-day episode.
@@ -62,7 +73,7 @@ def test_accrues_and_closes_with_correct_realized_net(cp):
 
 
 def test_stats_honest_when_nothing_closed(cp):
-    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     s = cp.paper_stats()
     assert s["n_open"] == 1 and s["n_closed"] == 0
     assert "avg_net_return_pct" not in s         # never a number before a real close
@@ -78,7 +89,7 @@ def test_stats_honest_when_nothing_closed(cp):
 def test_missing_observation_pauses_without_closing_or_accruing(cp):
     import sqlite3
 
-    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     c.execute(
@@ -89,7 +100,7 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.commit()
     c.close()
 
-    stats = cp.run([])
+    stats = _run(cp, [])
     assert stats["n_open"] == 1 and stats["n_closed"] == 0
     position = stats["open_positions"][0]
     assert position["measurement_state"] == "source_gap"
@@ -108,7 +119,8 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.commit()
     c.close()
 
-    recovered = cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    recovered = _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40,
+                           "edge_ann": 40}])
     position = recovered["open_positions"][0]
     assert position["measurement_state"] == "observed"
     assert position["unmeasured_h"] == pytest.approx(49, abs=0.1)
@@ -121,7 +133,7 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.execute("UPDATE paper SET last_ts=? WHERE symbol='X'", (observed_start,))
     c.commit()
     c.close()
-    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     accrued = c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0]
     c.close()
@@ -156,7 +168,7 @@ def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
     assert state[1] == past and state[2] != past
     assert state[3] == pytest.approx(48, abs=0.1)
 
-    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     accrued, measurement_state = c.execute(
         "SELECT accrued_pct,measurement_state FROM paper WHERE symbol='X'"
@@ -169,7 +181,8 @@ def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
 def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     from src.pipeline import opportunity_ledger
 
-    opened = cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    opened = _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40,
+                        "edge_ann": 40}])
     assert opened["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 0}
     event = opportunity_ledger.outcome_rows()[0]
     assert event["lane"] == "carry" and event["decision"] == "PAPER_OPEN"
@@ -184,7 +197,7 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
               (past, past))
     c.commit()
     c.close()
-    closed = cp.run([{"symbol": "X", "cross": True, "net_ann": 1, "edge_ann": 1}])
+    closed = _run(cp, [{"symbol": "X", "cross": True, "net_ann": 1, "edge_ann": 1}])
     assert closed["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 1}
     event = opportunity_ledger.outcome_rows()[0]
     outcome = event["outcome"]
@@ -208,8 +221,8 @@ def test_annualized_summary_requires_long_enough_cohort(cp):
         c.execute("""INSERT INTO paper(
             symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,
             last_ts,last_diff,status,exit_ts,exit_slip,hold_h,realized_net,close_reason,
-            cost_complete
-        ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,'diff_below_floor',1)""",
+            cost_complete,observation_version
+        ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,'diff_below_floor',1,1)""",
                   (f"L{i}", "2026-01-01T00:00:00+00:00", 40, 30, 0.05, 10_000,
                    3.0, "2026-02-01T00:00:00+00:00", 1,
                    "2026-02-01T00:00:00+00:00", 0.05,
@@ -227,17 +240,17 @@ def test_stats_quarantine_legacy_bad_exit_cost_and_funding_gaps(cp):
             "2026-01-03T00:00:00+00:00", 1,
             "2026-01-03T00:00:00+00:00", 0.05, 48, 30)
     rows = [
-        ("VALID", *base, "diff_below_floor", 2, 1, 0),
-        ("LEGACY", *base, "diff_below_floor", None, 1, 0),
-        ("MISSING", *base, "market_missing", 2, 1, 0),
-        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor", 2, 0, 0),
-        ("GAP", *base, "diff_below_floor", 2, 1, 5),
+        ("VALID", *base, "diff_below_floor", 2, 1, 0, 1),
+        ("LEGACY", *base, "diff_below_floor", None, 1, 0, 1),
+        ("MISSING", *base, "market_missing", 2, 1, 0, 1),
+        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor", 2, 0, 0, 1),
+        ("GAP", *base, "diff_below_floor", 2, 1, 5, 1),
     ]
     c.executemany("""INSERT INTO paper(
         symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,last_ts,
         last_diff,status,exit_ts,exit_slip,hold_h,realized_net,close_reason,
-        episode_version,cost_complete,unmeasured_h
-    ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,?,?,?,?)""", rows)
+        episode_version,cost_complete,unmeasured_h,observation_version
+    ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,?,?,?,?,?)""", rows)
     c.commit()
     c.close()
 

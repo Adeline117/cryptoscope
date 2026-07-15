@@ -67,3 +67,105 @@ def test_okx_funding_map_prefers_exact_then_multiplier_alias():
     assert got["kPEPE"] == pytest.approx(21.9)
     assert "KPEPE-USDT-SWAP" in calls[0]
     assert "PEPE-USDT-SWAP" in calls[1]
+
+
+def _ctx(name: str, *, funding_ann: float, oi_usd: float = 2_000_000) -> dict:
+    return {
+        "name": name,
+        "markPx": 1.0,
+        "oi_usd": oi_usd,
+        "funding_ann": funding_ann,
+        "vol24": 1_000_000,
+        "price_chg_24h": 0.0,
+    }
+
+
+def _open_status(scan: dict, symbol: str) -> dict:
+    return next(row for row in scan["open_status"] if row["symbol"] == symbol)
+
+
+def _stub_carry_history(monkeypatch, history=None) -> None:
+    monkeypatch.setattr(hl, "_funding_persistence", lambda: history or {})
+    monkeypatch.setattr(hl, "_hl_spot_tokens", lambda: set())
+    monkeypatch.setattr(hl, "xdiff_stats", lambda: {})
+    monkeypatch.setattr(hl, "_store_xdiff", lambda _diffs: None)
+
+
+def test_scan_carry_prioritizes_open_symbol_and_uses_current_pair(monkeypatch):
+    """An open episode must remain observable after it falls below every entry gate."""
+    rows = [
+        _ctx("OPEN", funding_ann=1.0, oi_usd=10),
+        _ctx("ENTRY", funding_ann=20.0),
+    ]
+    requested = []
+
+    def funding_map(coins, cap=45, fetch=None):
+        requested.extend(coins[:cap])
+        return {"OPEN": 4.0, "ENTRY": 0.0}
+
+    monkeypatch.setattr(hl, "okx_funding_map", funding_map)
+    # If the observation accidentally uses persistence instead of the current HL row,
+    # OPEN's edge would be +96 rather than the correct current -3.
+    _stub_carry_history(monkeypatch, {
+        "OPEN": {"mean_ann": 100.0, "pos_frac": 1.0, "n": 10},
+    })
+
+    scan = hl.scan_carry(rows, priority_symbols=["OPEN"])
+
+    assert requested[:2] == ["OPEN", "ENTRY"]
+    assert [row["symbol"] for row in scan["signals"]] == ["ENTRY"]
+    assert len(scan["open_observations"]) == 1
+    observation = scan["open_observations"][0]
+    assert observation["symbol"] == "OPEN" and observation["cross"] is True
+    assert observation["hl_ann"] == 1.0
+    assert observation["okx_ann"] == 4.0
+    assert observation["edge_ann"] == pytest.approx(-3.0)
+    assert observation["observed_at"]
+    assert _open_status(scan, "OPEN")["status"] == "observed"
+
+
+def test_carry_signals_explicit_empty_okx_rates_never_refetches(monkeypatch):
+    _stub_carry_history(monkeypatch)
+    monkeypatch.setattr(
+        hl,
+        "okx_funding_map",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("explicit OKX result triggered a second request")
+        ),
+    )
+
+    assert hl.carry_signals(
+        [_ctx("ALT", funding_ann=20.0)], okx_rates={}
+    ) == []
+
+
+def test_scan_carry_reports_source_symbol_okx_and_cap_states(monkeypatch):
+    monkeypatch.setattr(
+        hl, "carry_signals", lambda _rows, *, okx_rates=None: []
+    )
+
+    no_hl = hl.scan_carry([], priority_symbols=["NO_HL_SOURCE"])
+    assert _open_status(no_hl, "NO_HL_SOURCE")["status"] == "hl_source_unavailable"
+    assert no_hl["open_observations"] == []
+
+    rows = [_ctx("PRESENT", funding_ann=1.0, oi_usd=10)]
+    monkeypatch.setattr(hl, "okx_funding_map", lambda *_args, **_kwargs: {})
+    missing_symbol = hl.scan_carry(rows, priority_symbols=["ABSENT"])
+    assert _open_status(missing_symbol, "ABSENT")["status"] == "hl_symbol_unavailable"
+
+    missing_okx = hl.scan_carry(rows, priority_symbols=["PRESENT"])
+    assert _open_status(missing_okx, "PRESENT")["status"] == "okx_rate_unavailable"
+    assert missing_okx["open_observations"] == []
+
+    symbols = [f"OPEN{i:02d}" for i in range(46)]
+    cap_rows = [_ctx(symbol, funding_ann=1.0, oi_usd=10) for symbol in symbols]
+
+    def capped_rates(coins, cap=45, fetch=None):
+        return {symbol: 0.0 for symbol in coins[:cap]}
+
+    monkeypatch.setattr(hl, "okx_funding_map", capped_rates)
+    capped = hl.scan_carry(cap_rows, priority_symbols=symbols)
+    assert _open_status(capped, symbols[0])["status"] == "observed"
+    assert _open_status(capped, symbols[-1])["status"] == "okx_request_cap"
+    assert capped["source_health"]["open_requested"] == 46
+    assert capped["source_health"]["open_observed"] == 45

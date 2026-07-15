@@ -50,6 +50,8 @@ def edge_exclusion_reasons(sample: dict) -> list[str]:
     reasons: list[str] = []
     if sample.get("episode_version") != 2:
         reasons.append("legacy_episode")
+    if sample.get("observation_version") != 1:
+        reasons.append("unverified_observation_method")
     close_reason = sample.get("close_reason")
     if close_reason == "market_missing":
         reasons.append("market_missing_close")
@@ -81,7 +83,8 @@ def _conn() -> sqlite3.Connection:
         hold_h REAL, realized_net REAL, close_reason TEXT,
         last_attempt_ts TEXT, last_valid_ts TEXT, unmeasured_h REAL DEFAULT 0,
         measurement_state TEXT DEFAULT 'observed',
-        episode_version INTEGER DEFAULT 2, cost_complete INTEGER DEFAULT 0)""")
+        episode_version INTEGER DEFAULT 2, cost_complete INTEGER DEFAULT 0,
+        observation_version INTEGER)""")
     cols = {r[1] for r in c.execute("PRAGMA table_info(paper)").fetchall()}
     if "close_reason" not in cols:
         c.execute("ALTER TABLE paper ADD COLUMN close_reason TEXT")
@@ -93,6 +96,7 @@ def _conn() -> sqlite3.Connection:
         # Deliberately no migration default: pre-v2 rows stay NULL and quarantined.
         "episode_version": "INTEGER",
         "cost_complete": "INTEGER",
+        "observation_version": "INTEGER",
     }
     added: set[str] = set()
     for name, declaration in additions.items():
@@ -140,7 +144,8 @@ def _sync_opportunity_ledger() -> dict:
             "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,"
             "accrued_pct,last_ts,last_diff,status,exit_ts,exit_slip,hold_h,"
             "realized_net,close_reason,last_attempt_ts,last_valid_ts,unmeasured_h,"
-            "measurement_state,episode_version,cost_complete FROM paper ORDER BY id"
+            "measurement_state,episode_version,cost_complete,observation_version "
+            "FROM paper ORDER BY id"
         ).fetchall()
     finally:
         c.close()
@@ -149,7 +154,7 @@ def _sync_opportunity_ledger() -> dict:
         (pid, symbol, entry_ts, entry_diff, pred_net, entry_slip, notional,
          accrued_pct, last_ts, last_diff, status, exit_ts, exit_slip, hold_h,
          realized_net, close_reason, last_attempt_ts, last_valid_ts, unmeasured_h,
-         measurement_state, episode_version, cost_complete) = row
+         measurement_state, episode_version, cost_complete, observation_version) = row
         estimated_roundtrip_cost = ((entry_slip or 0) * 2
                                     + 2 * FEE_PCT_ONEWAY_BOTHLEGS)
         candidate = {
@@ -168,11 +173,13 @@ def _sync_opportunity_ledger() -> dict:
             "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
             "paper_position_id": pid,
             "episode_version": episode_version,
+            "observation_version": observation_version,
         }
         ident, _ = opportunity_ledger.record(candidate)
         outcome = {
             "version": 2 if episode_version == 2 else 1,
             "episode_version": episode_version,
+            "observation_version": observation_version,
             "kind": "delta_neutral_carry_paper",
             "execution_mode": "paper_orderbook_measurement",
             "cost_is_real_fill": False, "status": status,
@@ -357,14 +364,44 @@ def _roundtrip_slip(coin: str, notional: float = NOTIONAL,
     return hs + os_            # one direction, both legs; close measures the other side
 
 
-def run(carries: list[dict]) -> dict:
-    """Open/accrue/close paper positions from valid cross-venue observations.
+def open_symbols() -> list[str]:
+    """Symbols with an open paper episode, in stable creation order."""
+    c = _conn()
+    try:
+        return [row[0] for row in c.execute(
+            "SELECT symbol FROM paper WHERE status='open' ORDER BY id"
+        ).fetchall()]
+    finally:
+        c.close()
 
-    Absence from ``carries`` is not an exit: it can mean a source failure or an upstream
-    candidate filter. Such intervals are marked unmeasured and never accrue funding.
+
+def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
+    """Open from ranked candidates; accrue/close only from paired current observations.
+
+    ``observations=[]`` is an explicit source gap. ``None`` keeps legacy callers running,
+    but those candidate-proxy episodes receive observation_version=0 and are quarantined.
     """
     now = datetime.now(timezone.utc)
-    by_sym = {c["symbol"]: c for c in carries if c.get("cross")}
+    entry_by_sym = {item["symbol"]: item for item in carries if item.get("cross")}
+    raw_observations = observations
+    if raw_observations is None:
+        raw_observations = [{
+            "symbol": item["symbol"], "status": "observed", "cross": True,
+            "observation_version": 0,
+            "observed_edge_ann": item.get("observed_edge_ann", item.get("edge_ann")),
+        } for item in carries if item.get("cross")]
+    observed_by_sym: dict[str, dict] = {}
+    for observation in raw_observations:
+        if observation.get("status") != "observed" or not observation.get("cross"):
+            continue
+        try:
+            edge = float(observation["observed_edge_ann"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(edge):
+            continue
+        observed_by_sym[observation["symbol"]] = {**observation,
+                                                   "observed_edge_ann": edge}
     c = _conn()
     try:
         open_rows = {r[1]: r for r in c.execute(
@@ -375,7 +412,7 @@ def run(carries: list[dict]) -> dict:
         for sym, row in open_rows.items():
             (pid, _, _, _, pred_net, entry_slip, notional, accrued, last_ts, last_diff,
              _last_attempt_ts, _last_valid_ts, unmeasured_h, measurement_state) = row
-            cur = by_sym.get(sym)
+            cur = observed_by_sym.get(sym)
             try:
                 elapsed_h = max(
                     (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600, 0
@@ -390,7 +427,7 @@ def run(carries: list[dict]) -> dict:
                 )
                 continue
 
-            cur_diff = cur["edge_ann"]
+            cur_diff = cur["observed_edge_ann"]
             # realized funding over the interval = diff(ann%) × (hours / 8760)
             # A recovery observation only re-establishes the measurement clock. The
             # preceding interval remains unknown and must not be filled with last_diff.
@@ -429,19 +466,23 @@ def run(carries: list[dict]) -> dict:
                      unmeasured_h or 0, pid),
                 )
         # 2) OPEN new positions for fat-net cross carries not already open
-        for sym, cur in by_sym.items():
+        for sym, cur in entry_by_sym.items():
             if sym in open_rows or (cur.get("net_ann") or 0) < OPEN_MIN_NET:
+                continue
+            observation = observed_by_sym.get(sym)
+            if observation is None:
                 continue
             slip = _roundtrip_slip(sym, phase="entry")
             if slip is None:
                 continue                      # can't measure entry → don't open
             c.execute("INSERT INTO paper(symbol,entry_ts,entry_diff,pred_net,entry_slip,"
                       "notional,accrued_pct,last_ts,last_diff,last_attempt_ts,last_valid_ts,"
-                      "unmeasured_h,measurement_state,episode_version,cost_complete) "
-                      "VALUES (?,?,?,?,?,?,0,?,?,?,?,0,'observed',2,0)",
-                      (sym, now.isoformat(), cur["edge_ann"], cur["net_ann"], slip,
-                       NOTIONAL, now.isoformat(), cur["edge_ann"], now.isoformat(),
-                       now.isoformat()))
+                      "unmeasured_h,measurement_state,episode_version,cost_complete,"
+                      "observation_version) VALUES (?,?,?,?,?,?,0,?,?,?,?,0,'observed',2,0,?)",
+                      (sym, now.isoformat(), observation["observed_edge_ann"], cur["net_ann"],
+                       slip, NOTIONAL, now.isoformat(), observation["observed_edge_ann"],
+                       now.isoformat(), now.isoformat(),
+                       int(observation.get("observation_version") or 0)))
         c.commit()
     finally:
         c.close()
@@ -460,11 +501,12 @@ def paper_stats() -> dict:
     try:
         closed_all = c.execute("SELECT symbol,hold_h,entry_slip,exit_slip,realized_net,pred_net,"
                            "accrued_pct,entry_ts,exit_ts,close_reason,episode_version,cost_complete,"
-                           "unmeasured_h "
+                           "unmeasured_h,observation_version "
                            "FROM paper WHERE status='closed'").fetchall()
         opened = c.execute(
             "SELECT symbol,entry_ts,last_ts,entry_diff,last_diff,pred_net,entry_slip,notional,"
-            "last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state,episode_version "
+            "last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state,episode_version,"
+            "observation_version "
             "FROM paper WHERE status='open' ORDER BY entry_ts DESC"
         ).fetchall()
     finally:
@@ -477,6 +519,7 @@ def paper_stats() -> dict:
             "episode_version": row[10], "close_reason": row[9],
             "entry_slip_pct": row[2], "exit_slip_pct": row[3],
             "cost_complete": cost_complete, "unmeasured_h": row[12],
+            "observation_version": row[13],
             "hold_h": row[1], "funding_accrued_pct": row[6],
             "net_return_pct": net_return,
         }
@@ -504,6 +547,7 @@ def paper_stats() -> dict:
                 "unmeasured_h": round(row[10] or 0, 2),
                 "measurement_state": row[11] or "observed",
                 "episode_version": row[12],
+                "observation_version": row[13],
                 "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
                 "execution_mode": "paper_orderbook_measurement",
             }
@@ -552,5 +596,7 @@ if __name__ == "__main__":
 
     from src.config import PROJECT_ROOT
     load_dotenv(PROJECT_ROOT / ".env")
-    from src.onchain.hyperliquid import carry_signals
-    print(json.dumps(run(carry_signals()), ensure_ascii=False, indent=1))
+    from src.onchain.hyperliquid import scan_carry
+    scan = scan_carry(priority_symbols=open_symbols())
+    print(json.dumps(run(scan["signals"], observations=scan["open_observations"]),
+                     ensure_ascii=False, indent=1))

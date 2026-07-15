@@ -276,6 +276,7 @@ def test_carry_uses_absolute_non_directional_outcomes_without_claiming_real_edge
             "close_reason": "diff_below_floor", "cost_complete": True,
             "entry_slip_pct": 0.05, "exit_slip_pct": 0.05,
             "unmeasured_h": 0, "hold_h": 48, "funding_accrued_pct": 0.54,
+            "observation_version": 1,
         }, "resolved")
 
     stat = oo.lane_stats()["carry"]
@@ -295,7 +296,7 @@ def test_carry_quarantines_legacy_missing_market_and_incomplete_cost(ledger):
                 "net_return_pct": 0.25, "close_reason": "diff_below_floor",
                 "cost_complete": True, "entry_slip_pct": 0.05,
                 "exit_slip_pct": 0.05, "unmeasured_h": 0, "hold_h": 48,
-                "funding_accrued_pct": 0.54}
+                "funding_accrued_pct": 0.54, "observation_version": 1}
     outcomes = [
         {**complete, "episode_version": None, "net_return_pct": 9},
         {**complete, "net_return_pct": 8, "close_reason": "market_missing"},
