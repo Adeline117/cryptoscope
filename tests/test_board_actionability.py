@@ -123,3 +123,15 @@ def test_launch_defaults_to_actionable_only_instead_of_burying_decision_in_watch
     assert 'label:"观察"' in html
     assert 'type="search"' in html
     assert "搜索代币 / 合约" in html
+
+
+def test_launch_discloses_primary_stream_coverage_and_known_gaps():
+    html = BOARD.read_text()
+
+    assert "function renderLaunchCoverage(d)" in html
+    assert "Pump.fun 主链发行流" in html
+    assert "资格检查队列" in html
+    assert "已知覆盖缺口" in html
+    assert "不代表全市场覆盖" in html
+    assert "失败会退避，不会伪装成无机会" in html
+    assert "主链原始证据:" in html

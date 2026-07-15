@@ -147,6 +147,11 @@
   .search{width:220px;min-width:150px;border:1px solid var(--border2);background:var(--s1);color:var(--text);border-radius:9px;padding:8px 10px;font:12px var(--sans);outline:none}
   .search:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
   .empty{padding:30px 16px;text-align:center;color:var(--dim);font-size:13px}
+  .coverage-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 12px}
+  .coverage-card{min-height:104px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--s1)}
+  .coverage-card .ck{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--muted)}
+  .coverage-card .cv{margin-top:8px;font:700 18px/1.25 var(--mono);color:var(--text)}
+  .coverage-card .cs{margin-top:5px;font-size:11px;line-height:1.45;color:var(--dim)}
   .skl{height:var(--row-h);border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--s1) 25%,var(--s3) 50%,var(--s1) 75%);background-size:200% 100%;animation:sk 1.3s infinite}
   @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
 
@@ -220,7 +225,7 @@
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
     .command{padding:19px 17px;gap:17px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
-    .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}
+    .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}.coverage-strip{grid-template-columns:1fr}
     .swipe-hint{display:block;position:sticky;left:0;width:100%;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;text-align:right}
   }
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
@@ -319,6 +324,22 @@ function launchLifecycleHtml(r){
   return `<br><b>进入窗口</b>: ${quote}<br><b>价格失效</b>: 若用户自行建仓，价格 ≤ $${esc(r?.invalidation_price??"—")} 时论文失效；系统不会代为卖出。<br><b>固定评估（不是平仓）</b>: ${clocks}<small>收益扣除冻结的估算成本；真实成交成本标记: ${r?.outcome?.cost_is_real_fill===true?"真实":"非真实成交"}。</small><br><b>真实离场</b>: 无——系统没有成交、没有持仓，也不会自动平仓。`;
 }
 
+function renderLaunchCoverage(d){
+  const p=d?.primary_sources?.solana||{}, q=p.qualification||{}, states=q.qualification||{};
+  const stream=(p.streams||[])[0];
+  const status=!p.available?"unavailable":stream?.stale?"stale":stream?.status||"unavailable";
+  const labels={live:"实时",degraded:"有缺口",stale:"已陈旧",disconnected:"已断开",unavailable:"不可用"};
+  const cls=status==="live"?"b-good":status==="degraded"||status==="stale"?"b-warn":"b-danger";
+  const complete=q.evidence?.complete||0, recent=q.recent_complete||0;
+  const recorded=states.qualified_recorded||0, pending=(states.market_pending||0)+(states.market_error||0), raw=states.raw_unqualified||0;
+  const last=stream?.last_received_at?relMs(new Date(stream.last_received_at).getTime()):"无接收时钟";
+  return `<section class="coverage-strip" aria-label="Launch 数据覆盖与缺口">
+    <div class="coverage-card"><div class="ck"><span>Pump.fun 主链发行流</span><span class="chip ${cls}">${esc(labels[status]||status)}</span></div><div class="cv">${esc(recent)} <small class="dim">/ 近${esc(q.recent_hours??24)}h</small></div><div class="cs">身份完整证据累计 ${esc(complete)}；最后接收 ${esc(last)}。状态只证明监听情况，不等于无漏单。</div></div>
+    <div class="coverage-card"><div class="ck"><span>资格检查队列</span><span class="chip ${pending?"b-warn":"b-accent"}">${pending?"仍在补市场数据":"当前无重试项"}</span></div><div class="cv">${esc(recorded)} <small class="dim">已接入账本</small></div><div class="cs">原始待检查 ${esc(raw)} · 待索引/错误重试 ${esc(pending)} · 规则筛除 ${esc(states.screened_out||0)}。失败会退避，不会伪装成无机会。</div></div>
+    <div class="coverage-card"><div class="ck"><span>已知覆盖缺口</span><span class="chip ${stream?.open_gaps?"b-danger":"b-good"}">${esc(stream?.open_gaps??"?")} 个 open gap</span></div><div class="cv">${p.available?"链上证据优先":"不可判"}</div><div class="cs">DEX Screener 池与 profiles 仅负责市场水合/补充发现，不代表全市场覆盖；链上缺口、RPC 与索引延迟都会漏掉机会。</div></div>
+  </section>`;
+}
+
 let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
@@ -371,8 +392,8 @@ const LANES={
     custom:true,
   },
   launch:{
-    title:d=>{const e=d?.events||[];const p=e.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length;return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个报价当前仍有效`:'暂无报价仍有效的候选'}。`},
-    stat:d=>{const e=d?.events||[];return [["首池事件",e.length,"首次发现价已锁定"],["当前可行动",e.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length,"安全+路由+报价+证据门"],["纸面试验",e.filter(x=>x.recorded_decision==="SMALL_PROBE"&&effectiveDecision(x)==="WATCH").length,"继续结算但不可行动"],["观察",e.filter(x=>effectiveDecision(x)==="WATCH").length,"条件未齐/优势未证"],["已过期",e.filter(x=>effectiveDecision(x)==="EXPIRED").length,"必须重新报价"],["避开",e.filter(x=>effectiveDecision(x)==="AVOID").length,"已知安全/卖出失败"]]},
+    title:d=>{const e=d?.events||[];const p=e.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length;const s=d?.primary_sources?.solana?.streams?.[0];return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个报价当前仍有效`:'暂无报价仍有效的候选'}；Pump.fun 主链流 ${esc(s?.status||"不可判")}${s?.open_gaps?`，有 ${esc(s.open_gaps)} 个已知缺口`:''}。`},
+    stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{};return [["首池事件",e.length,"首次发现价已锁定"],["主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["当前可行动",e.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length,"安全+路由+报价+证据门"],["纸面试验",e.filter(x=>x.recorded_decision==="SMALL_PROBE"&&effectiveDecision(x)==="WATCH").length,"继续结算但不可行动"],["观察",e.filter(x=>effectiveDecision(x)==="WATCH").length,"条件未齐/优势未证"],["已过期",e.filter(x=>effectiveDecision(x)==="EXPIRED").length,"必须重新报价"],["避开",e.filter(x=>effectiveDecision(x)==="AVOID").length,"已知安全/卖出失败"]]},
     readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。<b>SMALL_PROBE</b> 必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的证据门。样本不足时保留原始 cohort 做纸面结算，但当前动作降为 WATCH；缺 API key、取数失败或路由未知也只观察，已知蜜罐/权限雷或无法卖出直接避开。",
     rows:d=>d?.events||[],
     id:r=>r.id||r.chain+r.token, flash:r=>r.entry_price,
@@ -393,7 +414,7 @@ const LANES={
       {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
       {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 ≤$${esc(r.invalidation_price??"—")}</small>`,sort:r=>r.max_notional_usd||0},
     ],
-    detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},eg=r.evidence_gate||{},ed=effectiveDecision(r);return `<span class="so">所以👉</span> ${ed==="SMALL_PROBE"?`安全、双向报价与证据门均通过，且仍在 ${esc(r.expires_at)} 前有效；只可按上限小额试错，触及失效价退出。`:ed==="EXPIRED"?"原报价已经过期，禁止按旧价格行动；必须重新通过安全与双向路由门。":ed==="AVOID"?"存在已知安全红旗或反向路由失败，不要碰。":eg.state&&eg.state!=="pass"?"技术门可能通过，但成本后同期对照尚未证明优势；只做纸面结算，不可行动。":"检查不完整，只观察；UNKNOWN 不是安全。"}<br>当前状态: ${esc(ed)} · ${esc(expiryText(r))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
+    detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},ed=effectiveDecision(r);return `<span class="so">所以👉</span> ${ed==="SMALL_PROBE"?`安全、双向报价与证据门均通过，且仍在 ${esc(r.expires_at)} 前有效；只可按上限小额试错，触及失效价退出。`:ed==="EXPIRED"?"原报价已经过期，禁止按旧价格行动；必须重新通过安全与双向路由门。":ed==="AVOID"?"存在已知安全红旗或反向路由失败，不要碰。":eg.state&&eg.state!=="pass"?"技术门可能通过，但成本后同期对照尚未证明优势；只做纸面结算，不可行动。":"检查不完整，只观察；UNKNOWN 不是安全。"}<br>当前状态: ${esc(ed)} · ${esc(expiryText(r))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:""}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
   },
   structure:{
     title:d=>{const e=d?.events||[],h=d?.source_health||[],bad=h.filter(x=>x.status!=="ok");return `<b style="color:var(--violet)">公开市场结构事件</b>: ${e.length} 个已入账。来源本轮可达 <b>${h.filter(x=>x.status==="ok").length}/${h.length||"?"}</b>${bad.length?`；失败: ${bad.map(x=>esc(x.exchange)+"("+esc(x.error||"unknown")+")").join(" · ")}`:""}。`},
@@ -671,7 +692,7 @@ function paint(){
     } else if(ls.verdict==="不可判") st.push(["24h结果","不可判",`积累${ls.n}/20 · ${ls.edge_note||""}`]); }
   $("lanestat").innerHTML=st.map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
   $("rd").innerHTML=L.readme;
-  $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
+  $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : view==="launch"?renderLaunchCoverage(d)+renderTable(view,L.rows(d),L.cols,L) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
   // counts
   for(const [k,l] of Object.entries(LANES)){const dd=data[k==="avoid"?"opp":k];const n=dd?(l.rows?l.rows(dd).length:0):0;const el=$("ct-"+k);if(el)el.textContent=n||""}
   document.querySelectorAll(".tab").forEach(t=>{const on=t.dataset.v===view;t.classList.toggle("on",on);t.setAttribute("aria-selected",String(on));t.tabIndex=on?0:-1});
