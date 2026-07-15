@@ -94,6 +94,10 @@ def test_stats_refuse_rate_below_minimum_sample(ledger):
     assert stat["verdict"] == "不可判"
     assert "rate" not in stat
     assert stat["n"] == 1
+    assert stat["probe"]["n"] == 1 and stat["control"]["n"] == 0
+    gate = oo.actionability_gate("launch")
+    assert gate["state"] == "collecting"
+    assert gate["probe_n"] == 1 and gate["control_n"] == 0
 
 
 def test_legacy_mutable_decision_is_excluded_from_cohort(ledger):
@@ -127,6 +131,15 @@ def test_launch_edge_requires_and_uses_watch_control(ledger):
     assert stat["edge_verdict"] == "有edge迹象"
     assert stat["probe"]["n"] == stat["control"]["n"] == oo.MIN_N
     assert stat["probe"]["lo"] > stat["control"]["hi"]
+    assert oo.actionability_gate("launch")["state"] == "pass"
+
+
+def test_cascade_has_no_action_gate_without_matched_control(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    gate = oo.actionability_gate("cascade")
+    assert gate["state"] == "collecting"
+    assert "同期可比 WATCH 对照" in gate["reason"]
 
 
 def test_watch_only_structure_never_gets_directional_hit_rate(ledger):

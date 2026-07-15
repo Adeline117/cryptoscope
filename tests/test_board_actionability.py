@@ -68,3 +68,12 @@ def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
     assert "ed==='EXPIRED'?'已过期·历史方向" in html
     assert "${launchLifecycleHtml(e)}" in html
     assert "e.actionability_reason" in html
+
+
+def test_launch_action_requires_statistical_evidence_gate():
+    html = BOARD.read_text()
+
+    assert "安全+路由+报价+证据门" in html
+    assert "成本后 24h 试验组相对同期 WATCH 对照的证据门" in html
+    assert "只做纸面结算，不可行动" in html
+    assert "优势门:" in html

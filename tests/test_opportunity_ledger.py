@@ -98,8 +98,10 @@ def test_active_actionability_fails_closed_on_missing_or_expired_quote(tmp_path,
                              quote_at=None, expires_at=None))
 
     rows = {row["token"]: row for row in ledger.active("launch", now=now)}
-    assert rows["fresh"]["effective_decision"] == "SMALL_PROBE"
-    assert rows["fresh"]["actionable_now"] is True
+    assert rows["fresh"]["effective_decision"] == "WATCH"
+    assert rows["fresh"]["actionable_now"] is False
+    assert rows["fresh"]["evidence_gate"]["state"] == "collecting"
+    assert "SMALL_PROBE 0/20" in rows["fresh"]["actionability_reason"]
     assert rows["fresh"]["seconds_to_expiry"] == 60
     assert rows["expired"]["effective_decision"] == "EXPIRED"
     assert rows["expired"]["actionable_now"] is False
@@ -107,3 +109,27 @@ def test_active_actionability_fails_closed_on_missing_or_expired_quote(tmp_path,
     assert rows["legacy"]["actionability_reason"] == "missing quote or expiry clock"
     # Historical cohort label remains intact for outcome measurement.
     assert all(row["decision"] == "SMALL_PROBE" for row in rows.values())
+
+
+def test_active_probe_requires_proven_cost_after_control_edge(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    now = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    for i in range(20):
+        ident, _ = ledger.record(_candidate(token=f"probe-{i}"))
+        ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": 8.0}}},
+                            "resolved")
+    for i in range(20):
+        ident, _ = ledger.record(_candidate(token=f"watch-{i}", decision="WATCH"))
+        ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": -2.0}}},
+                            "resolved")
+    ledger.record(_candidate(token="fresh", detected_at=now.isoformat(),
+                             quote_at=now.isoformat(),
+                             expires_at=(now + timedelta(seconds=60)).isoformat()))
+
+    fresh = {row["token"]: row for row in ledger.active("launch", now=now)}["fresh"]
+    assert fresh["evidence_gate"]["state"] == "pass"
+    assert fresh["evidence_gate"]["edge_verdict"] == "有edge迹象"
+    assert fresh["effective_decision"] == "SMALL_PROBE"
+    assert fresh["actionable_now"] is True

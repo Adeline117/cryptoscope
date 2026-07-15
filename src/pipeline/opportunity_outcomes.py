@@ -274,6 +274,41 @@ def _airdrop_stats(rows: list[dict]) -> dict:
     }
 
 
+def actionability_gate(lane: str) -> dict:
+    """Translate measured evidence into a fail-closed live action gate.
+
+    The recorded cohort decision remains immutable so paper outcomes can accumulate.
+    This gate only controls whether a current quote may be presented as actionable.
+    A technical route is not an edge: promotion requires a cost-after 24h cohort and
+    a contemporaneous WATCH control whose Wilson intervals no longer overlap.
+    """
+    if lane not in SUPPORTED_LANES:
+        return {"state": "not_applicable", "lane": lane}
+    try:
+        stat = lane_stats().get(lane) or {}
+    except Exception as exc:
+        return {"state": "blocked", "lane": lane, "edge_verdict": "不可判",
+                "reason": f"evidence read failed: {str(exc)[:80]}"}
+    edge = stat.get("edge_verdict") or "不可判"
+    common = {"lane": lane, "edge_verdict": edge, "minimum_n": MIN_N,
+              "measured_n": int(stat.get("n") or 0),
+              "cost_is_real_fill": stat.get("cost_is_real_fill", False)}
+    if edge == "有edge迹象":
+        return {**common, "state": "pass", "reason": stat.get("edge_note")}
+    if edge == "无edge/负":
+        return {**common, "state": "blocked", "reason": stat.get("edge_note")}
+    if lane == "launch":
+        probe, control = stat.get("probe") or {}, stat.get("control") or {}
+        return {**common, "state": "collecting",
+                "probe_n": int(probe.get("n") or 0),
+                "control_n": int(control.get("n") or 0),
+                "reason": (f"成本后24h同期对照不足: SMALL_PROBE "
+                           f"{int(probe.get('n') or 0)}/{MIN_N}, WATCH "
+                           f"{int(control.get('n') or 0)}/{MIN_N}")}
+    return {**common, "state": "collecting",
+            "reason": "Cascade 尚无同期可比 WATCH 对照；仅继续纸面测量"}
+
+
 def lane_stats() -> dict:
     """Honest 24h distribution and, only where possible, a control comparison."""
     from src.pipeline.evidence import wilson
@@ -309,6 +344,8 @@ def lane_stats() -> dict:
         if lane == "launch":
             common["legacy_unfrozen_n"] = sum((r.get("cohort_version") or 0) < 2
                                                 for r in measurable)
+            common["probe"] = _cohort(measurable, "SMALL_PROBE")
+            common["control"] = _cohort(measurable, "WATCH")
         if n < MIN_N:
             out[lane] = {**common, "verdict": "不可判",
                          "edge_verdict": "不可判", "note": f"24h样本 {n}/{MIN_N},继续积累"}
@@ -323,9 +360,7 @@ def lane_stats() -> dict:
                 "max_net_24h": round(max(points), 3),
                 "edge_verdict": "不可判", "edge_note": "缺少同期可比对照"}
         if lane == "launch":
-            probe, watch = _cohort(measurable, "SMALL_PROBE"), _cohort(measurable, "WATCH")
-            stat["probe"] = probe
-            stat["control"] = watch
+            probe, watch = stat["probe"], stat["control"]
             if probe["n"] >= MIN_N and watch["n"] >= MIN_N:
                 plo, phi = wilson(probe["positives"], probe["n"])
                 wlo, whi = wilson(watch["positives"], watch["n"])

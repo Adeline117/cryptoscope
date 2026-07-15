@@ -147,6 +147,15 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
     finally:
         c.close()
+    evidence_gate = None
+    if lane in {"launch", "cascade"}:
+        try:
+            from src.pipeline.opportunity_outcomes import actionability_gate
+            evidence_gate = actionability_gate(lane)
+        except Exception as exc:
+            evidence_gate = {"state": "blocked", "lane": lane,
+                             "edge_verdict": "不可判",
+                             "reason": f"evidence gate failed: {str(exc)[:80]}"}
     out = []
     for row in rows:
         keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
@@ -192,11 +201,17 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             elif expired:
                 effective_decision = "EXPIRED"
                 item["actionability_reason"] = "read-only quote expired"
+            elif not evidence_gate or evidence_gate.get("state") != "pass":
+                effective_decision = "WATCH"
+                item["actionability_reason"] = ((evidence_gate or {}).get("reason")
+                                                or "evidence gate unavailable")
         elif expired and recorded_decision == "CLAIM_CHECK":
             effective_decision = "EXPIRED"
             item["actionability_reason"] = "claim window expired"
         item["recorded_decision"] = recorded_decision
         item["effective_decision"] = effective_decision
+        if evidence_gate is not None:
+            item["evidence_gate"] = evidence_gate
         item["actionable_now"] = effective_decision in {"SMALL_PROBE", "CLAIM_CHECK"}
         item["is_expired"] = expired
         item["seconds_to_expiry"] = seconds_to_expiry
