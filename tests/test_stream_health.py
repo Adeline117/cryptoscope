@@ -81,3 +81,31 @@ def test_gap_prefix_can_advance_without_claiming_full_recovery(health):
         == "resolved"
     assert health.open_gaps("solana", "slots") == []
     assert health.snapshot()[0]["status"] == "live"
+
+
+def test_failed_gap_recovery_backs_off_without_hiding_the_gap(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    health.observe("solana", "slots", cursor=10, received_at=t0,
+                   expect_contiguous=True)
+    health.observe("solana", "slots", cursor=13, received_at=t0,
+                   expect_contiguous=True)
+    gap = health.open_gaps("solana", "slots", now=t0)[0]
+
+    first = health.defer_gap(gap["id"], "rpc response incomplete", at=t0,
+                             base_delay_seconds=60)
+    assert first["retry_count"] == 1 and first["delay_seconds"] == 60
+    assert health.open_gaps("solana", "slots", now=t0 + timedelta(seconds=59)) == []
+    state = health.snapshot(now=t0 + timedelta(seconds=30))[0]
+    assert state["status"] == "degraded" and state["open_gaps"] == 1
+    assert state["deferred_gaps"] == 1
+
+    due = health.open_gaps("solana", "slots", now=t0 + timedelta(seconds=60))[0]
+    assert due["retry_count"] == 1 and "incomplete" in due["last_error"]
+    second = health.defer_gap(due["id"], "still limited",
+                              at=t0 + timedelta(seconds=60),
+                              base_delay_seconds=60)
+    assert second["retry_count"] == 2 and second["delay_seconds"] == 120
+    assert health.open_gaps(
+        "solana", "slots", now=t0 + timedelta(seconds=179)) == []
+    assert len(health.open_gaps(
+        "solana", "slots", now=t0 + timedelta(seconds=180))) == 1

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.config import DATA_DIR
 
@@ -37,10 +37,20 @@ def _conn() -> sqlite3.Connection:
         id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, stream TEXT NOT NULL,
         from_cursor INTEGER NOT NULL, to_cursor INTEGER NOT NULL,
         detected_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
-        resolved_at TEXT, details TEXT,
+        resolved_at TEXT, details TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+        next_retry_at TEXT, last_error TEXT,
         UNIQUE(source,stream,from_cursor,to_cursor))""")
+    gap_columns = {row[1] for row in c.execute("PRAGMA table_info(gaps)")}
+    for name, kind in (
+        ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_retry_at", "TEXT"),
+        ("last_error", "TEXT"),
+    ):
+        if name not in gap_columns:
+            c.execute(f"ALTER TABLE gaps ADD COLUMN {name} {kind}")
     c.execute("CREATE INDEX IF NOT EXISTS idx_stream_gaps_open "
               "ON gaps(source,stream,status,detected_at)")
+    c.commit()
     return c
 
 
@@ -138,7 +148,8 @@ def resolve_gap(gap_id: int, *, details: dict | None = None,
                         (gap_id,)).fetchone()
         if not row:
             return False
-        c.execute("UPDATE gaps SET status='resolved',resolved_at=?,details=? WHERE id=?",
+        c.execute("UPDATE gaps SET status='resolved',resolved_at=?,details=?,"
+                  "retry_count=0,next_retry_at=NULL,last_error=NULL WHERE id=?",
                   (now, json.dumps(details or {}, separators=(",", ":")), gap_id))
         remaining = c.execute(
             "SELECT COUNT(*) FROM gaps WHERE source=? AND stream=? AND status='open'", row
@@ -173,13 +184,15 @@ def advance_gap(gap_id: int, through_cursor: int, *, details: dict | None = None
         payload = json.dumps(details or {}, separators=(",", ":"))
         if through >= end:
             c.execute(
-                "UPDATE gaps SET status='resolved',resolved_at=?,details=? WHERE id=?",
+                "UPDATE gaps SET status='resolved',resolved_at=?,details=?,"
+                "retry_count=0,next_retry_at=NULL,last_error=NULL WHERE id=?",
                 (now, payload, gap_id),
             )
             result = "resolved"
         else:
             c.execute(
-                "UPDATE gaps SET from_cursor=?,details=? WHERE id=?",
+                "UPDATE gaps SET from_cursor=?,details=?,retry_count=0,"
+                "next_retry_at=NULL,last_error=NULL WHERE id=?",
                 (through + 1, payload, gap_id),
             )
             result = "advanced"
@@ -197,18 +210,55 @@ def advance_gap(gap_id: int, through_cursor: int, *, details: dict | None = None
         c.close()
 
 
-def open_gaps(source: str, stream: str, *, limit: int = 100) -> list[dict]:
+def defer_gap(gap_id: int, error: str, *, at: datetime | str | None = None,
+              base_delay_seconds: int = 60,
+              max_delay_seconds: int = 6 * 60 * 60) -> dict | None:
+    """Persist exponential retry backoff while keeping the gap fail-visible."""
+    now = _iso(at)
+    current = datetime.fromisoformat(now)
+    base = max(1, int(base_delay_seconds))
+    maximum = max(base, int(max_delay_seconds))
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT retry_count FROM gaps WHERE id=? AND status='open'", (gap_id,),
+        ).fetchone()
+        if not row:
+            c.rollback()
+            return None
+        retry_count = int(row[0] or 0) + 1
+        delay = min(maximum, base * (2 ** min(retry_count - 1, 20)))
+        next_retry = (current + timedelta(seconds=delay)).isoformat()
+        last_error = str(error)[:240]
+        c.execute(
+            "UPDATE gaps SET retry_count=?,next_retry_at=?,last_error=? WHERE id=?",
+            (retry_count, next_retry, last_error, gap_id),
+        )
+        c.commit()
+        return {"retry_count": retry_count, "delay_seconds": delay,
+                "next_retry_at": next_retry, "last_error": last_error}
+    finally:
+        c.close()
+
+
+def open_gaps(source: str, stream: str, *, limit: int = 100,
+              now: datetime | str | None = None) -> list[dict]:
+    current = _iso(now)
     c = _conn()
     try:
         rows = c.execute(
-            """SELECT id,from_cursor,to_cursor,detected_at,details
+            """SELECT id,from_cursor,to_cursor,detected_at,details,
+                      retry_count,next_retry_at,last_error
                FROM gaps WHERE source=? AND stream=? AND status='open'
+                 AND (next_retry_at IS NULL OR next_retry_at<=?)
                ORDER BY detected_at,id LIMIT ?""",
-            (source, stream, max(0, int(limit))),
+            (source, stream, current, max(0, int(limit))),
         ).fetchall()
     finally:
         c.close()
-    keys = ("id", "from_cursor", "to_cursor", "detected_at", "details")
+    keys = ("id", "from_cursor", "to_cursor", "detected_at", "details",
+            "retry_count", "next_retry_at", "last_error")
     return [dict(zip(keys, row)) for row in rows]
 
 
@@ -220,9 +270,14 @@ def snapshot(*, now: datetime | str | None = None,
         rows = c.execute("""SELECT source,stream,cursor,last_event_at,last_received_at,
                                    latency_ms,status,last_error,updated_at
                             FROM streams ORDER BY source,stream""").fetchall()
-        gaps = {(s, st): n for s, st, n in c.execute(
-            "SELECT source,stream,COUNT(*) FROM gaps WHERE status='open' GROUP BY source,stream"
-        )}
+        gaps = {(s, st): (n, deferred, next_retry) for s, st, n, deferred, next_retry
+                in c.execute(
+                    """SELECT source,stream,COUNT(*),
+                              SUM(CASE WHEN next_retry_at>? THEN 1 ELSE 0 END),
+                              MIN(CASE WHEN next_retry_at>? THEN next_retry_at END)
+                       FROM gaps WHERE status='open' GROUP BY source,stream""",
+                    (current.isoformat(), current.isoformat()),
+                )}
     finally:
         c.close()
     out = []
@@ -234,7 +289,11 @@ def snapshot(*, now: datetime | str | None = None,
         age = ((current - datetime.fromisoformat(received)).total_seconds()
                if received else None)
         item["age_seconds"] = round(age, 1) if age is not None else None
-        item["open_gaps"] = gaps.get((item["source"], item["stream"]), 0)
+        gap_count, deferred, next_retry = gaps.get(
+            (item["source"], item["stream"]), (0, 0, None))
+        item["open_gaps"] = gap_count
+        item["deferred_gaps"] = deferred
+        item["next_gap_retry_at"] = next_retry
         item["stale"] = age is None or age > stale_after_seconds
         if item["stale"] and item["status"] == "live":
             item["status"] = "stale"
