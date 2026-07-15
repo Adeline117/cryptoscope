@@ -40,6 +40,19 @@ EXCHANGES: dict[str, dict[str, Any]] = {
 }
 
 POLL_INTERVAL_SECONDS = 60
+FAILURE_LOG_INTERVAL_SECONDS = 3600
+_LAST_FAILURE_LOG: dict[str, float] = {}
+
+
+def _log_fetch_failure(exchange: str, error: str, *, now: float | None = None) -> None:
+    """Keep per-scan health evidence while rate-limiting expected geo-block noise."""
+    now = time.monotonic() if now is None else now
+    last = _LAST_FAILURE_LOG.get(exchange)
+    if last is None or now - last >= FAILURE_LOG_INTERVAL_SECONDS:
+        _LAST_FAILURE_LOG[exchange] = now
+        logger.warning("listing_source_unavailable", exchange=exchange, error=error)
+    else:
+        logger.debug("listing_source_still_unavailable", exchange=exchange)
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +175,7 @@ def check_exchange_result(
     result["attempted_endpoints"] = len(errors) + int(selected_url is not None)
     if data is None:
         error = " | ".join(errors)[:300]
-        logger.error("listing_fetch_failed", exchange=exchange, error=error)
+        _log_fetch_failure(exchange, error)
         result["error"] = error
         return result
     result["endpoint"] = selected_url

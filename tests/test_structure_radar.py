@@ -100,6 +100,28 @@ def test_listing_detector_uses_only_configured_official_fallback(tmp_path, monke
     assert result["symbol_count"] == 1
 
 
+def test_listing_source_failure_is_warned_hourly_without_hiding_health(monkeypatch):
+    import src.collectors.listing_detector as ld
+
+    calls = []
+
+    class Logger:
+        def warning(self, event, **fields):
+            calls.append(("warning", event, fields))
+
+        def debug(self, event, **fields):
+            calls.append(("debug", event, fields))
+
+    monkeypatch.setattr(ld, "logger", Logger())
+    ld._LAST_FAILURE_LOG.clear()
+    ld._log_fetch_failure("bybit", "403", now=100)
+    ld._log_fetch_failure("bybit", "403", now=200)
+    ld._log_fetch_failure("bybit", "403", now=100 + ld.FAILURE_LOG_INTERVAL_SECONDS)
+
+    assert [level for level, _, _ in calls] == ["warning", "debug", "warning"]
+    assert calls[0][2] == {"exchange": "bybit", "error": "403"}
+
+
 def test_scheduler_registers_structure_radar_job():
     from src.pipeline.scheduler import create_scheduler
     scheduler = create_scheduler()
