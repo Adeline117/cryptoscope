@@ -1177,12 +1177,17 @@ async def start_bot_polling() -> None:
 
 
 async def stop_bot_polling(application) -> None:
-    """Gracefully stop the bot polling."""
-    if application and application.updater:
-        await application.updater.stop()
-        await application.stop()
-        await application.shutdown()
-        logger.info("telegram_bot_stopped")
+    """Gracefully stop polling and release cached exchange HTTP sessions."""
+    try:
+        if application and application.updater:
+            await application.updater.stop()
+            await application.stop()
+            await application.shutdown()
+            logger.info("telegram_bot_stopped")
+    finally:
+        from src.contract.exchange import close_exchange_clients
+
+        close_exchange_clients()
 
 
 if __name__ == "__main__":
@@ -1199,6 +1204,8 @@ if __name__ == "__main__":
             while True:
                 await asyncio.sleep(3600)
         except KeyboardInterrupt:
+            pass
+        finally:
             await stop_bot_polling(app)
 
     asyncio.run(_main())

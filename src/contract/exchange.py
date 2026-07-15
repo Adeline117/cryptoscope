@@ -9,6 +9,7 @@ via Telegram inline keyboard callback.
 
 from __future__ import annotations
 
+import atexit
 import os
 from typing import Any
 
@@ -45,6 +46,34 @@ EXCHANGES = {
 _exchange_instances: dict[str, Any] = {}
 
 
+def close_exchange_clients() -> int:
+    """Close cached synchronous CCXT sessions and forget every instance.
+
+    CCXT's synchronous adapters own a ``requests.Session`` and do not expose an
+    exchange-level ``close`` method. Clearing the cache before closing makes this
+    idempotent and prevents a failed close from leaving a stale client reusable.
+    """
+    instances = list(_exchange_instances.items())
+    _exchange_instances.clear()
+    closed = 0
+    for name, exchange in instances:
+        session = getattr(exchange, "session", None)
+        close = getattr(session, "close", None)
+        if not callable(close):
+            logger.warning("exchange_session_missing", name=name)
+            continue
+        try:
+            close()
+            closed += 1
+        except Exception as exc:
+            logger.warning("exchange_session_close_failed", name=name,
+                           error=str(exc)[:120])
+    return closed
+
+
+atexit.register(close_exchange_clients)
+
+
 def _get_exchange(name: str):
     """Get or create a ccxt exchange instance."""
     if name in _exchange_instances:
@@ -59,6 +88,13 @@ def _get_exchange(name: str):
 
     if not api_key or not api_secret:
         raise ValueError(f"{name} API keys not configured. Set {config['env_key']} and {config['env_secret']}")
+    passphrase = None
+    if name == "okx":
+        passphrase = os.environ.get(config["env_passphrase"], "")
+        if not passphrase:
+            raise ValueError(
+                f"okx passphrase not configured. Set {config['env_passphrase']}"
+            )
 
     try:
         import ccxt
@@ -72,7 +108,7 @@ def _get_exchange(name: str):
     }
 
     if name == "okx":
-        params["password"] = os.environ.get(config.get("env_passphrase", ""), "")
+        params["password"] = passphrase
 
     exchange_class = getattr(ccxt, config["class"])
     exchange = exchange_class(params)
