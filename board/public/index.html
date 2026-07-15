@@ -139,6 +139,18 @@
   .bar{display:inline-block;height:5px;border-radius:3px;background:var(--accent);vertical-align:middle;min-width:2px}
   .exp td{background:var(--s2);padding:12px 14px;white-space:normal;font-size:12.5px;color:var(--muted);line-height:1.6}
   .exp b{color:var(--text)} .exp .so{color:var(--accent-t);font-weight:600}
+  .event-timeline{margin:16px 0 4px;padding:16px;border:1px solid var(--border2);border-radius:13px;background:var(--s1);color:var(--text)}
+  .event-timeline-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+  .event-timeline-head h3{margin:0;font-size:13px;line-height:1.35}.event-timeline-head p{margin:4px 0 0;max-width:760px;color:var(--dim);font-size:10.5px;line-height:1.5}
+  .event-chart{width:100%;height:260px;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--s2)}
+  .event-chart-fallback{height:100%;display:grid;place-items:center;padding:18px;text-align:center;color:var(--dim);font-size:11px}
+  .event-clock-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:7px;margin-top:9px}
+  .event-clock{min-width:0;padding:9px 10px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:var(--s2)}
+  .event-clock.good{border-left-color:var(--good)}.event-clock.warn{border-left-color:var(--warn)}.event-clock.gap{border-left-color:var(--danger);border-style:dashed}
+  .event-clock .tk{display:block;width:auto;height:auto;border:0;background:none;text-align:left;font:650 9.5px/1.3 var(--sans);letter-spacing:.06em;color:var(--dim)}
+  .event-clock .tv{display:block;margin-top:3px;font:650 11px/1.45 var(--mono);color:var(--text);overflow-wrap:anywhere}.event-clock .ts{display:block;margin-top:2px;font-size:9.5px;line-height:1.4;color:var(--dim)}
+  .event-timeline-note{display:flex;align-items:flex-start;gap:7px;margin-top:9px;color:var(--dim);font-size:10px;line-height:1.5}.event-timeline-note::before{content:"i";flex:none;display:grid;place-items:center;width:15px;height:15px;border:1px solid var(--border2);border-radius:50%;font:700 9px var(--mono);color:var(--accent-t)}
+  .cascade-evidence{width:100%;margin-top:7px}.cascade-evidence>summary{cursor:pointer;color:var(--accent-t);font-size:11px}.cascade-evidence[open]>summary{margin-bottom:8px}
   .swipe-hint{display:none}
   .table-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;padding:4px}
   .filters{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none}.filters::-webkit-scrollbar{display:none}
@@ -250,7 +262,7 @@
   .cell .fu{font-family:var(--mono);font-size:15px;font-weight:600}
   .cell .mt{font-size:10.5px;color:var(--muted)}
   .cell-why{margin-top:4px;padding-top:7px;border-top:1px solid var(--border);font-size:11px;line-height:1.45;color:var(--muted)}
-  .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:space-between}
+  .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:space-between}.foot a{color:var(--muted)}
   body[data-view="play"] .lanehead,body[data-view="play"] .readme{display:none}
   body[data-view="play"] #view{margin-top:18px}
   @media(max-width:980px){
@@ -269,7 +281,7 @@
     .market-coverage{padding:17px 14px}.market-coverage-head{flex-direction:column;gap:7px}.market-coverage-grid{grid-template-columns:1fr}.market-coverage-card:last-child{grid-column:auto}.market-coverage-card .mch{gap:6px}
     .swipe-hint{display:block;position:sticky;left:0;width:100%;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;text-align:right}
     body[data-view="perp"] .stat{grid-template-columns:repeat(2,1fr)}body[data-view="perp"] .stat>div:nth-child(n){border-left:1px solid var(--border);padding-left:10px}body[data-view="perp"] .stat>div:nth-child(2n+1){border-left:0;padding-left:0}
-    .carry-health-grid{grid-template-columns:1fr 1fr}.carry-health-head{align-items:flex-start;flex-direction:column}.sc-card{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sc-card .k,.evidence-reasons{grid-column:1/-1}.sc-card .v{align-items:flex-start;flex-direction:column;gap:1px}.carry-life-grid{grid-template-columns:1fr}.carry-life{padding:12px}
+    .carry-health-grid{grid-template-columns:1fr 1fr}.carry-health-head{align-items:flex-start;flex-direction:column}.sc-card{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sc-card .k,.evidence-reasons{grid-column:1/-1}.sc-card .v{align-items:flex-start;flex-direction:column;gap:1px}.carry-life-grid{grid-template-columns:1fr}.carry-life{padding:12px}.event-timeline{padding:12px}.event-timeline-head{flex-direction:column}.event-chart{height:220px}.event-clock-grid{grid-template-columns:1fr 1fr}
   }
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
 </style>
@@ -313,9 +325,10 @@
   <details class="readme" id="readme"><summary>读我 · 这条线怎么用 / 诚实边界</summary><div class="rd" id="rd"></div></details>
   <div id="view" role="tabpanel" aria-live="polite" tabindex="0"></div>
 
-  <div class="foot"><span id="gen">—</span><span>Launch 报价最多每 30 秒采集/每 10 秒读取 · 其他赛道 2–60 分钟采集/每 60 秒读取 · 只是雷达不是买卖指令</span></div>
+  <div class="foot"><span id="gen">—</span><span>Launch 报价最多每 30 秒采集/每 10 秒读取 · 其他赛道 2–60 分钟采集/每 60 秒读取 · 只是雷达不是买卖指令 · <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a></span></div>
 </div>
 
+<script src="/vendor/lightweight-charts-5.2.0.js"></script>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
@@ -385,6 +398,62 @@ function launchLifecycleHtml(r){
     :"无完整双向报价时钟，不可按首次价行动";
   return `<br><b>进入窗口</b>: ${quote}<br><b>价格失效</b>: 若用户自行建仓，价格 ${invalidationCondition(r)} 时论文失效；系统不会代为卖出。<br><b>固定评估（不是平仓）</b>: ${clocks}<small>收益扣除冻结的估算成本；真实成交成本标记: ${r?.outcome?.cost_is_real_fill===true?"真实":"非真实成交"}。</small><br><b>真实离场</b>: 无——系统没有成交、没有持仓，也不会自动平仓。`;
 }
+
+const eventChartRows=new Map(),mountedEventCharts=new Set();
+let eventChartSeq=0;
+function finitePrice(value){const n=Number(value);return Number.isFinite(n)&&n>0?n:null}
+function unixClock(value){const ms=new Date(value||"").getTime();return Number.isFinite(ms)?Math.floor(ms/1000):null}
+function chartPrice(value){const n=finitePrice(value);if(n==null)return"—";return n<.001?n.toPrecision(4):n<1?n.toFixed(6):n.toLocaleString(undefined,{maximumFractionDigits:4})}
+function eventQuote(r){const ca=r?.current_assessment||{},probe=ca.execution_probe||r?.execution_probe||{};return{price:finitePrice(ca.entry_reference_price??probe.average_price),at:ca.quote_at||probe.quote_at||r?.quote_at,expiry:ca.expires_at||ca.quote_expires_at||r?.expires_at}}
+function eventHorizonRows(r){
+  const detected=unixClock(r?.detected_at),outcome=r?.outcome||{},points=outcome.horizons||{},unavailable=new Set(outcome.unavailable_horizons||[]);
+  return [["1h",1],["24h",24],["7d",168]].map(([name,hours])=>{
+    const target=detected==null?null:detected+hours*3600,point=points[name],price=finitePrice(point?.price);
+    if(price!=null)return{name,target,price,state:"settled",detail:`$${chartPrice(price)} · 估算成本后 ${point.net_return_pct_est==null?"—":`${point.net_return_pct_est>0?"+":""}${pct2(point.net_return_pct_est)}%`}`};
+    if(unavailable.has(name))return{name,target,price:null,state:"gap",detail:"历史价格不可得 · 数据断点"};
+    if(target!=null&&target<=Math.floor(Date.now()/1000))return{name,target,price:null,state:"pending",detail:"已到评估时点 · 等待结算器"};
+    return{name,target,price:null,state:"future",detail:"尚未到固定评估时点"};
+  });
+}
+function eventEvidenceTimelineHtml(r){
+  const key=`event-chart-${++eventChartSeq}`;eventChartRows.set(key,r);
+  const entry=finitePrice(r?.entry_price),quote=eventQuote(r),horizons=eventHorizonRows(r);
+  const priced=(entry!=null?1:0)+(quote.price!=null?1:0)+horizons.filter(x=>x.price!=null).length;
+  const cards=[
+    {name:"首次发现观测（非成交）",clock:r?.detected_at,detail:entry==null?"首次价格缺失":`$${chartPrice(entry)} · 不可事后改写`,state:entry==null?"gap":""},
+    {name:"当前只读报价（非成交）",clock:quote.at,detail:quote.price==null?"无可用双向报价":`$${chartPrice(quote.price)} · ${expiryText({expires_at:quote.expiry})}`,state:quote.price==null?"gap":"good"},
+    ...horizons.map(x=>({name:x.name,clock:x.target?new Date(x.target*1000).toISOString():null,detail:x.detail,state:x.state==="settled"?"good":x.state==="gap"?"gap":"warn"})),
+  ];
+  return `<section class="event-timeline" aria-label="事件价格证据时间线"><div class="event-timeline-head"><div><h3>离散观测点时间轴</h3><p>只画系统实际保存的独立快照；点与点之间没有价格路径。缺失时保留时钟断点，不插值、不补 K 线，也不把固定评估说成真实平仓。</p></div><span class="chip ${priced>=2?'b-accent':'b-warn'}">${priced}/5 个价格点</span></div><div class="event-chart" data-event-chart="${key}"><div class="event-chart-fallback">展开后绘制离散证据点；只有一个价格点时只显示该点与论文失效线。</div></div><div class="event-clock-grid">${cards.map(x=>`<div class="event-clock ${x.state}"><span class="tk">${esc(x.name)}</span><span class="tv">${esc(x.detail)}</span><span class="ts">${esc(utcClock(x.clock))}</span></div>`).join("")}</div><div class="event-timeline-note">报价窗关闭不等于离场；1h/24h/7d 是按首次发现时钟结算的固定评估点，不是平仓。系统没有成交、持仓或自动退出。</div></section>`;
+}
+function eventChartModel(r){
+  const quote=eventQuote(r),horizons=eventHorizonRows(r),points=[],clocks=[];
+  const add=(time,value,marker)=>{if(time==null)return;clocks.push(time);const price=finitePrice(value);if(price!=null)points.push({time,value:price,marker})};
+  add(unixClock(r?.detected_at),r?.entry_price,{position:"belowBar",color:"#7db4ff",shape:"arrowUp",text:"首次观测·非成交"});
+  add(unixClock(quote.at),quote.price,{position:"aboveBar",color:"#71d083",shape:"circle",text:"只读报价·非成交"});
+  for(const point of horizons){
+    const tone=point.state==="settled"?"#9b8cff":"#ff977d";
+    add(point.target,point.price,point.state==="settled"?{position:"aboveBar",color:tone,shape:"circle",text:point.name}:null);
+  }
+  const ca=r?.current_assessment||{};
+  return{points:points.sort((a,b)=>a.time-b.time),clocks:[...new Set(clocks)].sort((a,b)=>a-b),invalidation:finitePrice(ca.invalidation_reference_price??r?.invalidation_price),entry:finitePrice(r?.entry_price)};
+}
+function eventPriceFormat(model){const values=model.points.map(x=>x.value),min=Math.min(...values);const precision=Math.min(12,Math.max(2,Math.ceil(-Math.log10(min))+2));return{type:"price",precision,minMove:10**-precision}}
+function mountEventChart(node){
+  if(!node||node.dataset.chartMounted==="1")return;
+  const row=eventChartRows.get(node.dataset.eventChart);if(!row)return;
+  if(!window.LightweightCharts){node.innerHTML='<div class="event-chart-fallback">图表组件未加载；下方原始时钟仍有效。</div>';return}
+  const model=eventChartModel(row);if(!model.points.length){node.innerHTML='<div class="event-chart-fallback">没有真实价格点，拒绝绘制推测曲线。</div>';return}
+  node.innerHTML="";const css=getComputedStyle(document.documentElement),LC=window.LightweightCharts;
+  const chart=LC.createChart(node,{autoSize:true,layout:{background:{type:LC.ColorType.Solid,color:"transparent"},textColor:css.getPropertyValue("--muted").trim(),attributionLogo:true},grid:{vertLines:{color:css.getPropertyValue("--border").trim()},horzLines:{color:css.getPropertyValue("--border").trim()}},rightPriceScale:{borderColor:css.getPropertyValue("--border2").trim()},timeScale:{borderColor:css.getPropertyValue("--border2").trim(),timeVisible:true,secondsVisible:false},localization:{priceFormatter:chartPrice},crosshair:{mode:LC.CrosshairMode.Normal}});
+  const invisible=chart.addSeries(LC.LineSeries,{lineVisible:false,pointMarkersVisible:false,lastValueVisible:false,priceLineVisible:false});invisible.setData(model.clocks.map(time=>({time})));
+  let anchor=null;for(const point of model.points){const series=chart.addSeries(LC.LineSeries,{lineVisible:false,pointMarkersVisible:true,pointMarkersRadius:4,lastValueVisible:false,priceLineVisible:false,priceFormat:eventPriceFormat(model)});series.setData([{time:point.time,value:point.value}]);if(point.marker)LC.createSeriesMarkers(series,[{time:point.time,...point.marker}]);if(!anchor)anchor=series}
+  if(model.invalidation!=null)anchor.createPriceLine({price:model.invalidation,color:css.getPropertyValue("--danger").trim(),lineWidth:1,lineStyle:LC.LineStyle.Dashed,axisLabelVisible:true,title:"论文失效·非止损单"});
+  if(model.entry!=null)anchor.createPriceLine({price:model.entry,color:css.getPropertyValue("--accent").trim(),lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false,title:"首次观测"});
+  chart.timeScale().fitContent();node.dataset.chartMounted="1";mountedEventCharts.add({node,chart});
+}
+function mountEventCharts(root){root.querySelectorAll("[data-event-chart]").forEach(mountEventChart)}
+function disposeEventCharts(root){for(const item of [...mountedEventCharts]){if(root&&!root.contains(item.node))continue;item.chart.remove();delete item.node.dataset.chartMounted;mountedEventCharts.delete(item)}}
 
 function renderLaunchCoverage(d){
   const p=d?.primary_sources?.solana||{}, q=p.qualification||{}, states=q.qualification||{};
@@ -492,7 +561,7 @@ const LANES={
       {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
       {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 ≤$${esc(r.invalidation_price??"—")}</small>`,sort:r=>r.max_notional_usd||0},
     ],
-    detail:r=>{const ca=r.current_assessment||{},sg=ca.security_gate||r.security_gate||{},ep=ca.execution_probe||r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
+    detail:r=>{const ca=r.current_assessment||{},sg=ca.security_gate||r.security_gate||{},ep=ca.execution_probe||r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${eventEvidenceTimelineHtml(r)}${launchLifecycleHtml(r)}`},
   },
   structure:{
     title:d=>{const e=d?.events||[],h=d?.source_health||[],bad=h.filter(x=>x.status!=="ok"),canonical=d?.canonical_listings??e.filter(x=>x.event_type==="new_listing").length,legacy=d?.legacy_inventory_deltas??e.filter(x=>x.event_type==="legacy_inventory_delta").length;return `<b style="color:var(--violet)">公开市场结构事件</b>: ${canonical} 个资产级新增已入账；另有 ${legacy} 个旧库存差分组只观察。来源本轮可达 <b>${h.filter(x=>x.status==="ok").length}/${h.length||"?"}</b>${bad.length?`；失败: ${bad.map(x=>esc(x.exchange)+"("+esc(x.error||"unknown")+")").join(" · ")}`:""}。`},
@@ -862,7 +931,7 @@ function renderPerp(d){
 
   if(cascadeEvents.length){
     html+=`<div class="play-sec" style="margin:14px 0"><div class="ph">⚡ 已入账的级联/点火事件 <span class="pd">首次价已锁定 · 仅强触发</span></div>`+
-      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small>${launchLifecycleHtml(e)}</div>`}).join("")+`</div>`;
+      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small><details class="cascade-evidence" data-chart-details><summary>查看入场 / 失效 / 结果时间线</summary>${eventEvidenceTimelineHtml(e)}${launchLifecycleHtml(e)}</details></div>`}).join("")+`</div>`;
   }
   if(s.length){
     const col=p=>{const fa=p.funding_ann;const a=Math.min(Math.abs(fa)/300,1);if(p.signal==="ignition")return{bg:`color-mix(in srgb,var(--good) ${20+a*30}%,var(--s1))`,b:"var(--good-b)"};return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
@@ -873,6 +942,7 @@ function renderPerp(d){
 
 // ---------- paint ----------
 function paint(){
+  disposeEventCharts();eventChartRows.clear();eventChartSeq=0;
   const L=LANES[view], d=data[view==="avoid"?"opp":view];
   document.body.dataset.view=view;
   $("lanetitle").innerHTML=L.title(d);
@@ -899,9 +969,10 @@ function wireRows(){
   document.querySelectorAll("[data-filter]").forEach(btn=>btn.onclick=()=>{filterState[view]=btn.dataset.filter;paint()});
   document.querySelectorAll(".search").forEach(input=>input.oninput=()=>{const value=input.value;searchState[view]=value;paint();const next=document.querySelector(".search");if(next){next.focus();next.setSelectionRange(value.length,value.length)}});
   document.querySelectorAll("tr[data-row][aria-controls]").forEach(tr=>{
-    const toggle=()=>{const ex=document.getElementById(tr.getAttribute("aria-controls"));if(!ex)return;ex.hidden=!ex.hidden;tr.setAttribute("aria-expanded",String(!ex.hidden))};
+    const toggle=()=>{const ex=document.getElementById(tr.getAttribute("aria-controls"));if(!ex)return;ex.hidden=!ex.hidden;tr.setAttribute("aria-expanded",String(!ex.hidden));if(!ex.hidden)requestAnimationFrame(()=>mountEventCharts(ex));else disposeEventCharts(ex)};
     tr.onclick=toggle;tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}};
   });
+  document.querySelectorAll("details[data-chart-details]").forEach(item=>item.addEventListener("toggle",()=>{if(item.open)requestAnimationFrame(()=>mountEventCharts(item));else disposeEventCharts(item)}));
   document.querySelectorAll(".cell[aria-expanded]").forEach(cell=>{
     const toggle=()=>{const why=cell.querySelector(".cell-why");why.hidden=!why.hidden;cell.setAttribute("aria-expanded",String(!why.hidden))};
     cell.onclick=toggle;cell.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}};
