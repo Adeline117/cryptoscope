@@ -3,6 +3,7 @@ from pathlib import Path
 
 BOARD = Path(__file__).parents[1] / "board" / "public" / "index.html"
 BOARD_EXPORT = Path(__file__).parents[1] / "src" / "pipeline" / "board_export.py"
+HYPERLIQUID = Path(__file__).parents[1] / "src" / "onchain" / "hyperliquid.py"
 
 
 def test_board_uses_effective_decision_and_client_side_expiry():
@@ -144,7 +145,7 @@ def test_carry_evidence_separates_valid_total_and_quarantined_samples():
 
 
 def test_carry_ui_forbids_realized_or_complete_cost_claims():
-    combined = BOARD.read_text() + BOARD_EXPORT.read_text()
+    combined = BOARD.read_text() + BOARD_EXPORT.read_text() + HYPERLIQUID.read_text()
 
     for forbidden in (
         "或市场缺失",
@@ -154,6 +155,8 @@ def test_carry_ui_forbids_realized_or_complete_cost_claims():
         "绝对净收益",
         "唯一对个人可复制的正EV核",
         "ONE replicable positive-EV core",
+        '"realized_ann"',
+        "已实现carry",
     ):
         assert forbidden not in combined
     assert "报价费率年化代理" in combined

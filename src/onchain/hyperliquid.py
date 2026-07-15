@@ -228,14 +228,12 @@ def perp_signals(rows: list[dict] | None = None) -> list[dict]:
     return out
 
 
-# ── Funding-carry screener (delta-neutral): the ONE replicable positive-EV core ──
-# Research verdict (core-of-edge-provider-not-signal): the only edge an individual can
-# actually run is being the COUNTERPARTY to leveraged longs — hold spot + short the
-# perp, collect the funding they pay. This is CARRY (a risk premium), NOT free arb:
+# ── Funding-carry screener (delta-neutral candidate hypothesis) ────────────────────
+# Carry can collect a funding differential while hedging direction, but this repository
+# has not established a real-fill, all-in positive edge. It remains a risk-premium proxy:
 # funding can flip negative (you pay), the short leg can get squeezed/ADL'd, the venue
 # can blow up or the price de-peg (2025-10-10: USDe hit $0.65 on Binance, liquidating
-# solvent accounts). So we screen for SUSTAINED positive funding + flag every risk,
-# and never quote a fabricated net — funding is gross of fees/slippage.
+# solvent accounts). We screen sustained quotes and expose every missing cost component.
 CARRY_MIN_OI_USD = 1_000_000   # need a deep perp + a real spot market to run the pair
 CARRY_MIN_ANN = 8.0            # gross ann funding floor — below this, fees eat the carry
 CARRY_WINDOW_H = 48            # persistence window
@@ -247,9 +245,7 @@ CARRY_MAJORS = {"BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "AVAX", "LTC", "LINK"
 # The gross differential is a %/yr RATE; the entry/exit cost is a ONE-TIME % that
 # amortizes over how long you hold. Short holds (differential flips fast) = crippling
 # drag. Every number below is a stated, arguable COST assumption — conservative, never a
-# favorable fudge. This is the calculation that turns an exciting gross number into the
-# truth: after costs, most differentials are thin or NEGATIVE, and only the fat ones on
-# a long-enough hold survive.
+# favorable fudge. The output is a partial model proxy, not an all-in net return.
 CARRY_ROUNDTRIP_COST_PCT = 0.35   # both legs × (in+out): ~maker fees + realistic cross-
                                   # leg slippage (research: 20-50bps/leg). One-time.
 CARRY_REBALANCE_DRAG_ANN = 1.5    # ongoing %/yr to keep the two legs delta-neutral as
@@ -263,9 +259,9 @@ OKX_FUNDING_SCAN_TIMEOUT_S = 75.0
 
 
 def _carry_net_ann(gross_edge_ann: float, hold_days: float = CARRY_DEFAULT_HOLD_DAYS) -> float:
-    """Net %/yr after amortized entry/exit cost + ongoing rebalance drag. hold_days is the
+    """Partial-model proxy after assumed round-trip and rebalance drag. hold_days is the
     lever: at 14d a 0.35% round-trip = ~9%/yr drag, so a +7% gross differential nets
-    NEGATIVE — only fat differentials survive a short hold. Longer persistence → less drag."""
+    negative in this model. Basis, account fees, collateral and fills remain unknown."""
     amortized_drag = CARRY_ROUNDTRIP_COST_PCT / max(hold_days / 365.0, 1e-6)
     return gross_edge_ann - amortized_drag - CARRY_REBALANCE_DRAG_ANN
 
@@ -520,16 +516,21 @@ SCORECARD_MIN_SPAN_H = 24      # need a real span, not 20 snapshots in one burst
 
 
 def carry_scorecard(window_h: int = SCORECARD_WINDOW_H) -> dict:
-    """Lane-level REALIZED-carry track record from the accumulated snapshots — the honest
-    proof/disproof of the edge core. Not 'funding is 11% now' but 'holding the clean-major
-    carry basket over the window actually realized X%/yr and stayed positive Z% of the
-    time, worst instantaneous −W%'. Refuses a number until the sample supports one
-    ('不可判'), exactly like board_outcomes — a realized carry is only honest with history.
+    """Describe historical HL funding *quote snapshots*, never portfolio PnL.
 
-    Scope = CARRY_MAJORS only: the executable, deep-spot subset. Alts' realized funding
-    is dominated by de-peg/liquidation tail risk this can't capture, so quoting a basket
-    number on them would overstate an individual's achievable carry."""
+    The series has no OKX leg, positions, settlement timestamps, basis accounting, fees,
+    or fills. It is useful context for persistence only and cannot prove/disprove carry
+    profitability on its own.
+    """
     from datetime import timedelta
+    base = {
+        "measure_kind": "hl_funding_quote_snapshot_proxy",
+        "is_realized_pnl": False,
+        "includes_okx_leg": False,
+        "includes_funding_settlements": False,
+        "includes_basis_pnl": False,
+        "includes_costs": False,
+    }
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_h)).isoformat()
     c = _conn()
     pts: list[tuple[str, float]] = []      # (ts, funding_ann) across all major coins
@@ -542,25 +543,28 @@ def carry_scorecard(window_h: int = SCORECARD_WINDOW_H) -> dict:
     finally:
         c.close()
     if len(pts) < SCORECARD_MIN_SNAPS:
-        return {"available": False, "verdict": "不可判", "n": len(pts),
-                "note": f"已实现carry战绩积累中({len(pts)}/{SCORECARD_MIN_SNAPS}个快照点)"}
+        return {**base, "available": False, "verdict": "不可判", "n": len(pts),
+                "note": f"HL 报价费率快照积累中({len(pts)}/{SCORECARD_MIN_SNAPS}个点)"}
     tss = sorted(t for t, _ in pts)
     try:
         span_h = (datetime.fromisoformat(tss[-1]) - datetime.fromisoformat(tss[0])).total_seconds() / 3600
     except Exception:
         span_h = 0
     if span_h < SCORECARD_MIN_SPAN_H:
-        return {"available": False, "verdict": "不可判", "n": len(pts),
+        return {**base, "available": False, "verdict": "不可判", "n": len(pts),
                 "note": f"跨度仅{span_h:.0f}h(<{SCORECARD_MIN_SPAN_H}h),等更长历史"}
     fas = [fa for _, fa in pts]
-    realized = sum(fas) / len(fas)
+    quoted_proxy = sum(fas) / len(fas)
     pos_frac = sum(1 for x in fas if x > 0) / len(fas)
-    return {"available": True, "verdict": "measured",
-            "realized_ann": round(realized, 1), "pos_frac": round(pos_frac, 3),
-            "worst_ann": round(min(fas), 1), "n": len(fas), "span_h": round(span_h, 1),
-            "note": (f"主流carry篮子近{span_h:.0f}h已实现约 {realized:.0f}%/年(毛),"
-                     f"{pos_frac*100:.0f}%时间为正,最差瞬时 {min(fas):.0f}%/年。"
-                     "毛值未扣手续费/滑点,且不含脱锚/挤压尾部。")}
+    return {**base, "available": True, "verdict": "measured",
+            "quoted_hl_funding_rate_proxy_ann": round(quoted_proxy, 1),
+            "positive_quote_fraction": round(pos_frac, 3),
+            "worst_quoted_rate_ann": round(min(fas), 1),
+            "n": len(fas), "span_h": round(span_h, 1),
+            "note": (f"主流币近{span_h:.0f}h HL 资金费报价快照均值约 "
+                     f"{quoted_proxy:.0f}%/年，{pos_frac*100:.0f}% 快照为正，"
+                     f"最差瞬时报价率 {min(fas):.0f}%/年。未包含 OKX 腿、"
+                     "实际资金费结算、basis、成交或成本。")}
 
 
 def carry_signals(rows: list[dict] | None = None, *,

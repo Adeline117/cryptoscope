@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+import sqlite3
+from datetime import datetime, timedelta, timezone
 from threading import Event, Lock
 from time import monotonic, sleep
 
@@ -358,3 +359,31 @@ def test_hyperliquid_typed_fetch_separates_failure_from_empty_market():
     assert malformed["rows"] == [] and malformed["health"]["error_kind"] == "malformed_response"
     assert good["health"]["state"] == "ok" and good["health"]["rows"] == 1
     assert good["rows"][0]["name"] == "BTC"
+
+
+def test_carry_scorecard_is_explicitly_a_quote_proxy_not_realized_pnl(
+        monkeypatch, tmp_path):
+    db = tmp_path / "scorecard.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE snaps(coin TEXT, ts TEXT, funding_ann REAL)")
+    now = datetime.now(timezone.utc)
+    c.executemany(
+        "INSERT INTO snaps VALUES (?,?,?)",
+        [("BTC", (now - timedelta(hours=30 - i * 1.5)).isoformat(), 10 + i / 10)
+         for i in range(20)],
+    )
+    c.commit()
+    c.close()
+    monkeypatch.setattr(hl, "_conn", lambda: sqlite3.connect(db))
+
+    scorecard = hl.carry_scorecard()
+
+    assert scorecard["available"] is True
+    assert scorecard["measure_kind"] == "hl_funding_quote_snapshot_proxy"
+    assert scorecard["is_realized_pnl"] is False
+    assert scorecard["includes_okx_leg"] is False
+    assert scorecard["includes_funding_settlements"] is False
+    assert scorecard["includes_basis_pnl"] is False
+    assert scorecard["includes_costs"] is False
+    assert scorecard["quoted_hl_funding_rate_proxy_ann"] == pytest.approx(10.9)
+    assert "realized_ann" not in scorecard

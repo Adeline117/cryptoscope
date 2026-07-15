@@ -681,11 +681,12 @@ function carryEvidenceHtml(pp,evidence,scorecard){
     <span class="v"><span class="num">${esc(evidence?.edge_verdict||"不可判")}</span><small>已知组件后代理为正 ${evidence?.hits??"?"}/${valid??"?"}</small></span>
     ${reasonText?`<details class="evidence-reasons"><summary>查看排除原因</summary>${esc(reasonText)}</details>`:""}</div>`;
   if(scorecard?.verdict==="measured"){
-    const proxy=scorecard.quoted_hl_funding_rate_proxy_ann??scorecard.realized_ann;
+    const proxy=scorecard.quoted_hl_funding_rate_proxy_ann;
+    const positive=scorecard.positive_quote_fraction;
     html+=`<div class="sc-card muted"><span class="k">HL 报价费率快照代理 · 近${esc(scorecard.span_h)}h</span>
-      <span class="v"><span class="num">${proxy>0?"+":""}${esc(proxy)}%</span><small>报价费率年化代理</small></span>
-      <span class="v"><span class="num">${esc((scorecard.pos_frac*100).toFixed(0))}%</span><small>快照为正占比</small></span>
-      <span class="v"><span class="num">${esc(scorecard.worst_ann)}%</span><small>最差瞬时报价率</small></span>
+      <span class="v"><span class="num">${proxy==null?"—":`${proxy>0?"+":""}${esc(proxy)}%`}</span><small>报价费率年化代理</small></span>
+      <span class="v"><span class="num">${positive==null?"—":`${esc((positive*100).toFixed(0))}%`}</span><small>快照为正占比</small></span>
+      <span class="v"><span class="num">${scorecard.worst_quoted_rate_ann==null?"—":`${esc(scorecard.worst_quoted_rate_ann)}%`}</span><small>最差瞬时报价率</small></span>
       <span class="v"><small>不是双腿持仓收益、交易所结算或实盘 PnL</small></span></div>`;
   }else if(scorecard){
     html+=`<div class="sc-card muted"><span class="k">HL 报价费率快照代理</span><span class="v">不可判 <small>${esc(scorecard.note||scorecard.error_kind||"")}</small></span></div>`;
