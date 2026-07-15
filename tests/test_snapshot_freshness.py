@@ -1,10 +1,10 @@
-"""Tests for the holder-snapshot freshness guard (catch stalled / frozen feeds).
+"""Tests for the holder-snapshot freshness guard.
 
 Motivated by the live SIREN failure: its holder_snapshots froze ~2026-06-18
 with byte-identical rows, and the stale top-holder list invented a 48% "whale"
-that on-chain had already emptied. The guard must flag both failure modes:
-  - STALLED: feed stops producing new rows → latest silently ages.
-  - FROZEN:  feed keeps writing identical cached metrics.
+that on-chain had already emptied. A feed that stops producing rows must fail
+closed; an inactive token whose freshly fetched state is unchanged must not be
+misclassified as a provider failure.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -83,23 +83,46 @@ def test_recent_distinct_snapshot_is_fresh(db):
 
 def test_stalled_feed_flagged(db):
     now = datetime(2026, 6, 25, tzinfo=timezone.utc)
-    # Last (and only) snapshot is 30h old — past the 18h stall threshold.
-    _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=30))
+    # The opportunistic snapshot path has had no observation for well over 18h.
+    _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=31))
     v = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
     assert v["stale"] is True
     assert v["reason"] == "stalled"
-    assert v["age_hours"] == 30.0
+    assert v["age_hours"] == 31.0
 
 
-def test_frozen_identical_rows_flagged(db):
+def test_identical_fresh_rows_are_static_not_source_failure(db):
     now = datetime(2026, 6, 25, tzinfo=timezone.utc)
-    # Three recent but byte-identical metric rows = a frozen cache (the SIREN bug).
+    # A freshly queried inactive token may have exactly the same holder state.
     for h in (2, 4, 6):
         _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=h))
     v = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
-    assert v["stale"] is True
-    assert v["reason"] == "frozen"
+    assert v["stale"] is False
+    assert v["reason"] == "static"
     assert v["identical_run"] >= 3
+
+
+def test_stalled_feed_remains_failure_when_old_rows_are_identical(db):
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    for h in (36, 42, 48):
+        _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=h))
+    v = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
+    assert v["stale"] is True
+    assert v["reason"] == "stalled"
+    assert v["identical_run"] == 3
+
+
+def test_daily_snapshot_is_fresh_during_scheduler_grace(db):
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    _save_at(db, "0xgrace", "bsc", _holders(5000), now - timedelta(hours=29))
+    _save_at(db, "0xlate", "bsc", _holders(5000), now - timedelta(hours=31))
+
+    # find_stale_snapshots is the daily tracked-universe/health path: 24h cadence
+    # plus 6h grace. The lower-level opportunistic freshness default remains 18h.
+    bad = find_stale_snapshots(
+        tokens=["0xgrace", "0xlate"], now=now, db_path=db,
+    )
+    assert {row["token"] for row in bad} == {"0xlate"}
 
 
 def test_changing_metrics_not_frozen(db):

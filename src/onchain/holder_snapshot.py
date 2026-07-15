@@ -221,15 +221,21 @@ def get_snapshots(
 
 # --------------------------------------------------------------------------
 # Freshness guard — catch a holder-data source that has silently STALLED (stops
-# producing new rows) or FROZEN (keeps writing byte-identical cached metrics).
-# Both make the "latest snapshot" lie: SIREN's froze ~2026-06-18 with identical
-# rows, and a stale top-holder list invented a 48% "whale" that was long gone.
-# Pure read + clock injection so it is unit-testable.
+# producing new rows). A successful fetch can legitimately return an unchanged
+# holder set for an inactive token, so identical rows are reported as static state,
+# not treated as proof that the provider is serving a frozen cache. Pure read +
+# clock injection keeps the distinction unit-testable.
 # --------------------------------------------------------------------------
 
-# A snapshot cadence is ~6h; 3 consecutive misses (~18h) means the feed stalled.
+# Opportunistic accumulation candidates normally refresh many times per day; 18h
+# without any observation is stale for that path. The tracked health universe has
+# a separate daily cadence at 06:30 plus six hours of scheduler/provider grace.
 STALE_AFTER_H = 18.0
-# N consecutive byte-identical metric rows = the source is serving a frozen cache.
+DAILY_SNAPSHOT_CADENCE_H = 24.0
+DAILY_STALE_GRACE_H = 6.0
+DAILY_STALE_AFTER_H = DAILY_SNAPSHOT_CADENCE_H + DAILY_STALE_GRACE_H
+# N consecutive byte-identical metric rows = an unchanged on-chain state. The
+# legacy name remains part of the function signature for compatibility.
 FROZEN_RUNS = 3
 
 
@@ -253,9 +259,10 @@ def snapshot_freshness(
     """Verdict on whether a token's holder snapshots can be trusted as CURRENT.
 
     Returns {stale, reason, age_hours, latest, identical_run, n}. `stale=True`
-    means do NOT trust the latest snapshot's holder list / concentration —
-    either the feed stopped (age > stale_after_h) or it is serving a frozen
-    cache (the last `frozen_runs` rows are byte-identical). Never raises.
+    means do NOT trust the latest snapshot's holder list / concentration because
+    the feed produced no current observation. The last `frozen_runs` rows being
+    identical is exposed as `reason="static"` but remains trustworthy: unchanged
+    token state alone cannot prove a provider cache is frozen. Never raises.
     """
     now = now or datetime.now(timezone.utc)
     token = _canonical_token(token, chain)
@@ -292,7 +299,7 @@ def snapshot_freshness(
         return {"stale": True, "reason": "stalled", "age_hours": round(age_h, 1),
                 "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
     if identical_run >= frozen_runs:
-        return {"stale": True, "reason": "frozen", "age_hours": round(age_h, 1) if age_h is not None else None,
+        return {"stale": False, "reason": "static", "age_hours": round(age_h, 1) if age_h is not None else None,
                 "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
     return {"stale": False, "reason": "fresh", "age_hours": round(age_h, 1) if age_h is not None else None,
             "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
@@ -307,7 +314,7 @@ TRACKED_MIN_SNAPSHOTS = 4
 
 def find_stale_snapshots(
     *, tokens: "list[str] | None" = None,
-    stale_after_h: float = STALE_AFTER_H, frozen_runs: int = FROZEN_RUNS,
+    stale_after_h: float = DAILY_STALE_AFTER_H, frozen_runs: int = FROZEN_RUNS,
     min_snapshots: int = TRACKED_MIN_SNAPSHOTS,
     now: datetime | None = None, db_path: Path = DB_PATH,
 ) -> list[dict[str, Any]]:
@@ -769,12 +776,13 @@ def snapshot_token(
             logger.info("snapshot_skipped_no_holders", token=token, chain=chain)
         return None
     result = save_snapshot(token, chain, holders, db_path=db_path)
-    # Source may keep returning a frozen cache (rows saved, but identical). Detect
-    # a run of byte-identical metrics and warn so a cached feed can't masquerade
-    # as live data.
+    # An inactive token may return byte-identical live state for days. Surface that
+    # fact without claiming provider failure; only a missing/aged observation is a
+    # freshness failure. Proving a cache freeze requires independent block/provenance
+    # evidence, not equality of holder metrics alone.
     fresh = snapshot_freshness(token, chain, db_path=db_path)
-    if fresh["reason"] == "frozen":
-        logger.warning("holder_snapshot_frozen", token=token, chain=chain,
-                       identical_run=fresh["identical_run"],
-                       note="holder source returned identical metrics for consecutive snapshots — likely a frozen cache")
+    if fresh["reason"] == "static":
+        logger.info("holder_snapshot_static", token=token, chain=chain,
+                    identical_run=fresh["identical_run"],
+                    note="fresh fetch succeeded; unchanged holder metrics are not a source failure")
     return result
