@@ -13,7 +13,7 @@ def test_fast_and_slow_views_have_independent_freshness_policies():
     launch = _envelope({}, view="launch")
     operators = _envelope({}, view="operators")
     perps = _envelope({}, view="perps")
-    for payload, cadence, grace in ((launch, 3, 3), (perps, 5, 5),
+    for payload, cadence, grace in ((launch, 0.5, 0.5), (perps, 5, 5),
                                     (operators, 60, 30)):
         generated = datetime.fromisoformat(payload["generated_at"])
         expected = datetime.fromisoformat(payload["next_expected_at"])
@@ -56,9 +56,25 @@ def test_regular_export_can_skip_both_slow_scanners(monkeypatch):
 def test_board_does_not_claim_one_refresh_cadence_for_every_lane():
     board = (Path(__file__).parents[1] / "board" / "public" / "index.html").read_text()
 
-    assert "各赛道按 2–60 分钟采集" in board
-    assert "页面每 60 秒读取最新快照" in board
+    assert "Launch 报价最多每 30 秒采集/每 10 秒读取" in board
+    assert "其他赛道 2–60 分钟采集/每 60 秒读取" in board
     assert "每 15 分钟自动刷新" not in board
+
+
+def test_launch_delivery_cache_and_poll_fit_inside_quote_ttl():
+    import json
+
+    from src.pipeline.launch_execution import QUOTE_TTL_SECONDS
+
+    root = Path(__file__).parents[1]
+    board = (root / "board" / "public" / "index.html").read_text()
+    config = json.loads((root / "board" / "vercel.json").read_text())
+    launch_headers = next(row["headers"] for row in config["headers"]
+                          if row["source"] == "/data/launch.json")
+    values = {row["key"]: row["value"] for row in launch_headers}
+    assert values["Vercel-CDN-Cache-Control"] == "max-age=5"
+    assert 'setInterval(loadLaunch,1e4)' in board
+    assert 5 + 10 < QUOTE_TTL_SECONDS
 
 
 def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path, monkeypatch):
@@ -74,6 +90,6 @@ def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path,
 
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert meta["views"] == ["launch", "perps"]
-    assert meta["view_status"]["launch"]["refresh_cadence_min"] == 3
+    assert meta["view_status"]["launch"]["refresh_cadence_min"] == 0.5
     assert meta["view_status"]["perps"]["refresh_cadence_min"] == 5
     assert not list(tmp_path.glob("*.tmp"))

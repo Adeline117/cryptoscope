@@ -38,7 +38,7 @@ SCHEMA_VERSION = 1
 EXPORT_DIR = DATA_DIR / "board_export"
 VIEW_FRESHNESS = {
     # (actual scheduler cadence minutes, tolerated grace minutes)
-    "launch": (3, 3), "structure": (2, 3),
+    "launch": (0.5, 0.5), "structure": (2, 3),
     "watch": (15, 5), "perps": (5, 5),
     "airdrop": (60, 15), "opportunities": (60, 15),
     "operators": (60, 30), "stats": (60, 15),

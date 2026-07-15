@@ -4,7 +4,19 @@
     { "source": "/data/:path*", "destination": "https://oyyt6qeyzyzf55vg.public.blob.vercel-storage.com/:path*" }
   ],
   "headers": [
-    { "source": "/(.*)", "headers": [
+    { "source": "/data/launch.json", "headers": [
+      { "key": "x-vercel-enable-rewrite-caching", "value": "1" },
+      { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+      { "key": "CDN-Cache-Control", "value": "max-age=5" },
+      { "key": "Vercel-CDN-Cache-Control", "value": "max-age=5" }
+    ]},
+    { "source": "/data/((?!launch.json).*)", "headers": [
+      { "key": "x-vercel-enable-rewrite-caching", "value": "1" },
+      { "key": "Cache-Control", "value": "public, max-age=15, must-revalidate" },
+      { "key": "CDN-Cache-Control", "value": "max-age=60, stale-while-revalidate=30" },
+      { "key": "Vercel-CDN-Cache-Control", "value": "max-age=60" }
+    ]},
+    { "source": "/((?!data/).*)", "headers": [
       { "key": "Cache-Control", "value": "public, max-age=60, s-maxage=900, stale-while-revalidate=60, stale-if-error=86400" }
     ]}
   ]
