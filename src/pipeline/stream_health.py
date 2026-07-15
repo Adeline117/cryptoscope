@@ -174,6 +174,31 @@ def mark_disconnected(source: str, stream: str, error: str,
         c.close()
 
 
+def report_worker(source: str, stream: str, *, status: str,
+                  error: str | None = None,
+                  at: datetime | str | None = None) -> None:
+    """Heartbeat a background worker without pretending it emitted market data."""
+    if not source or not stream:
+        raise ValueError("source and stream are required")
+    if status not in {"live", "degraded"}:
+        raise ValueError("worker status must be live or degraded")
+    now = _iso(at)
+    c = _conn()
+    try:
+        c.execute("""INSERT INTO streams(
+                         source,stream,last_received_at,status,last_error,updated_at
+                     ) VALUES (?,?,?,?,?,?)
+                     ON CONFLICT(source,stream) DO UPDATE SET
+                       last_received_at=excluded.last_received_at,
+                       status=excluded.status,last_error=excluded.last_error,
+                       updated_at=excluded.updated_at""",
+                  (source, stream, now, status,
+                   str(error)[:240] if error else None, now))
+        c.commit()
+    finally:
+        c.close()
+
+
 def resolve_gap(gap_id: int, *, details: dict | None = None,
                 at: datetime | str | None = None) -> bool:
     now = _iso(at)

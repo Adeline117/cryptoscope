@@ -39,6 +39,7 @@ HYDRATION_RETRY_BASE_SECONDS = 60
 HYDRATION_RETRY_MAX_SECONDS = 3600
 RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS = 60
 RPC_PRESSURE_MAX_COOLDOWN_SECONDS = 3600
+MAINTENANCE_STREAM = "pump_fun_maintenance"
 DB = DATA_DIR / "solana_launch_events.db"
 
 
@@ -106,6 +107,18 @@ def _circuit_cooldown_seconds(retry_after_seconds: int | None,
         RPC_PRESSURE_MAX_COOLDOWN_SECONDS,
         max(exponential, max(0, int(retry_after_seconds or 0))),
     )
+
+
+def _report_maintenance(status: str, error: str | None = None) -> None:
+    """Health reporting is fail-visible but can never kill the worker it reports."""
+    try:
+        stream_health.report_worker(
+            "solana", MAINTENANCE_STREAM, status=status, error=error,
+        )
+    except Exception as exc:
+        logger.exception(
+            "solana_launch_maintenance_health_failed", error=str(exc)[:240],
+        )
 
 
 def _enable_wal(c: sqlite3.Connection) -> None:
@@ -880,13 +893,20 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
     pressure_count = 0
     while not stop.is_set():
         cycle_started = monotonic()
+        maintenance_status = "live"
+        maintenance_error = None
         try:
             cycle_now = monotonic()
             if circuit_open_until and cycle_now < circuit_open_until:
+                maintenance_status = "degraded"
+                remaining = max(0, round(circuit_open_until - cycle_now))
+                maintenance_error = (
+                    f"RPC circuit open: {circuit_kind}; retry in {remaining}s"
+                )
                 logger.warning(
                     "solana_launch_rpc_circuit_open",
                     pressure_kind=circuit_kind,
-                    remaining_seconds=max(0, round(circuit_open_until - cycle_now)),
+                    remaining_seconds=remaining,
                 )
             else:
                 half_open = circuit_open_until > 0
@@ -920,26 +940,41 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                     )
                     circuit_open_until = monotonic() + cooldown
                     circuit_kind = pressure_kind
+                    maintenance_status = "degraded"
+                    maintenance_error = (
+                        f"{pressure_lane} RPC pressure: {pressure_kind}; "
+                        f"cooldown {cooldown}s"
+                    )
                     logger.warning(
                         "solana_launch_rpc_pressure",
                         lane=pressure_lane, pressure_kind=pressure_kind,
                         retry_after_seconds=retry_after,
                         circuit_seconds=cooldown,
                     )
-                elif half_open and (
-                    gaps["attempted"]
-                    or (result is not None and result["attempted"])
+                elif half_open:
+                    if (gaps["attempted"]
+                            or (result is not None and result["attempted"])):
+                        circuit_open_until = 0.0
+                        circuit_kind = None
+                        pressure_count = 0
+                        logger.info("solana_launch_rpc_circuit_recovered")
+                    else:
+                        maintenance_status = "degraded"
+                        maintenance_error = "RPC circuit half-open; no due probe"
+                elif gaps["failed"] or (
+                    result is not None and result["rpc_failed"]
                 ):
-                    circuit_open_until = 0.0
-                    circuit_kind = None
-                    pressure_count = 0
-                    logger.info("solana_launch_rpc_circuit_recovered")
+                    maintenance_status = "degraded"
+                    maintenance_error = "maintenance evidence recovery failed"
         except Exception as exc:
             # One transient database/provider defect must never silently kill the
             # only maintenance thread.
             logger.exception(
                 "solana_launch_maintenance_failed", error=str(exc)[:240],
             )
+            maintenance_status = "degraded"
+            maintenance_error = f"maintenance exception: {str(exc)[:180]}"
+        _report_maintenance(maintenance_status, maintenance_error)
         elapsed = monotonic() - cycle_started
         if stop.wait(max(1.0, float(interval_seconds) - elapsed)):
             break

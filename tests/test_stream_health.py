@@ -54,6 +54,34 @@ def test_disconnect_is_not_reported_as_a_quiet_live_market(health):
     assert row["last_error"] == "websocket closed"
 
 
+def test_worker_heartbeat_distinguishes_degraded_alive_from_stale(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    health.report_worker(
+        "solana", "pump_fun_maintenance", status="degraded",
+        error="RPC circuit open", at=t0,
+    )
+    degraded = health.snapshot(
+        now=t0 + timedelta(seconds=30), stale_after_seconds=60,
+    )[0]
+    assert degraded["status"] == "degraded" and degraded["stale"] is False
+    assert degraded["last_event_at"] is None
+    assert degraded["last_error"] == "RPC circuit open"
+
+    health.report_worker(
+        "solana", "pump_fun_maintenance", status="live",
+        at=t0 + timedelta(seconds=45),
+    )
+    recovered = health.snapshot(
+        now=t0 + timedelta(seconds=50), stale_after_seconds=60,
+    )[0]
+    assert recovered["status"] == "live" and recovered["last_error"] is None
+
+
+def test_worker_heartbeat_rejects_misleading_status(health):
+    with pytest.raises(ValueError, match="live or degraded"):
+        health.report_worker("solana", "maintenance", status="disconnected")
+
+
 def test_stream_clocks_require_timezone(health):
     with pytest.raises(ValueError, match="timezone"):
         health.observe("source", "stream", received_at="2026-07-14T12:00:00")

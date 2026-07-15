@@ -264,14 +264,21 @@ def test_primary_market_miss_remains_retryable(tmp_path, monkeypatch):
 
 def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
+    from src.pipeline import stream_health
 
     now = datetime.now(timezone.utc)
     _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    stream_health.report_worker(
+        "solana", "pump_fun_maintenance", status="degraded",
+        error="RPC circuit open", at=now,
+    )
     payload = lr.view()
     solana = payload["primary_sources"]["solana"]
     assert solana["available"] is True
     assert solana["qualification"]["raw_total"] == 1
     assert solana["qualification"]["recent_complete"] == 1
+    assert solana["maintenance"]["status"] == "degraded"
+    assert solana["maintenance"]["last_error"] == "RPC circuit open"
 
 
 def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):

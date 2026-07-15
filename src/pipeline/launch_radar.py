@@ -553,15 +553,24 @@ def view() -> dict:
     """Read-only board payload; scanning belongs to a scheduled ingestion path."""
     try:
         from src.pipeline import solana_launch_stream, stream_health
-        streams = [item for item in stream_health.snapshot()
-                   if item["source"] == "solana" and item["stream"] == "pump_fun_launches"]
+        health = [item for item in stream_health.snapshot()
+                  if item["source"] == "solana"]
+        streams = [item for item in health
+                   if item["stream"] == "pump_fun_launches"]
+        maintenance = next(
+            (item for item in health
+             if item["stream"] == solana_launch_stream.MAINTENANCE_STREAM),
+            None,
+        )
         primary = {"available": True,
                    "qualification": solana_launch_stream.qualification_summary(
                        ledger_readback=lambda ident, mint: event_id_readback_matches(
                            ident, lane="launch", chain="solana", token=mint)),
-                   "streams": streams}
+                   "streams": streams,
+                   "maintenance": maintenance}
     except Exception as exc:
-        primary = {"available": False, "reason": str(exc)[:120], "streams": []}
+        primary = {"available": False, "reason": str(exc)[:120],
+                   "streams": [], "maintenance": None}
     try:
         from src.pipeline import evm_factory_stream
         from src.pipeline.evm_launch_bridge import configured_stream_health

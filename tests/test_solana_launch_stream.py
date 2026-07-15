@@ -974,6 +974,8 @@ def test_maintenance_recovers_gap_before_bounded_hydration(sol, monkeypatch):
 
 
 def test_gap_pressure_skips_hydration_in_same_maintenance_cycle(sol, monkeypatch):
+    from src.pipeline import stream_health
+
     hydration_calls = []
     monkeypatch.setattr(
         sol, "retry_open_gaps", lambda rpc: _gap_stats(
@@ -994,6 +996,12 @@ def test_gap_pressure_skips_hydration_in_same_maintenance_cycle(sol, monkeypatch
 
     sol._rehydrate_loop(StopAfterOneTick(), object(), interval_seconds=1)
     assert hydration_calls == []
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert "gap RPC pressure" in maintenance["last_error"]
 
 
 def test_provider_circuit_spans_cycles_and_half_open_uses_one_probe(sol, monkeypatch):
@@ -1045,6 +1053,8 @@ def test_provider_circuit_spans_cycles_and_half_open_uses_one_probe(sol, monkeyp
 
 
 def test_maintenance_worker_continues_after_unexpected_exception(sol, monkeypatch):
+    from src.pipeline import stream_health
+
     gap_calls = 0
     hydration_calls = 0
     errors = []
@@ -1081,6 +1091,39 @@ def test_maintenance_worker_continues_after_unexpected_exception(sol, monkeypatc
     sol._rehydrate_loop(StopAfterTwoTicks(), object(), interval_seconds=1)
     assert gap_calls == 2 and hydration_calls == 1
     assert errors[0][0] == "solana_launch_maintenance_failed"
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "live" and maintenance["last_error"] is None
+
+
+def test_health_reporting_failure_cannot_kill_maintenance_worker(sol, monkeypatch):
+    events = []
+    monkeypatch.setattr(sol, "retry_open_gaps", lambda rpc: _gap_stats(0))
+    monkeypatch.setattr(
+        sol, "rehydrate_pending", lambda rpc, limit: _hydration_stats(0),
+    )
+    monkeypatch.setattr(
+        sol.stream_health, "report_worker",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("health DB locked")
+        ),
+    )
+    monkeypatch.setattr(
+        sol.logger, "exception",
+        lambda event, **kwargs: events.append((event, kwargs)),
+    )
+
+    class StopAfterOneTick:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            return True
+
+    sol._rehydrate_loop(StopAfterOneTick(), object(), interval_seconds=1)
+    assert events[0][0] == "solana_launch_maintenance_health_failed"
 
 
 def test_unfinalized_or_pruned_slot_gap_stays_open(sol):
