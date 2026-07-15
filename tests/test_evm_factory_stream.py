@@ -44,6 +44,16 @@ def _v3_log(evm, *, removed=False, block=100):
     return item
 
 
+def _aerodrome_log(evm, *, stable=False, block=100):
+    item = _log(evm, block=block)
+    item["address"] = evm.AERODROME_FACTORY
+    item["topics"][0] = evm.AERODROME_POOL_TOPIC
+    item["topics"].append("0x" + f"{int(stable):064x}")
+    item["data"] = "0x" + _word(
+        "0x5555555555555555555555555555555555555555") + f"{99:064x}"
+    return item
+
+
 def _notification(item):
     return {"jsonrpc": "2.0", "method": "eth_subscription",
             "params": {"subscription": "0xsub", "result": item}}
@@ -62,10 +72,12 @@ def test_configured_specs_cover_official_bsc_base_and_ethereum_factories(evm):
     assert set(specs) == {("bsc", "pancakeswap_v2"),
                           ("bsc", "pancakeswap_v3"),
                           ("base", "pancakeswap_v2"),
+                          ("base", "aerodrome"),
                           ("ethereum", "pancakeswap_v2")}
     assert specs[("bsc", "pancakeswap_v2")].address == evm.PANCAKE_V2_FACTORY
     assert specs[("bsc", "pancakeswap_v3")].address == evm.PANCAKE_V3_FACTORY
     assert specs[("base", "pancakeswap_v2")].address == evm.PANCAKE_V2_BASE_FACTORY
+    assert specs[("base", "aerodrome")].address == evm.AERODROME_FACTORY
     assert specs[("ethereum", "pancakeswap_v2")].address == evm.PANCAKE_V2_ETH_FACTORY
     assert all(spec.ws_urls and spec.rpc_urls for spec in specs.values())
 
@@ -93,6 +105,16 @@ def test_v3_pool_created_decodes_fee_tick_and_pool(evm):
     assert event.payload["pool"] == "0x4444444444444444444444444444444444444444"
     assert evm.subscribe_requests(spec)[0]["params"][1]["topics"] == [
         evm.POOL_CREATED_TOPIC]
+
+
+def test_aerodrome_pool_decodes_stable_flag_pool_and_index(evm):
+    spec = evm.base_aerodrome_spec()
+    event = evm.parse_message(_notification(_aerodrome_log(evm, stable=True)), spec=spec)
+    assert event.payload["kind"] == "aerodrome_pool"
+    assert event.payload["stable"] is True and event.payload["pair_index"] == 99
+    assert event.payload["pool"] == "0x5555555555555555555555555555555555555555"
+    assert evm.subscribe_requests(spec)[0]["params"][1]["topics"] == [
+        evm.AERODROME_POOL_TOPIC]
 
 
 def test_new_head_supplies_contiguous_block_cursor_and_time(evm):
@@ -140,6 +162,24 @@ def test_complete_v3_pool_uses_separate_raw_schema(evm):
                        "0x4444444444444444444444444444444444444444",
                        500, 10, "complete", "raw_unqualified")
         assert c.execute("SELECT COUNT(*) FROM raw_pools").fetchone()[0] == 0
+    finally:
+        c.close()
+
+
+def test_aerodrome_pool_persists_stable_curve_without_qualification(evm):
+    class Rpc:
+        def call(self, method, params):
+            return {"number": "0x64", "timestamp": "0x5"}
+
+    spec = evm.base_aerodrome_spec()
+    event = evm.parse_message(_notification(_aerodrome_log(evm, stable=True)), spec=spec)
+    evm.persist(event.payload, rpc=Rpc())
+    c = evm._conn()
+    try:
+        row = c.execute("SELECT venue,pool,pair_index,stable,evidence_state,"
+                        "qualification_state FROM raw_pools").fetchone()
+        assert row == ("aerodrome", "0x5555555555555555555555555555555555555555",
+                       99, 1, "complete", "raw_unqualified")
     finally:
         c.close()
 

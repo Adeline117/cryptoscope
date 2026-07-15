@@ -66,6 +66,8 @@ factories on BSC, Base, and Ethereum plus PancakeSwap V3 on BSC. Each records
 `PairCreated` or `PoolCreated` as raw,
 reorg-aware evidence and uses its own `newHeads` cursor plus bounded `eth_getLogs`
 recovery; a new pool is never turned directly into a trade signal.
+Base's official Aerodrome stable/volatile PoolFactory is monitored independently
+with its curve type preserved in the raw evidence.
 
 ## Credentials
 

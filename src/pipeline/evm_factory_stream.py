@@ -21,10 +21,12 @@ logger = structlog.get_logger()
 
 PAIR_CREATED_TOPIC = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
+AERODROME_POOL_TOPIC = "0x2128d88d14c80cb081c1252a5acff7a264671bf199ce226b53788fb26065005e"
 PANCAKE_V2_FACTORY = "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
 PANCAKE_V2_BASE_FACTORY = "0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e"
 PANCAKE_V2_ETH_FACTORY = "0x1097053fd2ea711dad45caccc45eff7548fcb362"
 PANCAKE_V3_FACTORY = "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865"
+AERODROME_FACTORY = "0x420dd381b31aef6683db6b902084cb0ffece40da"
 PUBLIC_BSC_WS = ("wss://bsc-rpc.publicnode.com", "wss://bsc.drpc.org")
 PUBLIC_BSC_RPC = ("https://bsc.rpc.blxrbdn.com", "https://bsc.drpc.org",
                   "https://56.rpc.thirdweb.com")
@@ -50,7 +52,7 @@ class FactorySpec:
     rpc_urls: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if self.event_kind not in {"pair_v2", "pool_v3"}:
+        if self.event_kind not in {"pair_v2", "pool_v3", "aerodrome_pool"}:
             raise ValueError("unsupported factory event kind")
         for value, size, name in ((self.address, 40, "address"),
                                   (self.topic, 64, "topic")):
@@ -107,9 +109,18 @@ def bsc_pancake_v3_spec() -> FactorySpec:
     )
 
 
+def base_aerodrome_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="base", venue="aerodrome", address=AERODROME_FACTORY,
+        event_kind="aerodrome_pool", topic=AERODROME_POOL_TOPIC,
+        ws_urls=_urls("BASE_FACTORY_WS_URLS", PUBLIC_BASE_WS),
+        rpc_urls=_urls("BASE_FACTORY_RPC_URLS", PUBLIC_BASE_RPC),
+    )
+
+
 def configured_specs() -> tuple[FactorySpec, ...]:
     return (bsc_pancake_v2_spec(), bsc_pancake_v3_spec(), base_pancake_v2_spec(),
-            ethereum_pancake_v2_spec())
+            base_aerodrome_spec(), ethereum_pancake_v2_spec())
 
 
 def _conn() -> sqlite3.Connection:
@@ -123,11 +134,15 @@ def _conn() -> sqlite3.Connection:
         transaction_hash TEXT NOT NULL, log_index INTEGER NOT NULL,
         block_number INTEGER NOT NULL, block_hash TEXT, transaction_index INTEGER,
         token0 TEXT NOT NULL, token1 TEXT NOT NULL, pool TEXT NOT NULL,
-        pair_index INTEGER NOT NULL, block_at TEXT, detected_at TEXT NOT NULL,
+        pair_index INTEGER NOT NULL, stable INTEGER, block_at TEXT,
+        detected_at TEXT NOT NULL,
         updated_at TEXT NOT NULL, raw_payload_hash TEXT NOT NULL,
         removed INTEGER NOT NULL DEFAULT 0, evidence_state TEXT NOT NULL,
         qualification_state TEXT NOT NULL DEFAULT 'raw_unqualified',
         PRIMARY KEY(chain,transaction_hash,log_index))""")
+    columns = {row[1] for row in c.execute("PRAGMA table_info(raw_pools)")}
+    if "stable" not in columns:
+        c.execute("ALTER TABLE raw_pools ADD COLUMN stable INTEGER")
     c.execute("CREATE INDEX IF NOT EXISTS idx_raw_pools_block "
               "ON raw_pools(chain,venue,block_number,log_index)")
     c.execute("""CREATE TABLE IF NOT EXISTS raw_v3_pools(
@@ -226,7 +241,7 @@ def parse_message(raw: object, *, spec: FactorySpec | None = None) -> StreamEven
         raise ValueError("EVM factory log removed flag must be boolean")
     token0 = _word_address(topics[1], "token0")
     token1 = _word_address(topics[2], "token1")
-    pool_word = data[:64] if spec.event_kind == "pair_v2" else data[64:]
+    pool_word = data[64:] if spec.event_kind == "pool_v3" else data[:64]
     pool = _word_address(pool_word, "pool")
     zero = "0x" + "0" * 40
     if token0 == zero or token1 == zero or pool == zero:
@@ -256,6 +271,13 @@ def parse_message(raw: object, *, spec: FactorySpec | None = None) -> StreamEven
             raise ValueError("PoolCreated fee and tick spacing must be positive")
         payload["fee"] = fee
         payload["tick_spacing"] = tick_spacing
+    elif spec.event_kind == "aerodrome_pool":
+        stable = _uint_word(topics[3], "stable")
+        pool_index = _uint_word(data[64:], "pool index")
+        if stable not in {0, 1} or pool_index <= 0:
+            raise ValueError("Aerodrome stable flag or pool index is invalid")
+        payload["stable"] = bool(stable)
+        payload["pair_index"] = pool_index
     else:
         raise ValueError(f"unsupported factory event kind: {spec.event_kind}")
     return StreamEvent(payload)
@@ -308,7 +330,7 @@ def _hash(payload: dict) -> str:
 
 def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
     if (not isinstance(payload, dict)
-            or payload.get("kind") not in {"pair_v2", "pool_v3"}):
+            or payload.get("kind") not in {"pair_v2", "pool_v3", "aerodrome_pool"}):
         return
     now = datetime.now(timezone.utc).isoformat()
     block_at = None
@@ -327,18 +349,22 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
                   payload["block_number"], payload.get("block_hash"),
                   payload["transaction_index"], payload["token0"], payload["token1"],
                   payload["pool"])
-        if payload["kind"] == "pair_v2":
+        if payload["kind"] in {"pair_v2", "aerodrome_pool"}:
             c.execute("""INSERT INTO raw_pools(
                 chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
-                transaction_index,token0,token1,pool,pair_index,block_at,detected_at,
-                updated_at,raw_payload_hash,removed,evidence_state,qualification_state
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'raw_unqualified')
+                transaction_index,token0,token1,pool,pair_index,stable,block_at,
+                detected_at,updated_at,raw_payload_hash,removed,evidence_state,
+                qualification_state
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'raw_unqualified')
             ON CONFLICT(chain,transaction_hash,log_index) DO UPDATE SET
               block_number=excluded.block_number,block_hash=excluded.block_hash,
               block_at=COALESCE(raw_pools.block_at,excluded.block_at),
+              stable=excluded.stable,
               updated_at=excluded.updated_at,raw_payload_hash=excluded.raw_payload_hash,
               removed=excluded.removed,evidence_state=excluded.evidence_state""",
-                      (*common, payload["pair_index"], block_at, now, now,
+                      (*common, payload["pair_index"],
+                       int(payload["stable"]) if "stable" in payload else None,
+                       block_at, now, now,
                        _hash(payload), int(payload["removed"]), state))
         else:
             c.execute("""INSERT INTO raw_v3_pools(
