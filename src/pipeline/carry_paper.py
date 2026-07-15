@@ -37,6 +37,8 @@ CLOSE_DIFF_FLOOR = 2.0     # differential decayed below this (ann %) → natural
 # taker 0.05% = 0.095%. A round trip (enter + exit) is 2× that = 0.19%. Slippage is
 # MEASURED from the book separately (entry_slip + exit_slip), never folded in here.
 FEE_PCT_ONEWAY_BOTHLEGS = 0.095
+MIN_ANNUALIZED_HOLD_H = 30 * 24
+MIN_ANNUALIZED_SAMPLES = 5
 _OKX_CTVAL: dict[str, float] = {}
 
 
@@ -261,12 +263,11 @@ def run(carries: list[dict]) -> dict:
 
 
 def paper_stats() -> dict:
-    """Aggregate the paper book: closed-position realized hold/slippage/net (the measured
-    replacements for the assumptions), and current open accrual. Honest 'not enough yet'
-    until positions have closed."""
+    """Report absolute paper PnL; annualize only a stable-enough closed cohort."""
     c = _conn()
     try:
-        closed = c.execute("SELECT symbol,hold_h,entry_slip,exit_slip,realized_net,pred_net "
+        closed = c.execute("SELECT symbol,hold_h,entry_slip,exit_slip,realized_net,pred_net,"
+                           "accrued_pct "
                            "FROM paper WHERE status='closed'").fetchall()
         n_open = c.execute("SELECT COUNT(*) FROM paper WHERE status='open'").fetchone()[0]
     finally:
@@ -274,19 +275,36 @@ def paper_stats() -> dict:
     out = {"n_open": n_open, "n_closed": len(closed)}
     if closed:
         holds = [r[1] / 24 for r in closed if r[1] is not None]
-        slips = [(r[2] or 0) + (r[3] or 0) for r in closed]
-        nets = [r[4] for r in closed if r[4] is not None]
+        costs = [(r[2] or 0) + (r[3] or 0) + 2 * FEE_PCT_ONEWAY_BOTHLEGS
+                 for r in closed]
+        accrued = [r[6] or 0 for r in closed]
+        nets = [funding - cost for funding, cost in zip(accrued, costs)]
         preds = [r[5] for r in closed if r[5] is not None]
+        annualized = [r[4] for r in closed
+                      if (r[1] or 0) >= MIN_ANNUALIZED_HOLD_H and r[4] is not None]
         out.update({
             "avg_hold_days": round(sum(holds) / len(holds), 1) if holds else None,
-            "avg_slip_pct": round(sum(slips) / len(slips), 3) if slips else None,
-            "avg_realized_net": round(sum(nets) / len(nets), 1) if nets else None,
-            "avg_predicted_net": round(sum(preds) / len(preds), 1) if preds else None,
+            "avg_funding_accrued_pct": round(sum(accrued) / len(accrued), 4),
+            "avg_cost_pct": round(sum(costs) / len(costs), 4),
+            "avg_net_return_pct": round(sum(nets) / len(nets), 4),
+            "avg_predicted_ann_pct": round(sum(preds) / len(preds), 1) if preds else None,
+            "annualized_n": len(annualized),
+            "annualized_min_hold_days": MIN_ANNUALIZED_HOLD_H // 24,
             "recent": [{"symbol": r[0], "hold_days": round((r[1] or 0) / 24, 1),
-                        "realized_net": round(r[4], 1) if r[4] is not None else None,
-                        "predicted_net": round(r[5], 1) if r[5] is not None else None}
+                        "funding_accrued_pct": round(r[6] or 0, 4),
+                        "cost_pct": round((r[2] or 0) + (r[3] or 0)
+                                          + 2 * FEE_PCT_ONEWAY_BOTHLEGS, 4),
+                        "net_return_pct": round((r[6] or 0) - (r[2] or 0) - (r[3] or 0)
+                                                - 2 * FEE_PCT_ONEWAY_BOTHLEGS, 4)}
                        for r in closed[-8:]],
         })
+        if len(annualized) >= MIN_ANNUALIZED_SAMPLES:
+            out["avg_annualized_net_pct"] = round(sum(annualized) / len(annualized), 1)
+        else:
+            out["annualized_note"] = (
+                f"年化隐藏:需至少{MIN_ANNUALIZED_SAMPLES}个持有≥"
+                f"{MIN_ANNUALIZED_HOLD_H // 24}天的已平仓样本"
+            )
     return out
 
 
