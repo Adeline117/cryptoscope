@@ -168,9 +168,12 @@ def get_ticker(exchange_name: str, symbol: str) -> dict | None:
         return None
 
 
-def set_leverage(exchange_name: str, symbol: str, leverage: int) -> bool:
+def set_leverage(exchange_name: str, symbol: str, leverage: int, *,
+                 approval_token: str | None = None) -> bool:
     """Set leverage for a symbol."""
     try:
+        from src.contract.execution_gate import require_live_approval
+        require_live_approval("set_leverage", approval_token)
         ex = _get_exchange(exchange_name)
         ex.set_leverage(leverage, symbol)
         logger.info("leverage_set", exchange=exchange_name, symbol=symbol, leverage=leverage)
@@ -190,12 +193,16 @@ def place_order(
     leverage: int = 1,
     tp_price: float | None = None,
     sl_price: float | None = None,
+    *,
+    approval_token: str | None = None,
 ) -> dict:
     """Place a futures order.
 
     Returns: {order_id, symbol, side, amount, price, status, tp_order_id, sl_order_id}
     """
     try:
+        from src.contract.execution_gate import require_live_approval
+        require_live_approval("place_order", approval_token)
         ex = _get_exchange(exchange_name)
 
         # Set leverage first
@@ -258,9 +265,12 @@ def place_order(
         return {"error": str(e)}
 
 
-def close_position(exchange_name: str, symbol: str, side: str, amount: float) -> dict:
+def close_position(exchange_name: str, symbol: str, side: str, amount: float, *,
+                   approval_token: str | None = None) -> dict:
     """Close a position (reduce-only market order)."""
     try:
+        from src.contract.execution_gate import require_live_approval
+        require_live_approval("close_position", approval_token)
         ex = _get_exchange(exchange_name)
         close_side = "sell" if side == "long" else "buy"
         order = ex.create_order(
@@ -281,12 +291,13 @@ def close_position(exchange_name: str, symbol: str, side: str, amount: float) ->
         return {"error": str(e)}
 
 
-def close_all_positions(exchange_name: str) -> list[dict]:
+def close_all_positions(exchange_name: str, *, approval_token: str | None = None) -> list[dict]:
     """Emergency: close ALL open positions."""
     positions = get_positions(exchange_name)
     results = []
     for p in positions:
-        r = close_position(exchange_name, p["symbol"], p["side"], p["size"])
+        r = close_position(exchange_name, p["symbol"], p["side"], p["size"],
+                           approval_token=approval_token)
         results.append(r)
     return results
 
