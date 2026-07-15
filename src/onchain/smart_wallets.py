@@ -18,9 +18,8 @@ Honest ceiling unchanged: still behind the creation-block insider snipers.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import structlog
@@ -44,9 +43,9 @@ FILTERS = {
 }
 _DEFAULT_FILTER = {"winrate": 0.5, "realized": 8_000, "min_buys": 6, "max_buys": 800}
 MAX_BUYS_7D = 800             # above this = HFT bot, not copyable
-WATCH_PER_CHAIN = 14          # bounded source list; the poll below also bounds workers
-SMART_WALLET_WORKERS = 4      # bound local/browser resources while avoiding serial lag
-SMART_WALLET_HTTP_TIMEOUT_S = 15
+WATCH_PER_CHAIN = 14          # bounded source list
+SMART_WALLET_HTTP_TIMEOUT_S = 20
+SMART_WALLET_ROTATION_SLOTS = 3  # cover the set across the 45-minute activity window
 
 
 def _conn() -> sqlite3.Connection:
@@ -55,6 +54,9 @@ def _conn() -> sqlite3.Connection:
     c.execute("""CREATE TABLE IF NOT EXISTS watchlist(
         wallet TEXT, chain TEXT, winrate REAL, realized_7d REAL, buys_7d INTEGER,
         harvested_at TEXT, PRIMARY KEY(wallet, chain))""")
+    c.execute("""CREATE TABLE IF NOT EXISTS activity_cache(
+        wallet TEXT, chain TEXT, payload TEXT, checked_at REAL,
+        PRIMARY KEY(wallet, chain))""")
     return c
 
 
@@ -97,7 +99,7 @@ def watchlist(chain_code: str | None = None) -> list[dict]:
     c = _conn()
     try:
         q = "SELECT wallet, chain, winrate, realized_7d, buys_7d FROM watchlist"
-        rows = c.execute(q + (" WHERE chain=?" if chain_code else ""),
+        rows = c.execute(q + (" WHERE chain=?" if chain_code else "") + " ORDER BY wallet",
                          (chain_code,) if chain_code else ()).fetchall()
     finally:
         c.close()
@@ -106,13 +108,15 @@ def watchlist(chain_code: str | None = None) -> list[dict]:
 
 
 def recent_buys(wallet: str, chain_code: str, window_min: int = 40,
-                request_timeout_s: int = SMART_WALLET_HTTP_TIMEOUT_S) -> list[dict]:
+                request_timeout_s: int = SMART_WALLET_HTTP_TIMEOUT_S) -> list[dict] | None:
     """A watched wallet's BUY events in the last `window_min` minutes (GMGN activity)."""
     now = datetime.now(timezone.utc).timestamp()
     d = _fs_get(
         f"https://gmgn.ai/api/v1/wallet_activity/{chain_code}?wallet={wallet}&limit=20",
         timeout=request_timeout_s,
     )
+    if d is None:
+        return None
     acts = ((d or {}).get("data") or {}).get("activities") or []
     out = []
     for a in acts:
@@ -132,44 +136,100 @@ def recent_buys(wallet: str, chain_code: str, window_min: int = 40,
 MIN_BUY_USD = 20             # drop dust / fee-sized buys ($1 noise)
 
 
-def fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"),
-                     window_min: int = 40) -> list[dict] | None:
-    """Tokens that WATCHED proven wallets just bought, aggregated across wallets.
-    Ranked by number of DISTINCT watched buyers (convergence) then recency. None if
-    FlareSolverr is down."""
-    if not usable():
-        return None
-    agg: dict = {}
+def _rotation_batch(jobs: list[tuple[str, str]], now_ts: float) -> list[tuple[str, str]]:
+    """Select one deterministic third of the watchlist for this 15-minute slot."""
+    if not jobs:
+        return []
+    batch_size = math.ceil(len(jobs) / SMART_WALLET_ROTATION_SLOTS)
+    slot = int(now_ts // (15 * 60))
+    start = (slot * batch_size) % len(jobs)
+    return [jobs[(start + offset) % len(jobs)] for offset in range(batch_size)]
+
+
+def _update_activity_cache(observations: list[tuple[str, str, list[dict] | None]],
+                           checked_at: float) -> None:
+    rows = [
+        (wallet, chain, json.dumps(buys, separators=(",", ":")), checked_at)
+        for chain, wallet, buys in observations
+        if buys is not None
+    ]
+    if not rows:
+        return
+    c = _conn()
+    try:
+        c.executemany(
+            "INSERT OR REPLACE INTO activity_cache(wallet,chain,payload,checked_at) "
+            "VALUES(?,?,?,?)",
+            rows,
+        )
+        c.commit()
+    finally:
+        c.close()
+
+
+def _fresh_cached_activity(wallet_jobs: list[tuple[str, str]], window_min: int,
+                           now_ts: float) -> list[tuple[str, str, list[dict]]]:
+    allowed = set(wallet_jobs)
+    c = _conn()
+    try:
+        rows = c.execute(
+            "SELECT chain,wallet,payload FROM activity_cache WHERE checked_at>=?",
+            (now_ts - window_min * 60,),
+        ).fetchall()
+    finally:
+        c.close()
+    out = []
+    for chain, wallet, payload in rows:
+        if (chain, wallet) not in allowed:
+            continue
+        try:
+            buys = json.loads(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        out.append((chain, wallet, buys if isinstance(buys, list) else []))
+    return out
+
+
+def fresh_smart_buys_result(chain_codes=("sol", "bsc", "base", "eth"),
+                            window_min: int = 40, *, now_ts: float | None = None) -> dict:
+    """Poll a rotating bounded batch and aggregate fresh cached wallet activity.
+
+    FlareSolverr serializes these Cloudflare browser requests in practice. Polling all
+    wallets every run made the 15-minute publication job take almost five minutes;
+    parallel requests timed out together. A deterministic three-slot rotation keeps
+    each run bounded while the cache retains every still-valid observation.
+    """
+    now_ts = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
     wallet_jobs = [
         (ch, w["wallet"])
         for ch in chain_codes
         for w in watchlist(ch)
     ]
+    selected = _rotation_batch(wallet_jobs, now_ts)
+    observations: list[tuple[str, str, list[dict] | None]] = []
+    source_available = usable()
+    if source_available:
+        for ch, wallet in selected:
+            try:
+                buys = recent_buys(
+                    wallet,
+                    ch,
+                    window_min,
+                    request_timeout_s=SMART_WALLET_HTTP_TIMEOUT_S,
+                )
+            except Exception as exc:
+                logger.debug("smart_wallet_activity_failed", chain=ch,
+                             wallet=wallet, error=str(exc)[:80])
+                buys = None
+            observations.append((ch, wallet, buys))
+        _update_activity_cache(observations, now_ts)
 
-    def fetch(job: tuple[str, str]) -> tuple[str, str, list[dict]]:
-        ch, wallet = job
-        try:
-            buys = recent_buys(
-                wallet,
-                ch,
-                window_min,
-                request_timeout_s=SMART_WALLET_HTTP_TIMEOUT_S,
-            )
-        except Exception as exc:
-            logger.debug("smart_wallet_activity_failed", chain=ch,
-                         wallet=wallet, error=str(exc)[:80])
-            buys = []
-        return ch, wallet, buys
-
-    # A serial sweep can take longer than the 15-minute publication cadence when
-    # Cloudflare is slow. Four workers keep the end-to-end latency bounded without
-    # recreating the unbounded-thread/FD failure that previously hit the scheduler.
-    with ThreadPoolExecutor(max_workers=SMART_WALLET_WORKERS,
-                            thread_name_prefix="smart-wallet") as pool:
-        observations = list(pool.map(fetch, wallet_jobs))
-
-    for ch, wallet, buys in observations:
+    cached = _fresh_cached_activity(wallet_jobs, window_min, now_ts)
+    agg: dict = {}
+    for ch, wallet, buys in cached:
         for b in buys:
+            if now_ts - (b.get("ts") or 0) > window_min * 60:
+                continue
             if b["cost_usd"] < MIN_BUY_USD:
                 continue
             key = (ch, b["token"])
@@ -179,7 +239,6 @@ def fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"),
             e["buyers"].add(wallet)
             e["usd"] += b["cost_usd"]
             e["latest_ts"] = max(e["latest_ts"], b["ts"])
-    now = datetime.now(timezone.utc).timestamp()
     out = []
     for e in agg.values():
         n = len(e["buyers"])
@@ -187,11 +246,44 @@ def fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"),
             "symbol": e["symbol"], "chain": e["chain"], "token": e["token"],
             "n_buyers": n, "buyers": list(e["buyers"])[:5],
             "usd_bought": round(e["usd"]),
-            "mins_ago": round((now - e["latest_ts"]) / 60, 1) if e["latest_ts"] else None,
+            "mins_ago": round((now_ts - e["latest_ts"]) / 60, 1) if e["latest_ts"] else None,
             "strength": "收敛" if n >= 2 else "单个",
         })
     out.sort(key=lambda x: (-x["n_buyers"], x["mins_ago"] if x["mins_ago"] is not None else 999))
-    return out
+    observed = sum(buys is not None for _, _, buys in observations)
+    failed = len(selected) - observed if source_available else len(selected)
+    fresh_cached = len(cached)
+    if not source_available or (selected and observed == 0):
+        state, error_kind = "failed", "source_unavailable"
+    elif failed or fresh_cached < len(wallet_jobs):
+        state, error_kind = "partial", "request_or_rotation_gap"
+    else:
+        state, error_kind = "ok", None
+    return {
+        "buys": out,
+        "source_health": {
+            "state": state,
+            "error_kind": error_kind,
+            "configured_wallets": len(wallet_jobs),
+            "requested": len(selected),
+            "observed": observed,
+            "request_failed": failed,
+            "fresh_cached_wallets": fresh_cached,
+            "rotation_slots": SMART_WALLET_ROTATION_SLOTS,
+            "window_min": window_min,
+            "request_timeout_s": SMART_WALLET_HTTP_TIMEOUT_S,
+            "checked_at": datetime.fromtimestamp(now_ts, timezone.utc).isoformat(),
+        },
+    }
+
+
+def fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"),
+                     window_min: int = 40) -> list[dict] | None:
+    """Compatibility view; None means the current source sweep failed completely."""
+    result = fresh_smart_buys_result(chain_codes=chain_codes, window_min=window_min)
+    if result["source_health"]["state"] == "failed":
+        return None
+    return result["buys"]
 
 
 def harvest_all(chain_codes=("sol", "bsc", "base", "eth")) -> dict:

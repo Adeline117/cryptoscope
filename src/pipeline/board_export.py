@@ -331,19 +331,22 @@ def render_watch() -> dict:
     """The EARLIEST lane: tokens that WATCHED proven wallets JUST bought (minutes ago),
     before it aggregates into any rank. Convergence (>=2 watched wallets, same token,
     same window) is the strongest early signal a dashboard can honestly give."""
-    from src.onchain.smart_wallets import fresh_smart_buys, watchlist
+    from src.onchain.smart_wallets import fresh_smart_buys_result
     try:
-        buys = fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"), window_min=45)
+        result = fresh_smart_buys_result(
+            chain_codes=("sol", "bsc", "base", "eth"), window_min=45)
     except Exception as e:
         return _envelope({"watch": [], "watched_wallets": 0, "scan_error": str(e)[:120]},
                          view="watch")
-    if buys is None:
-        return _envelope({"watch": [], "watched_wallets": len(watchlist()),
-                          "note": "FlareSolverr 未运行 — 实时监听需要它"}, view="watch")
-    return _envelope({"watch": buys, "watched_wallets": len(watchlist()),
-                      "note": ("盯着一批已验证盈利的钱包,它们刚买入的币(分钟级,早于排名聚合)。"
-                               "收敛=≥2个独立聪明钱同窗买同一个=最强早信号。仍晚于创建区块内部人。")},
-                     view="watch")
+    buys = result["buys"]
+    health = result["source_health"]
+    payload = {"watch": buys, "watched_wallets": health["configured_wallets"],
+               "source_health": health,
+               "note": ("盯着一批已验证盈利的钱包,它们刚买入的币(分钟级,早于排名聚合)。"
+                        "收敛=≥2个独立聪明钱同窗买同一个=最强早信号。仍晚于创建区块内部人。")}
+    if health["state"] == "failed":
+        payload["scan_error"] = health["error_kind"]
+    return _envelope(payload, view="watch")
 
 
 def render_perps() -> dict:
