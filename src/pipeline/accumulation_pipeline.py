@@ -30,7 +30,7 @@ logger = structlog.get_logger()
 
 # Bound per-run work so a cron tick stays cheap.
 MAX_CANDIDATES = 15
-MIN_SECURITY_SCORE = 50  # contract gate: drop anything riskier than this
+MIN_SECURITY_SCORE = 70  # directional analysis requires verified low-risk evidence
 # Only snapshots within this window feed the realtime accumulation slope —
 # stale snapshots from a prior appearance must not pollute the signal (same
 # class of bug as the 2h-highlight stale-item leak).
@@ -92,18 +92,27 @@ async def _collect_universe() -> list[dict]:
     return deduped
 
 
-async def _security_gate(candidates: list[dict]) -> list[dict]:
-    """Stage 0 gate: drop honeypots / high-risk contracts."""
+async def _security_gate(candidates: list[dict], checker_factory=None) -> list[dict]:
+    """Return only candidates with verified, low-risk contract evidence.
+
+    Manual watch status is discovery intent, not a safety attestation.  Missing
+    modules, request errors, neutral API fallbacks and unindexed contracts all
+    fail closed so none of them can reach directional accumulation analysis.
+    """
     try:
-        from src.collectors.contract_security import ContractSecurityChecker
+        if checker_factory is None:
+            from src.collectors.contract_security import ContractSecurityChecker
+
+            checker_factory = ContractSecurityChecker
+        checker = checker_factory()
     except Exception as e:
         logger.warning("security_checker_unavailable", error=str(e))
-        # Without the gate, pass through but mark unknown.
         for c in candidates:
             c["security_score"] = None
-        return candidates
+            c["security_passed"] = False
+            c["security_state"] = "unknown"
+        return []
 
-    checker = ContractSecurityChecker()
     passed: list[dict] = []
     for c in candidates:
         addr, chain = c.get("address"), c.get("chain", "")
@@ -112,16 +121,33 @@ async def _security_gate(candidates: list[dict]) -> list[dict]:
         try:
             result = await checker.check_token(_chain_for_security(chain), addr)
             c["security_score"] = result.risk_score
-            c["security_passed"] = (not result.is_honeypot) and result.risk_score >= MIN_SECURITY_SCORE
-            # Manually-tracked watch tokens are always snapshotted (user vouched),
-            # but we still record their score for the alert.
-            if c["security_passed"] or c.get("source") == "watch_token":
+            risks = [str(value) for value in (result.risks or [])]
+            lowered = " ".join(risks).lower()
+            evidence_available = (
+                isinstance(result.raw, dict)
+                and bool(result.raw)
+                and "unable to verify" not in lowered
+                and "not found" not in lowered
+            )
+            c["security_passed"] = (
+                evidence_available
+                and not result.is_honeypot
+                and result.risk_score >= MIN_SECURITY_SCORE
+            )
+            c["security_state"] = (
+                "pass" if c["security_passed"]
+                else "unknown" if not evidence_available
+                else "avoid" if result.is_honeypot
+                else "caution"
+            )
+            c["security_risks"] = risks[:8]
+            if c["security_passed"]:
                 passed.append(c)
         except Exception as e:
             logger.debug("security_check_failed", address=addr, error=str(e))
-            if c.get("source") == "watch_token":
-                c["security_score"] = None
-                passed.append(c)
+            c["security_score"] = None
+            c["security_passed"] = False
+            c["security_state"] = "unknown"
     return passed
 
 
