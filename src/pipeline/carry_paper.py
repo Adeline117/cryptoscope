@@ -517,6 +517,7 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             continue
         observed_by_sym[observation["symbol"]] = {**observation,
                                                    "observed_edge_ann": edge,
+                                                   "_observed_at_dt": observed_at,
                                                    "observation_age_s": observation_age_s}
     c = _conn()
     try:
@@ -548,11 +549,12 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
              exit_signal_ts, exit_signal_diff) = row
             if status == "exit_pending":
                 measured_exit_slip = _roundtrip_slip(sym, phase="exit")
+                quote_at = datetime.now(timezone.utc)
                 if measured_exit_slip is None:
                     c.execute(
                         "UPDATE paper SET last_attempt_ts=?,measurement_state='exit_quote_gap' "
                         "WHERE id=?",
-                        (now.isoformat(), pid),
+                        (quote_at.isoformat(), pid),
                     )
                     continue
                 try:
@@ -560,11 +562,14 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                     hold_h = max(
                         (signal_dt - datetime.fromisoformat(row[2])).total_seconds() / 3600, 0
                     )
-                    quote_delay_s = max((now - signal_dt).total_seconds(), 0)
+                    quote_delay_s = max((quote_at - signal_dt).total_seconds(), 0)
                 except Exception:
-                    signal_dt = now
-                    hold_h = 0
-                    quote_delay_s = 0
+                    c.execute(
+                        "UPDATE paper SET last_attempt_ts=?,"
+                        "measurement_state='invalid_exit_signal' WHERE id=?",
+                        (quote_at.isoformat(), pid),
+                    )
+                    continue
                 book_quotes_complete = entry_slip is not None
                 hold_yr = max(hold_h / 8760.0, 1e-6)
                 proxy_cost = ((entry_slip + measured_exit_slip
@@ -578,18 +583,17 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                     "measurement_state='observed',cost_complete=?,exit_quote_ts=?,"
                     "exit_quote_delay_s=? WHERE id=?",
                     (signal_dt.isoformat(), measured_exit_slip, hold_h, net_proxy_ann,
-                     now.isoformat(), int(book_quotes_complete), now.isoformat(),
+                     quote_at.isoformat(), int(book_quotes_complete), quote_at.isoformat(),
                      quote_delay_s, pid),
                 )
                 continue
             cur = observed_by_sym.get(sym)
             try:
-                elapsed_h = max(
-                    (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600, 0
-                )
+                last_dt = datetime.fromisoformat(last_ts)
             except Exception:
-                elapsed_h = 0
+                last_dt = now
             if cur is None:
+                elapsed_h = max((now - last_dt).total_seconds() / 3600, 0)
                 c.execute(
                     "UPDATE paper SET last_ts=?,last_attempt_ts=?,unmeasured_h=?,"
                     "measurement_state='source_gap' WHERE id=?",
@@ -597,6 +601,15 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                 )
                 continue
 
+            measurement_at = cur["_observed_at_dt"]
+            if measurement_at < last_dt:
+                c.execute(
+                    "UPDATE paper SET last_attempt_ts=?,"
+                    "measurement_state='out_of_order_observation' WHERE id=?",
+                    (now.isoformat(), pid),
+                )
+                continue
+            elapsed_h = max((measurement_at - last_dt).total_seconds() / 3600, 0)
             cur_diff = cur["observed_edge_ann"]
             # Left-rectangle quote-rate integral, not exchange funding settlements.
             # A recovery observation only re-establishes the measurement clock. The
@@ -608,9 +621,15 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             interval_diff = last_diff if last_diff is not None else cur_diff
             accrued = (accrued or 0) + interval_diff * (elapsed_h / 8760.0)
             if cur_diff < CLOSE_DIFF_FLOOR:
+                signal_dt = measurement_at
                 measured_exit_slip = _roundtrip_slip(sym, phase="exit")
+                quote_at = datetime.now(timezone.utc)
                 try:
-                    hold_h = (now - datetime.fromisoformat(open_rows[sym][2])).total_seconds() / 3600
+                    hold_h = max(
+                        (signal_dt - datetime.fromisoformat(
+                            open_rows[sym][2])).total_seconds() / 3600,
+                        0,
+                    )
                 except Exception:
                     hold_h = 0
                 if measured_exit_slip is None:
@@ -619,8 +638,9 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                         "last_diff=?,last_attempt_ts=?,last_valid_ts=?,unmeasured_h=?,"
                         "measurement_state='exit_quote_gap',cost_complete=0,"
                         "exit_signal_ts=?,exit_signal_diff=? WHERE id=?",
-                        (accrued, now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
-                         unmeasured_h or 0, now.isoformat(), cur_diff, pid),
+                        (accrued, signal_dt.isoformat(), cur_diff, quote_at.isoformat(),
+                         signal_dt.isoformat(), unmeasured_h or 0,
+                         signal_dt.isoformat(), cur_diff, pid),
                     )
                     continue
                 book_quotes_complete = entry_slip is not None
@@ -632,22 +652,24 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                               if book_quotes_complete else None)
                 net_proxy_ann = (accrued / hold_yr - proxy_cost / hold_yr
                                  if proxy_cost is not None else None)
+                quote_delay_s = max((quote_at - signal_dt).total_seconds(), 0)
                 c.execute("UPDATE paper SET status='closed', exit_ts=?, exit_slip=?, hold_h=?, "
                           "accrued_pct=?, realized_net=?, last_ts=?, last_diff=?,"
                           "close_reason='diff_below_floor',last_attempt_ts=?,last_valid_ts=?,"
                           "unmeasured_h=?,measurement_state='observed',cost_complete=?,"
                           "exit_signal_ts=?,exit_signal_diff=?,exit_quote_ts=?,"
-                          "exit_quote_delay_s=0 WHERE id=?",
-                          (now.isoformat(), measured_exit_slip, hold_h, accrued, net_proxy_ann,
-                           now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
-                           unmeasured_h or 0, int(book_quotes_complete), now.isoformat(), cur_diff,
-                           now.isoformat(), pid))
+                          "exit_quote_delay_s=? WHERE id=?",
+                          (signal_dt.isoformat(), measured_exit_slip, hold_h, accrued,
+                           net_proxy_ann, signal_dt.isoformat(), cur_diff,
+                           quote_at.isoformat(), signal_dt.isoformat(), unmeasured_h or 0,
+                           int(book_quotes_complete), signal_dt.isoformat(), cur_diff,
+                           quote_at.isoformat(), quote_delay_s, pid))
             else:
                 c.execute(
                     "UPDATE paper SET accrued_pct=?,last_ts=?,last_diff=?,last_attempt_ts=?,"
                     "last_valid_ts=?,unmeasured_h=?,measurement_state='observed' WHERE id=?",
-                    (accrued, now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
-                     unmeasured_h or 0, pid),
+                    (accrued, measurement_at.isoformat(), cur_diff, now.isoformat(),
+                     measurement_at.isoformat(), unmeasured_h or 0, pid),
                 )
         # 2) OPEN new positions for fat-net cross carries not already open
         for sym, cur in entry_by_sym.items():
@@ -671,15 +693,22 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                     or current_partial_proxy < OPEN_MIN_PARTIAL_MODEL_PROXY_ANN):
                 continue
             slip = _roundtrip_slip(sym, phase="entry")
+            entry_quote_at = datetime.now(timezone.utc)
             if slip is None:
                 continue                      # can't measure entry → don't open
+            observation_at = observation["_observed_at_dt"]
+            entry_quote_delay_s = (entry_quote_at - observation_at).total_seconds()
+            if (not math.isfinite(entry_quote_delay_s) or entry_quote_delay_s < 0
+                    or entry_quote_delay_s > CARRY_OBSERVATION_MAX_AGE_S):
+                continue
             c.execute("INSERT INTO paper(symbol,entry_ts,entry_diff,pred_net,entry_slip,"
                       "notional,accrued_pct,last_ts,last_diff,last_attempt_ts,last_valid_ts,"
                       "unmeasured_h,measurement_state,episode_version,cost_complete,"
                       "observation_version) VALUES (?,?,?,?,?,?,0,?,?,?,?,0,'observed',?,0,?)",
-                      (sym, now.isoformat(), observation["observed_edge_ann"], partial_proxy,
-                       slip, NOTIONAL, now.isoformat(), observation["observed_edge_ann"],
-                       now.isoformat(), now.isoformat(), CURRENT_EPISODE_VERSION,
+                      (sym, entry_quote_at.isoformat(), observation["observed_edge_ann"],
+                       partial_proxy, slip, NOTIONAL, entry_quote_at.isoformat(),
+                       observation["observed_edge_ann"], entry_quote_at.isoformat(),
+                       observation_at.isoformat(), CURRENT_EPISODE_VERSION,
                        int(observation.get("observation_version") or 0)))
         c.commit()
     finally:

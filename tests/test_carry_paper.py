@@ -76,6 +76,33 @@ def test_entry_requires_fresh_pair_that_clears_current_partial_cost_screen(cp):
     assert stats["open_positions"][0]["observation_version"] == 1
 
 
+def test_entry_book_quote_must_finish_inside_observation_sla(cp, monkeypatch):
+    observed_at = datetime.now(timezone.utc)
+    run_at = observed_at + timedelta(seconds=10)
+    quote_at = observed_at + timedelta(seconds=cp.CARRY_OBSERVATION_MAX_AGE_S + 1)
+
+    class Clock(datetime):
+        ticks = iter((run_at, quote_at))
+
+        @classmethod
+        def now(cls, tz=None):
+            value = next(cls.ticks)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(cp, "datetime", Clock)
+    stats = cp.run(
+        [{"symbol": "SLOW", "cross": True,
+          "partial_model_proxy_ann_pct": 40, "edge_ann": 40}],
+        observations=[{
+            "symbol": "SLOW", "status": "observed", "cross": True,
+            "observation_version": 1, "observed_edge_ann": 40,
+            "observed_at": observed_at.isoformat(),
+        }],
+    )
+
+    assert stats["n_open"] == 0
+
+
 def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # open a 40%/yr differential position
     _run(cp, [{"symbol": "X", "cross": True,
@@ -352,6 +379,51 @@ def test_delayed_exit_quote_is_retained_but_excluded_from_edge_sample(cp):
         "net_proxy_after_book_quotes_and_modeled_fee_pct": -0.19,
     }
     assert cp.proxy_exclusion_reasons(sample) == ["exit_quote_outside_sla"]
+
+
+def test_exit_quote_sla_uses_post_request_completion_time(cp, monkeypatch):
+    import sqlite3
+
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+    signal_at = datetime.now(timezone.utc) - timedelta(seconds=59.5)
+    entry_at = signal_at - timedelta(hours=1)
+    c = sqlite3.connect(str(cp.DB))
+    c.execute(
+        "UPDATE paper SET status='exit_pending',entry_ts=?,exit_signal_ts=?,"
+        "exit_signal_diff=1,last_ts=?,last_valid_ts=? WHERE symbol='X'",
+        (entry_at.isoformat(), signal_at.isoformat(), signal_at.isoformat(),
+         signal_at.isoformat()),
+    )
+    c.commit()
+    c.close()
+
+    run_at = signal_at + timedelta(seconds=59.5)
+    quote_at = signal_at + timedelta(seconds=60.5)
+
+    class Clock(datetime):
+        ticks = iter((run_at, quote_at))
+
+        @classmethod
+        def now(cls, tz=None):
+            value = next(cls.ticks)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(cp, "datetime", Clock)
+    monkeypatch.setattr(cp, "_roundtrip_slip", lambda *_args, **_kwargs: 0.08)
+
+    stats = cp.run([], observations=[])
+
+    assert stats["n_closed"] == 0
+    assert stats["n_closed_total"] == stats["n_closed_excluded"] == 1
+    assert stats["excluded_by_reason"]["exit_quote_outside_sla"] == 1
+    c = sqlite3.connect(str(cp.DB))
+    delay_s, stored_quote_at = c.execute(
+        "SELECT exit_quote_delay_s,exit_quote_ts FROM paper WHERE symbol='X'"
+    ).fetchone()
+    c.close()
+    assert delay_s == pytest.approx(60.5)
+    assert stored_quote_at == quote_at.isoformat()
 
 
 def test_proxy_cohort_rejects_cost_contract_or_proxy_math_mismatch(cp):
