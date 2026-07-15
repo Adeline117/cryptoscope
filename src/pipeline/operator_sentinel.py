@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
+import urllib.error
 import urllib.request
 
 import structlog
@@ -33,6 +34,22 @@ from src.config import DATA_DIR
 logger = structlog.get_logger()
 
 SENTINELS_FILE = DATA_DIR / "operator_sentinels.json"
+
+
+def _read_json_response(request: urllib.request.Request, timeout: int) -> object:
+    """Read one JSON response while owning every response-like object.
+
+    ``HTTPError`` is also the rejected HTTP response.  The sentinel deliberately
+    swallows many market/RPC failures so it can try a fallback; without closing
+    that object first, each rejection leaves a socket in CLOSE_WAIT in the
+    long-lived 20-second watcher.
+    """
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode())
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise
 
 # Trigger thresholds (vs last-seen for distribute/rug; vs baseline for launch).
 # PRIMARY signal = the operator's own action (net position turn). balanceOf is
@@ -187,8 +204,7 @@ def _dex(token: str, chain: str) -> dict:
     try:
         url = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
         req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            d = json.loads(r.read().decode())
+        d = _read_json_response(req, timeout=15)
         pairs = d if isinstance(d, list) else d.get("pairs", [])
         if not pairs:
             return {}
@@ -223,8 +239,7 @@ def _funding_rate(symbol: str) -> float | None:
     try:
         url = f"https://api.gateio.ws/api/v4/futures/usdt/contracts/{symbol}_USDT"
         req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(req, timeout=12) as r:
-            d = json.loads(r.read().decode())
+        d = _read_json_response(req, timeout=12)
         if isinstance(d, dict) and d.get("funding_rate") is not None:
             val = round(float(d["funding_rate"]) * 100, 4)
     except Exception:
@@ -233,8 +248,7 @@ def _funding_rate(symbol: str) -> float | None:
         try:
             url = f"https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}_USDT"
             req = urllib.request.Request(url, headers={"User-Agent": "CryptoScope/1.0"})
-            with urllib.request.urlopen(req, timeout=12) as r:
-                d = json.loads(r.read().decode())
+            d = _read_json_response(req, timeout=12)
             if isinstance(d, dict) and d.get("data"):
                 val = round(float(d["data"].get("fundingRate", 0) or 0) * 100, 4)
         except Exception:
@@ -249,8 +263,7 @@ def _price_peak_now(token: str, chain: str) -> tuple[float, float] | None:
         d = _dex(token, chain)  # warms nothing; need pool addr from DexScreener
         u = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
         req = urllib.request.Request(u, headers={"User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(req, timeout=12) as r:
-            pairs = json.loads(r.read().decode())
+        pairs = _read_json_response(req, timeout=12)
         pairs = pairs if isinstance(pairs, list) else pairs.get("pairs", [])
         if not pairs:
             return None
@@ -259,8 +272,8 @@ def _price_peak_now(token: str, chain: str) -> tuple[float, float] | None:
              {"bsc": "bsc", "ethereum": "eth", "solana": "solana", "base": "base"}.get(chain, chain) + \
              f"/pools/{pool}/ohlcv/day?limit=30"
         req = urllib.request.Request(gt, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=12) as r:
-            rows = json.loads(r.read().decode()).get("data", {}).get("attributes", {}).get("ohlcv_list", [])
+        rows = (_read_json_response(req, timeout=12).get("data", {})
+                .get("attributes", {}).get("ohlcv_list", []))
         if not rows:
             return None
         closes = [float(x[4]) for x in rows]
@@ -372,8 +385,7 @@ def _solana_wallet_balance(owner: str, mint: str, rpc: str, timeout: int = 12) -
     try:
         req = urllib.request.Request(rpc, data=payload.encode(),
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            res = json.loads(r.read().decode()).get("result", {}) or {}
+        res = _read_json_response(req, timeout=timeout).get("result", {}) or {}
         total = 0.0
         for acc in res.get("value", []):
             ta = acc.get("account", {}).get("data", {}).get("parsed", {}).get("info", {}).get("tokenAmount", {})
@@ -424,8 +436,7 @@ def _classify_outflow(token: str, chain: str, wallets: list[str]) -> str:
         import urllib.request
         u = f"https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
         req = urllib.request.Request(u, headers={"User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as r:
-            pairs = json.loads(r.read().decode())
+        pairs = _read_json_response(req, timeout=10)
         pairs = pairs if isinstance(pairs, list) else pairs.get("pairs", [])
         for p in pairs:
             if p.get("pairAddress"):
@@ -481,8 +492,7 @@ def _solana_cluster_net_flow(token: str, wallets: list[str], since_iso: str | No
             rpc, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
                                   "params": params}).encode(),
             headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode()).get("result")
+        return _read_json_response(req, timeout=timeout).get("result")
 
     since_ts = None
     if since_iso:
@@ -739,8 +749,7 @@ def _token_age_days(token: str, chain: str) -> float | None:
         req = urllib.request.Request(
             f"https://api.dexscreener.com/latest/dex/tokens/{token}",
             headers={"User-Agent": _SANITY_UA})
-        with urllib.request.urlopen(req, timeout=20) as r:
-            pairs = (json.loads(r.read().decode()) or {}).get("pairs") or []
+        pairs = (_read_json_response(req, timeout=20) or {}).get("pairs") or []
         created = [p.get("pairCreatedAt") for p in pairs
                    if p.get("pairCreatedAt") and p.get("chainId") == ds]
         created = created or [p.get("pairCreatedAt") for p in pairs if p.get("pairCreatedAt")]

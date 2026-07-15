@@ -221,14 +221,17 @@ async def send_alert(message: str) -> bool:
     try:
         from telegram import Bot
 
-        bot = Bot(token=bot_token)
-        for i, chunk in enumerate(_split_text(message, 4000)):
-            if i > 0:
-                await asyncio.sleep(0.3)
-            await bot.send_message(
-                chat_id=chat_id, text=chunk, parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
+        # ``Bot`` owns two HTTPX clients.  The realtime watcher/WebSocket workers
+        # each run this coroutine in a short-lived event loop; leaving the Bot
+        # unclosed strands its Telegram socket in CLOSE_WAIT after that loop exits.
+        async with Bot(token=bot_token) as bot:
+            for i, chunk in enumerate(_split_text(message, 4000)):
+                if i > 0:
+                    await asyncio.sleep(0.3)
+                await bot.send_message(
+                    chat_id=chat_id, text=chunk, parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
         return True
     except Exception as e:
         logger.error("alert_send_failed", error=str(e))

@@ -17,8 +17,10 @@ Reconnects on drop (free wss are flaky). Free: publicnode / drpc BSC wss.
 from __future__ import annotations
 
 import json
+import socket
 import time
 from collections import defaultdict
+from contextlib import suppress
 
 import structlog
 
@@ -28,6 +30,45 @@ _WSS = ["wss://bsc-rpc.publicnode.com", "wss://bsc.drpc.org"]
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 FLUSH_SEC = 30           # batch transfers and emit a net-flow alert every N seconds
 MIN_FLOW_TOKENS = 1.0    # ignore dust
+
+
+def _open_subscription(url: str, tokens: list[str], socket_factory):
+    """Open and subscribe, closing a partially-initialized socket on failure."""
+    ws = socket_factory(url, timeout=10)
+    try:
+        ws.send(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe",
+                            "params": ["logs", {"address": tokens,
+                                                "topics": [TRANSFER_TOPIC]}]}))
+        reply = json.loads(ws.recv())
+        if reply.get("error") or not reply.get("result"):
+            raise ConnectionError(f"subscription rejected: {reply.get('error') or reply}")
+        return ws
+    except BaseException:
+        with suppress(Exception):
+            ws.close()
+        raise
+
+
+def _receive_one(ws, buf: dict, targets: dict) -> None:
+    """Receive one event; an empty frame means the peer closed the connection."""
+    raw = ws.recv()
+    if not raw:
+        raise ConnectionError("websocket peer closed")
+    try:
+        msg = json.loads(raw)
+        p = msg.get("params", {}).get("result")
+        if p and len(p.get("topics", [])) >= 3:
+            token = p["address"].lower()
+            frm = "0x" + p["topics"][1][26:].lower()
+            to = "0x" + p["topics"][2][26:].lower()
+            amt = int(p["data"], 16) / 1e18
+            wl = targets.get(token, {}).get("wallets", set())
+            if to in wl and frm not in wl:
+                buf[token]["buy"] += amt
+            elif frm in wl and to not in wl:
+                buf[token]["sell"] += amt
+    except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        logger.debug("ws_message_invalid")
 
 
 def _load_targets() -> dict:
@@ -87,7 +128,7 @@ def _flush(buf: dict, targets: dict) -> None:
 
 
 def run():
-    from websocket import create_connection
+    from websocket import WebSocketTimeoutException, create_connection
     targets = _load_targets()
     if not targets:
         logger.info("ws_no_targets")
@@ -98,10 +139,7 @@ def run():
         ws = None
         for url in _WSS:
             try:
-                ws = create_connection(url, timeout=10)
-                ws.send(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe",
-                                    "params": ["logs", {"address": tokens, "topics": [TRANSFER_TOPIC]}]}))
-                json.loads(ws.recv())  # subscription id
+                ws = _open_subscription(url, tokens, create_connection)
                 logger.info("ws_connected", url=url)
                 break
             except Exception as e:
@@ -116,21 +154,9 @@ def run():
             ws.settimeout(FLUSH_SEC)
             while True:
                 try:
-                    raw = ws.recv()
-                    msg = json.loads(raw)
-                    p = msg.get("params", {}).get("result")
-                    if p and len(p.get("topics", [])) >= 3:
-                        token = p["address"].lower()
-                        frm = "0x" + p["topics"][1][26:].lower()
-                        to = "0x" + p["topics"][2][26:].lower()
-                        amt = int(p["data"], 16) / 1e18
-                        wl = targets.get(token, {}).get("wallets", set())
-                        if to in wl and frm not in wl:
-                            buf[token]["buy"] += amt
-                        elif frm in wl and to not in wl:
-                            buf[token]["sell"] += amt
-                except Exception:
-                    pass  # timeout or parse → fall through to flush check
+                    _receive_one(ws, buf, targets)
+                except (TimeoutError, socket.timeout, WebSocketTimeoutException):
+                    pass  # idle subscription: flush on schedule, keep connection
                 if time.time() - last_flush >= FLUSH_SEC:
                     _flush(buf, targets)
                     last_flush = time.time()

@@ -67,3 +67,25 @@ def test_geckoterminal_closes_rejected_response_before_fallback(monkeypatch):
 
     assert anomaly_screener._gt_base_addresses("test") == []
     assert error.was_closed and error.fp.closed
+
+
+def test_realtime_sentinel_closes_market_and_funding_rejections(monkeypatch):
+    from src.pipeline import operator_sentinel
+
+    errors = []
+
+    def rejected(request, timeout):
+        error = TrackedHTTPError(request.full_url, code=403)
+        errors.append(error)
+        raise error
+
+    monkeypatch.setattr(operator_sentinel.urllib.request, "urlopen", rejected)
+    operator_sentinel._FUNDING_CACHE.clear()
+
+    assert operator_sentinel._dex("0xtoken", "bsc") == {}
+    assert operator_sentinel._funding_rate("FDLEAK") is None
+
+    # DexScreener plus Gate and MEXC fallback: every swallowed HTTPError must have
+    # released its response/socket before the 20-second watcher starts a new pass.
+    assert len(errors) == 3
+    assert all(error.was_closed and error.fp.closed for error in errors)
