@@ -89,3 +89,33 @@ def test_realtime_sentinel_closes_market_and_funding_rejections(monkeypatch):
     # released its response/socket before the 20-second watcher starts a new pass.
     assert len(errors) == 3
     assert all(error.was_closed and error.fp.closed for error in errors)
+
+
+def test_factory_rpc_clients_close_rejected_responses(monkeypatch):
+    from src.pipeline import evm_factory_stream, solana_launch_stream
+
+    evm_errors = []
+
+    def evm_rejected(request, timeout):
+        error = TrackedHTTPError(request.full_url, code=429)
+        evm_errors.append(error)
+        raise error
+
+    monkeypatch.setattr(evm_factory_stream.urllib.request, "urlopen", evm_rejected)
+    with pytest.raises(RuntimeError, match="all EVM RPC endpoints failed"):
+        evm_factory_stream.JsonRpc(
+            ("https://rpc-one.invalid", "https://rpc-two.invalid"),
+        ).call("eth_getLogs", [])
+
+    solana_error = TrackedHTTPError("https://solana.invalid", code=413)
+    monkeypatch.setattr(
+        solana_launch_stream.urllib.request,
+        "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(solana_error),
+    )
+    with pytest.raises(urllib.error.HTTPError):
+        solana_launch_stream.JsonRpc("https://solana.invalid").call("getBlock", [])
+
+    assert len(evm_errors) == 2
+    assert all(error.was_closed and error.fp.closed for error in evm_errors)
+    assert solana_error.was_closed and solana_error.fp.closed

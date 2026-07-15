@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import threading
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Callable
@@ -371,8 +372,13 @@ class JsonRpc:
         request = urllib.request.Request(
             self.endpoint, data=body,
             headers={"Content-Type": "application/json", "User-Agent": "CryptoScope/1.0"})
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            result = json.load(response)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                result = json.load(response)
+        except urllib.error.HTTPError as error:
+            # The exception is also the HTTP response and owns its socket.
+            error.close()
+            raise
         if result.get("error"):
             raise RuntimeError(f"Solana RPC {method} failed: {result['error']}")
         return result.get("result")

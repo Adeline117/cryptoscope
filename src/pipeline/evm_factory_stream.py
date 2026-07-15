@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import threading
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -537,6 +538,11 @@ class JsonRpc:
                     raise RuntimeError(result["error"])
                 self._index = index
                 return result.get("result")
+            except urllib.error.HTTPError as exc:
+                # HTTPError owns the rejected response. Closing it before trying the
+                # next RPC prevents a failed gap retry from leaking CLOSE_WAIT.
+                exc.close()
+                last_error = exc
             except Exception as exc:
                 last_error = exc
         raise RuntimeError(f"all EVM RPC endpoints failed for {method}: {last_error}")
