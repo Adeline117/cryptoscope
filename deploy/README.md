@@ -18,6 +18,10 @@ python3 -m venv .venv
 # 3. Install the LaunchAgent (edit paths inside the plist if repo moved)
 cp deploy/com.cryptoscope.scheduler.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.cryptoscope.scheduler.plist
+
+# Independent read-only Hyperliquid BBO/L2/trades/context stream
+cp deploy/com.cryptoscope.hyperliquid.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.cryptoscope.hyperliquid.plist
 ```
 
 Manage it:
@@ -25,13 +29,19 @@ Manage it:
 ```bash
 launchctl list | grep cryptoscope          # status (PID, exit code)
 launchctl unload ~/Library/LaunchAgents/com.cryptoscope.scheduler.plist   # stop
+launchctl unload ~/Library/LaunchAgents/com.cryptoscope.hyperliquid.plist # stop market stream
 tail -f logs/scheduler.err.log             # logs
+tail -f logs/hyperliquid.err.log           # stream errors/reconnects
 ```
 
 `KeepAlive` restarts the process on crash; `RunAtLoad` starts it on login/boot.
 The LaunchAgent grants a finite 2048-fd soft limit (4096 hard limit). The scheduler
 also raises a smaller inherited soft limit to `SCHEDULER_NOFILE_SOFT` (default 2048)
 and serializes its two descriptor-heavy scans.
+
+The Hyperliquid stream is a separate read-only process so a socket reconnect cannot
+stall cron jobs. It uses only public subscriptions; `HL_STREAM_COINS=BTC,ETH,SOL`
+can override the default universe.
 
 ## Credentials
 
