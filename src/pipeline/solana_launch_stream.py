@@ -230,6 +230,40 @@ def persist(payload: object, *, rpc: JsonRpc | None = None,
                        signature=payload["signature"][:12], error=str(exc)[:120])
 
 
+def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
+                      include_incomplete: bool = False) -> dict:
+    """Retry raw/RPC-failed evidence without repeatedly guessing ambiguous rows."""
+    states = ["raw_only", "rpc_unavailable"]
+    if include_incomplete:
+        states.append("incomplete")
+    placeholders = ",".join("?" for _ in states)
+    c = _conn()
+    try:
+        rows = c.execute(
+            f"SELECT signature FROM raw_launches WHERE evidence_state IN ({placeholders}) "
+            "ORDER BY slot DESC LIMIT ?", (*states, max(0, int(limit))),
+        ).fetchall()
+    finally:
+        c.close()
+    completed = failed = 0
+    for (signature,) in rows:
+        try:
+            _set_hydration(signature, _transaction(rpc, signature), None)
+            completed += 1
+        except Exception as exc:
+            _set_hydration(signature, None, str(exc))
+            failed += 1
+    return {"attempted": len(rows), "completed": completed, "failed": failed}
+
+
+def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
+                    *, interval_seconds: float = 60) -> None:
+    while not stop.wait(max(1, interval_seconds)):
+        result = rehydrate_pending(rpc, limit=25)
+        if result["attempted"]:
+            logger.info("solana_launch_rehydrated", **result)
+
+
 def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[dict, dict] | None:
     meta = item.get("meta") or {}
     if meta.get("err") is not None:
@@ -330,7 +364,18 @@ def main() -> None:
 
     load_dotenv(PROJECT_ROOT / ".env")
     _conn().close()
-    build_runner().run_forever(threading.Event())
+    rpc = JsonRpc(os.getenv("SOLANA_STREAM_RPC_URL", PUBLIC_SOLANA_RPC))
+    initial = rehydrate_pending(rpc, include_incomplete=True)
+    if initial["attempted"]:
+        logger.info("solana_launch_initial_rehydration", **initial)
+    stop = threading.Event()
+    worker = threading.Thread(target=_rehydrate_loop, args=(stop, rpc), daemon=True)
+    worker.start()
+    try:
+        build_runner(rpc=rpc).run_forever(stop)
+    finally:
+        stop.set()
+        worker.join(timeout=2)
 
 
 if __name__ == "__main__":

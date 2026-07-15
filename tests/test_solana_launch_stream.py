@@ -119,6 +119,46 @@ def test_inner_creation_instruction_can_prove_wrapped_launch(sol):
         c.close()
 
 
+def test_rpc_failed_launch_is_rehydrated_later(sol):
+    class RecoveringRpc:
+        def call(self, method, params):
+            assert method == "getTransaction"
+            return _transaction()
+
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload)
+    assert sol.rehydrate_pending(RecoveringRpc()) == {
+        "attempted": 1, "completed": 1, "failed": 0}
+    c = sol._conn()
+    try:
+        assert c.execute("SELECT evidence_state,creator,mint FROM raw_launches").fetchone() \
+            == ("complete", "creator", "mint")
+    finally:
+        c.close()
+
+
+def test_incomplete_identity_is_only_retried_during_startup_audit(sol):
+    tx = _transaction()
+    tx["transaction"]["message"]["accountKeys"].append(
+        {"pubkey": "sponsor", "signer": True})
+    tx["transaction"]["message"]["instructions"][0]["accounts"].append("sponsor")
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=tx)
+
+    class Rpc:
+        def __init__(self):
+            self.calls = 0
+
+        def call(self, method, params):
+            self.calls += 1
+            return _transaction()
+
+    rpc = Rpc()
+    assert sol.rehydrate_pending(rpc)["attempted"] == 0
+    assert sol.rehydrate_pending(rpc, include_incomplete=True)["completed"] == 1
+    assert rpc.calls == 1
+
+
 def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
     tx = _transaction()
 
