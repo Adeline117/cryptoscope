@@ -827,5 +827,8 @@ if __name__ == "__main__":
     load_dotenv(PROJECT_ROOT / ".env")
     from src.onchain.hyperliquid import scan_carry
     scan = scan_carry(priority_symbols=open_symbols())
-    print(json.dumps(run(scan["signals"], observations=scan["open_observations"]),
+    print(json.dumps(run(
+        scan["signals"],
+        observations=scan.get("paper_observations", scan["open_observations"]),
+    ),
                      ensure_ascii=False, indent=1))

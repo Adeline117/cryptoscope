@@ -18,6 +18,10 @@ def test_render_perps_sends_open_observations_to_paper_tracker(monkeypatch):
         "symbol": "OPEN", "cross": True, "hl_ann": 1.0, "okx_ann": 4.0,
         "edge_ann": -3.0, "observed_at": "2026-07-15T00:00:00+00:00",
     }]
+    entry_observation = {
+        "symbol": "ENTRY", "cross": True, "hl_ann": 20.0, "okx_ann": 0.0,
+        "edge_ann": 20.0, "observed_at": "2026-07-15T00:00:00+00:00",
+    }
     seen = {}
 
     hl_health = {
@@ -43,6 +47,8 @@ def test_render_perps_sends_open_observations_to_paper_tracker(monkeypatch):
         return {
             "signals": signals,
             "open_observations": observations,
+            "entry_observations": [entry_observation],
+            "paper_observations": observations + [entry_observation],
             "open_status": [{"symbol": "OPEN", "status": "observed"}],
             "source_health": {
                 "schema_version": 1,
@@ -75,7 +81,7 @@ def test_render_perps_sends_open_observations_to_paper_tracker(monkeypatch):
     assert seen["priority_symbols"] == ["OPEN"]
     assert seen["hl_health"] is hl_health
     assert seen["paper_carries"] is signals
-    assert seen["paper_observations"] is observations
+    assert seen["paper_observations"] == observations + [entry_observation]
     assert payload["carry"] is signals
     assert payload["carry_paper"] == {"n_open": 1, "n_closed": 0}
     assert payload["carry_source_health"]["state"] == "ok"

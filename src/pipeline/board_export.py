@@ -397,7 +397,11 @@ def render_perps() -> dict:
                             "error": paper_pre_error}
         else:
             try:
-                paper = paper_run(carry, observations=carry_scan["open_observations"])
+                paper = paper_run(
+                    carry,
+                    observations=carry_scan.get(
+                        "paper_observations", carry_scan["open_observations"]),
+                )
                 if (paper.get("ledger_sync") or {}).get("status") == "error":
                     paper_health = {"state": "partial", "error_kind": "ledger_sync_failed"}
             except Exception as e:

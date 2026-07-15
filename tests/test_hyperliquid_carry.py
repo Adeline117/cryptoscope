@@ -157,6 +157,10 @@ def test_scan_carry_prioritizes_open_symbol_and_uses_current_pair(monkeypatch):
     assert observation["okx_ann"] == 4.0
     assert observation["edge_ann"] == pytest.approx(-3.0)
     assert observation["observed_at"]
+    assert observation["observation_version"] == 1
+    assert [row["symbol"] for row in scan["entry_observations"]] == ["ENTRY"]
+    assert [row["symbol"] for row in scan["paper_observations"]] == ["OPEN", "ENTRY"]
+    assert scan["source_health"]["entry_observed"] == 1
     assert _open_status(scan, "OPEN")["status"] == "observed"
 
 
@@ -235,6 +239,8 @@ def test_scan_carry_reports_source_symbol_okx_and_cap_states(monkeypatch):
     no_hl = hl.scan_carry([], priority_symbols=["NO_HL_SOURCE"])
     assert _open_status(no_hl, "NO_HL_SOURCE")["status"] == "hl_source_unavailable"
     assert no_hl["open_observations"] == []
+    assert no_hl["entry_observations"] == []
+    assert no_hl["paper_observations"] == []
 
     rows = [_ctx("PRESENT", funding_ann=1.0, oi_usd=10)]
     def unsupported(coins, cap=45, fetch=None):

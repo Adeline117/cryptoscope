@@ -684,7 +684,7 @@ def carry_signals(rows: list[dict] | None = None, *,
 def scan_carry(rows: list[dict] | None = None, *,
                priority_symbols: list[str] | None = None,
                hl_health: dict | None = None) -> dict:
-    """Return entry signals separately from current observations of open episodes."""
+    """Return entry signals plus versioned current-pair paper observations."""
     fetched_here = rows is None
     if rows is None:
         result = fetch_ctxs_result()
@@ -703,7 +703,8 @@ def scan_carry(rows: list[dict] | None = None, *,
                      "status": "hl_source_unavailable"}
                     for symbol in priorities]
         return {
-            "signals": [], "open_observations": [], "open_status": statuses,
+            "signals": [], "open_observations": [], "entry_observations": [],
+            "paper_observations": [], "open_status": statuses,
             "source_health": {
                 "schema_version": 1, "state": "unavailable", "scan_at": scan_at,
                 "hl": hl_health, "okx": {"state": "not_needed", "requested": 0,
@@ -712,6 +713,7 @@ def scan_carry(rows: list[dict] | None = None, *,
                                            "rate_stale": 0,
                                            "rate_invalid": 0, "request_cap": 0},
                 "open_requested": len(priorities), "open_observed": 0,
+                "entry_observed": 0,
                 "entry_deferred_by_cap": 0,
                 "fetched_here": fetched_here,
             },
@@ -737,7 +739,19 @@ def scan_carry(rows: list[dict] | None = None, *,
     ]
     signals = carry_signals(signal_rows, okx_rates=okx)
 
-    observations = []
+    def paired_observation(symbol: str) -> dict | None:
+        row = by_symbol.get(symbol)
+        if row is None or okx_status.get(symbol) != "observed":
+            return None
+        observed_edge = float(row["funding_ann"]) - float(okx[symbol])
+        return {
+            "symbol": symbol, "status": "observed", "cross": True,
+            "observation_version": 1, "observed_at": scan_at,
+            "hl_ann": float(row["funding_ann"]), "okx_ann": float(okx[symbol]),
+            "observed_edge_ann": observed_edge, "edge_ann": observed_edge,
+        }
+
+    open_observations = []
     statuses = []
     for symbol in priorities:
         row = by_symbol.get(symbol)
@@ -746,18 +760,23 @@ def scan_carry(rows: list[dict] | None = None, *,
         elif okx_status.get(symbol) != "observed":
             status = f"okx_{okx_status.get(symbol) or 'request_failed'}"
         else:
-            observed_edge = float(row["funding_ann"]) - float(okx[symbol])
-            observation = {
-                "symbol": symbol, "status": "observed", "cross": True,
-                "observation_version": 1, "observed_at": scan_at,
-                "hl_ann": float(row["funding_ann"]), "okx_ann": float(okx[symbol]),
-                "observed_edge_ann": observed_edge, "edge_ann": observed_edge,
-            }
-            observations.append(observation)
+            open_observations.append(paired_observation(symbol))
             status = "observed"
         statuses.append({"symbol": symbol, "role": "open", "status": status})
 
-    observed_n = len(observations)
+    entry_observations = []
+    for signal in signals:
+        if not signal.get("cross") or not signal.get("paper_measurement_eligible"):
+            continue
+        observation = paired_observation(signal["symbol"])
+        if observation is not None:
+            entry_observations.append(observation)
+    paper_observations_by_symbol = {
+        observation["symbol"]: observation
+        for observation in open_observations + entry_observations
+    }
+    paper_observations = list(paper_observations_by_symbol.values())
+    observed_n = len(open_observations)
     if hl_health.get("state") == "unavailable" or okx_health["state"] == "unavailable":
         state = "unavailable"
     elif (hl_health.get("state") == "partial" or okx_health["state"] == "partial"
@@ -766,11 +785,14 @@ def scan_carry(rows: list[dict] | None = None, *,
     else:
         state = "ok"
     return {
-        "signals": signals, "open_observations": observations, "open_status": statuses,
+        "signals": signals, "open_observations": open_observations,
+        "entry_observations": entry_observations,
+        "paper_observations": paper_observations, "open_status": statuses,
         "source_health": {
             "schema_version": 1, "state": state, "scan_at": scan_at,
             "hl": hl_health, "okx": okx_health,
             "open_requested": len(priorities), "open_observed": observed_n,
+            "entry_observed": len(entry_observations),
             "entry_deferred_by_cap": sum(s not in limited_set for s in entry_symbols),
             "fetched_here": fetched_here,
         },
