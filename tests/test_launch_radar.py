@@ -191,3 +191,51 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     assert solana["available"] is True
     assert solana["qualification"]["raw_total"] == 1
     assert solana["qualification"]["recent_complete"] == 1
+
+
+def test_forward_evm_factory_pool_is_exactly_bridged_as_watch(tmp_path, monkeypatch):
+    from src.pipeline import evm_factory_stream as stream
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    monkeypatch.setattr(stream, "DB", tmp_path / "evm.db")
+    stream.ensure_bridge_started_at(at=datetime(2026, 7, 15, 11, tzinfo=timezone.utc))
+    token = "0x1111111111111111111111111111111111111111"
+    quote = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
+    pool = "0x3333333333333333333333333333333333333333"
+    c = stream._conn()
+    try:
+        c.execute("""INSERT INTO raw_pools(
+          chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
+          transaction_index,token0,token1,pool,pair_index,block_at,detected_at,
+          updated_at,raw_payload_hash,removed,evidence_state,qualification_state
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'complete','raw_unqualified')""",
+                  ("bsc", "pancakeswap_v2", stream.PANCAKE_V2_FACTORY, "0x" + "ab" * 32,
+                   3, 100, "0x" + "cd" * 32, 2, token, quote, pool, 42,
+                   (now.replace(second=0)).isoformat(), now.isoformat(), now.isoformat(),
+                   "e" * 64))
+        c.commit()
+    finally:
+        c.close()
+    pair = _pair(chainId="bsc", pairAddress=pool, pairCreatedAt=int(
+        now.replace(second=0).timestamp() * 1000),
+        baseToken={"address": token, "symbol": "EVM", "name": "EVM"},
+        quoteToken={"address": quote, "symbol": "WBNB"})
+
+    def fetch(url):
+        return [] if url == lr.PROFILES_URL else [pair]
+
+    result = lr.scan(fetch=fetch, now=now, max_profiles=0, max_primary=0, max_evm=1,
+                     assessor=lambda event: event)
+    assert result["primary_evm"]["inserted"] == 1
+    row = ol.active("launch", now=now)[0]
+    assert row["decision"] == "WATCH" and row["primary_evidence"]["pool"] == pool
+    assert row["event_at"] == now.replace(second=0).isoformat()
+    c = stream._conn()
+    try:
+        assert c.execute("SELECT qualification_state,target_token FROM raw_pools").fetchone() \
+            == ("qualified_recorded", token)
+    finally:
+        c.close()

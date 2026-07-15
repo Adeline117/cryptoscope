@@ -12,7 +12,7 @@ import json
 import urllib.request
 from datetime import datetime, timezone
 
-from src.pipeline.opportunity_ledger import active, record
+from src.pipeline.opportunity_ledger import active, record, record_if_absent
 
 PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
 PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
@@ -194,9 +194,109 @@ def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
     return result, assessed
 
 
+def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
+                      max_assessments: int, max_candidates: int) -> tuple[dict, int]:
+    """Bridge exact official factory pools without guessing token identity."""
+    from src.pipeline import evm_factory_stream as stream
+    from src.pipeline.evm_launch_bridge import exact_pair, identify_target
+
+    rows = stream.qualification_batch(now=now, limit=max_candidates)
+    result = {"available": True, "attempted": 0, "recorded": 0, "inserted": 0,
+              "pending": 0, "errors": 0, "screened_out": 0, "duplicates": 0}
+    backoffs = (180, 360, 900, 1800)
+    for raw in rows:
+        result["attempted"] += 1
+        target, terminal = identify_target(raw)
+        if terminal:
+            stream.set_qualification(raw, terminal, reason="quote-side identity is not unique",
+                                     at=now)
+            result["screened_out"] += 1
+            continue
+        retry_after = backoffs[min(int(raw.get("qualification_attempts") or 0),
+                                   len(backoffs) - 1)]
+        try:
+            pairs = fetch(PAIRS_URL.format(chain=raw["chain"], token=target))
+            pair = exact_pair(raw, target, pairs)
+        except Exception as exc:
+            stream.set_qualification(raw, "market_error", reason=str(exc),
+                                     target_token=target,
+                                     retry_after_seconds=retry_after, at=now)
+            result["errors"] += 1
+            break
+        if pair is None:
+            stream.set_qualification(raw, "market_pending",
+                                     reason="exact factory pool not indexed yet",
+                                     target_token=target,
+                                     retry_after_seconds=retry_after, at=now)
+            result["pending"] += 1
+            continue
+        try:
+            chain_time = datetime.fromisoformat(raw["block_at"]).astimezone(timezone.utc)
+            market_time = datetime.fromtimestamp(
+                float(pair["pairCreatedAt"]) / 1000, tz=timezone.utc)
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            stream.set_qualification(raw, "market_error",
+                                     reason=f"invalid pool creation clock: {exc}",
+                                     target_token=target,
+                                     retry_after_seconds=retry_after, at=now)
+            result["errors"] += 1
+            continue
+        if abs((market_time - chain_time).total_seconds()) > 600:
+            stream.set_qualification(raw, "market_error",
+                                     reason="market pool clock differs from factory by >10m",
+                                     target_token=target,
+                                     retry_after_seconds=retry_after, at=now)
+            result["errors"] += 1
+            continue
+        event = qualify(pair, now=now,
+                        source=f"{raw['chain']} {raw['venue']} factory + DEX Screener exact pool")
+        if event is None:
+            stream.set_qualification(raw, "below_threshold",
+                                     reason="exact pool below current liquidity/FDV bounds",
+                                     target_token=target,
+                                     retry_after_seconds=retry_after, at=now)
+            result["pending"] += 1
+            continue
+        # The factory clock is the primary event time. The market decision is made
+        # now; never backdate it to the raw socket receipt.
+        event["event_at"] = chain_time.isoformat()
+        event["detected_at"] = now.isoformat()
+        event["decision_at"] = now.isoformat()
+        event["primary_evidence"] = {
+            "source": "official EVM factory log",
+            "factory": raw["factory"], "venue": raw["venue"],
+            "transaction_hash": raw["transaction_hash"],
+            "log_index": raw["log_index"], "block_number": raw["block_number"],
+            "block_hash": raw["block_hash"], "pool": raw["pool"],
+            "raw_detected_at": raw["detected_at"], "evidence_state": "complete",
+            "explorer_url": (f"https://bscscan.com/tx/{raw['transaction_hash']}"
+                             if raw["chain"] == "bsc" else
+                             f"https://basescan.org/tx/{raw['transaction_hash']}"
+                             if raw["chain"] == "base" else
+                             f"https://etherscan.io/tx/{raw['transaction_hash']}"),
+        }
+        event, assessed = _assess_candidate(
+            event, assessor, assessed=assessed, max_assessments=max_assessments)
+        # Until gas and a true executable EVM round trip are priced, factory rows
+        # are useful discovery/control evidence but never an action window.
+        if event.get("decision") == "SMALL_PROBE":
+            event["decision"] = "WATCH"
+            event.setdefault("reasons", []).append(
+                "EVM 主链发现仅纸面: gas/双向可执行成本尚不完整")
+        ident, new = record_if_absent(event)
+        state = "qualified_recorded" if new else "duplicate_token_existing"
+        stream.set_qualification(raw, state,
+                                 reason=None if new else "token already has a first launch event",
+                                 target_token=target, ledger_event_id=ident, at=now)
+        result["recorded"] += int(new)
+        result["inserted"] += int(new)
+        result["duplicates"] += int(not new)
+    return result, assessed
+
+
 def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CANDIDATES,
          assessor=None, max_assessments: int = MAX_EXECUTION_ASSESSMENTS,
-         max_primary: int = 20) -> dict:
+         max_primary: int = 20, max_evm: int = 10) -> dict:
     """Discover pools, then safety/round-trip gate only raw actionable candidates.
 
     The hard assessment budget bounds GoPlus/router calls. Anything beyond the budget
@@ -215,6 +315,16 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
         primary = {"available": False, "attempted": 0, "recorded": 0, "inserted": 0,
                    "pending": 0, "errors": 1, "screened_out": 0,
                    "reason": str(exc)[:120]}
+    try:
+        primary_evm, assessed = _scan_primary_evm(
+            fetch, now=now, assessor=assessor, assessed=assessed,
+            max_assessments=max_assessments, max_candidates=max(0, max_evm))
+        inserted += primary_evm["inserted"]
+    except Exception as exc:
+        primary_evm = {"available": False, "attempted": 0, "recorded": 0,
+                       "inserted": 0, "pending": 0, "errors": 1,
+                       "screened_out": 0, "duplicates": 0,
+                       "reason": str(exc)[:120]}
     profiles = fetch(PROFILES_URL)
     profiles = profiles if isinstance(profiles, list) else []
     for profile in profiles[:max_profiles]:
@@ -228,8 +338,10 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
                 inserted += int(new)
         except Exception:
             continue
-    return {"scanned": len(profiles[:max_profiles]) + primary["attempted"],
+    return {"scanned": (len(profiles[:max_profiles]) + primary["attempted"]
+                        + primary_evm["attempted"]),
             "profile_scanned": len(profiles[:max_profiles]), "primary": primary,
+            "primary_evm": primary_evm,
             "assessed": assessed, "inserted": inserted,
             "events": active("launch"),
             "source": "Primary chain launch evidence + DEX Screener pools/profiles"}
@@ -246,7 +358,16 @@ def view() -> dict:
                    "streams": streams}
     except Exception as exc:
         primary = {"available": False, "reason": str(exc)[:120], "streams": []}
-    return {"events": active("launch"), "primary_sources": {"solana": primary},
+    try:
+        from src.pipeline import evm_factory_stream
+        from src.pipeline.evm_launch_bridge import configured_stream_health
+        evm_primary = {"available": True,
+                       "qualification": evm_factory_stream.qualification_summary(),
+                       "streams": configured_stream_health()}
+    except Exception as exc:
+        evm_primary = {"available": False, "reason": str(exc)[:120], "streams": []}
+    return {"events": active("launch"),
+            "primary_sources": {"solana": primary, "evm": evm_primary},
             "source": "Launch event ledger + primary chain stream health"}
 
 
