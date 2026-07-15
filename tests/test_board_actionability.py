@@ -135,3 +135,7 @@ def test_launch_discloses_primary_stream_coverage_and_known_gaps():
     assert "不代表全市场覆盖" in html
     assert "失败会退避，不会伪装成无机会" in html
     assert "主链原始证据:" in html
+    assert "EVM 官方工厂流" in html
+    assert "EVM 精确池资格" in html
+    assert "BSC / Base / Ethereum 共 5 条工厂流" in html
+    assert "只匹配工厂原始 pool" in html
