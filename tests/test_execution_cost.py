@@ -58,3 +58,41 @@ def test_unknown_route_contract_invents_no_zero_cost_fill():
     assert contract["known_total_pct"] == 0
     assert contract["all_in_total_pct"] is None
     assert all(component["status"] == "unknown" for component in contract["components"])
+
+
+def test_carry_paper_contract_never_upgrades_book_quotes_to_all_in_cost():
+    from src.pipeline.execution_cost import carry_paper_contract
+
+    opened = carry_paper_contract(
+        notional_usd_per_leg=10_000,
+        entry_book_impact_pct=0.05,
+        exit_book_impact_pct=None,
+        modeled_fee_pct=0.19,
+    )
+    assert opened["purpose"] == "paper_measurement"
+    assert opened["notional_basis"] == "per_leg"
+    assert opened["measurement_gross_notional_usd"] == 20_000
+    assert opened["known_total_pct"] == 0.05
+    assert opened["modeled_proxy_total_pct"] is None
+    assert opened["book_quote_cost_complete"] is False
+    assert opened["completeness"] == "partial"
+    assert opened["all_in_total_pct"] is None
+    assert opened["is_real_fill"] is False
+
+    closed = carry_paper_contract(
+        notional_usd_per_leg=10_000,
+        entry_book_impact_pct=0.05,
+        exit_book_impact_pct=0.08,
+        modeled_fee_pct=0.19,
+    )
+    components = {item["name"]: item for item in closed["components"]}
+    assert closed["known_total_pct"] == 0.13
+    assert closed["modeled_proxy_total_pct"] == 0.32
+    assert closed["book_quote_cost_complete"] is True
+    assert closed["completeness"] == "partial"
+    assert closed["all_in_total_pct"] is None
+    assert components["venue_fee_tier"]["status"] == "unknown"
+    assert components["venue_fee_tier"]["modeled_proxy_pct"] == 0.19
+    assert components["cross_venue_basis"]["status"] == "unknown"
+    assert components["collateral_opportunity_or_borrow"]["status"] == "unknown"
+    assert components["margin_transfer_and_rebalance"]["status"] == "unknown"

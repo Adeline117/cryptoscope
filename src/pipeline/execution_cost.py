@@ -5,7 +5,7 @@ from math import isclose
 
 
 CONTRACT_VERSION = 1
-PURPOSES = {"discovery_outcome", "current_action"}
+PURPOSES = {"discovery_outcome", "current_action", "paper_measurement"}
 STATUSES = {"included", "unknown", "excluded", "not_applicable"}
 
 
@@ -134,5 +134,68 @@ def unknown_route_contract(*, notional_usd: float, method: str) -> dict:
             {"name": "network_fee", "pct": None, "status": "unknown"},
         ],
         "known_total_pct": 0, "all_in_total_pct": None,
+        "completeness": "partial", "is_real_fill": False,
+    })
+
+
+def carry_paper_contract(*, notional_usd_per_leg: float,
+                         entry_book_impact_pct: float | None,
+                         exit_book_impact_pct: float | None,
+                         modeled_fee_pct: float,
+                         method: str = "cross_perp_paper_quote_proxy_v1") -> dict:
+    """Describe what a Carry paper episode measures and, critically, omits.
+
+    Book impact can be observed from read-only quotes. The account's actual fee tier,
+    cross-venue basis PnL, collateral cost and rebalancing remain unknown, so this
+    contract is always partial and can never emit an all-in total or realized fill.
+    ``modeled_fee_pct`` is exposed only as a proxy assumption; it is not known cost.
+    """
+    try:
+        fee_proxy = float(modeled_fee_pct)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("carry modeled fee proxy must be numeric") from exc
+    if fee_proxy < 0:
+        raise ValueError("carry modeled fee proxy cannot be negative")
+
+    components = []
+    known_total = 0.0
+    for name, value, phase in (
+        ("entry_book_impact", entry_book_impact_pct, "entry"),
+        ("exit_book_impact", exit_book_impact_pct, "exit"),
+    ):
+        if value is None:
+            components.append({"name": name, "pct": None, "status": "unknown",
+                               "source": "read_only_orderbook", "phase": phase})
+        else:
+            measured = float(value)
+            if measured < 0:
+                raise ValueError("carry book impact cannot be negative")
+            known_total += measured
+            components.append({"name": name, "pct": measured, "status": "included",
+                               "source": "read_only_orderbook", "phase": phase,
+                               "is_real_fill": False})
+    components.extend([
+        {"name": "venue_fee_tier", "pct": None, "status": "unknown",
+         "modeled_proxy_pct": fee_proxy,
+         "reason": "account and maker-taker tier not verified"},
+        {"name": "cross_venue_basis", "pct": None, "status": "unknown",
+         "reason": "leg prices and equal-base-quantity basis PnL not persisted"},
+        {"name": "collateral_opportunity_or_borrow", "pct": None,
+         "status": "unknown", "reason": "deployed collateral and borrow cost unknown"},
+        {"name": "margin_transfer_and_rebalance", "pct": None,
+         "status": "unknown", "reason": "transfer and rebalance path not measured"},
+    ])
+    book_complete = entry_book_impact_pct is not None and exit_book_impact_pct is not None
+    modeled_proxy_total = known_total + fee_proxy if book_complete else None
+    return validate({
+        "version": CONTRACT_VERSION, "purpose": "paper_measurement",
+        "basis": "round_trip", "currency": "USD",
+        "notional_usd": notional_usd_per_leg, "notional_basis": "per_leg",
+        "measurement_gross_notional_usd": float(notional_usd_per_leg) * 2,
+        "method": method, "components": components,
+        "known_total_pct": known_total, "all_in_total_pct": None,
+        "modeled_proxy_total_pct": (round(modeled_proxy_total, 6)
+                                    if modeled_proxy_total is not None else None),
+        "book_quote_cost_complete": book_complete,
         "completeness": "partial", "is_real_fill": False,
     })
