@@ -272,16 +272,56 @@ def test_carry_uses_absolute_non_directional_outcomes_without_claiming_real_edge
         })
         ledger.save_outcome(ident, {
             "kind": "delta_neutral_carry_paper", "net_return_pct": 0.25,
-            "cost_is_real_fill": False,
+            "cost_is_real_fill": False, "episode_version": 2,
+            "close_reason": "diff_below_floor", "cost_complete": True,
+            "entry_slip_pct": 0.05, "exit_slip_pct": 0.05,
+            "unmeasured_h": 0, "hold_h": 48, "funding_accrued_pct": 0.54,
         }, "resolved")
 
     stat = oo.lane_stats()["carry"]
     assert stat["verdict"] == "measured"
     assert stat["edge_verdict"] == "不可判"
-    assert stat["metric"] == "absolute_net_return_after_measured_book_costs"
+    assert stat["metric"] == "absolute_net_return_after_complete_paper_book_costs"
     assert stat["median_net_return_pct"] == 0.25
     assert stat["cost_is_real_fill"] is False
     assert "实盘" in stat["note"]
+
+
+def test_carry_quarantines_legacy_missing_market_and_incomplete_cost(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    ts = datetime.now(timezone.utc).isoformat()
+    complete = {"kind": "delta_neutral_carry_paper", "episode_version": 2,
+                "net_return_pct": 0.25, "close_reason": "diff_below_floor",
+                "cost_complete": True, "entry_slip_pct": 0.05,
+                "exit_slip_pct": 0.05, "unmeasured_h": 0, "hold_h": 48,
+                "funding_accrued_pct": 0.54}
+    outcomes = [
+        {**complete, "episode_version": None, "net_return_pct": 9},
+        {**complete, "net_return_pct": 8, "close_reason": "market_missing"},
+        {**complete, "net_return_pct": 7, "cost_complete": False,
+         "exit_slip_pct": None},
+        {**complete, "net_return_pct": None},
+        {**complete, "net_return_pct": -0.25},
+    ]
+    for i, outcome in enumerate(outcomes):
+        ident, _ = ledger.record({
+            "lane": "carry", "chain": "hyperliquid+okx", "token": f"Q{i}",
+            "event_key": f"paper:q{i}", "symbol": f"Q{i}", "detected_at": ts,
+            "decision": "PAPER_OPEN", "state": "paper_closed",
+        })
+        ledger.save_outcome(ident, outcome, "resolved")
+
+    stat = oo.lane_stats()["carry"]
+    assert stat["total_closed"] == 5
+    assert stat["n"] == 1 and stat["hits"] == 0
+    assert stat["excluded_closed"] == 4
+    assert stat["excluded_by_reason"] == {
+        "legacy_episode": 1,
+        "market_missing_close": 1,
+        "incomplete_cost": 1,
+        "missing_result": 1,
+    }
 
 
 def test_airdrop_sums_verified_claims_but_refuses_success_only_hit_rate(ledger):

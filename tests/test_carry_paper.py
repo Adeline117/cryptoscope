@@ -207,8 +207,9 @@ def test_annualized_summary_requires_long_enough_cohort(cp):
     for i in range(cp.MIN_ANNUALIZED_SAMPLES):
         c.execute("""INSERT INTO paper(
             symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,
-            last_ts,last_diff,status,exit_ts,exit_slip,hold_h,realized_net
-        ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?)""",
+            last_ts,last_diff,status,exit_ts,exit_slip,hold_h,realized_net,close_reason,
+            cost_complete
+        ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,'diff_below_floor',1)""",
                   (f"L{i}", "2026-01-01T00:00:00+00:00", 40, 30, 0.05, 10_000,
                    3.0, "2026-02-01T00:00:00+00:00", 1,
                    "2026-02-01T00:00:00+00:00", 0.05,
@@ -218,6 +219,36 @@ def test_annualized_summary_requires_long_enough_cohort(cp):
     stats = cp.paper_stats()
     assert stats["annualized_n"] == cp.MIN_ANNUALIZED_SAMPLES
     assert stats["avg_annualized_net_pct"] == 30
+
+
+def test_stats_quarantine_legacy_bad_exit_cost_and_funding_gaps(cp):
+    c = cp._conn()
+    base = ("2026-01-01T00:00:00+00:00", 40, 30, 0.05, 10_000, 0.5,
+            "2026-01-03T00:00:00+00:00", 1,
+            "2026-01-03T00:00:00+00:00", 0.05, 48, 30)
+    rows = [
+        ("VALID", *base, "diff_below_floor", 2, 1, 0),
+        ("LEGACY", *base, "diff_below_floor", None, 1, 0),
+        ("MISSING", *base, "market_missing", 2, 1, 0),
+        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor", 2, 0, 0),
+        ("GAP", *base, "diff_below_floor", 2, 1, 5),
+    ]
+    c.executemany("""INSERT INTO paper(
+        symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,last_ts,
+        last_diff,status,exit_ts,exit_slip,hold_h,realized_net,close_reason,
+        episode_version,cost_complete,unmeasured_h
+    ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,?,?,?,?)""", rows)
+    c.commit()
+    c.close()
+
+    stats = cp.paper_stats()
+    assert stats["n_closed_total"] == 5
+    assert stats["n_closed"] == 1 and stats["n_closed_excluded"] == 4
+    assert stats["recent"][0]["symbol"] == "VALID"
+    assert stats["excluded_by_reason"]["legacy_episode"] == 1
+    assert stats["excluded_by_reason"]["market_missing_close"] == 1
+    assert stats["excluded_by_reason"]["incomplete_cost"] == 1
+    assert stats["excluded_by_reason"]["incomplete_funding_path"] == 1
 
 
 def test_carry_slippage_uses_real_leg_direction_for_entry_and_exit(monkeypatch):

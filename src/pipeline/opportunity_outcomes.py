@@ -285,29 +285,43 @@ def _cohort(rows: list[dict], decision: str) -> dict:
 
 
 def _carry_stats(rows: list[dict]) -> dict:
-    """Measure closed delta-neutral paper episodes without inventing direction."""
+    """Measure only complete v2 carry episodes; retain but quarantine old evidence."""
     from src.pipeline.evidence import wilson
+    from src.pipeline.carry_paper import edge_exclusion_reasons
 
     closed = []
+    total_closed = 0
+    excluded: dict[str, int] = {}
     for row in rows:
         outcome = row.get("outcome") or {}
         if outcome.get("kind") != "delta_neutral_carry_paper":
             continue
+        if row.get("outcome_state") != "resolved":
+            continue
+        total_closed += 1
+        reasons = edge_exclusion_reasons(outcome)
+        if reasons:
+            for reason in reasons:
+                excluded[reason] = excluded.get(reason, 0) + 1
+            continue
         value = outcome.get("net_return_pct")
-        if row.get("outcome_state") == "resolved" and value is not None:
-            closed.append(float(value))
+        closed.append(float(value))
     n = len(closed)
     positives = sum(value > 0 for value in closed)
     common = {
         "n": n, "hits": positives,
+        "total_closed": total_closed,
+        "excluded_closed": total_closed - n,
+        "excluded_by_reason": excluded,
         "pending": sum(r.get("outcome_state") == "open" for r in rows),
-        "metric": "absolute_net_return_after_measured_book_costs",
+        "metric": "absolute_net_return_after_complete_paper_book_costs",
         "cost_is_real_fill": False,
         "execution_mode": "paper_orderbook_measurement",
     }
     if n < MIN_N:
         return {**common, "verdict": "不可判", "edge_verdict": "不可判",
-                "note": f"关闭样本 {n}/{MIN_N};订单簿纸面测量不冒充实盘成交"}
+                "note": (f"有效v2关闭样本 {n}/{MIN_N};另隔离 {total_closed - n} 个"
+                         "旧版/错误退出/成本不全样本;纸面测量不冒充实盘成交")}
     lo, hi = wilson(positives, n)
     return {
         **common, "verdict": "measured", "edge_verdict": "不可判",
