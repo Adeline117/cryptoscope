@@ -1,4 +1,4 @@
-# 五线暴富机会作战模型
+# 五线右尾机会验证模型
 
 ## 北极星
 
@@ -10,13 +10,13 @@
 
 ## 路线与代码边界
 
-| 线 | 收益结构 | 当前入口 | 下一步缺口 | 不该做的事 |
+| 线 | 收益结构 | 当前入口 | 当前数据边界 | 不该做的事 |
 |---|---|---|---|---|
-| Launch | 低流通早期定价重估，右尾主引擎 | `launch_radar.py`、`launch_execution.py`、GMGN | Solana/Base 流式首池与首批钱包、从只读双向报价升级为真实成交回放 | 用热度/单一分数代替时延和可卖性 |
-| Cascade | 杠杆拥挤开始平仓时的流动性真空 | `hyperliquid.py`、`liquidation_monitor.py` | WebSocket、OI/盘口/清算事件状态机、双向结果账本 | 仅因高资金费裸做反向 |
-| Structure | 公开催化剂、上币、解锁、CEX 流、跨所结构价差 | `listing_detector.py`、`cex_flow.py`、`token_unlocks.py`、`carry_paper.py` | 统一日历与可交易窗口、来源可信度 | 漏洞、未公开信息抢跑、攻击或恶意 MEV |
-| Airdrop | 低下行的长期期权/劳务回报 | `airdrop_radar.py`、官方活动清单 | 项目资格、成本、快照证据、领取/卖出追踪 | 多号 Sybil 或违反项目条款的自动化 |
-| Convexity | 高杠杆单边行情的严格限额彩票仓 | `perp_scanner.py`、`execution_advisor.py` | 与主账户隔离的风险预算、失效和爆仓模拟 | 把幸存者收益当可重复 alpha |
+| Launch | 低流通早期定价重估，右尾主引擎 | `launch_radar.py`、`launch_execution.py`、Solana/EVM 官方链流 | Pump.fun 与 BSC/Base/Ethereum 指定工厂；RPC、索引和市场水合有已知缺口，不是全链覆盖 | 用热度/单一分数代替时延、可卖性与账本回读 |
+| Cascade | 杠杆拥挤开始平仓时的流动性真空 | `hyperliquid.py`、`liquidation_monitor.py` | 当前级联/OI/清算观测仅覆盖 Hyperliquid，不代表所有 CEX 永续市场 | 仅因高资金费或拥挤标签裸做反向 |
+| Structure | 公开上币等市场结构变化 | `structure_radar.py`、`collectors/listing_detector.py` | 逐轮检查 Binance、OKX、Bybit、Coinbase 公共 instruments；失败源单列，库存差分不是公告或方向信号 | 用传闻、旧库存恢复或未经验证的解锁生成交易指令 |
+| Airdrop | 低下行的长期期权/劳务回报 | `airdrop_radar.py`、审计信任根下的官方活动登记 | 人工维护且覆盖不完整；来源归属、钱包资格、成本与领取结果是四种不同证据 | 多号 Sybil、自动交互或违反项目条款 |
+| Carry | 跨所资金费差的 delta 中性候选 | `hyperliquid.py`、`carry_paper.py` | 当前配对为 Hyperliquid/OKX；只积累报价率积分、盘口与部分费用代理，尚无实际结算和完整 all-in 成本 | 把年化毛差、模拟关闭或部分成本代理当作实盘正 EV |
 
 ## 第一阶段：Launch Radar
 
@@ -51,7 +51,7 @@ EVM 记录 0x 指示价但在 gas 未折算为美元前仍只允许 WATCH。缺 
 Launch/Cascade 会扣除事件发现时冻结的往返成本估算，但该估算不是实盘成交证明；
 只有样本达到 20 才展示分布。Launch 的 `SMALL_PROBE` 必须与同一候选宇宙的
 `WATCH` 同期对照，置信区间未分离时仍显示“不可判”。没有方向假设的 Structure
-事件不计算命中率，Carry 与 Airdrop 分别使用资金费净额和领取净回报账本。
+事件不计算命中率。Carry 在真实双腿结算、basis、账户费率、抵押资金成本和调仓成本齐全前，只报告报价率积分减盘口与建模费用的描述性代理，`real_edge_n` 保持 0 或不可判；Airdrop 只有经链上成功交易核验的领取结果才进入净回报账本。
 
 ## 空投的证据门
 
