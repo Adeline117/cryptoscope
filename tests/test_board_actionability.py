@@ -300,6 +300,38 @@ def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     assert 'data-jump="avoid"' in html
 
 
+def test_overview_has_fail_closed_five_lane_source_coverage_matrix():
+    html = BOARD.read_text()
+
+    assert "function renderMarketCoverageMatrix()" in html
+    assert 'aria-label="五赛道数据覆盖矩阵"' in html
+    assert "五赛道数据覆盖 · 不是全市场地图" in html
+    assert "绝不解释成“市场没有机会”" in html
+    assert "h+=renderMarketCoverageMatrix()" in html
+    for lane in ("Launch", "Cascade", "Structure", "Airdrop", "Carry"):
+        assert f'>{lane}<' in html
+    for scope in (
+        "Solana + EVM 首池发行流",
+        "目前仅覆盖 Hyperliquid",
+        "sourceHealth=structure?.source_health||[]",
+        "逐源失败不计覆盖",
+        "代码信任根",
+        "活动页 + 独立证据页",
+        "人工登记覆盖不完整",
+        "Hyperliquid + OKX 跨所资金费假设",
+        "只覆盖 HL + OKX",
+    ):
+        assert scope in html
+    assert 'if(!trace||!["ok","partial"].includes(trace.state))return "unavailable"' in html
+    assert "账本精确回读：SOL" in html and "；EVM ${evmTrace" in html
+    assert "traceable_unique_ledger_events" in html
+    assert "orphan_rows" in html and "traceReadbackUnavailable(evmTrace)" in html
+    assert "未接 Binance、OKX、Bybit 清算流" in html
+    assert ".market-coverage-card{position:relative;min-width:0" in html
+    assert ".market-coverage-grid{grid-template-columns:1fr}" in html
+    assert "overflow-wrap:anywhere" in html
+
+
 def test_board_navigation_and_details_are_keyboard_accessible_and_shareable():
     html = BOARD.read_text()
 
@@ -347,5 +379,12 @@ def test_launch_discloses_primary_stream_coverage_and_known_gaps():
     assert "主链原始证据:" in html
     assert "EVM 官方工厂流" in html
     assert "EVM 精确池资格" in html
+    assert "EVM 精确池资格 / 账本回读" in html
+    assert "evmTrace.traceable_unique_ledger_events" in html
+    assert "evmTrace.orphan_rows" in html
+    assert "evmTrace.readback_unavailable_rows" in html
+    assert "evmTrace.readback_error_rows" in html
+    assert "evmReadbackUnavailable" in html
+    assert "可追溯唯一账本事件" in html
     assert "BSC / Base / Ethereum 共 5 条工厂流" in html
     assert "只匹配工厂原始 pool" in html
