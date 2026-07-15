@@ -304,6 +304,7 @@
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmtUsd=n=>n==null?"—":(n=+n,Math.abs(n)>=1e6?(n/1e6).toFixed(2)+"M":Math.abs(n)>=1e3?Math.round(n/1e3)+"k":Math.round(n));
+const pct2=n=>n==null||!Number.isFinite(+n)?"—":(+n).toFixed(2);
 const usd=n=>n==null?"—":"$"+fmtUsd(n);
 const pctc=n=>n==null?'<span class="flat">—</span>':`<span class="${n>0?'up':n<0?'down':'flat'}">${n>0?'+':''}${(+n).toFixed(n>=100||n<=-100?0:1)}%</span>`;
 const short=a=>a?a.slice(0,4)+"…"+a.slice(-4):"—";
@@ -635,7 +636,7 @@ function renderPlay(){
   h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
   if(carry.length){
     h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出是报价率积分减盘口报价与费用假设的描述性代理，不是实际结算或完整 PnL；有效代理关闭 <b>${carryValid}</b> / 总关闭 ${carryTotal}，旧协议 open 隔离 <b>${pp.n_quarantined_total??0}</b>，真实优势样本 <b>${pp.real_edge_n??carryEvidence?.real_edge_n??0}</b>。</div>`;
-    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛差 ${c.edge_ann} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
+    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛资金费差 ${esc(c.gross_funding_diff_ann_pct)} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
   } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
   h+='</div>';
   h+=carryLifecycleHtml(pp,3);
@@ -727,7 +728,7 @@ function carryLifecycleHtml(pp,limit=5){
     return `<article class="carry-life ${cls}"><div class="carry-life-head"><span class="chip ${chip}">${label}</span><b>${esc(p.symbol)}</b><span class="dim">${esc(p.measurement_state||"unknown")}</span></div>
       <div class="carry-life-grid">
         <div class="life-cell"><span class="lk">时间 UTC</span><span class="lv">入场 ${esc(utcClock(p.entry_at))}<br>最后有效 ${esc(utcClock(lastValid))}</span></div>
-        <div class="life-cell"><span class="lk">配对差价</span><span class="lv">${p.entry_diff_ann_pct==null?"—":esc(p.entry_diff_ann_pct)} → ${p.last_diff_ann_pct==null?"—":esc(p.last_diff_ann_pct)} %/年</span></div>
+        <div class="life-cell"><span class="lk">配对差价</span><span class="lv">${esc(pct2(p.entry_diff_ann_pct))} → ${esc(pct2(p.last_diff_ann_pct))} %/年</span></div>
         <div class="life-cell"><span class="lk">盘口测量规模</span><span class="lv">每腿 ${usd(p.notional_usd_per_leg)}<br><small class="dim">不是仓位建议或可成交上限</small></span></div>
       </div><div class="life-rule">${rule}</div></article>`;
   }).join("");
@@ -756,7 +757,7 @@ function renderPerp(d){
       const proxy=c.partial_model_proxy_ann_pct;
       const netcol=proxy>0?`<span class="num" style="color:var(--accent-t);font-weight:650">+${esc(proxy)}%</span>`:`<span class="num" style="color:var(--danger)">${esc(proxy)}%</span>`;
       const coverage=c.cross?(c.coverage_point_count?`<small class="dim">${esc(c.model_hold_days_assumption)}d固定情景·持有期未验证<br>报价覆盖 ${esc(c.coverage_span_h)}h/${esc(c.coverage_point_count)}点</small>`:`<small class="dim">${esc(c.model_hold_days_assumption)}d固定情景·持有期未验证<br>报价覆盖积累中</small>`):'<small class="dim">单所观察·不进双腿账本</small>';
-      return `<tr title="${esc(c.note)}"><td>${idc(c.symbol,c.tier)}</td><td class="n">${netcol}<small class="dim"> 毛差 ${esc(c.edge_ann)}</small></td><td class="n">${struct}</td><td>${trade}</td><td class="n">${coverage}</td><td>${flags}</td></tr>`;
+      return `<tr title="${esc(c.note)}"><td>${idc(c.symbol,c.tier)}</td><td class="n">${netcol}<small class="dim"> 毛资金费差 ${esc(c.gross_funding_diff_ann_pct)}</small></td><td class="n">${struct}</td><td>${trade}</td><td class="n">${coverage}</td><td>${flags}</td></tr>`;
     }).join("");
     const crossCount=carry.filter(c=>c.cross===true).length,singleCount=carry.length-crossCount;
     html+=`<div class="perp-sec">💰 Carry 候选 · 仅作纸面验证 <small>跨所双腿 ${crossCount} 个；单所现货对冲 ${singleCount} 个不进入双腿账本。部分模型只扣固定情景组件；basis、账户费率、抵押资金成本和调仓仍不完整，不能当作 all-in 净收益或仓位建议。</small></div>

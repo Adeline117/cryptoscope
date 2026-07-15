@@ -224,9 +224,15 @@ def test_carry_ui_forbids_realized_or_complete_cost_claims():
 
 
 def test_carry_public_contract_forbids_legacy_profit_metric_names():
+    html = BOARD.read_text()
     tracker = CARRY_PAPER.read_text()
     outcomes = OPPORTUNITY_OUTCOMES.read_text()
 
+    assert "c.edge_ann" not in html
+    assert "c.gross_funding_diff_ann_pct" in html
+    assert "毛资金费差" in html
+    assert "pct2(p.entry_diff_ann_pct)" in html
+    assert "pct2(p.last_diff_ann_pct)" in html
     assert '"funding_accrued_pct"' not in tracker
     assert '"net_return_pct"' not in tracker
     assert "absolute_net_return_after_complete_paper_book_costs" not in outcomes
