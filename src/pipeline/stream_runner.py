@@ -38,6 +38,7 @@ class StreamRunner:
         expect_contiguous: bool = False,
         backfill: Callable[[int, int], bool] | None = None,
         heartbeat_seconds: float = 30,
+        health_interval_seconds: float = 0,
         backoff_base_seconds: float = 1,
         backoff_max_seconds: float = 60,
         monotonic: Callable[[], float] = time.monotonic,
@@ -51,6 +52,7 @@ class StreamRunner:
         self.expect_contiguous = expect_contiguous
         self.backfill = backfill
         self.heartbeat_seconds = max(0, heartbeat_seconds)
+        self.health_interval_seconds = max(0, health_interval_seconds)
         self.backoff_base_seconds = max(0, backoff_base_seconds)
         self.backoff_max_seconds = max(self.backoff_base_seconds, backoff_max_seconds)
         self.monotonic = monotonic
@@ -64,6 +66,7 @@ class StreamRunner:
         ws = self.connect()
         processed = 0
         last_ping = self.monotonic()
+        last_health = None
         try:
             self.subscribe(ws)
             while not stop.is_set():
@@ -80,9 +83,17 @@ class StreamRunner:
                 event = self.parse(raw)
                 if event is None:
                     continue
-                observed = stream_health.observe(
-                    self.source, self.stream, cursor=event.cursor,
-                    event_at=event.event_at, expect_contiguous=self.expect_contiguous)
+                health_now = self.monotonic()
+                should_record_health = (self.expect_contiguous
+                                        or self.health_interval_seconds == 0
+                                        or last_health is None
+                                        or health_now - last_health >= self.health_interval_seconds)
+                observed = {}
+                if should_record_health:
+                    observed = stream_health.observe(
+                        self.source, self.stream, cursor=event.cursor,
+                        event_at=event.event_at, expect_contiguous=self.expect_contiguous)
+                    last_health = health_now
                 gap = observed.get("gap")
                 if gap and self.backfill:
                     try:

@@ -26,6 +26,8 @@ def _conn() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=10)
     c.execute("PRAGMA busy_timeout=8000")
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
     c.execute("""CREATE TABLE IF NOT EXISTS streams(
         source TEXT NOT NULL, stream TEXT NOT NULL, cursor INTEGER,
         last_event_at TEXT, last_received_at TEXT, latency_ms INTEGER,

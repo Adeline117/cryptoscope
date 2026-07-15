@@ -69,3 +69,21 @@ def test_hyperliquid_socket_uses_application_ping(hl):
 
     hl._HyperliquidSocket(Raw()).ping()
     assert json.loads(sent[0]) == {"method": "ping"}
+
+
+def test_store_batches_commits_and_flushes_on_close(hl):
+    ticks = iter((0.0, 0.1, 0.2, 0.3))
+    store = hl.HyperliquidStore(hl.DB, batch_size=2, flush_seconds=99,
+                                monotonic=lambda: next(ticks))
+    message = {"channel": "trades", "data": [{"coin": "BTC", "time": 1002,
+               "tid": 7, "side": "A", "px": "100", "sz": "0.5", "hash": "0x1"}]}
+    store.persist(message)
+    assert store.pending == 1
+    store.persist({"channel": "trades", "data": [{**message["data"][0], "tid": 8}]})
+    assert store.pending == 0
+    store.close()
+    c = hl._conn()
+    try:
+        assert c.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 2
+    finally:
+        c.close()

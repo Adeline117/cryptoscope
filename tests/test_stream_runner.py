@@ -82,3 +82,24 @@ def test_backoff_is_bounded():
                           on_event=lambda payload: None,
                           backoff_base_seconds=2, backoff_max_seconds=10)
     assert [runner._backoff(i) for i in (1, 2, 3, 4, 20)] == [2, 4, 8, 10, 10]
+
+
+def test_high_frequency_non_contiguous_feed_throttles_health_writes(monkeypatch):
+    from src.pipeline import stream_health
+    from src.pipeline.stream_runner import StreamEvent, StreamRunner
+
+    stop = threading.Event()
+    ws = _Socket([{"n": 1}, {"n": 2}, {"n": 3}])
+    health_calls = []
+    monkeypatch.setattr(stream_health, "observe",
+                        lambda *args, **kwargs: health_calls.append(kwargs) or {})
+
+    runner = StreamRunner(
+        source="hyperliquid", stream="market", connect=lambda: ws,
+        subscribe=lambda sock: None,
+        parse=lambda raw: StreamEvent(raw, cursor=raw["n"]),
+        on_event=lambda payload: stop.set() if payload["n"] == 3 else None,
+        health_interval_seconds=1, monotonic=lambda: 100,
+    )
+    assert runner.run_connection(stop) == 3
+    assert len(health_calls) == 1
