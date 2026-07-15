@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 
 import structlog
 
+from src.onchain.chain_identity import security_chain_id
+
 logger = structlog.get_logger()
 
 POLL_MAX = 30                 # bound work per tick (watchlist is narrow anyway)
@@ -124,15 +126,17 @@ async def run_stage2_detector(send: bool = True) -> dict:
 
 async def _commit_security(token: str, chain: str, checker_factory=None) -> dict:
     """Re-run contract facts at commit time; unavailable data is never clean."""
+    chain_id = security_chain_id(chain)
+    if chain_id is None:
+        return {
+            "state": "unknown", "score": None,
+            "reason": f"unsupported chain identity: {chain!r}",
+        }
     try:
         if checker_factory is None:
             from src.collectors.contract_security import ContractSecurityChecker
             checker_factory = ContractSecurityChecker
 
-        chain_id: int | str = "solana" if chain in ("solana", "sol") else {
-            "ethereum": 1, "eth": 1, "base": 8453, "bsc": 56,
-            "arbitrum": 42161, "optimism": 10, "polygon": 137,
-        }.get(chain, 1)
         result = await checker_factory().check_token(chain_id, token)
     except Exception as e:
         logger.debug("stage2_security_failed", token=token, error=str(e))

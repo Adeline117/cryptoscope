@@ -28,10 +28,11 @@ from datetime import datetime, timezone
 
 import structlog
 
+from src.onchain.chain_identity import EVM_CHAIN_IDS, canonical_chain
+
 logger = structlog.get_logger()
 
-_CHAIN_ID = {"ethereum": "1", "bsc": "56", "base": "8453",
-             "arbitrum": "42161", "polygon": "137", "optimism": "10"}
+_CHAIN_ID = {chain: str(chain_id) for chain, chain_id in EVM_CHAIN_IDS.items()}
 _API = "https://api.gopluslabs.io/api/v1/token_security"
 _CACHE: dict = {}
 _CACHE_TTL_S = 900          # 15 min: a lock can be released within the hour
@@ -60,7 +61,8 @@ def token_security(token: str, chain: str, timeout: int = 20) -> dict:
     Returns {available, checked_at, is_open_source, flags{...}, lp{...}, holders[...]}
     with `available=False` and a `reason` when the read did not happen.
     """
-    cid = _CHAIN_ID.get(chain)
+    canonical = canonical_chain(chain)
+    cid = _CHAIN_ID.get(canonical) if canonical else None
     if not cid:
         return {"available": False, "reason": f"chain {chain} unsupported"}
     key = (cid, token.lower())

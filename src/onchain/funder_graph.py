@@ -28,22 +28,26 @@ from pathlib import Path
 import structlog
 
 from src.config import DATA_DIR
+from src.onchain.chain_identity import (
+    EVM_CHAIN_IDS,
+    MORALIS_CHAIN_SLUGS,
+    canonical_chain,
+    evm_chain_id,
+)
 
 logger = structlog.get_logger()
 
 DB_PATH = DATA_DIR / "funder_graph.db"
 
-_EVM_CHAIN_IDS = {
-    "ethereum": 1, "eth": 1, "base": 8453, "bsc": 56,
-    "arbitrum": 42161, "optimism": 10, "polygon": 137,
-}
+_EVM_CHAIN_IDS = {**EVM_CHAIN_IDS, "eth": 1, "avax": 43114}
 
 # Etherscan's free tier only covers Ethereum mainnet ("Free API access is not
 # supported for this chain" on chainid!=1). For other EVM chains we use Moralis
 # (free tier) when a key is present — this is what lets BSC funder clustering run.
 _MORALIS_CHAINS = {
-    "bsc": "bsc", "base": "base", "arbitrum": "arbitrum",
-    "optimism": "optimism", "polygon": "polygon", "ethereum": "eth", "eth": "eth",
+    **MORALIS_CHAIN_SLUGS,
+    "eth": "eth",
+    "avax": "avalanche",
 }
 _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
@@ -239,20 +243,31 @@ def get_funders(
     cached too (as NULL) to avoid repeat lookups. EVM via Etherscan, Solana via
     Helius/RPC signature pagination.
     """
-    is_solana = chain in ("solana", "sol")
+    canonical = canonical_chain(chain)
+    if canonical is None:
+        logger.warning(
+            "funders_unsupported_chain", chain=chain,
+            note="unknown chain is never routed to Ethereum",
+        )
+        return {}
+    chain = canonical
+    is_solana = chain == "solana"
     # Solana addresses are case-sensitive (base58); EVM are not.
     addrs = [a if is_solana else a.lower() for a in addresses if a]
     if not addrs:
         return {}
 
     keys = _keys()
-    chain_id = _EVM_CHAIN_IDS.get(chain, 1)
+    chain_id = evm_chain_id(chain)
+    if not is_solana and chain_id is None:
+        return {}
     # Etherscan free works only for ETH; other EVM chains route through Moralis, with
     # Covalent/GoldRush as the keyed free fallback when Moralis is parked/unavailable.
     from src.onchain import covalent_client, moralis_client
     use_moralis = (not is_solana and chain_id != 1 and moralis_client.usable())
     use_covalent = (not is_solana and chain_id != 1 and not use_moralis
-                    and covalent_client.available())
+                    and covalent_client.available()
+                    and covalent_client.supports_chain(chain_id))
     if not is_solana and not keys and not use_moralis and not use_covalent:
         return {}
 

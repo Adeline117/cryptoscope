@@ -37,6 +37,14 @@ def available() -> bool:
     return bool(key())
 
 
+def supports_chain(chain_id: object) -> bool:
+    """Whether the concrete GoldRush endpoints used here support this chain."""
+    try:
+        return int(chain_id) in _CHAINS
+    except (TypeError, ValueError):
+        return False
+
+
 def get(endpoint: str, timeout: int = 25):
     """GET a Covalent v1 endpoint (everything after /v1/). Returns parsed JSON or None.
     Basic auth: key as username, empty password."""

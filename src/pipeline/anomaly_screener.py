@@ -693,34 +693,45 @@ def onchain_enrich(token: str, chain: str) -> dict | None:
          wallets. A proven tier-1/2 wallet holding the token is a strong tell,
          and it's FREE (we already have the holder list).
     """
+    from src.onchain.chain_identity import canonical_chain, evm_chain_id
+
+    canonical = canonical_chain(chain)
+    if canonical is None:
+        logger.warning(
+            "onchain_enrich_unsupported_chain", token=token, chain=chain,
+            note="unknown chain is never routed to Ethereum",
+        )
+        return None
     try:
         from src.onchain import holder_snapshot as hs
     except Exception:
         return None
     try:
-        prior = hs.get_snapshots(token, chain, limit=20)
-        if chain in ("solana", "sol"):
+        prior = hs.get_snapshots(token, canonical, limit=20)
+        if canonical == "solana":
             holders = hs.fetch_holders_solana(token)
         else:
-            cid = {"ethereum": 1, "base": 8453, "bsc": 56, "arbitrum": 42161, "optimism": 10}.get(chain, 1)
+            cid = evm_chain_id(canonical)
+            if cid is None:
+                return None
             holders = hs.fetch_holders_evm(token, chain_id=cid, max_pages=15)
         if not holders:
             return None
-        hs.save_snapshot(token, chain, holders)
+        hs.save_snapshot(token, canonical, holders)
         count = len([h for h in holders if (h.get("balance") or 0) > 0])
 
         # Smart-money intersection (free — reuses fetched holders).
-        smart = _smart_money_set(chain)
+        smart = _smart_money_set(canonical)
         hit_addrs = [h["address"] for h in holders
-                     if (h["address"] if chain in ("solana", "sol") else str(h["address"]).lower()) in smart]
-        top_tier = min((smart[a if chain in ("solana", "sol") else a.lower()] for a in hit_addrs), default=None)
+                     if (h["address"] if canonical == "solana" else str(h["address"]).lower()) in smart]
+        top_tier = min((smart[a if canonical == "solana" else a.lower()] for a in hit_addrs), default=None)
 
         prior_counts = [s.get("holder_count", 0) for s in prior if s.get("holder_count")]
         base = prior_counts[0] if prior_counts else None
         rising = bool(base and base > 0 and count >= base * 1.05)
         # Effective concentration (the linchpin): cluster holders → is one hidden
         # entity controlling the float? Reuses the holders we just fetched.
-        conc = effective_concentration_signal(holders, token, chain)
+        conc = effective_concentration_signal(holders, token, canonical)
         return {
             "holder_count": count, "prior_count": base, "rising": rising,
             "change_pct": round((count - base) / max(base, 1) * 100, 1) if base else None,

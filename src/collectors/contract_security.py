@@ -20,6 +20,12 @@ from datetime import datetime, timezone
 import structlog
 
 from src.collectors.base import BaseCollector, CollectedItem, CollectionResult
+from src.onchain.chain_identity import (
+    EVM_CHAIN_IDS,
+    SUPPORTED_EVM_CHAIN_IDS,
+    canonical_chain,
+    evm_chain_id,
+)
 
 logger = structlog.get_logger()
 
@@ -36,12 +42,8 @@ def _urllib_get_json(url: str, params: dict | None = None, timeout: int = 15) ->
 
 # Supported EVM chain IDs
 CHAIN_IDS = {
-    "ethereum": 1,
+    **EVM_CHAIN_IDS,
     "eth": 1,
-    "bsc": 56,
-    "polygon": 137,
-    "arbitrum": 42161,
-    "base": 8453,
 }
 
 GOPLUS_BASE = "https://api.gopluslabs.io/api/v1"
@@ -107,9 +109,20 @@ class ContractSecurityChecker(BaseCollector):
         try:
             # Normalize chain_id
             if isinstance(chain_id, str):
-                if chain_id.lower() == "solana":
+                canonical = canonical_chain(chain_id)
+                if canonical == "solana":
                     return await self._check_solana_token(address)
-                chain_id = CHAIN_IDS.get(chain_id.lower(), int(chain_id))
+                resolved = evm_chain_id(canonical) if canonical else None
+                if resolved is None:
+                    try:
+                        resolved = int(chain_id)
+                    except (TypeError, ValueError):
+                        raise ValueError(f"unsupported chain identity: {chain_id!r}")
+                chain_id = resolved
+
+            if (isinstance(chain_id, bool) or not isinstance(chain_id, int)
+                    or chain_id not in SUPPORTED_EVM_CHAIN_IDS):
+                raise ValueError(f"unsupported EVM chain id: {chain_id!r}")
 
             return await self._check_evm_token(chain_id, address)
         finally:

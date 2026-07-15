@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 
+from src.onchain.chain_identity import EVM_CHAIN_IDS, canonical_chain, evm_chain_id
 from src.signals.distribution_exit import DistributionExitSignal, classify_flows
 
 logger = structlog.get_logger()
@@ -30,10 +31,7 @@ MAX_TOKENS = 20             # bound per-run work
 LOOKBACK_DAYS = 7           # only watch tokens that accumulated this recently
 TRANSFER_WINDOW = 200       # recent transfers to scan per token
 
-_EVM_CHAIN_IDS = {
-    "ethereum": 1, "eth": 1, "base": 8453, "bsc": 56,
-    "arbitrum": 42161, "optimism": 10, "polygon": 137,
-}
+_EVM_CHAIN_IDS = {**EVM_CHAIN_IDS, "eth": 1, "avax": 43114}
 
 
 def _recent_accumulation_tokens() -> list[dict]:
@@ -176,13 +174,21 @@ async def run_exit_monitor(send: bool = True) -> dict:
     exits = 0
     checked = 0
     for tok in tokens:
-        chain = tok["chain"]
-        if chain in ("solana", "sol"):
+        chain = canonical_chain(tok["chain"])
+        if chain is None:
+            logger.warning(
+                "exit_monitor_unsupported_chain", token=tok["address"],
+                chain=tok["chain"], note="unknown chain is never routed to Ethereum",
+            )
+            continue
+        if chain == "solana":
             flows = _fetch_solana_flows(tok["address"])
             if not flows.get("to_cex_count") and not flows.get("from_cex_count"):
                 continue
         else:
-            chain_id = _EVM_CHAIN_IDS.get(chain, 1)
+            chain_id = evm_chain_id(chain)
+            if chain_id is None:
+                continue
             transfers = _fetch_labeled_transfers(tok["address"], chain_id)
             if not transfers:
                 continue
