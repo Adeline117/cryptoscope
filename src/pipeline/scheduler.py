@@ -219,6 +219,12 @@ def create_scheduler() -> AsyncIOScheduler:
         id="smart_wallet_watch",
         name="聪明钱实时监听 (watched wallets 刚买入 → Blob)",
     )
+    scheduler.add_job(
+        _run_perps_export,
+        CronTrigger(minute="*/5"),
+        id="perps_export",
+        name="永续/Cascade/Carry 独立导出 → Blob",
+    )
     # Low-float launch discovery is a separate event feed. It must run far more
     # often than the 45-minute board export, otherwise the "first seen" price is
     # already a hindsight snapshot.
@@ -623,16 +629,30 @@ async def _run_smart_wallet_watch():
     logger.info("scheduled_smart_wallet_watch")
     from src.pipeline import board_export
     try:
-        # both real-time lanes on the 15-min cadence: the wallet watch AND perps
-        # (frequent perp snapshots also densify OI history so IGNITION can compute).
         watch = await asyncio.to_thread(board_export.render_watch)
-        perps = await asyncio.to_thread(board_export.render_perps)
-        paths = await asyncio.to_thread(board_export.write_views, watch=watch, perps=perps)
+        paths = await asyncio.to_thread(board_export.write_views, watch=watch)
         n = await asyncio.to_thread(board_export.push_to_blob, paths)
         logger.info("smart_wallet_watch_done", tokens=len(watch.get("watch", [])),
-                    perps=len(perps.get("perps", [])), pushed=n)
+                    pushed=n)
     except Exception as e:
         logger.error("smart_wallet_watch_failed", error=str(e)[:120])
+
+
+async def _run_perps_export():
+    """Publish perpetual/cascade/carry independently of wallet APIs and slow scans."""
+    import asyncio
+
+    logger.info("scheduled_perps_export")
+    from src.pipeline import board_export
+    try:
+        perps = await asyncio.to_thread(board_export.render_perps)
+        paths = await asyncio.to_thread(board_export.write_views, perps=perps)
+        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("perps_export_done", perps=len(perps.get("perps", [])),
+                    cascades=len(perps.get("cascade_events", [])),
+                    carry=len(perps.get("carry", [])), pushed=pushed)
+    except Exception as e:
+        logger.error("perps_export_failed", error=str(e)[:120])
 
 
 async def _run_harvest_wallets():

@@ -11,7 +11,9 @@ def test_fast_and_slow_views_have_independent_freshness_policies():
 
     launch = _envelope({}, view="launch")
     operators = _envelope({}, view="operators")
-    for payload, cadence, grace in ((launch, 3, 3), (operators, 60, 30)):
+    perps = _envelope({}, view="perps")
+    for payload, cadence, grace in ((launch, 3, 3), (perps, 5, 5),
+                                    (operators, 60, 30)):
         generated = datetime.fromisoformat(payload["generated_at"])
         expected = datetime.fromisoformat(payload["next_expected_at"])
         stale = datetime.fromisoformat(payload["stale_after_at"])

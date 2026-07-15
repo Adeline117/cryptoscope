@@ -91,3 +91,31 @@ async def test_operator_scan_runs_off_event_loop(monkeypatch):
 
     assert await operator_sentinel.run_and_alert(use_transfers=True) == 0
     assert scan_threads and scan_threads[0] != loop_thread
+
+
+def test_perps_export_is_independent_from_wallet_watch():
+    from src.pipeline.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    assert "perps_export" in jobs and "smart_wallet_watch" in jobs
+    assert jobs["perps_export"].func is not jobs["smart_wallet_watch"].func
+    assert "*/5" in str(jobs["perps_export"].trigger)
+
+
+@pytest.mark.asyncio
+async def test_wallet_watch_job_never_calls_perps_renderer(monkeypatch):
+    from src.pipeline import board_export, scheduler
+
+    rendered = []
+    monkeypatch.setattr(board_export, "render_watch", lambda: {"watch": []})
+    monkeypatch.setattr(
+        board_export, "render_perps",
+        lambda: (_ for _ in ()).throw(AssertionError("wallet job coupled to perps")),
+    )
+    monkeypatch.setattr(board_export, "write_views",
+                        lambda **views: rendered.append(set(views)) or [])
+    monkeypatch.setattr(board_export, "push_to_blob", lambda paths: 0)
+
+    await scheduler._run_smart_wallet_watch()
+    assert rendered == [{"watch"}]
