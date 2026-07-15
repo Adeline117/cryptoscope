@@ -126,7 +126,18 @@ class StreamRunner:
                 failures = 0 if processed else failures + 1
             except Exception as exc:
                 failures += 1
-                stream_health.mark_disconnected(self.source, self.stream, str(exc))
+                try:
+                    stream_health.mark_disconnected(self.source, self.stream, str(exc))
+                except Exception as health_exc:
+                    # A broken/locked health store must not kill the long-lived
+                    # market stream while it is already recovering from a
+                    # connection or health-observation failure.
+                    logger.warning(
+                        "stream_health_disconnect_write_failed",
+                        source=self.source,
+                        stream=self.stream,
+                        error=str(health_exc)[:120],
+                    )
                 logger.warning("stream_disconnected", source=self.source, stream=self.stream,
                                failures=failures, error=str(exc)[:120])
             if not stop.is_set():

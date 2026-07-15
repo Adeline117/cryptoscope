@@ -1,6 +1,7 @@
 """Long-lived stream behavior is deterministic without a real network."""
 from __future__ import annotations
 
+import sqlite3
 import threading
 from datetime import datetime, timezone
 
@@ -140,3 +141,39 @@ def test_payloads_without_cursor_do_not_disable_health_throttle(monkeypatch):
     )
     assert runner.run_connection(stop) == 3
     assert [call["cursor"] for call in health_calls] == [None, 7]
+
+
+def test_health_disconnect_write_failure_does_not_kill_worker(monkeypatch):
+    from src.pipeline import stream_health
+    from src.pipeline.stream_runner import StreamEvent, StreamRunner
+
+    stop = threading.Event()
+    sockets = iter([_Socket([{"seq": 1}]), _Socket([{"seq": 2}])])
+    observations = 0
+    disconnect_writes = []
+
+    def observe(*args, **kwargs):
+        nonlocal observations
+        observations += 1
+        if observations == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return {}
+
+    def mark_disconnected(*args, **kwargs):
+        disconnect_writes.append((args, kwargs))
+        raise sqlite3.OperationalError("database is still locked")
+
+    monkeypatch.setattr(stream_health, "observe", observe)
+    monkeypatch.setattr(stream_health, "mark_disconnected", mark_disconnected)
+    runner = StreamRunner(
+        source="base", stream="uniswap_v3_pools", connect=lambda: next(sockets),
+        subscribe=lambda sock: None,
+        parse=lambda raw: StreamEvent(raw, cursor=raw["seq"]),
+        on_event=lambda payload: stop.set(),
+        backoff_base_seconds=0, backoff_max_seconds=0,
+    )
+
+    runner.run_forever(stop)
+
+    assert observations == 2
+    assert len(disconnect_writes) == 1
