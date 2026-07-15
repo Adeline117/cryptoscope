@@ -20,6 +20,7 @@ cluster from Arkham." It does NOT confirm a whale — that's the second step
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 
 import structlog
@@ -86,8 +87,14 @@ def score_reasons(reasons: list[str]) -> int:
 def _http_json(url: str):
     req = urllib.request.Request(
         url, headers={"User-Agent": "CryptoScope/1.0", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as error:
+        # HTTPError is also a response object.  Callers intentionally swallow 4xx/5xx
+        # during fallback scans, so relying on GC here leaks sockets into CLOSE_WAIT.
+        error.close()
+        raise
 
 
 def _dexscreener_pairs(query: str) -> list[dict]:

@@ -54,3 +54,16 @@ def test_moralis_closes_rejected_response_before_key_rotation(monkeypatch):
 
     assert moralis_client.get("test") is None
     assert error.was_closed and error.fp.closed
+
+
+def test_geckoterminal_closes_rejected_response_before_fallback(monkeypatch):
+    from src.pipeline import anomaly_screener
+
+    error = TrackedHTTPError("https://api.geckoterminal.com/api/v2/test", code=429)
+    monkeypatch.setattr(
+        anomaly_screener.urllib.request, "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(error),
+    )
+
+    assert anomaly_screener._gt_base_addresses("test") == []
+    assert error.was_closed and error.fp.closed
