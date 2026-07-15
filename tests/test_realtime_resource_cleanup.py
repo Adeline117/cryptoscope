@@ -44,6 +44,39 @@ def test_empty_websocket_frame_forces_reconnect_instead_of_busy_loop():
         realtime_ws._receive_one(ws, defaultdict(lambda: {"buy": 0.0, "sell": 0.0}), {})
 
 
+def test_peer_closed_websocket_still_shutdowns_underlying_socket():
+    from src.pipeline import realtime_ws
+
+    sock = _Socket()
+
+    class PeerClosedWebSocket:
+        connected = False
+
+        def __init__(self):
+            self.sock = sock
+            self.close_calls = 0
+            self.shutdown_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+            if not self.connected:
+                return
+
+        def shutdown(self):
+            self.shutdown_calls += 1
+            if self.sock:
+                self.sock.close()
+                self.sock = None
+
+    ws = PeerClosedWebSocket()
+    realtime_ws._close_websocket(ws)
+
+    assert ws.close_calls == 1
+    assert ws.shutdown_calls == 1
+    assert ws.sock is None
+    assert sock.closed == 1
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("send_fails", [False, True])
 async def test_realtime_telegram_bot_closes_on_success_and_failure(monkeypatch, send_fails):

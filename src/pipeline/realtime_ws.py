@@ -32,6 +32,20 @@ FLUSH_SEC = 30           # batch transfers and emit a net-flow alert every N sec
 MIN_FLOW_TOKENS = 1.0    # ignore dust
 
 
+def _close_websocket(ws) -> None:
+    """Release the socket even after websocket-client marks a peer close disconnected.
+
+    ``WebSocket.close()`` returns immediately when ``connected`` is already false.
+    A received close frame sets that flag before our reconnect ``finally`` runs, so
+    calling only ``close`` leaves the underlying TCP socket in CLOSE_WAIT. ``shutdown``
+    is idempotent and closes the socket regardless of that flag.
+    """
+    with suppress(Exception):
+        ws.close()
+    with suppress(Exception):
+        ws.shutdown()
+
+
 def _open_subscription(url: str, tokens: list[str], socket_factory):
     """Open and subscribe, closing a partially-initialized socket on failure."""
     ws = socket_factory(url, timeout=10)
@@ -44,8 +58,7 @@ def _open_subscription(url: str, tokens: list[str], socket_factory):
             raise ConnectionError(f"subscription rejected: {reply.get('error') or reply}")
         return ws
     except BaseException:
-        with suppress(Exception):
-            ws.close()
+        _close_websocket(ws)
         raise
 
 
@@ -165,10 +178,7 @@ def run():
         except Exception as e:
             logger.warning("ws_loop_error", error=str(e)[:80])
         finally:
-            try:
-                ws.close()
-            except Exception:
-                pass
+            _close_websocket(ws)
         time.sleep(5)  # reconnect
 
 
