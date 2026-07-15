@@ -1,6 +1,6 @@
-# Launch 前向优势验证协议 v1
+# Launch 前向优势验证协议 v2
 
-状态：**2026-07-15 19:00 UTC 起预注册并前向收集**。实现常量以
+状态：**2026-07-15 22:00 UTC 起预注册并前向收集**。实现常量以
 `src/pipeline/edge_validation.py` 为准。
 
 ## 能回答和不能回答的问题
@@ -14,8 +14,9 @@
 
 ## 冻结项
 
-- 协议 ID：`launch-forward-spa-v1`；事件 `cohort_version=4`。
-- 起点：`2026-07-15T19:00:00Z`。更早事件与 v1-v3 永久只作描述。
+- 协议 ID：`launch-forward-spa-v2`；事件 `cohort_version=5`。
+- 起点：`2026-07-15T22:00:00Z`。更早事件与 v1-v4 永久只作描述。v4 的
+  shared-day-only 实现会丢掉非共同日期的完整坏结果，因此发现后退役，绝不重标进 v5。
 - 试验组：首次冻结决策为 `SMALL_PROBE`；对照组：首次冻结决策为 `WATCH`。
 - 成本合同：`discovery_outcome`、版本 1、固定 Launch 往返成本方法。
 - 主终点：首次发现价起算的成本后 24h return，经 1% 残值下限转换为 log 增长效用。
@@ -29,7 +30,9 @@
 1. 当前固定前缀的 24h 结果必须全部结算为价格或明确不可得；仍 pending 时不看结果。
 2. 固定前缀两组的 24h 主结果都必须 100% 可结算。rug、退市、死池最容易导致结局依赖缺失，因此任何 unavailable/invalid 都阻断正向 edge 判定；不能用剩余样本制造通过。
 3. 至少 14 个同时拥有试验和对照的 UTC 日；每组至少 80% 的有效事件位于共享日。
-4. 每日先求平均 log 效用，再用 `arch==8.0.0` 的 SPA/Reality Check 做 10,000 次
+   主检验使用两组日期的 union；某日没有候选的一组按持有现金、log 效用 0 计入，
+   不得只保留共同日期。固定前缀的全事件平均 log 效用还必须同时优于 WATCH 与现金。
+4. union 日历内每日先求平均 log 效用，再用 `arch==8.0.0` 的 SPA/Reality Check 做 10,000 次
    stationary bootstrap，固定 3 日 block 和随机种子。
 5. 六次 look 共用 5% family-wise alpha；每次只可用 `0.05/6`。使用最保守的
    SPA `upper` p-value，并要求日均 log 效用差至少 0.02。

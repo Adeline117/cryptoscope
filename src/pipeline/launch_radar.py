@@ -104,6 +104,7 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     from src.pipeline.slippage import price_impact
     roundtrip_cost = round(2 * price_impact(liq, max_notional) + 0.60, 3)
     from src.pipeline.execution_cost import discovery_contract
+    from src.pipeline.edge_validation import COHORT_VERSION
     cost_contract = discovery_contract(
         notional_usd=max_notional, modeled_roundtrip_pct=roundtrip_cost,
         method="constant_product_roundtrip_plus_0.60pct_buffer_v1")
@@ -123,9 +124,9 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
         "max_notional_usd": max_notional, "age_min": round(age_min, 1),
         "roundtrip_cost_pct_est": roundtrip_cost,
         "cost_model": "constant_product_roundtrip_plus_0.60pct_buffer",
-        # v4 starts a fresh, pre-registered forward-validation cohort.  Earlier
-        # versions remain descriptive and can never be relabeled into this sample.
-        "cost_contract": cost_contract, "cohort_version": 4,
+        # v5 starts a fresh protocol after v4's shared-calendar attrition flaw was
+        # found. Earlier versions remain descriptive and can never be relabeled.
+        "cost_contract": cost_contract, "cohort_version": COHORT_VERSION,
         "fdv": fdv, "liquidity_usd": liq, "volume_m5": vol5,
         "buys_m5": buys, "sells_m5": sells, "flow_ratio": round(flow_ratio, 2),
         "boost_active": boost, "pair": pair.get("pairAddress"), "url": pair.get("url"),
@@ -469,7 +470,7 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
 def refresh_quotes(*, now: datetime | None = None, assessor=None,
                    max_candidates: int = 1, refresh_before_seconds: int = 30,
                    retry_after_seconds: int = 60) -> dict:
-    """Refresh a bounded set of protocol-eligible v4 quotes without rediscovery.
+    """Refresh a bounded set of protocol-eligible v5 quotes without rediscovery.
 
     Discovery remains a three-minute event job. This fast path only appends current
     read-only measurements and never changes the frozen cohort, price, or cost.

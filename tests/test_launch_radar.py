@@ -23,7 +23,7 @@ def test_qualify_emits_small_probe_only_for_fresh_tradeable_flow():
     assert got["decision"] == "SMALL_PROBE"
     assert got["invalidation_price"] == pytest.approx(0.00007)
     assert got["max_notional_usd"] == 60  # 0.3% of pool, not an unbounded suggestion
-    assert got["cohort_version"] == 4
+    assert got["cohort_version"] == 5
     assert got["cost_contract"]["purpose"] == "discovery_outcome"
 
 

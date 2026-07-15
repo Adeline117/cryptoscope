@@ -24,6 +24,7 @@ import structlog
 
 from src.pipeline import opportunity_ledger
 from src.pipeline.edge_validation import (
+    COHORT_VERSION,
     LAUNCH_COST_METHOD,
     LOOK_SIZES as EDGE_LOOK_SIZES,
     is_protocol_event,
@@ -482,7 +483,9 @@ def lane_stats() -> dict:
                                                      for r in measurable)
             common["legacy_v3_descriptive_n"] = sum(r.get("cohort_version") == 3
                                                      for r in measurable)
-            common["v4_cost_method"] = LAUNCH_COST_METHOD
+            common["legacy_v4_descriptive_n"] = sum(r.get("cohort_version") == 4
+                                                     for r in measurable)
+            common[f"v{COHORT_VERSION}_cost_method"] = LAUNCH_COST_METHOD
             common["probe"] = _cohort(measurable, "SMALL_PROBE")
             common["control"] = _cohort(measurable, "WATCH")
             common["edge_validation"] = launch_forward_validation(measurable)

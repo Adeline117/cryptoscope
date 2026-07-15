@@ -6,7 +6,7 @@ import pytest
 
 def _setup(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
-    from src.pipeline.edge_validation import LAUNCH_COST_METHOD
+    from src.pipeline.edge_validation import COHORT_VERSION, LAUNCH_COST_METHOD
     from src.pipeline.execution_cost import discovery_contract
 
     monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
@@ -17,7 +17,7 @@ def _setup(tmp_path, monkeypatch):
         "decision": "WATCH", "state": "live", "entry_price": 1.0,
         "max_notional_usd": 25, "detected_at": "2026-07-16T11:00:00+00:00",
         "roundtrip_cost_pct_est": 1.2, "cost_contract": contract,
-        "cohort_version": 4,
+        "cohort_version": COHORT_VERSION,
     })
     return ledger, ident
 
@@ -141,7 +141,7 @@ def test_fresh_partial_quote_resolves_to_paper_ready_not_actionable(tmp_path, mo
     assert row["current_assessment"]["entry_reference_price"] == 1.1
 
 
-def test_expired_v4_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
+def test_expired_v5_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
     at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     ledger.append_execution_assessment(ident, _assessment(at))

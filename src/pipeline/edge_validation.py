@@ -25,11 +25,13 @@ from typing import Any
 import numpy as np
 
 
-PROTOCOL_ID = "launch-forward-spa-v1"
-COHORT_VERSION = 4
-PROTOCOL_START_AT = "2026-07-15T19:00:00+00:00"
+PROTOCOL_ID = "launch-forward-spa-v2"
+COHORT_VERSION = 5
+# v2 was committed before this future boundary.  v4 remains descriptive because
+# its shared-day-only validator was changed after the cohort had started.
+PROTOCOL_START_AT = "2026-07-15T22:00:00+00:00"
 PRIMARY_HORIZON = "24h"
-PRIMARY_METRIC = "daily_mean_cost_adjusted_log_growth_utility"
+PRIMARY_METRIC = "union_calendar_daily_mean_cost_adjusted_log_growth_utility"
 LOOK_SIZES = (100, 200, 400, 800, 1_600, 3_200)
 FAMILY_ALPHA = 0.05
 LOOK_ALPHA = FAMILY_ALPHA / len(LOOK_SIZES)
@@ -204,6 +206,7 @@ def launch_forward_validation(rows: list[dict]) -> dict:
     for arm in ARMS:
         daily[arm], resolved[arm] = _daily_utility(prefix[arm])
     shared_days = sorted(set(daily["SMALL_PROBE"]) & set(daily["WATCH"]))
+    calendar_days = sorted(set(daily["SMALL_PROBE"]) | set(daily["WATCH"]))
     shared_events = {
         arm: sum(1 for row in prefix[arm]
                  if _point_state(row)[0] == "resolved"
@@ -215,6 +218,9 @@ def launch_forward_validation(rows: list[dict]) -> dict:
         for arm in ARMS
     }
     result.update({"shared_days": len(shared_days),
+                   "calendar_days": len(calendar_days),
+                   "inactive_arm_daily_utility": 0.0,
+                   "calendar_policy": "union_days_absent_arm_is_cash",
                    "shared_event_fraction": shared_fraction})
     if (len(shared_days) < MIN_SHARED_DAYS
             or min(shared_fraction.values()) < MIN_SHARED_EVENT_FRACTION):
@@ -226,10 +232,41 @@ def launch_forward_validation(rows: list[dict]) -> dict:
         })
         return result
 
-    probe = np.asarray([daily["SMALL_PROBE"][day] for day in shared_days])
-    watch = np.asarray([daily["WATCH"][day] for day in shared_days])
+    # Never discard a resolved bad day merely because the other arm had no event.
+    # On the union calendar, an inactive arm stayed in cash and receives utility 0.
+    probe = np.asarray([daily["SMALL_PROBE"].get(day, 0.0) for day in calendar_days])
+    watch = np.asarray([daily["WATCH"].get(day, 0.0) for day in calendar_days])
     mean_lift = float(np.mean(probe - watch))
     result["mean_daily_log_utility_lift"] = round(mean_lift, 8)
+
+    event_utility: dict[str, float] = {}
+    for arm in ARMS:
+        values = [
+            _utility(value)
+            for row in prefix[arm]
+            for state, value in [_point_state(row)]
+            if state == "resolved" and value is not None
+        ]
+        event_utility[arm] = float(np.mean(values))
+    event_lift = event_utility["SMALL_PROBE"] - event_utility["WATCH"]
+    result.update({
+        "mean_event_log_utility": {
+            arm: round(value, 8) for arm, value in event_utility.items()
+        },
+        "mean_event_log_utility_lift": round(event_lift, 8),
+    })
+    # A right-tail selector is not allowed to pass while its complete fixed prefix
+    # loses to either WATCH or cash. This catches event clustering that a daily mean
+    # alone could otherwise hide.
+    if event_utility["SMALL_PROBE"] <= 0 or event_lift <= 0:
+        result.update({
+            "state": "no_edge_observed",
+            "edge_verdict": "无edge/负",
+            "reason": ("固定前缀全事件 log 效用未同时优于 WATCH 与现金: "
+                       f"SMALL_PROBE {event_utility['SMALL_PROBE']:.4f}, "
+                       f"WATCH {event_utility['WATCH']:.4f}"),
+        })
+        return result
     try:
         from arch.bootstrap import SPA
 

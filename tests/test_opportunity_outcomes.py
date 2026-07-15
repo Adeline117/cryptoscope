@@ -22,8 +22,8 @@ def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE
             "roundtrip_cost_pct_est": 1.0, "cost_model": "test_frozen_cost"}
     if protocol:
         from src.pipeline.execution_cost import discovery_contract
-        from src.pipeline.edge_validation import LAUNCH_COST_METHOD
-        item.update({"cohort_version": 4, "cost_contract": discovery_contract(
+        from src.pipeline.edge_validation import COHORT_VERSION, LAUNCH_COST_METHOD
+        item.update({"cohort_version": COHORT_VERSION, "cost_contract": discovery_contract(
             notional_usd=50, modeled_roundtrip_pct=1.0,
             method=LAUNCH_COST_METHOD)})
     return item
