@@ -302,22 +302,15 @@ def render_airdrop() -> dict:
 
 
 def render_stats(opportunities: dict | None) -> dict:
-    """Measurement layer: log this round's opp picks (with entry price), resolve any
-    due, and emit the honest per-lane hit rate. The board shows '不可判' until the
-    sample supports a number — the same discipline that killed the fake 44%."""
+    """Read-only measurement export for legacy and canonical lane scorecards.
+
+    The old smart-money view is now a non-actionable discovery aid, so its frozen
+    historical scorecard is displayed but no longer creates or resolves new picks.
+    Canonical five-lane outcomes are ingested by their event jobs and resolved by the
+    dedicated hourly scheduler.  Rendering must never perform slow price backfills.
+    """
     try:
         from src.pipeline import board_outcomes
-        ops = (opportunities or {}).get("opportunities", [])
-        picks = [{"symbol": o.get("symbol"), "chain": o.get("chain"),
-                  "token": o.get("token") or o.get("address"),
-                  "price0": o.get("price"), "liquidity": o.get("liq"),
-                  "metric": o.get("smart_money")}
-                 for o in ops[:12] if o.get("price")]
-        # _price_at resolves via GeckoTerminal, which covers Solana + EVM. A pick whose
-        # horizon price can't be fetched simply stays unresolved and retires — never a
-        # fake number.
-        board_outcomes.log_picks("opp", picks)
-        board_outcomes.resolve()
         lanes = board_outcomes.lane_stats()
         # The five-lane ledger has its own immutable first-seen snapshots and is
         # resolved hourly by the scheduler. Rendering stays read-only: a dashboard
@@ -326,7 +319,8 @@ def render_stats(opportunities: dict | None) -> dict:
         lanes.update(opportunity_lane_stats())
         return _envelope({"lanes": lanes,
                           "note": "五线事件按首次价结算1h/24h/7d并扣发现时冻结的成本估算。"
-                                  "样本<20或缺同期对照时只报不可判；纸面成本不冒充真实成交。"},
+                                  "样本<20或缺同期对照时只报不可判；纸面成本不冒充真实成交。"
+                                  "旧聪明钱分数为冻结历史，不再新增不可行动 picks。"},
                          view="stats")
     except Exception as e:
         logger.warning("render_stats_failed", error=str(e)[:120])

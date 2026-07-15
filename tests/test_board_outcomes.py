@@ -56,3 +56,24 @@ def test_lane_stats_computes_lift_and_edge_at_min_n(bo):
     assert st["lo"] < st["rate"] < st["hi"]                  # Wilson brackets the point
     assert st["base_rate"] == 0.25 and st["lift"] == round((7 / bo.MIN_N) / 0.25, 2)
     assert st["edge"] in ("有edge迹象", "接近随机", "无edge/负")
+
+
+def test_stats_render_is_read_only_and_never_runs_legacy_price_backfill(monkeypatch):
+    from src.pipeline import board_export, board_outcomes, opportunity_outcomes
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("stats render attempted a legacy write or price backfill")
+
+    monkeypatch.setattr(board_outcomes, "log_picks", forbidden)
+    monkeypatch.setattr(board_outcomes, "resolve", forbidden)
+    monkeypatch.setattr(board_outcomes, "lane_stats", lambda: {
+        "opp": {"verdict": "measured", "edge": "无edge/负"},
+    })
+    monkeypatch.setattr(opportunity_outcomes, "lane_stats", lambda: {
+        "launch": {"verdict": "不可判", "edge_verdict": "不可判"},
+    })
+
+    payload = board_export.render_stats({"opportunities": [{"price": 1.0}]})
+    assert payload["lanes"]["opp"]["edge"] == "无edge/负"
+    assert payload["lanes"]["launch"]["edge_verdict"] == "不可判"
+    assert "冻结历史" in payload["note"]
