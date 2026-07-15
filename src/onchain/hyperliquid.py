@@ -258,6 +258,7 @@ def _hl_spot_tokens() -> set[str]:
 
 
 OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate?instId={}-USDT-SWAP"
+OKX_FUNDING_MAX_AGE_MS = 5 * 60 * 1000
 
 
 def _store_xdiff(diffs: dict[str, float]) -> None:
@@ -312,24 +313,45 @@ def xdiff_stats(window_h: int = 7 * 24) -> dict[str, dict]:
     return out
 
 
-def okx_funding_map(coins: list[str], cap: int = 45) -> dict[str, float]:
+def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
+    """Annualize one period rate using OKX's actual scheduled interval."""
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000) if now_ms is None else now_ms
+    try:
+        observed_ms = int(row["ts"])
+        funding_ms = int(row["fundingTime"])
+        next_ms = int(row["nextFundingTime"])
+        rate = float(row["fundingRate"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    age_ms = now_ms - observed_ms
+    interval_h = (next_ms - funding_ms) / 3_600_000
+    if age_ms < -5_000 or age_ms > OKX_FUNDING_MAX_AGE_MS or not (0.5 <= interval_h <= 24):
+        return None
+    return rate * (24 / interval_h) * 365 * 100
+
+
+def okx_funding_map(coins: list[str], cap: int = 45, fetch=None) -> dict[str, float]:
     """{coin: OKX annualized funding %} for the given coins (bounded loop, keyless).
-    OKX funds every 8h → *3*365. The cross-exchange EDGE lives here: HL is structurally
+    OKX's interval can change by contract/regime, so each rate is annualized from the
+    response's fundingTime→nextFundingTime interval. The cross-exchange EDGE lives here:
     higher than CEX (institutions can't touch the DEX leg), so HL_ann − OKX_ann is a
     delta-neutral two-perp carry (short the high-funding venue, long the low). Never
     raises; a coin absent from OKX or a failed fetch is simply omitted (→ no false diff).
     Binance/Bybit are geo-blocked (451/403) from here; OKX is the reachable CEX leg."""
     out: dict[str, float] = {}
+    if fetch is None:
+        def fetch(url):
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                return json.loads(response.read())
     for c in coins[:cap]:
         base = c[1:] if c.startswith("k") else c        # HL kPEPE → OKX PEPE
         try:
-            req = urllib.request.Request(OKX_FUNDING_URL.format(base),
-                                         headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as response:
-                d = json.loads(response.read())
+            d = fetch(OKX_FUNDING_URL.format(base))
             rows = d.get("data") or []
-            if rows and rows[0].get("fundingRate") not in (None, ""):
-                out[c] = float(rows[0]["fundingRate"]) * 3 * 365 * 100
+            annualized = _okx_funding_ann(rows[0]) if rows else None
+            if annualized is not None:
+                out[c] = annualized
         except Exception:
             continue
     return out
