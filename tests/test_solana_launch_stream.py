@@ -20,7 +20,11 @@ def sol(tmp_path, monkeypatch):
 def _notification(log="Program log: Instruction: CreateV2"):
     return {"jsonrpc": "2.0", "method": "logsNotification", "params": {"result": {
         "context": {"slot": 123}, "value": {"signature": "sig-1", "err": None,
-        "logs": [log]},
+        "logs": [
+            "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]",
+            log,
+            "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+        ]},
     }}}
 
 
@@ -34,8 +38,11 @@ def _transaction():
         "instructions": [{"programId":
                           "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
                           "accounts": ["mint", "curve", "creator"], "data": "raw"}],
-    }}, "meta": {"err": None,
-                  "logMessages": ["Program log: Instruction: CreateV2"]}}
+    }}, "meta": {"err": None, "logMessages": [
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]",
+        "Program log: Instruction: CreateV2",
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+    ]}}
 
 
 def _raw_transaction(*, loaded_program=False, loaded_sponsor=False):
@@ -77,6 +84,26 @@ def _raw_transaction(*, loaded_program=False, loaded_sponsor=False):
         },
         "slot": 123,
     }
+
+
+def _pump_swap_with_ata_create():
+    tx = _raw_transaction()
+    ata_program = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+    tx["transaction"]["message"]["accountKeys"].append(ata_program)
+    tx["transaction"]["message"]["instructions"][0]["accounts"] = [0, 2]
+    tx["meta"]["innerInstructions"] = [{
+        "index": 0,
+        "instructions": [{"programIdIndex": 4, "accounts": [0], "data": "ata"}],
+    }]
+    tx["meta"]["logMessages"] = [
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]",
+        "Program log: Instruction: Buy",
+        f"Program {ata_program} invoke [2]",
+        "Program log: Instruction: Create",
+        f"Program {ata_program} success",
+        "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+    ]
+    return tx
 
 
 def test_subscriptions_use_standard_solana_methods(sol):
@@ -139,6 +166,43 @@ def test_loaded_addresses_resolve_but_never_become_transaction_signers(sol):
 def test_generic_initialize_mint_is_not_enough_to_claim_launch(sol):
     assert sol.parse_message(_notification(
         "Program log: Instruction: InitializeMint2")) is None
+
+
+def test_ata_create_inside_pump_swap_is_not_a_launch_or_gap_blocker(sol):
+    from src.pipeline import stream_health
+
+    tx = _pump_swap_with_ata_create()
+    logs = tx["meta"]["logMessages"]
+    notification = _notification()
+    notification["params"]["result"]["value"]["logs"] = logs
+    assert sol.parse_message(notification) is None
+    assert sol._launch_from_block_transaction(tx, 11, 0) is None
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return [11]
+            assert method == "getBlock"
+            return {"transactions": [tx]}
+
+    assert sol.retry_open_gaps(Rpc()) == {
+        "attempted": 1, "recovered": 1, "progressed": 0, "failed": 0,
+    }
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    c = sol._conn()
+    try:
+        assert c.execute("SELECT COUNT(*) FROM raw_launches").fetchone()[0] == 0
+    finally:
+        c.close()
 
 
 def test_slot_notifications_supply_gap_cursor(sol):
@@ -383,15 +447,15 @@ def test_failed_gap_recovery_is_deferred_but_remains_fail_visible(sol):
     assert health["next_gap_retry_at"] is not None
 
 
-def test_malformed_raw_create_does_not_advance_the_gap(sol):
+def test_unresolved_raw_create_is_retained_and_does_not_block_the_gap(sol):
     from src.pipeline import stream_health
 
     stream_health.observe("solana", "pump_fun_launches", cursor=10,
                           expect_contiguous=True)
     stream_health.observe("solana", "pump_fun_launches", cursor=12,
                           expect_contiguous=True)
-    malformed = _raw_transaction()
-    malformed["transaction"]["message"]["instructions"][0]["accounts"][0] = 999
+    unresolved = _raw_transaction()
+    unresolved["transaction"]["message"]["instructions"][0]["programIdIndex"] = 999
 
     class Rpc:
         def call(self, method, params):
@@ -402,20 +466,38 @@ def test_malformed_raw_create_does_not_advance_the_gap(sol):
             if method == "getBlocks":
                 return [11]
             assert method == "getBlock"
-            return {"transactions": [malformed]}
+            return {"transactions": [unresolved]}
 
     assert sol.retry_open_gaps(Rpc()) == {
-        "attempted": 1, "recovered": 0, "progressed": 0, "failed": 1,
+        "attempted": 1, "recovered": 1, "progressed": 0, "failed": 0,
     }
-    c = stream_health._conn()
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    c = sol._conn()
     try:
-        gap = c.execute(
-            "SELECT from_cursor,to_cursor,status,retry_count,last_error FROM gaps"
+        row = c.execute(
+            "SELECT signature,evidence_state,creator,mint,hydration_error "
+            "FROM raw_launches"
         ).fetchone()
     finally:
         c.close()
-    assert gap[:4] == (11, 11, "open", 1)
-    assert "identity is incomplete" in gap[4]
+    assert row[:4] == ("sig-1", "incomplete", None, None)
+    assert "did not prove" in row[4]
+
+    class HydrationRpc:
+        def call(self, method, params):
+            assert method == "getTransaction"
+            return _transaction()
+
+    assert sol.rehydrate_pending(HydrationRpc(), include_incomplete=True) == {
+        "attempted": 1, "completed": 1, "failed": 0,
+    }
+    c = sol._conn()
+    try:
+        assert c.execute(
+            "SELECT evidence_state,creator,mint FROM raw_launches"
+        ).fetchone() == ("complete", "creator", "mint")
+    finally:
+        c.close()
 
 
 def test_websocket_runner_never_backfills_or_hydrates_inline(sol):

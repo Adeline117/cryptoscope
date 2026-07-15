@@ -232,10 +232,64 @@ def subscribe_requests() -> list[dict]:
     ]
 
 
+def _invoked_program(line: str) -> tuple[str, int] | None:
+    prefix, marker = "Program ", " invoke ["
+    if not line.startswith(prefix) or marker not in line or not line.endswith("]"):
+        return None
+    program, raw_depth = line[len(prefix):].split(marker, 1)
+    try:
+        depth = int(raw_depth[:-1])
+    except ValueError:
+        return None
+    return (program, depth) if program and depth > 0 else None
+
+
+def _exited_program(line: str) -> str | None:
+    prefix = "Program "
+    if not line.startswith(prefix):
+        return None
+    body = line[len(prefix):]
+    if body.endswith(" success"):
+        return body[:-len(" success")]
+    if " failed:" in body:
+        return body.split(" failed:", 1)[0]
+    return None
+
+
 def _creation_type(logs: list[str]) -> str | None:
-    for name in ("CreateV2", "Create"):
-        if any(line.strip() == f"Program log: Instruction: {name}" for line in logs):
-            return name
+    """Return only Create logs emitted by an active Pump invocation.
+
+    A Pump swap commonly invokes the Associated Token Account program, which
+    emits its own ``Instruction: Create`` log.  Scanning the transaction-wide
+    log strings without following invocation depth would misclassify that CPI as
+    a Pump launch and could make historical gap recovery permanently fail.
+    """
+    active: dict[int, str] = {}
+    for raw_line in logs:
+        line = str(raw_line).strip()
+        invoked = _invoked_program(line)
+        if invoked:
+            program, depth = invoked
+            for current_depth in tuple(active):
+                if current_depth >= depth:
+                    active.pop(current_depth, None)
+            active[depth] = program
+            continue
+        exited = _exited_program(line)
+        if exited:
+            matching = [depth for depth, program in active.items()
+                        if program == exited]
+            if matching:
+                depth = max(matching)
+                for current_depth in tuple(active):
+                    if current_depth >= depth:
+                        active.pop(current_depth, None)
+            continue
+        if not active or active[max(active)] != PUMP_FUN_PROGRAM:
+            continue
+        for name in ("CreateV2", "Create"):
+            if line == f"Program log: Instruction: {name}":
+                return name
     return None
 
 
@@ -543,18 +597,6 @@ def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[d
     if not create_name:
         return None
     normalized = {"transaction": tx, "meta": meta, "slot": int(slot)}
-    keys, _ = _account_keys(normalized)
-    has_program = any(
-        isinstance(instruction, dict)
-        and _instruction_program(instruction, keys) == PUMP_FUN_PROGRAM
-        for instruction in _instructions(normalized)
-    )
-    if not has_program:
-        if any(PUMP_FUN_PROGRAM in line for line in logs):
-            raise RuntimeError(
-                f"slot {slot} transaction {index} has Pump create logs "
-                "but no resolvable Pump instruction")
-        return None
     signatures = tx.get("signatures") or []
     if not signatures:
         raise RuntimeError(f"slot {slot} transaction {index} has no signature")
@@ -601,10 +643,9 @@ def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
         if not launch:
             continue
         payload, tx = launch
-        creator, mint, error = _extract_identity(tx)
-        if not creator or not mint:
-            raise RuntimeError(
-                f"slot {slot} create identity is incomplete: {error or 'unknown error'}")
+        # Gap completeness means the matching raw event was durably captured.
+        # Identity qualification is a separate, retriable evidence state; a new
+        # Pump account layout must not permanently pin the entire stream gap.
         persist(payload, transaction=tx)
 
 
