@@ -349,14 +349,21 @@ def render_watch() -> dict:
 def render_perps() -> dict:
     """Structure #2 (trend ignition) + #3 (liquidation-cascade right side) from
     Hyperliquid — keyless, live, no home-grown detection needed."""
-    from src.onchain.hyperliquid import (_fetch_ctxs, _store_and_diff, carry_scorecard,
+    from src.onchain.hyperliquid import (fetch_ctxs_result, _store_and_diff, carry_scorecard,
                                          perp_signals, scan_carry)
     from src.pipeline.carry_paper import open_symbols as paper_open_symbols
     from src.pipeline.carry_paper import run as paper_run
     try:
-        rows = _fetch_ctxs()
+        hl_result = fetch_ctxs_result()
+        rows = hl_result["rows"]
+        snapshot_health = {"state": "ok"}
         if rows:
-            _store_and_diff(rows)          # one snapshot shared by both screens
+            try:
+                _store_and_diff(rows)      # one snapshot shared by both screens
+            except Exception as e:
+                logger.warning("perp_snapshot_store_failed", error=str(e)[:120])
+                snapshot_health = {"state": "error", "error_kind": "store_failed",
+                                   "error": str(e)[:120]}
         sigs = perp_signals(rows) if rows else []
         cascade_events = []
         try:
@@ -365,25 +372,75 @@ def render_perps() -> dict:
             cascade_events = cascade_view().get("events", [])
         except Exception as e:
             logger.debug("cascade_ledger_failed", error=str(e)[:80])
-        carry_scan = scan_carry(rows, priority_symbols=paper_open_symbols())
+        paper_pre_error = None
+        try:
+            active_symbols = paper_open_symbols()
+        except Exception as exc:
+            active_symbols = []
+            paper_pre_error = str(exc)[:120]
+        carry_scan = scan_carry(rows, priority_symbols=active_symbols,
+                                hl_health=hl_result["health"])
         carry = carry_scan["signals"]
-        scorecard = carry_scorecard()      # realized-carry track record (honest measurement)
-        paper = {}
-        try:                               # paper-trade tracker: measures hold_days + real
-            paper = paper_run(carry, observations=carry_scan["open_observations"])
+        scorecard_health = {"state": "ok"}
+        try:
+            scorecard = carry_scorecard()
         except Exception as e:
-            logger.debug("carry_paper_failed", error=str(e)[:80])
+            logger.warning("carry_scorecard_failed", error=str(e)[:120])
+            scorecard = {"available": False, "verdict": "不可判",
+                         "error_kind": "scorecard_failed"}
+            scorecard_health = {"state": "error", "error_kind": "scorecard_failed",
+                                "error": str(e)[:120]}
+        paper = {}
+        paper_health = {"state": "ok"}
+        if paper_pre_error:
+            paper_health = {"state": "error", "error_kind": "open_symbols_failed",
+                            "error": paper_pre_error}
+        else:
+            try:
+                paper = paper_run(carry, observations=carry_scan["open_observations"])
+                if (paper.get("ledger_sync") or {}).get("status") == "error":
+                    paper_health = {"state": "partial", "error_kind": "ledger_sync_failed"}
+            except Exception as e:
+                logger.debug("carry_paper_failed", error=str(e)[:80])
+                paper_health = {"state": "error", "error_kind": "tracker_failed",
+                                "error": str(e)[:120]}
+        carry_health = dict(carry_scan["source_health"])
+        carry_health["paper"] = paper_health
+        carry_health["snapshot_store"] = snapshot_health
+        carry_health["scorecard"] = scorecard_health
+        if (paper_health["state"] != "ok" or snapshot_health["state"] != "ok"
+                or scorecard_health["state"] != "ok") and carry_health["state"] == "ok":
+            carry_health["state"] = "partial"
         return _envelope({"perps": sigs, "carry": carry, "cascade_events": cascade_events, "carry_scorecard": scorecard,
                           "carry_paper": paper,
                           "carry_open_status": carry_scan["open_status"],
-                          "carry_source_health": carry_scan["source_health"],
+                          "carry_source_health": carry_health,
                           "source": "Hyperliquid + OKX (keyless)",
                           "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
                                    "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
                                    "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")},
                          view="perps")
     except Exception as e:
-        return _envelope({"perps": [], "carry": [], "source": "Hyperliquid", "scan_error": str(e)[:120]},
+        attempted_at = datetime.now(timezone.utc).isoformat()
+        return _envelope({"perps": [], "carry": [], "carry_paper": {},
+                          "carry_open_status": [],
+                          "carry_source_health": {
+                              "schema_version": 1, "state": "unavailable",
+                              "scan_at": attempted_at,
+                              "hl": {"state": "unavailable", "rows": 0,
+                                     "attempted_at": attempted_at,
+                                     "error_kind": "export_failed"},
+                              "okx": {"state": "not_needed", "requested": 0,
+                                      "observed": 0, "unsupported": 0,
+                                      "request_failed": 0, "rate_stale": 0,
+                                      "rate_invalid": 0, "request_cap": 0},
+                              "paper": {"state": "error",
+                                        "error_kind": "export_failed"},
+                              "open_requested": 0, "open_observed": 0,
+                              "entry_deferred_by_cap": 0,
+                          },
+                          "source": "Hyperliquid + OKX (keyless)",
+                          "scan_error": str(e)[:120]},
                          view="perps")
 
 

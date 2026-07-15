@@ -40,36 +40,66 @@ IGNITION_OI_JUMP = 0.03        # +3% OI since last snapshot = leverage piling in
 SNAPSHOT_MIN_GAP_MIN = 12      # diff against a snapshot at least this old (15-min job)
 
 
-def _fetch_ctxs() -> list[dict]:
-    """[{name, markPx, openInterest, funding, dayNtlVlm, prevDayPx, oi_usd, funding_ann,
-    price_chg_24h, vol24}] for every perp. Never raises → [] on failure."""
+def fetch_ctxs_result(fetch=None) -> dict:
+    """Typed Hyperliquid snapshot result; transport failure is not an empty market."""
+    attempted_at = datetime.now(timezone.utc).isoformat()
     try:
-        req = urllib.request.Request(
-            INFO_URL, data=json.dumps({"type": "metaAndAssetCtxs"}).encode(),
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=20) as response:
-            d = json.loads(response.read())
+        if fetch is None:
+            req = urllib.request.Request(
+                INFO_URL, data=json.dumps({"type": "metaAndAssetCtxs"}).encode(),
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=20) as response:
+                data = json.loads(response.read())
+        else:
+            data = fetch()
     except Exception as e:
         logger.warning("hyperliquid_fetch_failed", error=str(e)[:100])
-        return []
-    universe, ctxs = d[0].get("universe", []), d[1]
+        return {"rows": [], "health": {"state": "unavailable", "rows": 0,
+                "attempted_at": attempted_at, "error_kind": "request_failed",
+                "error": str(e)[:120]}}
+    if (not isinstance(data, list) or len(data) < 2 or not isinstance(data[0], dict)
+            or not isinstance(data[0].get("universe"), list)
+            or not isinstance(data[1], list)):
+        return {"rows": [], "health": {"state": "unavailable", "rows": 0,
+                "attempted_at": attempted_at, "error_kind": "malformed_response"}}
+    universe, ctxs = data[0]["universe"], data[1]
     out = []
+    invalid_rows = abs(len(universe) - len(ctxs))
     for u, c in zip(universe, ctxs):
         try:
-            px = float(c.get("markPx") or 0)
-            oi = float(c.get("openInterest") or 0) * px
-            fund = float(c.get("funding") or 0)          # hourly
-            vol = float(c.get("dayNtlVlm") or 0)
+            name = str(u["name"])
+            px = float(c["markPx"])
+            open_interest = float(c["openInterest"])
+            fund = float(c["funding"])
+            vol = float(c["dayNtlVlm"])
             prev = float(c.get("prevDayPx") or 0)
+            if (not name or not all(math.isfinite(x) for x in
+                                    (px, open_interest, fund, vol, prev))
+                    or px <= 0 or open_interest < 0 or vol < 0 or prev < 0):
+                raise ValueError("invalid market row")
+            oi = open_interest * px
             out.append({
-                "name": u.get("name"), "markPx": px, "oi_usd": oi,
+                "name": name, "markPx": px, "oi_usd": oi,
                 "funding_ann": fund * 24 * 365 * 100,     # annualized %
                 "vol24": vol,
                 "price_chg_24h": ((px / prev - 1) * 100) if prev else None,
             })
         except Exception:
+            invalid_rows += 1
             continue
-    return out
+    if not out:
+        return {"rows": [], "health": {"state": "unavailable", "rows": 0,
+                "attempted_at": attempted_at, "error_kind": "no_valid_rows",
+                "invalid_rows": invalid_rows}}
+    return {"rows": out, "health": {
+            "state": "partial" if invalid_rows else "ok", "rows": len(out),
+            "attempted_at": attempted_at, "last_success_at": attempted_at,
+            "invalid_rows": invalid_rows, "expected_rows": len(universe)}}
+
+
+def _fetch_ctxs() -> list[dict]:
+    """Compatibility wrapper for callers that only consume rows."""
+    return fetch_ctxs_result()["rows"]
 
 
 def _conn() -> sqlite3.Connection:
@@ -316,8 +346,8 @@ def xdiff_stats(window_h: int = 7 * 24) -> dict[str, dict]:
     return out
 
 
-def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
-    """Annualize one period rate using OKX's actual scheduled interval."""
+def _okx_funding_value(row: dict, *, now_ms: int | None = None) -> tuple[float | None, str]:
+    """Return annualized rate plus observed/stale/invalid classification."""
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000) if now_ms is None else now_ms
     try:
         observed_ms = int(row["ts"])
@@ -325,13 +355,75 @@ def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
         next_ms = int(row["nextFundingTime"])
         rate = float(row["fundingRate"])
     except (KeyError, TypeError, ValueError):
-        return None
+        return None, "rate_invalid"
     age_ms = now_ms - observed_ms
     interval_h = (next_ms - funding_ms) / 3_600_000
-    if (not math.isfinite(rate) or age_ms < -5_000 or age_ms > OKX_FUNDING_MAX_AGE_MS
-            or not (0.5 <= interval_h <= 24)):
-        return None
-    return rate * (24 / interval_h) * 365 * 100
+    if age_ms < -5_000 or age_ms > OKX_FUNDING_MAX_AGE_MS:
+        return None, "rate_stale"
+    if not math.isfinite(rate) or not (0.5 <= interval_h <= 24):
+        return None, "rate_invalid"
+    annualized = rate * (24 / interval_h) * 365 * 100
+    return (annualized, "observed") if math.isfinite(annualized) else (None, "rate_invalid")
+
+
+def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
+    """Compatibility wrapper returning only a verified current annualized rate."""
+    value, status = _okx_funding_value(row, now_ms=now_ms)
+    return value if status == "observed" else None
+
+
+def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
+                     fetch=None) -> dict:
+    """Typed per-symbol OKX funding scan; absence never hides transport or freshness."""
+    symbols = list(dict.fromkeys(str(c) for c in coins if c))
+    attempted_at = datetime.now(timezone.utc).isoformat()
+    if fetch is None:
+        def fetch(url):
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                return json.loads(response.read())
+    rates: dict[str, float] = {}
+    statuses: dict[str, str] = {}
+    limited = symbols[:max(cap, 0)]
+    for symbol in limited:
+        status = "unsupported"
+        for base in okx_symbol_candidates(symbol):
+            try:
+                data = fetch(OKX_FUNDING_URL.format(base))
+            except Exception:
+                status = "request_failed"
+                break
+            if not isinstance(data, dict) or str(data.get("code")) != "0":
+                status = "request_failed"
+                break
+            rows = data.get("data")
+            if not isinstance(rows, list):
+                status = "rate_invalid"
+                break
+            if not rows:
+                continue
+            value, status = _okx_funding_value(rows[0])
+            if status == "observed" and value is not None:
+                rates[symbol] = value
+            break
+        statuses[symbol] = status
+    for symbol in symbols[len(limited):]:
+        statuses[symbol] = "request_cap"
+    counts = {name: sum(value == name for value in statuses.values()) for name in (
+        "observed", "unsupported", "request_failed", "rate_stale", "rate_invalid",
+        "request_cap")}
+    bad = counts["request_failed"] + counts["rate_stale"] + counts["rate_invalid"]
+    if not symbols:
+        state = "not_needed"
+    elif bad and not rates and counts["unsupported"] == 0:
+        state = "unavailable"
+    elif bad or counts["request_cap"]:
+        state = "partial"
+    else:
+        state = "ok"
+    return {"rates": rates, "status_by_symbol": statuses,
+            "summary": {"state": state, "attempted_at": attempted_at,
+                        "requested": len(symbols), **counts}}
 
 
 def okx_funding_map(coins: list[str], cap: int = 45, fetch=None) -> dict[str, float]:
@@ -342,26 +434,7 @@ def okx_funding_map(coins: list[str], cap: int = 45, fetch=None) -> dict[str, fl
     delta-neutral two-perp carry (short the high-funding venue, long the low). Never
     raises; a coin absent from OKX or a failed fetch is simply omitted (→ no false diff).
     Binance/Bybit are geo-blocked (451/403) from here; OKX is the reachable CEX leg."""
-    out: dict[str, float] = {}
-    if fetch is None:
-        def fetch(url):
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as response:
-                return json.loads(response.read())
-    for c in coins[:cap]:
-        for base in okx_symbol_candidates(c):
-            try:
-                d = fetch(OKX_FUNDING_URL.format(base))
-                rows = d.get("data") or []
-            except Exception:
-                break
-            if not rows:
-                continue
-            annualized = _okx_funding_ann(rows[0])
-            if annualized is not None:
-                out[c] = annualized
-            break
-    return out
+    return okx_funding_scan(coins, cap=cap, fetch=fetch)["rates"]
 
 
 def _funding_persistence(window_h: int = CARRY_WINDOW_H) -> dict[str, dict]:
@@ -543,24 +616,36 @@ def carry_signals(rows: list[dict] | None = None, *,
 
 
 def scan_carry(rows: list[dict] | None = None, *,
-               priority_symbols: list[str] | None = None) -> dict:
+               priority_symbols: list[str] | None = None,
+               hl_health: dict | None = None) -> dict:
     """Return entry signals separately from current observations of open episodes."""
     fetched_here = rows is None
     if rows is None:
-        rows = _fetch_ctxs()
+        result = fetch_ctxs_result()
+        rows = result["rows"]
+        hl_health = result["health"]
         if rows:
             _store_and_diff(rows)
+    elif hl_health is None:
+        hl_health = {"state": "ok" if rows else "unavailable", "rows": len(rows),
+                     "attempted_at": datetime.now(timezone.utc).isoformat(),
+                     **({} if rows else {"error_kind": "rows_unavailable"})}
     priorities = list(dict.fromkeys(str(s) for s in (priority_symbols or []) if s))
     scan_at = datetime.now(timezone.utc).isoformat()
     if not rows:
-        statuses = [{"symbol": symbol, "status": "hl_source_unavailable"}
+        statuses = [{"symbol": symbol, "role": "open",
+                     "status": "hl_source_unavailable"}
                     for symbol in priorities]
         return {
             "signals": [], "open_observations": [], "open_status": statuses,
             "source_health": {
-                "state": "unavailable", "scan_at": scan_at,
-                "hl_rows": 0, "open_requested": len(priorities), "open_observed": 0,
-                "okx_requested": 0, "okx_observed": 0, "entry_deferred_by_cap": 0,
+                "schema_version": 1, "state": "unavailable", "scan_at": scan_at,
+                "hl": hl_health, "okx": {"state": "not_needed", "requested": 0,
+                                           "observed": 0, "unsupported": 0,
+                                           "request_failed": 0, "rate_stale": 0,
+                                           "rate_invalid": 0, "request_cap": 0},
+                "open_requested": len(priorities), "open_observed": 0,
+                "entry_deferred_by_cap": 0,
                 "fetched_here": fetched_here,
             },
         }
@@ -571,9 +656,18 @@ def scan_carry(rows: list[dict] | None = None, *,
                      and r.get("funding_ann", 0) >= CARRY_MIN_ANN]
     requested = list(dict.fromkeys(priorities + entry_symbols))
     limited = requested[:OKX_FUNDING_REQUEST_CAP]
-    okx = okx_funding_map(limited, cap=len(limited)) if limited else {}
+    okx_result = okx_funding_scan(requested, cap=OKX_FUNDING_REQUEST_CAP)
+    okx = okx_result["rates"]
+    okx_status = okx_result["status_by_symbol"]
+    okx_health = okx_result["summary"]
     limited_set = set(limited)
-    signal_rows = [r for r in rows if r.get("name") in limited_set]
+    # A failed/stale/invalid OKX response is unknown, not evidence that the contract is
+    # absent. Only a live paired quote or a verified unsupported result may feed entry.
+    signal_rows = [
+        r for r in rows
+        if r.get("name") in limited_set
+        and okx_status.get(r.get("name")) in {"observed", "unsupported"}
+    ]
     signals = carry_signals(signal_rows, okx_rates=okx)
 
     observations = []
@@ -582,10 +676,8 @@ def scan_carry(rows: list[dict] | None = None, *,
         row = by_symbol.get(symbol)
         if row is None:
             status = "hl_symbol_unavailable"
-        elif symbol not in limited_set:
-            status = "okx_request_cap"
-        elif symbol not in okx:
-            status = "okx_rate_unavailable"
+        elif okx_status.get(symbol) != "observed":
+            status = f"okx_{okx_status.get(symbol) or 'request_failed'}"
         else:
             observed_edge = float(row["funding_ann"]) - float(okx[symbol])
             observation = {
@@ -596,16 +688,22 @@ def scan_carry(rows: list[dict] | None = None, *,
             }
             observations.append(observation)
             status = "observed"
-        statuses.append({"symbol": symbol, "status": status})
+        statuses.append({"symbol": symbol, "role": "open", "status": status})
 
     observed_n = len(observations)
-    state = "ok" if observed_n == len(priorities) else "partial"
+    if hl_health.get("state") == "unavailable" or okx_health["state"] == "unavailable":
+        state = "unavailable"
+    elif (hl_health.get("state") == "partial" or okx_health["state"] == "partial"
+          or observed_n != len(priorities)):
+        state = "partial"
+    else:
+        state = "ok"
     return {
         "signals": signals, "open_observations": observations, "open_status": statuses,
         "source_health": {
-            "state": state, "scan_at": scan_at, "hl_rows": len(rows),
+            "schema_version": 1, "state": state, "scan_at": scan_at,
+            "hl": hl_health, "okx": okx_health,
             "open_requested": len(priorities), "open_observed": observed_n,
-            "okx_requested": len(limited), "okx_observed": len(okx),
             "entry_deferred_by_cap": sum(s not in limited_set for s in entry_symbols),
             "fetched_here": fetched_here,
         },
