@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -50,6 +51,14 @@ def test_regular_export_can_skip_both_slow_scanners(monkeypatch):
     result = board_export.run(push=False, include_operators=False,
                               include_opportunities=False)
     assert result["views_written"] == 0
+
+
+def test_board_does_not_claim_one_refresh_cadence_for_every_lane():
+    board = (Path(__file__).parents[1] / "board" / "public" / "index.html").read_text()
+
+    assert "各赛道按 2–60 分钟采集" in board
+    assert "页面每 60 秒读取最新快照" in board
+    assert "每 15 分钟自动刷新" not in board
 
 
 def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path, monkeypatch):
