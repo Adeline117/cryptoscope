@@ -50,3 +50,12 @@ def test_legacy_discovery_views_cannot_bypass_canonical_trade_gates():
     assert "能埋伏,小仓+止损" not in html
     assert "要动只能空" not in html
     assert "派发(可做空/避开)" not in html
+
+
+def test_structure_view_discloses_per_source_coverage_failures():
+    html = BOARD.read_text()
+
+    assert "来源本轮可达" in html
+    assert "配置了来源不等于成功扫描" in html
+    assert 'x.status!=="ok"' in html
+    assert "失败源不会计入覆盖" in html

@@ -312,9 +312,9 @@ const LANES={
     detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},ed=effectiveDecision(r);return `<span class="so">所以👉</span> ${ed==="SMALL_PROBE"?`安全与双向报价均通过且仍在 ${esc(r.expires_at)} 前有效；只可按上限小额试错，触及失效价退出。`:ed==="EXPIRED"?"原报价已经过期，禁止按旧价格行动；必须重新通过安全与双向路由门。":ed==="AVOID"?"存在已知安全红旗或反向路由失败，不要碰。":"检查不完整，只观察；UNKNOWN 不是安全。"}<br>当前状态: ${esc(ed)} · ${esc(expiryText(r))}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
   },
   structure:{
-    title:d=>{const e=d?.events||[];return `<b style="color:var(--violet)">公开市场结构事件</b>: ${e.length} 个已入账。上币、解锁、CEX 流入会在这里按实际发生时间分线记录。`},
-    stat:d=>{const e=d?.events||[];return [["公开事件",e.length,"不含传闻"],["新上币",e.filter(x=>x.event_type==="new_listing").length,"待测价格影响"],["交易指令",0,"默认只观察"]]},
-    readme:"结构事件会改变流动性、可得性或供给，但本身<b>不是方向交易信号</b>。当前只接入交易所公开新增交易对；解锁、CEX 流和跨所结构价差会在各自数据源可靠后接入。每个事件先记录，再独立测量价格和流动性影响，不能从消息标题直接推导做多或做空。",
+    title:d=>{const e=d?.events||[],h=d?.source_health||[],bad=h.filter(x=>x.status!=="ok");return `<b style="color:var(--violet)">公开市场结构事件</b>: ${e.length} 个已入账。来源本轮可达 <b>${h.filter(x=>x.status==="ok").length}/${h.length||"?"}</b>${bad.length?`；失败: ${bad.map(x=>esc(x.exchange)+"("+esc(x.error||"unknown")+")").join(" · ")}`:""}。`},
+    stat:d=>{const e=d?.events||[],h=d?.source_health||[],ok=h.filter(x=>x.status==="ok");return [["公开事件",e.length,"不含传闻"],["新上币",e.filter(x=>x.event_type==="new_listing").length,"待测价格影响"],["来源可达",`${ok.length}/${h.length||"?"}`,h.length?`检查 ${utcClock(d.source_health_at)}`:"尚无健康证据"],["交易指令",0,"默认只观察"]]},
+    readme:"结构事件会改变流动性、可得性或供给，但本身<b>不是方向交易信号</b>。当前只接入交易所公开新增交易对，并逐源公开请求成功或失败；配置了来源不等于成功扫描，失败源不会计入覆盖。解锁、CEX 流和跨所结构价差会在各自数据源可靠后接入。每个事件先记录，再独立测量价格和流动性影响。",
     rows:d=>d?.events||[],
     id:r=>r.id||r.event_key||r.symbol+r.event_at, flash:null,
     empty:"当前没有新的已验证公开结构事件。没有消息不是故障，也不应以传闻填充。",

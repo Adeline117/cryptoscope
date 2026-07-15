@@ -110,24 +110,35 @@ def _save_snapshot(exchange: str, symbols: set[str]) -> None:
 # Core detection
 # ---------------------------------------------------------------------------
 
-def check_exchange(
+def check_exchange_result(
     exchange: str,
     timeout: float = 10.0,
-) -> list[dict[str, Any]]:
-    """Fetch current listings for one exchange and return new pairs.
+) -> dict[str, Any]:
+    """Fetch one exchange and return alerts plus explicit source health.
+
+    A failed request must remain distinguishable from a successful scan that found
+    zero listings.  Otherwise callers can accidentally claim full exchange coverage
+    while a geo-blocked endpoint silently returns an empty alert list.
 
     Args:
         exchange: One of ``"binance"``, ``"okx"``, ``"bybit"``.
         timeout: HTTP timeout in seconds.
 
-    Returns:
-        List of alert dicts, each with ``exchange``, ``symbol``,
-        ``detected_at``, and ``message``.
+    Returns a dict with ``status`` (``ok`` or ``failed``), source evidence and an
+    ``alerts`` list.  ``baseline_ready`` is false on the first successful scan,
+    because that scan can establish inventory but cannot detect a delta.
     """
+    checked_at = datetime.now(timezone.utc).isoformat()
+    result: dict[str, Any] = {
+        "exchange": exchange, "checked_at": checked_at, "status": "failed",
+        "symbol_count": None, "baseline_ready": False, "new_count": 0,
+        "alerts": [],
+    }
     config = EXCHANGES.get(exchange)
     if config is None:
         logger.warning("unknown_exchange", exchange=exchange)
-        return []
+        result["error"] = "unknown exchange"
+        return result
 
     url = config["url"]
     parser_name = config["parser"]
@@ -139,15 +150,19 @@ def check_exchange(
         data = resp.json()
     except (httpx.HTTPError, json.JSONDecodeError) as exc:
         logger.error("listing_fetch_failed", exchange=exchange, error=str(exc))
-        return []
+        result["error"] = str(exc)[:160]
+        return result
 
     current_symbols = parser_fn(data)
     if not current_symbols:
         logger.warning("no_symbols_parsed", exchange=exchange)
-        return []
+        result["error"] = "response parsed zero live symbols"
+        return result
 
     previous_symbols = _load_snapshot(exchange)
     _save_snapshot(exchange, current_symbols)
+    result.update({"status": "ok", "symbol_count": len(current_symbols),
+                   "baseline_ready": bool(previous_symbols)})
 
     if not previous_symbols:
         # First run — nothing to compare against
@@ -156,11 +171,11 @@ def check_exchange(
             exchange=exchange,
             count=len(current_symbols),
         )
-        return []
+        return result
 
     new_symbols = current_symbols - previous_symbols
     if not new_symbols:
-        return []
+        return result
 
     now = datetime.now(timezone.utc).isoformat()
     alerts: list[dict[str, Any]] = []
@@ -174,7 +189,27 @@ def check_exchange(
         alerts.append(alert)
         logger.info("new_listing_detected", exchange=exchange, symbol=sym)
 
-    return alerts
+    result.update({"alerts": alerts, "new_count": len(alerts)})
+    return result
+
+
+def check_exchange(
+    exchange: str,
+    timeout: float = 10.0,
+) -> list[dict[str, Any]]:
+    """Backward-compatible alert-only interface for one exchange."""
+    return check_exchange_result(exchange, timeout=timeout)["alerts"]
+
+
+def check_all_exchanges_with_status(timeout: float = 10.0) -> dict[str, Any]:
+    """Check every configured source without converting failures to empty scans."""
+    sources = [check_exchange_result(exchange, timeout=timeout)
+               for exchange in EXCHANGES]
+    return {
+        "alerts": [alert for source in sources for alert in source["alerts"]],
+        "sources": [{k: v for k, v in source.items() if k != "alerts"}
+                    for source in sources],
+    }
 
 
 def check_all_exchanges(timeout: float = 10.0) -> list[dict[str, Any]]:
