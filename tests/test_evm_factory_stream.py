@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -195,8 +196,20 @@ def test_removed_log_is_retained_as_reorg_evidence(evm):
     evm.persist(removed.payload, rpc=Rpc())
     c = evm._conn()
     try:
-        assert c.execute("SELECT removed,evidence_state,block_at FROM raw_pools").fetchone() \
-            == (1, "removed_reorg", "1970-01-01T00:00:05+00:00")
+        assert c.execute("SELECT removed,evidence_state,block_at,qualification_state "
+                         "FROM raw_pools").fetchone() \
+            == (1, "removed_reorg", "1970-01-01T00:00:05+00:00", "reorg_removed")
+    finally:
+        c.close()
+
+
+def test_removed_log_arriving_first_is_never_qualification_candidate(evm):
+    removed = evm.parse_message(_notification(_log(evm, removed=True)))
+    evm.persist(removed.payload)
+    c = evm._conn()
+    try:
+        assert c.execute("SELECT evidence_state,qualification_state FROM raw_pools").fetchone() \
+            == ("removed_reorg", "reorg_removed")
     finally:
         c.close()
 
@@ -253,3 +266,59 @@ def test_backfill_limit_counts_both_endpoints(evm):
     spec = evm.bsc_pancake_v2_spec()
     assert evm.backfill_blocks(1, evm.MAX_BACKFILL_BLOCKS + 1,
                                spec=spec, rpc=Rpc()) is False
+
+
+def _persist_complete(evm):
+    class Rpc:
+        def call(self, method, params):
+            return {"number": "0x64", "timestamp": "0x5"}
+
+    event = evm.parse_message(_notification(_log(evm)))
+    evm.persist(event.payload, rpc=Rpc())
+
+
+def test_bridge_boundary_quarantines_historical_inventory(evm):
+    _persist_complete(evm)
+    now = datetime.now(timezone.utc) + timedelta(seconds=1)
+    started = evm.ensure_bridge_started_at(at=now)
+    assert started == now.isoformat()
+    assert evm.qualification_batch(now=now) == []
+    assert evm.qualification_summary()["qualification"] == {"historical_raw_only": 1}
+
+
+def test_forward_factory_row_has_retryable_qualification_clock(evm):
+    now = datetime.now(timezone.utc)
+    evm.ensure_bridge_started_at(at=now - timedelta(minutes=1))
+    _persist_complete(evm)
+    c = evm._conn()
+    try:
+        c.execute("UPDATE raw_pools SET block_at=?,detected_at=?",
+                  ((now - timedelta(seconds=10)).isoformat(),
+                   (now - timedelta(seconds=9)).isoformat()))
+        c.commit()
+    finally:
+        c.close()
+    row = evm.qualification_batch(now=now, limit=1)[0]
+    assert row["table_kind"] == "v2" and row["pool"].endswith("3333")
+    assert evm.set_qualification(row, "market_pending", reason="not indexed",
+                                 retry_after_seconds=180, at=now)
+    assert evm.qualification_batch(now=now + timedelta(seconds=179)) == []
+    retry = evm.qualification_batch(now=now + timedelta(seconds=181))[0]
+    assert retry["qualification_attempts"] == 1
+
+
+def test_factory_qualification_migrates_both_raw_tables(evm):
+    c = evm._conn()
+    try:
+        for table in ("raw_pools", "raw_v3_pools"):
+            columns = {row[1] for row in c.execute(f"PRAGMA table_info({table})")}
+            assert {"qualification_attempted_at", "qualification_retry_at",
+                    "qualification_reason", "qualification_attempts", "qualified_at",
+                    "ledger_event_id", "target_token"} <= columns
+    finally:
+        c.close()
+
+
+def test_unknown_factory_qualification_state_fails_closed(evm):
+    with pytest.raises(ValueError, match="unknown qualification state"):
+        evm.set_qualification({"table_kind": "v2"}, "magic_profit")

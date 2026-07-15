@@ -8,7 +8,7 @@ import sqlite3
 import threading
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import structlog
@@ -39,6 +39,15 @@ MAX_BACKFILL_BLOCKS = 2_000
 DB = DATA_DIR / "evm_factory_events.db"
 _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                "AppleWebKit/537.36 Chrome/120 Safari/537.36 CryptoScope/1.0")
+QUALIFICATION_STATES = {
+    "raw_unqualified", "market_pending", "market_error", "below_threshold",
+    "qualified_recorded", "duplicate_token_existing", "unsupported_quote_pair",
+    "ambiguous_target", "expired_unqualified", "reorg_removed",
+    "historical_raw_only",
+}
+RETRYABLE_QUALIFICATION_STATES = {
+    "raw_unqualified", "market_pending", "market_error", "below_threshold",
+}
 
 
 @dataclass(frozen=True)
@@ -158,7 +167,148 @@ def _conn() -> sqlite3.Connection:
         PRIMARY KEY(chain,transaction_hash,log_index))""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_raw_v3_pools_block "
               "ON raw_v3_pools(chain,venue,block_number,log_index)")
+    for table in ("raw_pools", "raw_v3_pools"):
+        table_columns = {row[1] for row in c.execute(f"PRAGMA table_info({table})")}
+        for name, kind, default in (
+            ("qualification_attempted_at", "TEXT", ""),
+            ("qualification_retry_at", "TEXT", ""),
+            ("qualification_reason", "TEXT", ""),
+            ("qualification_attempts", "INTEGER", " NOT NULL DEFAULT 0"),
+            ("qualified_at", "TEXT", ""),
+            ("ledger_event_id", "TEXT", ""),
+            ("target_token", "TEXT", ""),
+        ):
+            if name not in table_columns:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}{default}")
+        c.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_qualification "
+                  f"ON {table}(evidence_state,qualification_state,detected_at)")
+    c.execute("""CREATE TABLE IF NOT EXISTS bridge_meta(
+        key TEXT PRIMARY KEY,value TEXT NOT NULL,updated_at TEXT NOT NULL)""")
     return c
+
+
+def ensure_bridge_started_at(*, at: datetime | None = None) -> str:
+    """Freeze the forward-test boundary and quarantine pre-deployment inventory."""
+    now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        c.execute("INSERT OR IGNORE INTO bridge_meta(key,value,updated_at) "
+                  "VALUES ('launch_bridge_started_at',?,?)", (now, now))
+        started = c.execute(
+            "SELECT value FROM bridge_meta WHERE key='launch_bridge_started_at'"
+        ).fetchone()[0]
+        for table in ("raw_pools", "raw_v3_pools"):
+            c.execute(f"UPDATE {table} SET qualification_state='historical_raw_only', "
+                      "qualification_reason='observed before forward bridge boundary' "
+                      "WHERE detected_at<? AND qualification_state='raw_unqualified'",
+                      (started,))
+        c.commit()
+        return started
+    finally:
+        c.close()
+
+
+def qualification_batch(*, now: datetime | None = None, limit: int = 10,
+                        max_age_hours: float = 24) -> list[dict]:
+    """Return forward, non-reorg factory rows due for an exact-pool market check."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    started = ensure_bridge_started_at(at=now)
+    cutoff = (now - timedelta(hours=max(0, float(max_age_hours)))).isoformat()
+    c = _conn()
+    try:
+        for table in ("raw_pools", "raw_v3_pools"):
+            c.execute(f"""UPDATE {table} SET qualification_state='expired_unqualified',
+                              qualification_reason='older than 24h launch window',
+                              qualification_attempted_at=?
+                           WHERE detected_at>=? AND COALESCE(block_at,detected_at)<?
+                             AND removed=0 AND evidence_state='complete'
+                             AND qualification_state IN
+                               ('raw_unqualified','market_pending','market_error','below_threshold')""",
+                      (now.isoformat(), started, cutoff))
+        c.commit()
+        common = """chain,venue,factory,transaction_hash,log_index,block_number,
+                    block_hash,transaction_index,token0,token1,pool,block_at,detected_at,
+                    qualification_state,qualification_attempts,qualification_retry_at"""
+        rows = c.execute(f"""SELECT 'v2' AS table_kind,{common} FROM raw_pools
+            WHERE detected_at>=? AND removed=0 AND evidence_state='complete'
+              AND qualification_state IN
+                ('raw_unqualified','market_pending','market_error','below_threshold')
+              AND (qualification_retry_at IS NULL OR qualification_retry_at<=?)
+            UNION ALL SELECT 'v3' AS table_kind,{common} FROM raw_v3_pools
+            WHERE detected_at>=? AND removed=0 AND evidence_state='complete'
+              AND qualification_state IN
+                ('raw_unqualified','market_pending','market_error','below_threshold')
+              AND (qualification_retry_at IS NULL OR qualification_retry_at<=?)
+            ORDER BY block_at,detected_at LIMIT ?""",
+            (started, now.isoformat(), started, now.isoformat(), max(0, int(limit))),
+        ).fetchall()
+    finally:
+        c.close()
+    keys = ("table_kind", "chain", "venue", "factory", "transaction_hash",
+            "log_index", "block_number", "block_hash", "transaction_index",
+            "token0", "token1", "pool", "block_at", "detected_at",
+            "qualification_state", "qualification_attempts", "qualification_retry_at")
+    return [dict(zip(keys, row)) for row in rows]
+
+
+def set_qualification(row: dict, state: str, *, reason: str | None = None,
+                      target_token: str | None = None,
+                      ledger_event_id: str | None = None,
+                      retry_after_seconds: float | None = None,
+                      at: datetime | None = None) -> bool:
+    """Conditionally transition a raw row while preserving reorg terminal state."""
+    if state not in QUALIFICATION_STATES:
+        raise ValueError(f"unknown qualification state: {state}")
+    table = {"v2": "raw_pools", "v3": "raw_v3_pools"}.get(row.get("table_kind"))
+    if not table:
+        raise ValueError("qualification row has unknown table_kind")
+    now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    retry_at = ((now + timedelta(seconds=max(0, float(retry_after_seconds)))).isoformat()
+                if retry_after_seconds is not None else None)
+    qualified_at = now.isoformat() if state == "qualified_recorded" else None
+    c = _conn()
+    try:
+        changed = c.execute(f"""UPDATE {table} SET qualification_state=?,
+                    qualification_attempted_at=?,qualification_retry_at=?,
+                    qualification_reason=?,qualification_attempts=qualification_attempts+1,
+                    qualified_at=COALESCE(?,qualified_at),
+                    ledger_event_id=COALESCE(?,ledger_event_id),
+                    target_token=COALESCE(?,target_token)
+                 WHERE chain=? AND transaction_hash=? AND log_index=? AND removed=0
+                   AND qualification_state IN
+                     ('raw_unqualified','market_pending','market_error','below_threshold')""",
+            (state, now.isoformat(), retry_at, str(reason)[:240] if reason else None,
+             qualified_at, ledger_event_id, target_token.lower() if target_token else None,
+             row["chain"], row["transaction_hash"].lower(), int(row["log_index"])),
+        ).rowcount
+        c.commit()
+        return bool(changed)
+    finally:
+        c.close()
+
+
+def qualification_summary() -> dict:
+    """Report forward and historical coverage across both factory schemas."""
+    c = _conn()
+    try:
+        rows = c.execute("""SELECT evidence_state,qualification_state,COUNT(*) FROM raw_pools
+                            GROUP BY evidence_state,qualification_state
+                            UNION ALL
+                            SELECT evidence_state,qualification_state,COUNT(*) FROM raw_v3_pools
+                            GROUP BY evidence_state,qualification_state""").fetchall()
+        started = c.execute(
+            "SELECT value FROM bridge_meta WHERE key='launch_bridge_started_at'"
+        ).fetchone()
+    finally:
+        c.close()
+    evidence, qualification = {}, {}
+    for evidence_state, qualification_state, count in rows:
+        evidence[evidence_state] = evidence.get(evidence_state, 0) + count
+        qualification[qualification_state] = qualification.get(qualification_state, 0) + count
+    return {"raw_total": sum(evidence.values()), "evidence": evidence,
+            "qualification": qualification,
+            "bridge_started_at": started[0] if started else None}
 
 
 def subscribe_requests(spec: FactorySpec) -> list[dict]:
@@ -361,11 +511,21 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
               block_at=COALESCE(raw_pools.block_at,excluded.block_at),
               stable=excluded.stable,
               updated_at=excluded.updated_at,raw_payload_hash=excluded.raw_payload_hash,
-              removed=excluded.removed,evidence_state=excluded.evidence_state""",
+              removed=excluded.removed,evidence_state=excluded.evidence_state,
+              qualification_state=CASE WHEN excluded.removed=1 THEN 'reorg_removed'
+                                       ELSE raw_pools.qualification_state END,
+              qualification_reason=CASE WHEN excluded.removed=1 THEN 'factory log removed by reorg'
+                                        ELSE raw_pools.qualification_reason END""",
                       (*common, payload["pair_index"],
                        int(payload["stable"]) if "stable" in payload else None,
                        block_at, now, now,
                        _hash(payload), int(payload["removed"]), state))
+            if payload["removed"]:
+                c.execute("""UPDATE raw_pools SET qualification_state='reorg_removed',
+                              qualification_reason='factory log removed by reorg'
+                           WHERE chain=? AND transaction_hash=? AND log_index=?""",
+                          (payload["chain"], payload["transaction_hash"].lower(),
+                           payload["log_index"]))
         else:
             c.execute("""INSERT INTO raw_v3_pools(
                 chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
@@ -377,9 +537,19 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
               block_number=excluded.block_number,block_hash=excluded.block_hash,
               block_at=COALESCE(raw_v3_pools.block_at,excluded.block_at),
               updated_at=excluded.updated_at,raw_payload_hash=excluded.raw_payload_hash,
-              removed=excluded.removed,evidence_state=excluded.evidence_state""",
+              removed=excluded.removed,evidence_state=excluded.evidence_state,
+              qualification_state=CASE WHEN excluded.removed=1 THEN 'reorg_removed'
+                                       ELSE raw_v3_pools.qualification_state END,
+              qualification_reason=CASE WHEN excluded.removed=1 THEN 'factory log removed by reorg'
+                                        ELSE raw_v3_pools.qualification_reason END""",
                       (*common, payload["fee"], payload["tick_spacing"], block_at,
                        now, now, _hash(payload), int(payload["removed"]), state))
+            if payload["removed"]:
+                c.execute("""UPDATE raw_v3_pools SET qualification_state='reorg_removed',
+                              qualification_reason='factory log removed by reorg'
+                           WHERE chain=? AND transaction_hash=? AND log_index=?""",
+                          (payload["chain"], payload["transaction_hash"].lower(),
+                           payload["log_index"]))
         c.commit()
     finally:
         c.close()
