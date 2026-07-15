@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Callable, Protocol
 
 import structlog
+from websocket import WebSocketTimeoutException
 
 from src.pipeline import stream_health
 
@@ -74,7 +75,7 @@ class StreamRunner:
                     raw = ws.recv()
                     if raw in (None, "", b""):
                         raise ConnectionError("websocket closed")
-                except (TimeoutError, socket.timeout):
+                except (TimeoutError, socket.timeout, WebSocketTimeoutException):
                     now = self.monotonic()
                     if now - last_ping >= self.heartbeat_seconds:
                         ws.ping()

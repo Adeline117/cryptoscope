@@ -74,6 +74,22 @@ def test_timeout_sends_heartbeat_without_declaring_disconnect(health_db):
     assert ws.pings == 1
 
 
+def test_websocket_client_timeout_is_idle_not_disconnect(health_db):
+    from websocket import WebSocketTimeoutException
+    from src.pipeline.stream_runner import StreamEvent, StreamRunner
+
+    stop = threading.Event()
+    ws = _Socket([WebSocketTimeoutException("idle"), {"seq": 1}])
+    runner = StreamRunner(
+        source="ethereum", stream="heads", connect=lambda: ws,
+        subscribe=lambda sock: None,
+        parse=lambda raw: StreamEvent(raw, cursor=raw["seq"]),
+        on_event=lambda payload: stop.set(), heartbeat_seconds=0,
+    )
+    assert runner.run_connection(stop) == 1
+    assert ws.pings == 1 and ws.closed is True
+
+
 def test_backoff_is_bounded():
     from src.pipeline.stream_runner import StreamRunner
 
