@@ -23,15 +23,18 @@ SNAPSHOT_DIR = DATA_DIR / "listing_snapshots"
 
 EXCHANGES: dict[str, dict[str, Any]] = {
     "binance": {
-        "url": "https://api.binance.com/api/v3/exchangeInfo",
+        # Official market-data mirror is reachable in regions where api.binance.com
+        # returns HTTP 451. Keep the primary API as a fallback, never a proxy.
+        "urls": ["https://data-api.binance.vision/api/v3/exchangeInfo",
+                 "https://api.binance.com/api/v3/exchangeInfo"],
         "parser": "_parse_binance",
     },
     "okx": {
-        "url": "https://www.okx.com/api/v5/public/instruments?instType=SPOT",
+        "urls": ["https://www.okx.com/api/v5/public/instruments?instType=SPOT"],
         "parser": "_parse_okx",
     },
     "bybit": {
-        "url": "https://api.bybit.com/v5/market/instruments-info?category=spot",
+        "urls": ["https://api.bybit.com/v5/market/instruments-info?category=spot"],
         "parser": "_parse_bybit",
     },
 }
@@ -112,7 +115,7 @@ def _save_snapshot(exchange: str, symbols: set[str]) -> None:
 
 def check_exchange_result(
     exchange: str,
-    timeout: float = 10.0,
+    timeout: float = 25.0,
 ) -> dict[str, Any]:
     """Fetch one exchange and return alerts plus explicit source health.
 
@@ -140,18 +143,29 @@ def check_exchange_result(
         result["error"] = "unknown exchange"
         return result
 
-    url = config["url"]
+    urls = config.get("urls") or [config["url"]]
     parser_name = config["parser"]
     parser_fn = _PARSERS[parser_name]
 
-    try:
-        resp = httpx.get(url, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-    except (httpx.HTTPError, json.JSONDecodeError) as exc:
-        logger.error("listing_fetch_failed", exchange=exchange, error=str(exc))
-        result["error"] = str(exc)[:160]
+    data = None
+    errors = []
+    selected_url = None
+    for url in urls:
+        try:
+            resp = httpx.get(url, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            selected_url = url
+            break
+        except (httpx.HTTPError, json.JSONDecodeError) as exc:
+            errors.append(f"{url}: {str(exc)[:100]}")
+    result["attempted_endpoints"] = len(errors) + int(selected_url is not None)
+    if data is None:
+        error = " | ".join(errors)[:300]
+        logger.error("listing_fetch_failed", exchange=exchange, error=error)
+        result["error"] = error
         return result
+    result["endpoint"] = selected_url
 
     current_symbols = parser_fn(data)
     if not current_symbols:
@@ -201,7 +215,7 @@ def check_exchange(
     return check_exchange_result(exchange, timeout=timeout)["alerts"]
 
 
-def check_all_exchanges_with_status(timeout: float = 10.0) -> dict[str, Any]:
+def check_all_exchanges_with_status(timeout: float = 25.0) -> dict[str, Any]:
     """Check every configured source without converting failures to empty scans."""
     sources = [check_exchange_result(exchange, timeout=timeout)
                for exchange in EXCHANGES]
@@ -212,7 +226,7 @@ def check_all_exchanges_with_status(timeout: float = 10.0) -> dict[str, Any]:
     }
 
 
-def check_all_exchanges(timeout: float = 10.0) -> list[dict[str, Any]]:
+def check_all_exchanges(timeout: float = 25.0) -> list[dict[str, Any]]:
     """Check all configured exchanges for new listings.
 
     Returns:

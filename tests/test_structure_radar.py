@@ -62,6 +62,44 @@ def test_listing_fetch_failure_is_not_reported_as_empty_success(monkeypatch):
     assert "451" in result["error"]
 
 
+def test_listing_detector_uses_only_configured_official_fallback(tmp_path, monkeypatch):
+    import httpx
+    import src.collectors.listing_detector as ld
+
+    monkeypatch.setattr(ld, "SNAPSHOT_DIR", tmp_path)
+    monkeypatch.setitem(ld.EXCHANGES, "binance", {
+        "urls": ["https://official-primary.invalid", "https://official-mirror.invalid"],
+        "parser": "_parse_binance",
+    })
+    calls = []
+
+    class Response:
+        def __init__(self, url):
+            self.url = url
+
+        def raise_for_status(self):
+            if "primary" in self.url:
+                request = httpx.Request("GET", self.url)
+                response = httpx.Response(451, request=request)
+                raise httpx.HTTPStatusError("451", request=request, response=response)
+
+        def json(self):
+            return {"symbols": [{"symbol": "ABCUSDT", "status": "TRADING"}]}
+
+    def fetch(url, timeout):
+        calls.append(url)
+        return Response(url)
+
+    monkeypatch.setattr(ld.httpx, "get", fetch)
+    result = ld.check_exchange_result("binance")
+
+    assert calls == ["https://official-primary.invalid", "https://official-mirror.invalid"]
+    assert result["status"] == "ok"
+    assert result["endpoint"] == "https://official-mirror.invalid"
+    assert result["attempted_endpoints"] == 2
+    assert result["symbol_count"] == 1
+
+
 def test_scheduler_registers_structure_radar_job():
     from src.pipeline.scheduler import create_scheduler
     scheduler = create_scheduler()
