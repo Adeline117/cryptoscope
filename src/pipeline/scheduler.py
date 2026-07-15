@@ -750,13 +750,19 @@ async def _run_structure_radar():
 
 
 async def _run_board_export():
-    """Render regular views without the minutes-long operator verdict scan."""
+    """Render regular views without independently scheduled slow or Perps scans."""
     import asyncio
 
     logger.info("scheduled_board_export")
     from src.pipeline import board_export
     try:
-        res = await asyncio.to_thread(board_export.run, True, False, False)
+        res = await asyncio.to_thread(
+            board_export.run,
+            push=True,
+            include_operators=False,
+            include_opportunities=False,
+            include_perps=False,
+        )
         logger.info("board_export_done", **res)
     except Exception as e:
         logger.error("board_export_failed", error=str(e)[:120])

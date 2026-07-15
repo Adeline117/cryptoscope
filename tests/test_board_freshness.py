@@ -31,11 +31,15 @@ def test_unknown_view_cannot_inherit_a_generous_default_sla():
         _envelope({}, view="new_lane_without_policy")
 
 
-def test_regular_export_can_skip_both_slow_scanners(monkeypatch):
+def test_regular_export_can_skip_separately_scheduled_scanners(monkeypatch):
     from src.pipeline import board_export
 
-    for name in ("render_perps", "render_launch", "render_structure", "render_airdrop"):
+    for name in ("render_launch", "render_structure", "render_airdrop"):
         monkeypatch.setattr(board_export, name, lambda: {})
+    monkeypatch.setattr(
+        board_export, "render_perps",
+        lambda: (_ for _ in ()).throw(AssertionError("perps renderer was called")),
+    )
     monkeypatch.setattr(
         board_export, "render_operators",
         lambda: (_ for _ in ()).throw(AssertionError("operator scanner was called")),
@@ -49,7 +53,7 @@ def test_regular_export_can_skip_both_slow_scanners(monkeypatch):
     monkeypatch.setattr(board_export, "write_views", lambda **views: [])
 
     result = board_export.run(push=False, include_operators=False,
-                              include_opportunities=False)
+                              include_opportunities=False, include_perps=False)
     assert result["views_written"] == 0
 
 
@@ -87,9 +91,16 @@ def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path,
     perps = board_export._envelope({}, view="perps")
     board_export.write_views(launch=launch)
     board_export.write_views(perps=perps)
+    original_perps = (tmp_path / "perps.json").read_bytes()
+    original_perps_status = json.loads((tmp_path / "meta.json").read_text())["view_status"][
+        "perps"
+    ]
+    board_export.write_views(launch=board_export._envelope({}, view="launch"), perps=None)
 
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert meta["views"] == ["launch", "perps"]
     assert meta["view_status"]["launch"]["refresh_cadence_min"] == 0.5
     assert meta["view_status"]["perps"]["refresh_cadence_min"] == 5
+    assert meta["view_status"]["perps"] == original_perps_status
+    assert (tmp_path / "perps.json").read_bytes() == original_perps
     assert not list(tmp_path.glob("*.tmp"))

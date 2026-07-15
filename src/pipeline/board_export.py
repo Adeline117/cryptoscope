@@ -634,11 +634,12 @@ def push_to_blob(paths: list) -> int:
 
 
 def run(push: bool = True, include_operators: bool = True,
-        include_opportunities: bool = True) -> dict:
+        include_opportunities: bool = True, include_perps: bool = True) -> dict:
     """Render the money-making lanes → Blob. perps (#2/#3) is keyless & fast;
     opportunities (#1) is the home-grown smart-money radar; operators (庄) is the
-    verdict engine (slow). Each lane fails independently to null, never blocks."""
-    perps = render_perps()                              # #2 ignition + #3 cascade
+    verdict engine (slow). Independent scheduler jobs can omit their separately-owned
+    views without overwriting the last successful export."""
+    perps = render_perps() if include_perps else None   # independent five-minute job
     launch = render_launch()                            # #1 low-float first-seen events
     structure = render_structure()                      # public listings / later unlocks
     airdrop = render_airdrop()                          # official, owned-wallet workbench
