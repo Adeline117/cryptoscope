@@ -21,10 +21,19 @@ logger = structlog.get_logger()
 
 PAIR_CREATED_TOPIC = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
 PANCAKE_V2_FACTORY = "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
+PANCAKE_V2_BASE_FACTORY = "0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e"
+PANCAKE_V2_ETH_FACTORY = "0x1097053fd2ea711dad45caccc45eff7548fcb362"
 PUBLIC_BSC_WS = ("wss://bsc-rpc.publicnode.com", "wss://bsc.drpc.org")
 PUBLIC_BSC_RPC = ("https://bsc.rpc.blxrbdn.com", "https://bsc.drpc.org")
+PUBLIC_BASE_WS = ("wss://base-rpc.publicnode.com", "wss://base.drpc.org")
+PUBLIC_BASE_RPC = ("https://mainnet.base.org", "https://base.drpc.org")
+PUBLIC_ETH_WS = ("wss://ethereum-rpc.publicnode.com", "wss://eth.drpc.org")
+PUBLIC_ETH_RPC = ("https://rpc.flashbots.net", "https://eth.drpc.org",
+                  "https://ethereum-rpc.publicnode.com")
 MAX_BACKFILL_BLOCKS = 2_000
 DB = DATA_DIR / "evm_factory_events.db"
+_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/537.36 Chrome/120 Safari/537.36 CryptoScope/1.0")
 
 
 @dataclass(frozen=True)
@@ -52,6 +61,27 @@ def bsc_pancake_v2_spec() -> FactorySpec:
         ws_urls=_urls("BSC_FACTORY_WS_URLS", PUBLIC_BSC_WS),
         rpc_urls=_urls("BSC_FACTORY_RPC_URLS", PUBLIC_BSC_RPC),
     )
+
+
+def base_pancake_v2_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="base", venue="pancakeswap_v2", address=PANCAKE_V2_BASE_FACTORY,
+        ws_urls=_urls("BASE_FACTORY_WS_URLS", PUBLIC_BASE_WS),
+        rpc_urls=_urls("BASE_FACTORY_RPC_URLS", PUBLIC_BASE_RPC),
+    )
+
+
+def ethereum_pancake_v2_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="ethereum", venue="pancakeswap_v2", address=PANCAKE_V2_ETH_FACTORY,
+        ws_urls=_urls("ETH_FACTORY_WS_URLS", PUBLIC_ETH_WS),
+        rpc_urls=_urls("ETH_FACTORY_RPC_URLS", PUBLIC_ETH_RPC),
+    )
+
+
+def configured_specs() -> tuple[FactorySpec, ...]:
+    return (bsc_pancake_v2_spec(), base_pancake_v2_spec(),
+            ethereum_pancake_v2_spec())
 
 
 def _conn() -> sqlite3.Connection:
@@ -179,7 +209,7 @@ class JsonRpc:
                 request = urllib.request.Request(
                     endpoint, data=body,
                     headers={"Content-Type": "application/json",
-                             "User-Agent": "CryptoScope/1.0"})
+                             "User-Agent": _BROWSER_UA})
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     result = json.load(response)
                 if result.get("error"):
@@ -329,11 +359,13 @@ def build_runner(*, spec: FactorySpec | None = None, rpc: JsonRpc | None = None,
     )
 
 
-def _maintenance(stop: threading.Event, spec: FactorySpec, rpc: JsonRpc) -> None:
+def _maintenance(stop: threading.Event,
+                 bindings: tuple[tuple[FactorySpec, JsonRpc], ...]) -> None:
     while not stop.wait(60):
-        result = retry_open_gaps(spec, rpc)
-        if result["attempted"]:
-            logger.info("evm_factory_gap_retry", chain=spec.chain, **result)
+        for spec, rpc in bindings:
+            result = retry_open_gaps(spec, rpc)
+            if result["attempted"]:
+                logger.info("evm_factory_gap_retry", chain=spec.chain, **result)
 
 
 def main() -> None:
@@ -342,19 +374,27 @@ def main() -> None:
 
     load_dotenv(PROJECT_ROOT / ".env")
     _conn().close()
-    spec = bsc_pancake_v2_spec()
-    rpc = JsonRpc(spec.rpc_urls)
-    initial = retry_open_gaps(spec, rpc)
-    if initial["attempted"]:
-        logger.info("evm_factory_initial_gap_retry", chain=spec.chain, **initial)
+    bindings = tuple((spec, JsonRpc(spec.rpc_urls)) for spec in configured_specs())
+    for spec, rpc in bindings:
+        initial = retry_open_gaps(spec, rpc)
+        if initial["attempted"]:
+            logger.info("evm_factory_initial_gap_retry", chain=spec.chain, **initial)
     stop = threading.Event()
-    worker = threading.Thread(target=_maintenance, args=(stop, spec, rpc), daemon=True)
+    worker = threading.Thread(target=_maintenance, args=(stop, bindings), daemon=True)
     worker.start()
+    runners = [build_runner(spec=spec, rpc=rpc) for spec, rpc in bindings]
+    children = [threading.Thread(target=runner.run_forever, args=(stop,), daemon=True,
+                                 name=f"factory-{runner.source}")
+                for runner in runners[1:]]
+    for child in children:
+        child.start()
     try:
-        build_runner(spec=spec, rpc=rpc).run_forever(stop)
+        runners[0].run_forever(stop)
     finally:
         stop.set()
         worker.join(timeout=2)
+        for child in children:
+            child.join(timeout=2)
 
 
 if __name__ == "__main__":

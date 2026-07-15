@@ -47,6 +47,15 @@ def test_subscribes_to_official_factory_event_and_heads(evm):
     assert requests[1]["params"] == ["newHeads"]
 
 
+def test_configured_specs_cover_official_bsc_base_and_ethereum_factories(evm):
+    specs = {spec.chain: spec for spec in evm.configured_specs()}
+    assert set(specs) == {"bsc", "base", "ethereum"}
+    assert specs["bsc"].address == evm.PANCAKE_V2_FACTORY
+    assert specs["base"].address == evm.PANCAKE_V2_BASE_FACTORY
+    assert specs["ethereum"].address == evm.PANCAKE_V2_ETH_FACTORY
+    assert all(spec.ws_urls and spec.rpc_urls for spec in specs.values())
+
+
 def test_pair_created_decodes_raw_pool_evidence(evm):
     event = evm.parse_message(json.dumps(_notification(_log(evm))))
     assert event.cursor is None
