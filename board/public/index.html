@@ -290,6 +290,20 @@ function effectiveDecision(r){
   if(expiry&&Date.now()>=expiry&&["SMALL_PROBE","CLAIM_CHECK"].includes(recorded))return "EXPIRED";
   return r?.effective_decision||recorded;
 }
+const ACTION_LEVELS=new Set(["A0_BLOCKED","A1_WATCH","A2_PAPER_READY","A3_MANUAL_PROBE","A4_REAL_FILL_VALIDATED"]);
+function actionLevel(r){
+  const hard=(r?.decision==="AVOID"||r?.recorded_decision==="AVOID"||r?.security_gate?.state==="avoid");
+  if(hard)return "A0_BLOCKED";
+  const level=ACTION_LEVELS.has(r?.action_level)?r.action_level:"A1_WATCH";
+  const expiry=r?.current_assessment?.expires_at||r?.expires_at;
+  if(["A2_PAPER_READY","A3_MANUAL_PROBE"].includes(level)&&(!expiry||Date.now()>=new Date(expiry).getTime()))return "A1_WATCH";
+  return level;
+}
+function actionChip(r){
+  const lv=actionLevel(r), labels={A0_BLOCKED:"A0 · 阻断",A1_WATCH:"A1 · 观察",A2_PAPER_READY:"A2 · 纸面就绪",A3_MANUAL_PROBE:"A3 · 人工小额验证",A4_REAL_FILL_VALIDATED:"A4 · 历史真实成交已核验"};
+  const cls=lv==="A0_BLOCKED"?"b-danger":lv==="A3_MANUAL_PROBE"||lv==="A4_REAL_FILL_VALIDATED"?"b-good":lv==="A2_PAPER_READY"?"b-accent":"b-warn";
+  return `<span class="chip ${cls}">${esc(labels[lv])}</span>`;
+}
 function expiryText(r){
   if(!r?.expires_at)return "无有效报价时钟";
   const seconds=Math.ceil((new Date(r.expires_at).getTime()-Date.now())/1000);
@@ -392,35 +406,36 @@ function walletName(w,i){return "聪明钱#"+(i+1)}
 
 const LANES={
   play:{
-    title:d=>{const l=(data.launch?.events||[]).filter(x=>effectiveDecision(x)==="SMALL_PROBE").length;const cr=(data.perp?.carry||[]).filter(x=>x.net_ann>0).length;return `<b>先看这里</b>:${l?`有 <b style="color:var(--good)">${l}</b> 个低流通 Launch 报价仍有效`:'此刻没有报价仍有效的早期 Launch'}${cr?`；另有 <b style="color:var(--good)">${cr}</b> 个跨所carry候选(验证中)`:''}。`},
-    stat:d=>{const c=data.perp?.carry||[];const l=data.launch?.events||[];const dep=(data.op?.operators||[]).filter(depNow).length;return [["Launch",l.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length,"当前报价有效"],["carry",c.filter(x=>x.net_ann>0).length,"净>0·验证中"],["该避开",dep+avoidRows(data.opp).length,"别接盘"]]},
+    title:d=>{const l=(data.launch?.events||[]).filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const cr=(data.perp?.carry||[]).filter(x=>x.net_ann>0).length;return `<b>先看这里</b>:${l?`有 <b style="color:var(--good)">${l}</b> 个低流通 Launch 人工验证窗`:'此刻没有通过全部门禁的早期 Launch 人工验证窗'}${cr?`；另有 <b style="color:var(--good)">${cr}</b> 个跨所carry候选(验证中)`:''}。`},
+    stat:d=>{const c=data.perp?.carry||[];const l=data.launch?.events||[];const dep=(data.op?.operators||[]).filter(depNow).length;return [["Launch A3",l.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"人工验证·永不自动交易"],["carry",c.filter(x=>x.net_ann>0).length,"净>0·验证中"],["该避开",dep+avoidRows(data.opp).length,"别接盘"]]},
     readme:"目标是提高抓住极端右尾机会的概率，不是制造买入理由。<b>Launch</b>盯低流通早期重定价，必须先过流动性/时延/成交门；<b>carry</b>是低波动结构线；其余多数线用于防守。每个候选保留首次发现价、失效价和最大可成交仓位，方便事后复盘，而不是事后挑赢家。",
     custom:true,
   },
   launch:{
-    title:d=>{const e=d?.events||[];const p=e.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length;const s=d?.primary_sources?.solana?.streams?.[0];return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个报价当前仍有效`:'暂无报价仍有效的候选'}；Pump.fun 主链流 ${esc(s?.status||"不可判")}${s?.open_gaps?`，有 ${esc(s.open_gaps)} 个已知缺口`:''}。`},
-    stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{},eq=d?.primary_sources?.evm?.qualification||{};return [["首池事件",e.length,"首次发现价已锁定"],["SOL主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["EVM工厂完整证据",eq.evidence?.complete??"—","5条官方工厂流"],["当前可行动",e.filter(x=>effectiveDecision(x)==="SMALL_PROBE").length,"安全+路由+报价+证据门"],["纸面试验",e.filter(x=>x.recorded_decision==="SMALL_PROBE"&&effectiveDecision(x)==="WATCH").length,"继续结算但不可行动"],["观察",e.filter(x=>effectiveDecision(x)==="WATCH").length,"条件未齐/优势未证"],["已过期",e.filter(x=>effectiveDecision(x)==="EXPIRED").length,"必须重新报价"],["避开",e.filter(x=>effectiveDecision(x)==="AVOID").length,"已知安全/卖出失败"]]},
+    title:d=>{const e=d?.events||[];const p=e.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const s=d?.primary_sources?.solana?.streams?.[0];return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个 A3 人工验证窗仍有效`:'暂无通过新报价合同的 A3 人工验证窗'}；Pump.fun 主链流 ${esc(s?.status||"不可判")}${s?.open_gaps?`，有 ${esc(s.open_gaps)} 个已知缺口`:''}。`},
+    stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{},eq=d?.primary_sources?.evm?.qualification||{};return [["首池事件",e.length,"首次发现价已锁定"],["SOL主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["EVM工厂完整证据",eq.evidence?.complete??"—","5条官方工厂流"],["A3人工验证窗",e.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"完整成本+报价+证据+送达SLA"],["A2纸面就绪",e.filter(x=>actionLevel(x)==="A2_PAPER_READY").length,"不得当作入场指令"],["A1观察",e.filter(x=>actionLevel(x)==="A1_WATCH").length,"旧数据/条件未齐/已过期"],["A0阻断",e.filter(x=>actionLevel(x)==="A0_BLOCKED").length,"已知安全红旗"]]},
     readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。<b>SMALL_PROBE</b> 必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的证据门。样本不足时保留原始 cohort 做纸面结算，但当前动作降为 WATCH；缺 API key、取数失败或路由未知也只观察，已知蜜罐/权限雷或无法卖出直接避开。",
     rows:d=>d?.events||[],
     id:r=>r.id||r.chain+r.token, flash:r=>r.entry_price,
     empty:"暂时没有合格首池事件。Launch 是事件流，不是热榜；空白是正常输出。",
     filters:[
-      {k:"actionable",label:"可行动",test:r=>effectiveDecision(r)==="SMALL_PROBE"},
-      {k:"watch",label:"观察",test:r=>effectiveDecision(r)==="WATCH"},
-      {k:"avoid",label:"避开",test:r=>effectiveDecision(r)==="AVOID"},
-      {k:"expired",label:"已过期",test:r=>effectiveDecision(r)==="EXPIRED"},
+      {k:"actionable",label:"A3 人工验证窗",test:r=>actionLevel(r)==="A3_MANUAL_PROBE"},
+      {k:"paper",label:"A2 纸面就绪",test:r=>actionLevel(r)==="A2_PAPER_READY"},
+      {k:"watch",label:"A1 观察",test:r=>actionLevel(r)==="A1_WATCH"},
+      {k:"avoid",label:"A0 阻断",test:r=>actionLevel(r)==="A0_BLOCKED"},
+      {k:"expired",label:"报价已过期",test:r=>r.expires_at&&Date.now()>=new Date(r.expires_at).getTime()},
       {k:"all",label:"全部",test:r=>true},
     ],
     searchText:r=>`${r.symbol||""} ${r.token||""} ${r.chain||""}`,
     cols:[
       {k:"sym",label:"代币",cell:r=>idc(r.symbol,(CHAIN[r.chain]||r.chain)+" · "+(r.age_min<60?Math.round(r.age_min)+"m":(r.age_min/60).toFixed(1)+"h")),sort:r=>r.symbol||""},
-      {k:"d",label:"当前决策",c:1,cell:r=>effectiveDecision(r)==="SMALL_PROBE"?`<span class="chip b-good">报价有效 · ${expiryText(r)}</span>`:effectiveDecision(r)==="EXPIRED"?'<span class="chip">已过期</span>':effectiveDecision(r)==="AVOID"?'<span class="chip b-danger">避开</span>':'<span class="chip b-warn">观察</span>',sort:r=>effectiveDecision(r)==="SMALL_PROBE"?3:effectiveDecision(r)==="WATCH"?2:effectiveDecision(r)==="EXPIRED"?1:0},
-      {k:"px",label:"首次价",n:1,cell:r=>r.entry_price?`<span class="num">$${r.entry_price}</span>`:"—",sort:r=>r.entry_price||0},
+      {k:"d",label:"动作等级",c:1,cell:r=>`${actionChip(r)}${actionLevel(r)==="A3_MANUAL_PROBE"?` <small class="dim">${esc(expiryText(r.current_assessment||r))}</small>`:""}`,sort:r=>({A4_REAL_FILL_VALIDATED:4,A3_MANUAL_PROBE:3,A2_PAPER_READY:2,A1_WATCH:1,A0_BLOCKED:0})[actionLevel(r)]},
+      {k:"px",label:"首次发现价",n:1,cell:r=>r.entry_price?`<span class="num">$${r.entry_price}</span>`:"—",sort:r=>r.entry_price||0},
       {k:"fdv",label:"FDV / 流动性",n:1,cell:r=>`$${fmtUsd(r.fdv)} <small class="dim">/ ${usd(r.liquidity_usd)}</small>`,sort:r=>r.fdv||0},
       {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
       {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 ≤$${esc(r.invalidation_price??"—")}</small>`,sort:r=>r.max_notional_usd||0},
     ],
-    detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},ed=effectiveDecision(r);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${ed==="SMALL_PROBE"?`安全、双向报价与证据门均通过，且仍在 ${esc(r.expires_at)} 前有效；只可按上限小额试错，触及失效价退出。`:ed==="EXPIRED"?"原报价已经过期，禁止按旧价格行动；必须重新通过安全与双向路由门。":ed==="AVOID"?"存在已知安全红旗或反向路由失败，不要碰。":eg.state&&eg.state!=="pass"?"技术门可能通过，但成本后同期对照尚未证明优势；只做纸面结算，不可行动。":"检查不完整，只观察；UNKNOWN 不是安全。"}<br>当前状态: ${esc(ed)} · ${esc(expiryText(r))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
+    detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r),ca=r.current_assessment||{};const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
   },
   structure:{
     title:d=>{const e=d?.events||[],h=d?.source_health||[],bad=h.filter(x=>x.status!=="ok");return `<b style="color:var(--violet)">公开市场结构事件</b>: ${e.length} 个已入账。来源本轮可达 <b>${h.filter(x=>x.status==="ok").length}/${h.length||"?"}</b>${bad.length?`；失败: ${bad.map(x=>esc(x.exchange)+"("+esc(x.error||"unknown")+")").join(" · ")}`:""}。`},
@@ -542,7 +557,7 @@ function classOp(r){if(!r.ok)return"unknown";const v=r.verdict||"",a=r.acquisiti
 // board from a data dashboard into a clear, honest, ranked trading thesis.
 function renderPlay(){
   const launches=data.launch?.events||[];
-  const activeLaunch=launches.filter(x=>effectiveDecision(x)==="SMALL_PROBE");
+  const activeLaunch=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE");
   const carry=(data.perp?.carry||[]).filter(x=>x.net_ann>0);
   const pp=data.perp?.carry_paper;
   const carryEvidence=data.stats?.lanes?.carry;
@@ -562,13 +577,13 @@ function renderPlay(){
       <p class="decision-copy">${verdictCopy}</p>
       <div class="command-actions"><button class="jump primary" data-jump="launch">查看入场门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
     <div class="decision-facts">
-      <div class="fact ${actionCount?'good':'warn'}"><span class="fk">可行动</span><span class="fv">${actionCount}</span><span class="fs">有价格、有时钟、有失效条件</span></div>
+      <div class="fact ${actionCount?'good':'warn'}"><span class="fk">A3 人工验证窗</span><span class="fv">${actionCount}</span><span class="fs">新鲜报价+完整成本+证据门+送达SLA</span></div>
       <div class="fact"><span class="fk">纸面候选</span><span class="fv">${carry.length}</span><span class="fs">模型净额为正，不等于已获证</span></div>
       <div class="fact danger"><span class="fk">应避开</span><span class="fv">${dep.length+avoid.length}</span><span class="fs">派发、高接盘风险或安全红旗</span></div>
       <div class="fact warn"><span class="fk">数据覆盖</span><span class="fv">${sourceOk}/${sourceHealth.length||'?'}</span><span class="fs">仅为上币来源健康，不代表全市场覆盖</span></div>
     </div></section>`;
   if(activeLaunch.length){
-    h+=`<section class="play-sec" style="grid-column:1/-1"><div class="ph">可执行窗口 <span class="pd">报价到期即失效 · 非自动交易</span></div>${activeLaunch.slice(0,4).map(r=>`<div class="prow"><span class="chip b-good">${esc(expiryText(r))}</span> <b>${esc(r.symbol)}</b> 入场参考 <span class="num">$${esc(r.entry_price)}</span> · 失效 ≤ <span class="num">$${esc(r.invalidation_price)}</span> · 最大 <span class="num">${usd(r.max_notional_usd)}</span><button class="jump" data-jump="launch">看完整证据</button></div>`).join('')}</section>`;
+    h+=`<section class="play-sec" style="grid-column:1/-1"><div class="ph">A3 人工小额验证窗 <span class="pd">只读报价到期即失效 · 永不自动交易</span></div>${activeLaunch.slice(0,4).map(r=>{const ca=r.current_assessment||{};return `<div class="prow"><span class="chip b-good">${esc(expiryText(ca))}</span> <b>${esc(r.symbol)}</b> 当前只读报价参考 <span class="num">${ca.entry_reference_price!=null?'$'+esc(ca.entry_reference_price):'不可得'}</span> · 当前失效参考 ≤ <span class="num">${ca.invalidation_reference_price!=null?'$'+esc(ca.invalidation_reference_price):'不可得'}</span> · 最大 <span class="num">${usd(ca.notional_usd||r.max_notional_usd)}</span><button class="jump" data-jump="launch">看完整证据</button></div>`}).join('')}</section>`;
   }
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
     <div class="evidence-card"><div class="ek"><span>早期机会证据</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEvidence?.probe?.n??0}/20 <small class="dim">试验</small></div><div class="es">同期 WATCH 对照 ${launchEvidence?.control?.n??0}/20；必须比较成本后 24h 结果。</div><div class="meter"><i style="width:${Math.min(100,(launchEvidence?.probe?.n||0)/20*100)}%"></i></div></div>

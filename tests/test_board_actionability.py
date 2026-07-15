@@ -9,8 +9,9 @@ def test_board_uses_effective_decision_and_client_side_expiry():
 
     assert "function effectiveDecision(r)" in html
     assert 'Date.now()>=expiry' in html
-    assert 'effectiveDecision(x)==="SMALL_PROBE"' in html
-    assert "原报价已经过期，禁止按旧价格行动" in html
+    assert 'actionLevel(x)==="A3_MANUAL_PROBE"' in html
+    assert '["A2_PAPER_READY","A3_MANUAL_PROBE"].includes(level)' in html
+    assert "旧数据、未知项或报价过期，一律只观察" in html
     assert "已过期·历史方向" in html
     assert "只读报价非成交" in html
 
@@ -73,9 +74,9 @@ def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
 def test_launch_action_requires_statistical_evidence_gate():
     html = BOARD.read_text()
 
-    assert "安全+路由+报价+证据门" in html
+    assert "完整成本+报价+证据+送达SLA" in html
     assert "成本后 24h 试验组相对同期 WATCH 对照的证据门" in html
-    assert "只做纸面结算，不可行动" in html
+    assert "安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场" in html
     assert "优势门:" in html
 
 
@@ -95,7 +96,7 @@ def test_decision_overview_separates_actionable_windows_from_paper_candidates():
 
     assert 'aria-label="当前决策"' in html
     assert "等待 · 当前不入场" in html
-    assert "有价格、有时钟、有失效条件" in html
+    assert "新鲜报价+完整成本+证据门+送达SLA" in html
     assert "模型净额为正，不等于已获证" in html
     assert "不代表全市场覆盖" in html
     assert 'data-jump="launch"' in html
@@ -120,9 +121,22 @@ def test_launch_defaults_to_actionable_only_instead_of_burying_decision_in_watch
 
     assert 'filterState={launch:"actionable"}' in html
     assert "当前没有通过全部门禁且报价仍有效的机会" in html
-    assert 'label:"观察"' in html
+    assert 'label:"A1 观察"' in html
     assert 'type="search"' in html
     assert "搜索代币 / 合约" in html
+
+
+def test_launch_uses_fail_closed_a0_to_a4_action_levels():
+    html = BOARD.read_text()
+
+    assert "function actionLevel(r)" in html
+    for level in ("A0_BLOCKED", "A1_WATCH", "A2_PAPER_READY",
+                  "A3_MANUAL_PROBE", "A4_REAL_FILL_VALIDATED"):
+        assert level in html
+    assert "首次发现价（不是当前入场价）" in html
+    assert "当前只读报价参考" in html
+    assert "自动交易: <b>永不允许</b>" in html
+    assert "入场参考" not in html
 
 
 def test_launch_discloses_primary_stream_coverage_and_known_gaps():
