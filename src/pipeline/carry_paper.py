@@ -6,8 +6,8 @@ slippage — with MEASURED data. On each run it:
 
   · opens a paper position for every fat-net cross-venue carry not already open,
     snapshotting entry slippage from the LIVE order books (HL + OKX),
-  · accrues the realized funding differential each update (integrating the diff over
-    elapsed time — the actual money the delta-neutral pair would have collected),
+  · accrues the observed funding differential only between consecutive valid updates;
+    source gaps are measured explicitly and never backfilled as profit,
   · closes the position when the differential decays below a floor → the REAL hold
     period and the REAL realized net (accrued funding − measured entry/exit slippage).
 
@@ -50,10 +50,51 @@ def _conn() -> sqlite3.Connection:
         entry_diff REAL, pred_net REAL, entry_slip REAL, notional REAL,
         accrued_pct REAL DEFAULT 0, last_ts TEXT, last_diff REAL,
         status TEXT DEFAULT 'open', exit_ts TEXT, exit_slip REAL,
-        hold_h REAL, realized_net REAL, close_reason TEXT)""")
+        hold_h REAL, realized_net REAL, close_reason TEXT,
+        last_attempt_ts TEXT, last_valid_ts TEXT, unmeasured_h REAL DEFAULT 0,
+        measurement_state TEXT DEFAULT 'observed')""")
     cols = {r[1] for r in c.execute("PRAGMA table_info(paper)").fetchall()}
     if "close_reason" not in cols:
         c.execute("ALTER TABLE paper ADD COLUMN close_reason TEXT")
+    additions = {
+        "last_attempt_ts": "TEXT",
+        "last_valid_ts": "TEXT",
+        "unmeasured_h": "REAL DEFAULT 0",
+        "measurement_state": "TEXT DEFAULT 'observed'",
+    }
+    added: set[str] = set()
+    for name, declaration in additions.items():
+        if name not in cols:
+            c.execute(f"ALTER TABLE paper ADD COLUMN {name} {declaration}")
+            added.add(name)
+    if added:
+        now = datetime.now(timezone.utc)
+        rows = c.execute(
+            "SELECT id,last_ts,status,last_attempt_ts,last_valid_ts,unmeasured_h,"
+            "measurement_state FROM paper"
+        ).fetchall()
+        for pid, last_ts, status, attempt, valid, unmeasured, state in rows:
+            if status == "open" and "measurement_state" in added:
+                try:
+                    migration_gap_h = max(
+                        (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600, 0
+                    )
+                except Exception:
+                    migration_gap_h = 0
+                c.execute(
+                    "UPDATE paper SET last_ts=?,last_attempt_ts=?,last_valid_ts=?,"
+                    "unmeasured_h=?,measurement_state='migration_gap' WHERE id=?",
+                    (now.isoformat(), now.isoformat(), valid or last_ts,
+                     (unmeasured or 0) + migration_gap_h, pid),
+                )
+            else:
+                c.execute(
+                    "UPDATE paper SET last_attempt_ts=?,last_valid_ts=?,unmeasured_h=?,"
+                    "measurement_state=? WHERE id=?",
+                    (attempt or last_ts, valid or last_ts, unmeasured or 0,
+                     state or "observed", pid),
+                )
+        c.commit()
     return c
 
 
@@ -66,7 +107,8 @@ def _sync_opportunity_ledger() -> dict:
         rows = c.execute(
             "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,"
             "accrued_pct,last_ts,last_diff,status,exit_ts,exit_slip,hold_h,"
-            "realized_net,close_reason FROM paper ORDER BY id"
+            "realized_net,close_reason,last_attempt_ts,last_valid_ts,unmeasured_h,"
+            "measurement_state FROM paper ORDER BY id"
         ).fetchall()
     finally:
         c.close()
@@ -74,7 +116,8 @@ def _sync_opportunity_ledger() -> dict:
     for row in rows:
         (pid, symbol, entry_ts, entry_diff, pred_net, entry_slip, notional,
          accrued_pct, last_ts, last_diff, status, exit_ts, exit_slip, hold_h,
-         realized_net, close_reason) = row
+         realized_net, close_reason, last_attempt_ts, last_valid_ts, unmeasured_h,
+         measurement_state) = row
         estimated_roundtrip_cost = ((entry_slip or 0) * 2
                                     + 2 * FEE_PCT_ONEWAY_BOTHLEGS)
         candidate = {
@@ -100,7 +143,10 @@ def _sync_opportunity_ledger() -> dict:
             "cost_is_real_fill": False, "status": status,
             "funding_accrued_pct": accrued_pct or 0,
             "entry_slip_pct": entry_slip,
-            "last_diff_ann_pct": last_diff, "last_measured_at": last_ts,
+            "last_diff_ann_pct": last_diff, "last_measured_at": last_valid_ts,
+            "last_attempt_at": last_attempt_ts, "last_valid_at": last_valid_ts,
+            "unmeasured_h": unmeasured_h or 0,
+            "measurement_state": measurement_state or "observed",
         }
         state = "open"
         if status == "closed":
@@ -206,28 +252,48 @@ def _roundtrip_slip(coin: str, notional: float = NOTIONAL,
 
 
 def run(carries: list[dict]) -> dict:
-    """Open/accrue/close paper positions from the current cross-venue carry list. Returns
-    a stats summary. `carries`: the carry_signals() output (needs symbol, cross, net_ann,
-    edge_ann)."""
+    """Open/accrue/close paper positions from valid cross-venue observations.
+
+    Absence from ``carries`` is not an exit: it can mean a source failure or an upstream
+    candidate filter. Such intervals are marked unmeasured and never accrue funding.
+    """
     now = datetime.now(timezone.utc)
     by_sym = {c["symbol"]: c for c in carries if c.get("cross")}
     c = _conn()
     try:
         open_rows = {r[1]: r for r in c.execute(
             "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,"
-            "last_ts,last_diff FROM paper WHERE status='open'").fetchall()}
+            "last_ts,last_diff,last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state "
+            "FROM paper WHERE status='open'").fetchall()}
         # 1) ACCRUE + maybe CLOSE existing open positions
         for sym, row in open_rows.items():
-            pid, _, _, _, pred_net, entry_slip, notional, accrued, last_ts, last_diff = row
+            (pid, _, _, _, pred_net, entry_slip, notional, accrued, last_ts, last_diff,
+             _last_attempt_ts, _last_valid_ts, unmeasured_h, measurement_state) = row
             cur = by_sym.get(sym)
-            cur_diff = cur["edge_ann"] if cur else (last_diff if last_diff is not None else 0)
             try:
-                elapsed_h = (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600
+                elapsed_h = max(
+                    (now - datetime.fromisoformat(last_ts)).total_seconds() / 3600, 0
+                )
             except Exception:
                 elapsed_h = 0
+            if cur is None:
+                c.execute(
+                    "UPDATE paper SET last_ts=?,last_attempt_ts=?,unmeasured_h=?,"
+                    "measurement_state='source_gap' WHERE id=?",
+                    (now.isoformat(), now.isoformat(), (unmeasured_h or 0) + elapsed_h, pid),
+                )
+                continue
+
+            cur_diff = cur["edge_ann"]
             # realized funding over the interval = diff(ann%) × (hours / 8760)
-            accrued = (accrued or 0) + (last_diff or cur_diff) * (elapsed_h / 8760.0)
-            if cur_diff < CLOSE_DIFF_FLOOR or cur is None:
+            # A recovery observation only re-establishes the measurement clock. The
+            # preceding interval remains unknown and must not be filled with last_diff.
+            if measurement_state != "observed":
+                unmeasured_h = (unmeasured_h or 0) + elapsed_h
+                elapsed_h = 0
+            interval_diff = last_diff if last_diff is not None else cur_diff
+            accrued = (accrued or 0) + interval_diff * (elapsed_h / 8760.0)
+            if cur_diff < CLOSE_DIFF_FLOOR:
                 exit_slip = _roundtrip_slip(sym, phase="exit") or entry_slip or 0
                 try:
                     hold_h = (now - datetime.fromisoformat(open_rows[sym][2])).total_seconds() / 3600
@@ -239,15 +305,20 @@ def run(carries: list[dict]) -> dict:
                 # one-time round-trip cost = slippage in + slippage out + fees(2× one-way)
                 cost = (entry_slip or 0) + exit_slip + 2 * FEE_PCT_ONEWAY_BOTHLEGS
                 realized_net = accrued / hold_yr - cost / hold_yr
-                close_reason = "market_missing" if cur is None else "diff_below_floor"
                 c.execute("UPDATE paper SET status='closed', exit_ts=?, exit_slip=?, hold_h=?, "
                           "accrued_pct=?, realized_net=?, last_ts=?, last_diff=?,"
-                          "close_reason=? WHERE id=?",
+                          "close_reason='diff_below_floor',last_attempt_ts=?,last_valid_ts=?,"
+                          "unmeasured_h=?,measurement_state='observed' WHERE id=?",
                           (now.isoformat(), exit_slip, hold_h, accrued, realized_net,
-                           now.isoformat(), cur_diff, close_reason, pid))
+                           now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
+                           unmeasured_h or 0, pid))
             else:
-                c.execute("UPDATE paper SET accrued_pct=?, last_ts=?, last_diff=? WHERE id=?",
-                          (accrued, now.isoformat(), cur_diff, pid))
+                c.execute(
+                    "UPDATE paper SET accrued_pct=?,last_ts=?,last_diff=?,last_attempt_ts=?,"
+                    "last_valid_ts=?,unmeasured_h=?,measurement_state='observed' WHERE id=?",
+                    (accrued, now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
+                     unmeasured_h or 0, pid),
+                )
         # 2) OPEN new positions for fat-net cross carries not already open
         for sym, cur in by_sym.items():
             if sym in open_rows or (cur.get("net_ann") or 0) < OPEN_MIN_NET:
@@ -256,9 +327,11 @@ def run(carries: list[dict]) -> dict:
             if slip is None:
                 continue                      # can't measure entry → don't open
             c.execute("INSERT INTO paper(symbol,entry_ts,entry_diff,pred_net,entry_slip,"
-                      "notional,accrued_pct,last_ts,last_diff) VALUES (?,?,?,?,?,?,0,?,?)",
+                      "notional,accrued_pct,last_ts,last_diff,last_attempt_ts,last_valid_ts,"
+                      "unmeasured_h,measurement_state) VALUES (?,?,?,?,?,?,0,?,?,?,?,0,'observed')",
                       (sym, now.isoformat(), cur["edge_ann"], cur["net_ann"], slip,
-                       NOTIONAL, now.isoformat(), cur["edge_ann"]))
+                       NOTIONAL, now.isoformat(), cur["edge_ann"], now.isoformat(),
+                       now.isoformat()))
         c.commit()
     finally:
         c.close()
@@ -279,20 +352,25 @@ def paper_stats() -> dict:
                            "accrued_pct,entry_ts,exit_ts,close_reason "
                            "FROM paper WHERE status='closed'").fetchall()
         opened = c.execute(
-            "SELECT symbol,entry_ts,last_ts,entry_diff,last_diff,pred_net,entry_slip,notional "
+            "SELECT symbol,entry_ts,last_ts,entry_diff,last_diff,pred_net,entry_slip,notional,"
+            "last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state "
             "FROM paper WHERE status='open' ORDER BY entry_ts DESC"
         ).fetchall()
     finally:
         c.close()
     out = {
         "n_open": len(opened), "n_closed": len(closed),
-        "exit_rule": f"cross-venue funding differential < {CLOSE_DIFF_FLOOR}% ann or market missing",
+        "exit_rule": f"valid paired observation: differential < {CLOSE_DIFF_FLOOR}% ann",
         "open_positions": [
             {
-                "symbol": row[0], "entry_at": row[1], "last_measured_at": row[2],
+                "symbol": row[0], "entry_at": row[1], "last_measured_at": row[9],
                 "entry_diff_ann_pct": row[3], "last_diff_ann_pct": row[4],
                 "predicted_net_ann_pct": row[5], "entry_slip_pct": row[6],
                 "notional_usd_per_leg": row[7],
+                "last_attempt_at": row[8], "last_valid_at": row[9],
+                "integration_cursor_at": row[2],
+                "unmeasured_h": round(row[10] or 0, 2),
+                "measurement_state": row[11] or "observed",
                 "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
                 "execution_mode": "paper_orderbook_measurement",
             }

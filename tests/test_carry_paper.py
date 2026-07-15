@@ -75,6 +75,97 @@ def test_stats_honest_when_nothing_closed(cp):
     assert position["execution_mode"] == "paper_orderbook_measurement"
 
 
+def test_missing_observation_pauses_without_closing_or_accruing(cp):
+    import sqlite3
+
+    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    c = sqlite3.connect(str(cp.DB))
+    past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    c.execute(
+        "UPDATE paper SET entry_ts=?,last_ts=?,last_valid_ts=?,last_diff=40,accrued_pct=0 "
+        "WHERE symbol='X'",
+        (past, past, past),
+    )
+    c.commit()
+    c.close()
+
+    stats = cp.run([])
+    assert stats["n_open"] == 1 and stats["n_closed"] == 0
+    position = stats["open_positions"][0]
+    assert position["measurement_state"] == "source_gap"
+    assert position["unmeasured_h"] == pytest.approx(48, abs=0.1)
+    assert position["last_valid_at"] == past
+    assert position["last_measured_at"] == past
+    assert position["last_attempt_at"] != past
+
+    c = sqlite3.connect(str(cp.DB))
+    row = c.execute(
+        "SELECT accrued_pct,last_ts FROM paper WHERE symbol='X'"
+    ).fetchone()
+    assert row[0] == 0
+    recovery_start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    c.execute("UPDATE paper SET last_ts=? WHERE symbol='X'", (recovery_start,))
+    c.commit()
+    c.close()
+
+    recovered = cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    position = recovered["open_positions"][0]
+    assert position["measurement_state"] == "observed"
+    assert position["unmeasured_h"] == pytest.approx(49, abs=0.1)
+    c = sqlite3.connect(str(cp.DB))
+    assert c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0] == 0
+    c.close()
+
+    c = sqlite3.connect(str(cp.DB))
+    observed_start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    c.execute("UPDATE paper SET last_ts=? WHERE symbol='X'", (observed_start,))
+    c.commit()
+    c.close()
+    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    c = sqlite3.connect(str(cp.DB))
+    accrued = c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0]
+    c.close()
+    assert accrued == pytest.approx(40 / 8760, rel=0.02)
+
+
+def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
+    import sqlite3
+
+    past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    c = sqlite3.connect(str(cp.DB))
+    c.execute("""CREATE TABLE paper(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, entry_ts TEXT,
+        entry_diff REAL, pred_net REAL, entry_slip REAL, notional REAL,
+        accrued_pct REAL DEFAULT 0, last_ts TEXT, last_diff REAL,
+        status TEXT DEFAULT 'open', exit_ts TEXT, exit_slip REAL,
+        hold_h REAL, realized_net REAL, close_reason TEXT)""")
+    c.execute(
+        "INSERT INTO paper(symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,"
+        "accrued_pct,last_ts,last_diff,status) VALUES ('X',?,?,?,?,?,0,?,40,'open')",
+        (past, 40, 40, 0.05, 10_000, past),
+    )
+    c.commit()
+    c.close()
+
+    migrated = cp._conn()
+    state = migrated.execute(
+        "SELECT measurement_state,last_valid_ts,last_ts,unmeasured_h FROM paper"
+    ).fetchone()
+    migrated.close()
+    assert state[0] == "migration_gap"
+    assert state[1] == past and state[2] != past
+    assert state[3] == pytest.approx(48, abs=0.1)
+
+    cp.run([{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    c = sqlite3.connect(str(cp.DB))
+    accrued, measurement_state = c.execute(
+        "SELECT accrued_pct,measurement_state FROM paper WHERE symbol='X'"
+    ).fetchone()
+    c.close()
+    assert accrued == 0
+    assert measurement_state == "observed"
+
+
 def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     from src.pipeline import opportunity_ledger
 
