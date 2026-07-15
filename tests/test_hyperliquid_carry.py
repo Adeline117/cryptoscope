@@ -175,6 +175,58 @@ def test_carry_signals_explicit_empty_okx_rates_never_refetches(monkeypatch):
     ) == []
 
 
+def test_carry_proxy_uses_fixed_hold_assumption_not_sparse_coverage(monkeypatch):
+    monkeypatch.setattr(hl, "_funding_persistence", lambda: {
+        "BTC": {"mean_ann": 30.0, "pos_frac": 1.0, "n": 10},
+    })
+    monkeypatch.setattr(hl, "_hl_spot_tokens", lambda: set())
+    monkeypatch.setattr(hl, "_store_xdiff", lambda _diffs: None)
+    coverage = {
+        "BTC": {"positive_fraction": 5 / 6, "mean_ann": 20.0,
+                "point_count": 6, "coverage_span_h": 48.0},
+    }
+    monkeypatch.setattr(hl, "xdiff_stats", lambda: coverage)
+
+    first = hl.carry_signals(
+        [_ctx("BTC", funding_ann=30.0)], okx_rates={"BTC": 0.0},
+    )[0]
+    coverage["BTC"] = {**coverage["BTC"], "coverage_span_h": 720.0}
+    second = hl.carry_signals(
+        [_ctx("BTC", funding_ann=30.0)], okx_rates={"BTC": 0.0},
+    )[0]
+
+    expected = hl._carry_partial_model_proxy_ann(30.0)
+    assert first["partial_model_proxy_ann_pct"] == pytest.approx(expected, abs=0.1)
+    assert second["partial_model_proxy_ann_pct"] == first["partial_model_proxy_ann_pct"]
+    assert first["model_hold_days_assumption"] == 14
+    assert first["hold_period_verified"] is False
+    assert first["coverage_span_h"] == 48.0
+    assert first["coverage_point_count"] == 6
+    assert first["coverage_positive_fraction"] == pytest.approx(0.83)
+    assert first["all_in_net_ann_pct"] is None
+    assert first["cost_completeness"] == "partial"
+    assert first["is_realized"] is False
+    assert first["candidate_scope"] == "cross_venue_two_perp"
+    assert first["paper_measurement_eligible"] is True
+    assert "net_ann" not in first
+    assert "hold_days" not in first and "hold_measured" not in first
+
+
+def test_single_venue_candidate_is_separate_from_cross_venue_paper_scope(monkeypatch):
+    monkeypatch.setattr(hl, "_funding_persistence", lambda: {})
+    monkeypatch.setattr(hl, "_hl_spot_tokens", lambda: set())
+    monkeypatch.setattr(hl, "xdiff_stats", lambda: {})
+    monkeypatch.setattr(hl, "_store_xdiff", lambda _diffs: None)
+
+    candidate = hl.carry_signals(
+        [_ctx("BTC", funding_ann=30.0)], okx_rates={},
+    )[0]
+
+    assert candidate["cross"] is False
+    assert candidate["candidate_scope"] == "single_venue_spot_perp"
+    assert candidate["paper_measurement_eligible"] is False
+
+
 def test_scan_carry_reports_source_symbol_okx_and_cap_states(monkeypatch):
     monkeypatch.setattr(
         hl, "carry_signals", lambda _rows, *, okx_rates=None: []

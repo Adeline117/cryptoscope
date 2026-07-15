@@ -432,8 +432,8 @@ function walletName(w,i){return "聪明钱#"+(i+1)}
 
 const LANES={
   play:{
-    title:d=>{const l=(data.launch?.events||[]).filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const cr=(data.perp?.carry||[]).filter(x=>x.net_ann>0).length;return `<b>先看这里</b>:${l?`有 <b style="color:var(--good)">${l}</b> 个低流通 Launch 人工验证窗`:'此刻没有通过全部门禁的早期 Launch 人工验证窗'}${cr?`；另有 <b style="color:var(--good)">${cr}</b> 个跨所carry候选(验证中)`:''}。`},
-    stat:d=>{const c=data.perp?.carry||[];const l=data.launch?.events||[];const dep=(data.op?.operators||[]).filter(depNow).length;return [["Launch A3",l.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"人工验证·永不自动交易"],["carry",c.filter(x=>x.net_ann>0).length,"净>0·验证中"],["该避开",dep+avoidRows(data.opp).length,"别接盘"]]},
+    title:d=>{const l=(data.launch?.events||[]).filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const cr=(data.perp?.carry||[]).filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0).length;return `<b>先看这里</b>:${l?`有 <b style="color:var(--good)">${l}</b> 个低流通 Launch 人工验证窗`:'此刻没有通过全部门禁的早期 Launch 人工验证窗'}${cr?`；另有 <b style="color:var(--good)">${cr}</b> 个跨所 Carry 部分模型候选(验证中)`:''}。`},
+    stat:d=>{const c=data.perp?.carry||[];const l=data.launch?.events||[];const dep=(data.op?.operators||[]).filter(depNow).length;return [["Launch A3",l.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"人工验证·永不自动交易"],["跨所 Carry",c.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0).length,"部分模型代理>0·非真实收益"],["该避开",dep+avoidRows(data.opp).length,"别接盘"]]},
     readme:"目标是提高抓住极端右尾机会的概率，不是制造买入理由。<b>Launch</b>盯低流通早期重定价，必须先过流动性/时延/成交门；<b>carry</b>是低波动结构线；其余多数线用于防守。每个候选保留首次发现价、失效价和最大可成交仓位，方便事后复盘，而不是事后挑赢家。",
     custom:true,
   },
@@ -545,8 +545,8 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>{const c=d?.carry||[],health=d?.carry_source_health||{};const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos}/${c.length}${top?`，最高代理 +${top.net_ann}%(${esc(top.symbol)})`:''}。有效报价代理关闭 ${pp.n_proxy_closed??ev?.n_proxy??"?"} / 总关闭 ${pp.n_closed_total??"?"}；真实优势样本 ${pp.real_edge_n??ev?.real_edge_n??0}。`},
-    stat:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["模型代理>0",`${pos}/${c.length}`,"部分成本假设·非结果"],["最高模型代理",top?`+${top.net_ann}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"}`],["真实优势样本",pp.real_edge_n??ev?.real_edge_n??0,"仍不可判"]]},
+    title:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),single=c.filter(x=>x.cross!==true),health=d?.carry_source_health||{};const pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0);const top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos.length}/${cross.length}${top?`，最高代理 +${top.partial_model_proxy_ann_pct}%(${esc(top.symbol)})`:''}。另有单所现货对冲候选 ${single.length} 个，不进入双腿纸面账本。真实优势样本 ${pp.real_edge_n??ev?.real_edge_n??0}。`},
+    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["跨所代理>0",`${pos.length}/${cross.length}`,"固定14天部分成本情景"],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"}`],["真实优势样本",pp.real_edge_n??ev?.real_edge_n??0,"仍不可判"]]},
     readme:"💰资金费 Carry 是当前值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。当前关闭样本也只是报价率积分减盘口报价和费用假设的描述性代理；basis、账户费率、抵押成本、调仓和实际结算都缺失，因此真实优势样本仍为 0。下面的拥挤/点火仅作方向防御观察。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -584,7 +584,9 @@ function classOp(r){if(!r.ok)return"unknown";const v=r.verdict||"",a=r.acquisiti
 function renderPlay(){
   const launches=data.launch?.events||[];
   const activeLaunch=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE");
-  const carry=(data.perp?.carry||[]).filter(x=>x.net_ann>0);
+  const allCarry=data.perp?.carry||[];
+  const carry=allCarry.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0);
+  const singleVenueCarry=allCarry.filter(x=>x.cross!==true);
   const pp=data.perp?.carry_paper||{};
   const carryHealth=data.perp?.carry_source_health||{};
   const carryEvidence=data.stats?.lanes?.carry;
@@ -599,7 +601,7 @@ function renderPlay(){
   const verdictCopy=actionCount
     ?'这些候选同时通过安全、双向路由、报价时钟与证据门。仍只能按逐行仓位上限试错，价格失效或时钟到期立即停止使用旧报价。'
     :carry.length
-      ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有模型代理为正的纸面候选，尚未证明真实成本后优势。'
+      ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有固定情景的部分模型代理为正，尚未证明真实成本后优势。'
       :'当前没有通过完整门禁的 Launch 或 Carry 候选；数据缺失时保持不可判，不把抓取失败说成没有机会。';
   h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
     <div><div class="decision-kicker">当前决策 · ${actionCount?'可小额验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
@@ -607,7 +609,7 @@ function renderPlay(){
       <div class="command-actions"><button class="jump primary" data-jump="launch">查看入场门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
     <div class="decision-facts">
       <div class="fact ${actionCount?'good':'warn'}"><span class="fk">A3 人工验证窗</span><span class="fv">${actionCount}</span><span class="fs">新鲜报价+完整成本+证据门+送达SLA</span></div>
-      <div class="fact"><span class="fk">纸面候选</span><span class="fv">${carry.length}</span><span class="fs">模型代理为正，成本组件仍不全</span></div>
+      <div class="fact"><span class="fk">跨所纸面候选</span><span class="fv">${carry.length}</span><span class="fs">部分模型代理为正，成本组件仍不全</span></div>
       <div class="fact danger"><span class="fk">应避开</span><span class="fv">${dep.length+avoid.length}</span><span class="fs">派发、高接盘风险或安全红旗</span></div>
       <div class="fact warn"><span class="fk">数据覆盖</span><span class="fv">${sourceOk}/${sourceHealth.length||'?'}</span><span class="fs">仅为上币来源健康，不代表全市场覆盖</span></div>
     </div></section>`;
@@ -627,7 +629,7 @@ function renderPlay(){
   h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
   if(carry.length){
     h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出是报价率积分减盘口报价与费用假设的描述性代理，不是实际结算或完整 PnL；有效代理关闭 <b>${carryValid}</b> / 总关闭 ${carryTotal}，真实优势样本 <b>${pp.real_edge_n??carryEvidence?.real_edge_n??0}</b>。</div>`;
-    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 模型代理 <span class="num" style="color:var(--accent-t)">+${c.net_ann}%/年</span> <small class="dim">毛差 ${c.edge_ann} · ${c.hold_measured?c.hold_days+'d历史覆盖':'14d持仓假设'} · 非仓位建议</small></div>`).join('');
+    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛差 ${c.edge_ann} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
   } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
   h+='</div>';
   h+=carryLifecycleHtml(pp,3);
@@ -641,7 +643,7 @@ function renderPlay(){
   // 3) DON'T
   h+='<div class="play-sec"><div class="ph">🚫 别做:顶刊实证的散户负EV陷阱</div><div class="pnote">跟 🐋 聪明钱买入去接盘 · 追 💎 早期扫描的币做多 · 买 💰 庄吸筹跟庄 · 裸做空高资金费。这些标签是让你<b>看清结构、别当接盘侠</b>,不是让你照着买。跟买吸筹:pump 后 ~18 秒见顶、跟随者胜率 48%&lt;50%、非 insider 负回报。</div></div>';
   // VERDICT
-  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个模型净额代理为正的跨所 carry 纸面候选`:'进攻端无模型代理为正的候选'}，但<b>当前没有通过证据门的真 edge</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
+  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个部分模型代理为正的跨所 Carry 纸面候选`:'进攻端无跨所部分模型代理为正的候选'}，另有 ${singleVenueCarry.length} 个单所现货对冲观察项未进入双腿验证；<b>当前没有通过证据门的真 edge</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
   return h+'</div>';
 }
 
@@ -744,12 +746,14 @@ function renderPerp(d){
         ?`<span class="num">HL ${c.sustained_ann>0?"+":""}${esc(c.sustained_ann)} · OKX ${c.okx_ann>0?"+":""}${esc(c.okx_ann)}</span>`
         :`<span class="num">HL ${c.sustained_ann>0?"+":""}${esc(c.sustained_ann)}%</span>`;
       const trade=c.cross?'<span class="chip b-accent">空HL·多OKX</span>':`<span class="chip">${esc((c.hedge||"").includes("HL")?"HL现货":"CEX现货")}</span>`;
-      const netcol=c.net_ann>0?`<span class="num" style="color:var(--accent-t);font-weight:650">+${esc(c.net_ann)}%</span>`:`<span class="num" style="color:var(--danger)">${esc(c.net_ann)}%</span>`;
-      const hold=c.cross?(c.hold_measured?`<span class="num">${esc(c.hold_days)}d</span><small class="dim"> 历史覆盖跨度</small>`:`<small class="dim">14d模型假设·未验证</small>`):'<small class="dim">—</small>';
-      return `<tr title="${esc(c.note)}"><td>${idc(c.symbol,c.tier)}</td><td class="n">${netcol}<small class="dim"> 毛差 ${esc(c.edge_ann)}</small></td><td class="n">${struct}</td><td>${trade}</td><td class="n">${hold}</td><td>${flags}</td></tr>`;
+      const proxy=c.partial_model_proxy_ann_pct;
+      const netcol=proxy>0?`<span class="num" style="color:var(--accent-t);font-weight:650">+${esc(proxy)}%</span>`:`<span class="num" style="color:var(--danger)">${esc(proxy)}%</span>`;
+      const coverage=c.cross?(c.coverage_point_count?`<small class="dim">${esc(c.model_hold_days_assumption)}d固定情景·持有期未验证<br>报价覆盖 ${esc(c.coverage_span_h)}h/${esc(c.coverage_point_count)}点</small>`:`<small class="dim">${esc(c.model_hold_days_assumption)}d固定情景·持有期未验证<br>报价覆盖积累中</small>`):'<small class="dim">单所观察·不进双腿账本</small>';
+      return `<tr title="${esc(c.note)}"><td>${idc(c.symbol,c.tier)}</td><td class="n">${netcol}<small class="dim"> 毛差 ${esc(c.edge_ann)}</small></td><td class="n">${struct}</td><td>${trade}</td><td class="n">${coverage}</td><td>${flags}</td></tr>`;
     }).join("");
-    html+=`<div class="perp-sec">💰 Carry 候选 · 仅作纸面验证 <small>模型代理只扣当前已建模的盘口与费率假设；basis、账户费率、抵押资金成本和调仓仍不完整，不能当作 all-in 净收益或仓位建议。</small></div>
-      <div class="scroll"><div class="swipe-hint" aria-hidden="true">左右滑动查看更多 →</div><table class="tbl"><thead><tr><th>代币</th><th class="n">模型净额代理/年</th><th class="n">报价构成(HL/OKX)</th><th>纸面结构</th><th class="n">持仓假设/覆盖</th><th>风险</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    const crossCount=carry.filter(c=>c.cross===true).length,singleCount=carry.length-crossCount;
+    html+=`<div class="perp-sec">💰 Carry 候选 · 仅作纸面验证 <small>跨所双腿 ${crossCount} 个；单所现货对冲 ${singleCount} 个不进入双腿账本。部分模型只扣固定情景组件；basis、账户费率、抵押资金成本和调仓仍不完整，不能当作 all-in 净收益或仓位建议。</small></div>
+      <div class="scroll"><div class="swipe-hint" aria-hidden="true">左右滑动查看更多 →</div><table class="tbl"><thead><tr><th>代币</th><th class="n">部分模型代理/年</th><th class="n">报价构成(HL/OKX)</th><th>纸面结构</th><th class="n">模型假设/报价覆盖</th><th>风险</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }else{
     html+=`<div class="empty">${healthState==="ok"?"本轮没有候选通过 Carry 入场门槛；这不代表全市场没有机会。":"本轮数据不完整，不能判断是否存在 Carry 候选。"}</div>`;
   }

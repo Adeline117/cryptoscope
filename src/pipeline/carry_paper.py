@@ -31,7 +31,7 @@ logger = structlog.get_logger()
 
 DB = DATA_DIR / "carry_paper.db"
 NOTIONAL = 10_000.0        # paper size per leg — small enough that book slippage is real
-OPEN_MIN_NET = 8.0         # only paper-trade carries whose PREDICTED net clears this
+OPEN_MIN_PARTIAL_MODEL_PROXY_ANN = 8.0  # entry screen only; not a real-edge threshold
 CLOSE_DIFF_FLOOR = 2.0     # differential decayed below this (ann %) → natural exit
 # Fee tiers depend on the actual account and maker/taker path. This is only a disclosed
 # proxy assumption: one direction across both legs = HL 0.045% + OKX 0.05%.
@@ -245,7 +245,7 @@ def _sync_opportunity_ledger() -> dict:
             "entry_book_impact_pct": entry_slip,
             "cost_contract": entry_contract,
             "cost_model": "cross_perp_paper_quote_proxy_v1",
-            "prediction_model": "legacy_carry_signal_partial_cost_scenario_v1",
+            "prediction_model": "entry_snapshot_partial_cost_scenario_unversioned",
             "prediction_cost_completeness": "partial",
             "execution_mode": "paper_orderbook_measurement",
             "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
@@ -610,7 +610,12 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                 )
         # 2) OPEN new positions for fat-net cross carries not already open
         for sym, cur in entry_by_sym.items():
-            if sym in open_rows or (cur.get("net_ann") or 0) < OPEN_MIN_NET:
+            try:
+                partial_proxy = float(cur["partial_model_proxy_ann_pct"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (sym in open_rows or not math.isfinite(partial_proxy)
+                    or partial_proxy < OPEN_MIN_PARTIAL_MODEL_PROXY_ANN):
                 continue
             observation = observed_by_sym.get(sym)
             if observation is None:
@@ -622,7 +627,7 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                       "notional,accrued_pct,last_ts,last_diff,last_attempt_ts,last_valid_ts,"
                       "unmeasured_h,measurement_state,episode_version,cost_complete,"
                       "observation_version) VALUES (?,?,?,?,?,?,0,?,?,?,?,0,'observed',?,0,?)",
-                      (sym, now.isoformat(), observation["observed_edge_ann"], cur["net_ann"],
+                      (sym, now.isoformat(), observation["observed_edge_ann"], partial_proxy,
                        slip, NOTIONAL, now.isoformat(), observation["observed_edge_ann"],
                        now.isoformat(), now.isoformat(), CURRENT_EPISODE_VERSION,
                        int(observation.get("observation_version") or 0)))

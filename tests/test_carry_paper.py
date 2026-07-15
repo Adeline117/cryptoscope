@@ -33,9 +33,12 @@ def cp(tmp_path, monkeypatch):
 
 def test_opens_only_fat_net_cross(cp):
     _run(cp, [
-        {"symbol": "FAT", "cross": True, "net_ann": 40, "edge_ann": 40},
-        {"symbol": "THIN", "cross": True, "net_ann": 3, "edge_ann": 3},   # < OPEN_MIN_NET
-        {"symbol": "SINGLE", "cross": False, "net_ann": 90, "edge_ann": 90},  # not cross
+        {"symbol": "FAT", "cross": True, "partial_model_proxy_ann_pct": 40,
+         "edge_ann": 40},
+        {"symbol": "THIN", "cross": True, "partial_model_proxy_ann_pct": 3,
+         "edge_ann": 3},
+        {"symbol": "SINGLE", "cross": False, "partial_model_proxy_ann_pct": 90,
+         "edge_ann": 90},
     ])
     import sqlite3
     rows = sqlite3.connect(str(cp.DB)).execute("SELECT symbol FROM paper").fetchall()
@@ -44,7 +47,8 @@ def test_opens_only_fat_net_cross(cp):
 
 def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # open a 40%/yr differential position
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     import sqlite3
     c = sqlite3.connect(str(cp.DB))
     # backdate entry + last update to 5 days ago, diff held at 40 the whole time
@@ -77,7 +81,8 @@ def test_accrues_and_closes_with_correct_quote_proxy(cp):
 
 
 def test_stats_honest_when_nothing_closed(cp):
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     s = cp.paper_stats()
     assert s["n_open"] == 1 and s["n_closed"] == 0
     assert "avg_net_proxy_pct" not in s
@@ -98,7 +103,8 @@ def test_stats_honest_when_nothing_closed(cp):
 def test_missing_observation_pauses_without_closing_or_accruing(cp):
     import sqlite3
 
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     c.execute(
@@ -128,8 +134,8 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.commit()
     c.close()
 
-    recovered = _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40,
-                           "edge_ann": 40}])
+    recovered = _run(cp, [{"symbol": "X", "cross": True,
+                           "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     position = recovered["open_positions"][0]
     assert position["measurement_state"] == "observed"
     assert position["unmeasured_h"] == pytest.approx(49, abs=0.1)
@@ -142,7 +148,8 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.execute("UPDATE paper SET last_ts=? WHERE symbol='X'", (observed_start,))
     c.commit()
     c.close()
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     accrued = c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0]
     c.close()
@@ -152,7 +159,8 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
 def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
     import sqlite3
 
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     c = sqlite3.connect(str(cp.DB))
     c.execute(
@@ -175,7 +183,8 @@ def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
     c.close()
 
     no_legacy_open = cp.run(
-        [{"symbol": "Y", "cross": True, "net_ann": 40, "edge_ann": 40}],
+        [{"symbol": "Y", "cross": True,
+          "partial_model_proxy_ann_pct": 40, "edge_ann": 40}],
         observations=None,
     )
     assert {row["symbol"] for row in no_legacy_open["open_positions"]} == {"X"}
@@ -190,7 +199,8 @@ def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeyp
         return 0.05 if phase == "entry" else exit_quote["value"]
 
     monkeypatch.setattr(cp, "_roundtrip_slip", slip)
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     c.execute("UPDATE paper SET entry_ts=?,last_ts=?,last_diff=40 WHERE symbol='X'",
@@ -332,7 +342,8 @@ def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
     assert state[1] == past and state[2] != past
     assert state[3] == pytest.approx(48, abs=0.1)
 
-    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
     accrued, measurement_state = c.execute(
         "SELECT accrued_pct,measurement_state FROM paper WHERE symbol='X'"
@@ -345,8 +356,8 @@ def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
 def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     from src.pipeline import opportunity_ledger
 
-    opened = _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40,
-                        "edge_ann": 40}])
+    opened = _run(cp, [{"symbol": "X", "cross": True,
+                        "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     assert opened["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 0}
     event = opportunity_ledger.outcome_rows()[0]
     assert event["lane"] == "carry" and event["decision"] == "WATCH"
@@ -378,7 +389,8 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
               (past, past))
     c.commit()
     c.close()
-    closed = _run(cp, [{"symbol": "X", "cross": True, "net_ann": 1, "edge_ann": 1}])
+    closed = _run(cp, [{"symbol": "X", "cross": True,
+                        "partial_model_proxy_ann_pct": 1, "edge_ann": 1}])
     assert closed["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 1}
     event = opportunity_ledger.outcome_rows()[0]
     outcome = event["outcome"]

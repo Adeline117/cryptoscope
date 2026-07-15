@@ -93,7 +93,7 @@ def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
     assert "它尚不是已证明的正 EV" in html
     assert "Carry 优势证据" in html
     assert "当前没有通过证据门的真 edge" in html
-    assert "模型净额代理/年" in html and "纸面结构" in html
+    assert "部分模型代理/年" in html and "纸面结构" in html
     assert "唯一「个人真能做出正EV」" not in html
     assert "唯一有结构 edge 的" not in html
 
@@ -168,11 +168,19 @@ def test_carry_ui_forbids_realized_or_complete_cost_claims():
         "pp.avg_net_return_pct",
         "pp.avg_funding_accrued_pct",
         "pp.avg_cost_pct",
+        "c.net_ann",
+        "x.net_ann",
+        "c.hold_measured",
+        "c.hold_days",
+        "净>0·验证中",
     ):
         assert forbidden not in combined
     assert "报价费率年化代理" in combined
     assert "不是仓位建议或可成交上限" in combined
     assert "不能当作 all-in 净收益或仓位建议" in combined
+    assert "x.cross===true&&x.partial_model_proxy_ann_pct>0" in combined
+    assert "单所现货对冲" in combined
+    assert "不进入双腿账本" in combined
 
 
 def test_carry_public_contract_forbids_legacy_profit_metric_names():

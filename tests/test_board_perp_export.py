@@ -11,7 +11,8 @@ def test_render_perps_sends_open_observations_to_paper_tracker(monkeypatch):
         "funding_ann": 1.0, "vol24": 1_000, "price_chg_24h": 0.0,
     }]
     signals = [{
-        "symbol": "ENTRY", "cross": True, "edge_ann": 20.0, "net_ann": 10.0,
+        "symbol": "ENTRY", "cross": True, "edge_ann": 20.0,
+        "partial_model_proxy_ann_pct": 10.0,
     }]
     observations = [{
         "symbol": "OPEN", "cross": True, "hl_ann": 1.0, "okx_ann": 4.0,

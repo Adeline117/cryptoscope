@@ -250,19 +250,21 @@ CARRY_ROUNDTRIP_COST_PCT = 0.35   # both legs × (in+out): ~maker fees + realist
                                   # leg slippage (research: 20-50bps/leg). One-time.
 CARRY_REBALANCE_DRAG_ANN = 1.5    # ongoing %/yr to keep the two legs delta-neutral as
                                   # price moves (periodic rebalances cost fee+slippage).
-CARRY_DEFAULT_HOLD_DAYS = 14      # amortize the one-time cost over this hold. This is the
-                                  # single biggest lever — and it EQUALS how long the
-                                  # differential stays positive (measured, not assumed).
+CARRY_MODEL_HOLD_DAYS_ASSUMPTION = 14  # disclosed scenario input, never inferred from
+                                       # sparse quote-history coverage
 OKX_FUNDING_REQUEST_CAP = 45
 OKX_FUNDING_MAX_WORKERS = 8
 OKX_FUNDING_SCAN_TIMEOUT_S = 75.0
 
 
-def _carry_net_ann(gross_edge_ann: float, hold_days: float = CARRY_DEFAULT_HOLD_DAYS) -> float:
-    """Partial-model proxy after assumed round-trip and rebalance drag. hold_days is the
-    lever: at 14d a 0.35% round-trip = ~9%/yr drag, so a +7% gross differential nets
-    negative in this model. Basis, account fees, collateral and fills remain unknown."""
-    amortized_drag = CARRY_ROUNDTRIP_COST_PCT / max(hold_days / 365.0, 1e-6)
+def _carry_partial_model_proxy_ann(gross_edge_ann: float) -> float:
+    """Fixed-scenario proxy, not an all-in or realized annual return.
+
+    Quote-history coverage never changes the assumed 14-day amortization. Basis, account
+    fees, collateral, transfers, rebalancing paths and fills remain unknown.
+    """
+    assumed_years = CARRY_MODEL_HOLD_DAYS_ASSUMPTION / 365.0
+    amortized_drag = CARRY_ROUNDTRIP_COST_PCT / assumed_years
     return gross_edge_ann - amortized_drag - CARRY_REBALANCE_DRAG_ANN
 
 
@@ -295,9 +297,7 @@ OKX_FUNDING_MAX_AGE_MS = 5 * 60 * 1000
 
 
 def _store_xdiff(diffs: dict[str, float]) -> None:
-    """Persist each coin's HL-OKX differential per run, so xdiff_stats can measure how
-    long the differential actually STAYS positive — that persistence IS the hold period,
-    which is the single biggest lever on net-of-cost. Never raises."""
+    """Persist sparse HL-OKX quote differences for descriptive coverage statistics."""
     if not diffs:
         return
     now = datetime.now(timezone.utc).isoformat()
@@ -317,8 +317,7 @@ def _store_xdiff(diffs: dict[str, float]) -> None:
 
 
 def xdiff_stats(window_h: int = 7 * 24) -> dict[str, dict]:
-    """Per coin over the window: {coin: {pos_frac, mean, n, span_h}} for the HL-OKX
-    differential. Empty until history accrues — honestly absent, not faked."""
+    """Describe sparse quote coverage; never infer a continuous holding period from it."""
     from datetime import timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_h)).isoformat()
     agg: dict[str, list] = {}
@@ -341,8 +340,12 @@ def xdiff_stats(window_h: int = 7 * 24) -> dict[str, dict]:
             span = (datetime.fromisoformat(tss[-1]) - datetime.fromisoformat(tss[0])).total_seconds() / 3600
         except Exception:
             span = 0
-        out[coin] = {"pos_frac": sum(1 for v in vals if v > 0) / len(vals),
-                     "mean": sum(vals) / len(vals), "n": len(vals), "span_h": round(span, 1)}
+        out[coin] = {
+            "positive_fraction": sum(1 for v in vals if v > 0) / len(vals),
+            "mean_ann": sum(vals) / len(vals),
+            "point_count": len(vals),
+            "coverage_span_h": round(span, 1),
+        }
     return out
 
 
@@ -570,12 +573,10 @@ def carry_scorecard(window_h: int = SCORECARD_WINDOW_H) -> dict:
 def carry_signals(rows: list[dict] | None = None, *,
                   okx_rates: dict[str, float] | None = None) -> list[dict]:
     """Funding-carry opportunities, with the CROSS-EXCHANGE differential (HL vs OKX) as
-    the primary edge — the one research-validated play our breadth can capture: HL funding
-    is structurally higher than CEX (institutions can't touch the DEX leg), so short the
-    high-funding venue + long the low = a delta-neutral TWO-PERP carry, NO spot leg needed.
-    Falls back to single-venue (spot-hedged) carry when OKX lacks the perp. Ranked by the
-    cross-venue differential (or sustained HL funding), persistence-weighted, majors lifted.
-    Pass pre-fetched+stored `rows` to share one call with perp_signals."""
+    primary hypothesis. Short the high-funding venue + long the low is directionally
+    hedged in concept, but basis, liquidation, venue and execution risks remain. Single-
+    venue spot-hedged rows are kept as a separate candidate scope and never enter the
+    cross-venue paper ledger. Pass pre-fetched `rows` to share one market snapshot."""
     if rows is None:
         rows = _fetch_ctxs()
         if not rows:
@@ -583,7 +584,7 @@ def carry_signals(rows: list[dict] | None = None, *,
         _store_and_diff(rows)      # also records funding for persistence history
     hist = _funding_persistence()
     hl_spot = _hl_spot_tokens()    # coins with a HL spot leg (single-venue hedge)
-    xstats = xdiff_stats()         # measured persistence of the HL-OKX differential
+    xstats = xdiff_stats()         # sparse quote coverage, not a measured holding period
     # candidates = coins with notable HL funding; fetch the OKX leg for just these.
     cands = [r["name"] for r in rows
              if r["oi_usd"] >= CARRY_MIN_OI_USD and r["funding_ann"] >= CARRY_MIN_ANN]
@@ -628,29 +629,25 @@ def carry_signals(rows: list[dict] | None = None, *,
         if pos_frac is None:
             flags.append("持续性积累中(需多轮快照)")
         flags.append("尾部:ADL级联(2025-10-10)会强平对冲腿——为崩盘sizing")
-        # hold_days = how long the differential actually STAYS positive (measured), which
-        # sets the cost amortization. Until history accrues, use the conservative default
-        # and say so — never assume a long hold we haven't observed.
         xs = xstats.get(r["name"]) if cross else None
-        if xs and xs["n"] >= 6 and xs["pos_frac"] >= 0.8:
-            hold_days = min(max(xs["span_h"] / 24.0, 1.0), 30.0)
-            hold_measured = True
-        else:
-            hold_days = CARRY_DEFAULT_HOLD_DAYS
-            hold_measured = False
-        # NET after costs — the number that matters. Rank by this, not the gross edge.
-        net_ann = _carry_net_ann(edge_ann, hold_days)
-        if net_ann <= 0:
-            flags.insert(0, f"净额≤0:毛{edge_ann:.0f}%扣成本后不划算(需差价更肥或持仓更久)")
-        if cross and not hold_measured:
-            flags.append("差价持续性未测(净额按14天假设,真值取决于差价能撑多久)")
+        partial_proxy = _carry_partial_model_proxy_ann(edge_ann)
+        if partial_proxy <= 0:
+            flags.insert(0, f"部分模型代理≤0:毛{edge_ann:.0f}%不足以覆盖当前情景成本")
+        if cross:
+            flags.append(
+                f"持有期未验证(模型固定按{CARRY_MODEL_HOLD_DAYS_ASSUMPTION}天假设;"
+                "历史仅为稀疏报价覆盖)"
+            )
         pf = pos_frac if pos_frac is not None else 0.5
-        quality = net_ann * pf * (1.3 if is_major else 1.0)
+        quality = partial_proxy * pf * (1.3 if is_major else 1.0)
         note = (f"跨所差(毛){edge_ann:.0f}%:空HL(+{sustained:.0f}%)、多OKX({okx_ann:+.0f}%)。"
-                f"扣成本(往返~{CARRY_ROUNDTRIP_COST_PCT}%按{CARRY_DEFAULT_HOLD_DAYS}天摊+再平衡{CARRY_REBALANCE_DRAG_ANN}%)"
-                f"净约 {net_ann:.0f}%/年。两永续delta中性,不需现货。持仓越久摊得越薄(=差价持续多久,测量中)。"
+                f"部分成本情景(往返~{CARRY_ROUNDTRIP_COST_PCT}%按"
+                f"{CARRY_MODEL_HOLD_DAYS_ASSUMPTION}天假设摊销+再平衡"
+                f"{CARRY_REBALANCE_DRAG_ANN}%)代理约 {partial_proxy:.0f}%/年。"
+                "持有期未验证；历史跨度只表示稀疏报价覆盖。"
                 if cross else
-                f"现货多+永续空,毛{sustained:.0f}%,扣成本净约{net_ann:.0f}%/年。对冲:{hedge}。")
+                f"现货多+永续空,毛{sustained:.0f}%,部分成本情景代理约"
+                f"{partial_proxy:.0f}%/年。对冲:{hedge}；不进入跨所双腿纸面账本。")
         out.append({
             "symbol": r["name"], "funding_ann": round(fa, 1),
             "sustained_ann": round(sustained, 1), "pos_frac": pos_frac,
@@ -658,9 +655,20 @@ def carry_signals(rows: list[dict] | None = None, *,
             "cross_diff": round(cross_diff, 1) if cross else None, "cross": cross,
             "edge_ann": round(edge_ann, 1), "score_edge_ann": round(edge_ann, 1),
             "observed_edge_ann": (observed_cross_diff if cross else None),
-            "current_hl_ann": fa, "net_ann": round(net_ann, 1),
-            "hold_days": round(hold_days, 1), "hold_measured": (hold_measured if cross else None),
-            "diff_pos_frac": (round(xs["pos_frac"], 2) if xs else None),
+            "current_hl_ann": fa,
+            "partial_model_proxy_ann_pct": round(partial_proxy, 1),
+            "all_in_net_ann_pct": None,
+            "cost_completeness": "partial", "is_realized": False,
+            "model_hold_days_assumption": CARRY_MODEL_HOLD_DAYS_ASSUMPTION,
+            "hold_period_verified": False,
+            "coverage_span_h": xs["coverage_span_h"] if xs else None,
+            "coverage_point_count": xs["point_count"] if xs else 0,
+            "coverage_positive_fraction": (
+                round(xs["positive_fraction"], 2) if xs else None),
+            "partial_model_method": "fixed_14d_roundtrip_and_rebalance_proxy_v1",
+            "candidate_scope": ("cross_venue_two_perp" if cross
+                                else "single_venue_spot_perp"),
+            "paper_measurement_eligible": cross,
             "trade": ("空HL·多OKX" if cross else "现货多·永续空"),
             "oi_usd": round(r["oi_usd"]), "is_major": is_major,
             "tier": "主流" if is_major else "山寨", "hedge": hedge,
