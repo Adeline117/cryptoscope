@@ -27,6 +27,18 @@ def _solana_row(**overrides):
     return row
 
 
+def _local_authority(**overrides):
+    row = {
+        "state": "pass", "source": "Solana finalized getAccountInfo",
+        "checked_at": "2026-07-15T12:00:00+00:00", "slot": 123,
+        "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "raw_hash": "a" * 64, "mint_authority": None, "freeze_authority": None,
+        "hard_flags": [], "cautions": [],
+    }
+    row.update(overrides)
+    return row
+
+
 def _evm_risk(**overrides):
     row = {
         "available": True, "checked_at": "2026-07-15T12:00:00+00:00",
@@ -54,14 +66,17 @@ def test_solana_security_requires_complete_clean_fields():
     def clean(url, params, headers):
         return {"code": 1, "result": {"Mint": _solana_row()}}
 
-    assert le.security_probe(_event(), fetch=clean)["state"] == "pass"
+    assert le.security_probe(
+        _event(), fetch=clean, authority_probe=lambda _mint: _local_authority()
+    )["state"] == "pass"
 
     def incomplete(url, params, headers):
         row = _solana_row()
         row.pop("freezable")
         return {"code": 1, "result": {"Mint": row}}
 
-    got = le.security_probe(_event(), fetch=incomplete)
+    got = le.security_probe(
+        _event(), fetch=incomplete, authority_probe=lambda _mint: _local_authority())
     assert got["state"] == "unknown" and "freezable" in got["unknown_fields"]
 
 
@@ -72,9 +87,70 @@ def test_solana_mint_or_freeze_authority_is_avoid():
         return {"code": 1, "result": {"Mint": _solana_row(
             mintable={"status": "1"}, freezable={"status": "1"})}}
 
-    got = le.security_probe(_event(), fetch=risky)
+    got = le.security_probe(
+        _event(), fetch=risky, authority_probe=lambda _mint: _local_authority())
     assert got["state"] == "avoid"
     assert set(got["hard_flags"]) == {"mintable", "freezable"}
+
+
+@pytest.mark.parametrize("local_state", ["caution", "unknown"])
+def test_solana_local_non_pass_evidence_blocks_router(local_state):
+    from src.pipeline import launch_execution as le
+
+    calls = []
+
+    def fetch(url, params, headers):
+        calls.append(url)
+        return {"code": 1, "result": {"Mint": _solana_row()}}
+
+    local = _local_authority(
+        state=local_state,
+        reason="local authority evidence is not clean",
+        cautions=["token_2022_extensions_not_fully_parsed"]
+        if local_state == "caution" else [],
+    )
+    got = le.assess(_event(), fetch=fetch,
+                    authority_probe=lambda _mint: local)
+
+    assert got["security_gate"]["state"] == local_state
+    assert got["decision"] == "WATCH"
+    assert got["execution_probe"]["state"] == "skipped"
+    assert calls == ["https://api.gopluslabs.io/api/v1/solana/token_security"]
+
+
+def test_solana_local_avoid_outranks_unknown_provider():
+    from src.pipeline import launch_execution as le
+
+    def unindexed(url, params, headers):
+        return {"code": 1, "result": {}}
+
+    got = le.security_probe(
+        _event(), fetch=unindexed,
+        authority_probe=lambda _mint: _local_authority(
+            state="avoid", hard_flags=["mint_authority"],
+            mint_authority="Authority", reason="live mint authority"),
+    )
+
+    assert got["state"] == "avoid"
+    assert got["providers"]["goplus"]["state"] == "unknown"
+    assert got["providers"]["solana_rpc"]["state"] == "avoid"
+    assert got["hard_flags"] == ["mint_authority"]
+
+
+def test_solana_combined_pass_requires_both_evidence_clocks():
+    from src.pipeline import launch_execution as le
+
+    def clean(url, params, headers):
+        return {"code": 1, "result": {"Mint": _solana_row()}}
+
+    local = _local_authority()
+    local.pop("checked_at")
+    got = le.security_probe(
+        _event(), fetch=clean, authority_probe=lambda _mint: local)
+
+    assert got["state"] == "unknown"
+    assert got["checked_at"] is None
+    assert "clock" in got["reason"]
 
 
 def test_evm_complete_clean_evidence_passes(monkeypatch):

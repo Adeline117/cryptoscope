@@ -41,6 +41,7 @@ _EVM_USDC = {
 }
 
 Fetch = Callable[[str, dict, dict | None], dict]
+AuthorityProbe = Callable[[str], dict]
 
 _EVM_REQUIRED_BINARY_FLAGS = (
     "is_honeypot", "is_mintable", "transfer_pausable",
@@ -72,7 +73,7 @@ def _status(row: dict, key: str) -> int | None:
     return _flag(value.get("status")) if isinstance(value, dict) else _flag(value)
 
 
-def _solana_security(token: str, fetch: Fetch) -> dict:
+def _goplus_solana_security(token: str, fetch: Fetch) -> dict:
     try:
         data = fetch("https://api.gopluslabs.io/api/v1/solana/token_security",
                      {"contract_addresses": token}, None)
@@ -80,7 +81,7 @@ def _solana_security(token: str, fetch: Fetch) -> dict:
         return {"state": "unknown", "source": "GoPlus Solana",
                 "reason": f"security fetch failed: {str(exc)[:60]}"}
     rows = data.get("result") or {}
-    row = rows.get(token) or rows.get(token.lower())
+    row = rows.get(token)
     if data.get("code") != 1 or not isinstance(row, dict):
         return {"state": "unknown", "source": "GoPlus Solana",
                 "reason": "token not indexed or malformed response"}
@@ -109,6 +110,70 @@ def _solana_security(token: str, fetch: Fetch) -> dict:
     state = "avoid" if hard else "caution" if extensions else "pass"
     return {"state": state, "source": "GoPlus Solana", "hard_flags": hard,
             "cautions": extensions, "checked_at": datetime.now(timezone.utc).isoformat()}
+
+
+def _oldest_evidence_clock(*items: dict) -> str | None:
+    clocks = []
+    for item in items:
+        try:
+            value = datetime.fromisoformat(str(item["checked_at"]).replace("Z", "+00:00"))
+            if value.tzinfo is None:
+                return None
+            clocks.append(value.astimezone(timezone.utc))
+        except (KeyError, TypeError, ValueError):
+            return None
+    return min(clocks).isoformat() if len(clocks) == len(items) and clocks else None
+
+
+def _solana_security(token: str, fetch: Fetch,
+                      authority_probe: AuthorityProbe | None = None) -> dict:
+    provider = _goplus_solana_security(token, fetch)
+    if authority_probe is None:
+        from src.onchain.solana_token_authority import inspect_mint
+
+        authority_probe = inspect_mint
+    try:
+        local = authority_probe(token)
+    except Exception as exc:
+        local = {"state": "unknown", "source": "Solana finalized getAccountInfo",
+                 "reason": f"authority probe failed: {str(exc)[:80]}"}
+    if not isinstance(local, dict) or local.get("state") not in {
+            "pass", "caution", "unknown", "avoid"}:
+        local = {"state": "unknown", "source": "Solana finalized getAccountInfo",
+                 "reason": "authority probe returned malformed evidence"}
+
+    rank = {"pass": 0, "caution": 1, "unknown": 2, "avoid": 3}
+    provider_state = provider.get("state")
+    if provider_state not in rank:
+        provider = {"state": "unknown", "source": "GoPlus Solana",
+                    "reason": "provider returned malformed evidence"}
+        provider_state = "unknown"
+    local_state = local["state"]
+    state = max((provider_state, local_state), key=rank.get)
+    checked_at = _oldest_evidence_clock(provider, local)
+    if state == "pass" and checked_at is None:
+        state = "unknown"
+
+    hard = list(dict.fromkeys(
+        list(provider.get("hard_flags") or []) + list(local.get("hard_flags") or [])))
+    cautions = list(dict.fromkeys(
+        list(provider.get("cautions") or []) + list(local.get("cautions") or [])))
+    unknown_fields = list(dict.fromkeys(
+        list(provider.get("unknown_fields") or []) + list(local.get("unknown_fields") or [])))
+    reasons = [str(item.get("reason")) for item in (provider, local)
+               if item.get("state") != "pass" and item.get("reason")]
+    result = {
+        "state": state, "source": "GoPlus Solana + finalized Solana RPC",
+        "providers": {"goplus": provider, "solana_rpc": local},
+        "hard_flags": hard, "cautions": cautions, "checked_at": checked_at,
+    }
+    if unknown_fields:
+        result["unknown_fields"] = unknown_fields
+    if reasons:
+        result["reason"] = "; ".join(reasons)[:240]
+    elif state == "unknown":
+        result["reason"] = "security evidence clock missing or invalid"
+    return result
 
 
 def _evm_security(token: str, chain: str) -> dict:
@@ -160,12 +225,13 @@ def _evm_security(token: str, chain: str) -> dict:
             "checked_at": rr.get("checked_at")}
 
 
-def security_probe(event: dict, fetch: Fetch = _get_json) -> dict:
+def security_probe(event: dict, fetch: Fetch = _get_json,
+                   authority_probe: AuthorityProbe | None = None) -> dict:
     token, chain = event.get("token"), event.get("chain")
     if not token or not chain:
         return {"state": "unknown", "reason": "missing token/chain"}
     if chain == "solana":
-        return _solana_security(token, fetch)
+        return _solana_security(token, fetch, authority_probe=authority_probe)
     if chain in {"ethereum", "base", "bsc"}:
         return _evm_security(token, chain)
     return {"state": "unknown", "reason": f"security chain unsupported: {chain}"}
@@ -355,8 +421,9 @@ def gate(event: dict, security: dict, execution: dict,
     return event
 
 
-def assess(event: dict, fetch: Fetch = _get_json) -> dict:
-    security = security_probe(event, fetch=fetch)
+def assess(event: dict, fetch: Fetch = _get_json,
+           authority_probe: AuthorityProbe | None = None) -> dict:
+    security = security_probe(event, fetch=fetch, authority_probe=authority_probe)
     # Do not spend two router calls after a failed safety gate.
     execution = (route_probe(event, fetch=fetch) if security.get("state") == "pass"
                  else {"state": "skipped", "reason": "security gate did not pass",
