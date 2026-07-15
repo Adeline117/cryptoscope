@@ -13,6 +13,7 @@ failures, and incomplete fields are UNKNOWN and downgrade the candidate to WATCH
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.parse
 import urllib.request
@@ -40,6 +41,13 @@ _EVM_USDC = {
 }
 
 Fetch = Callable[[str, dict, dict | None], dict]
+
+_EVM_REQUIRED_BINARY_FLAGS = (
+    "is_honeypot", "is_mintable", "transfer_pausable",
+    "owner_change_balance", "hidden_owner", "can_take_back_ownership",
+    "is_blacklisted", "trading_cooldown", "cannot_sell_all", "is_proxy",
+)
+_EVM_REQUIRED_TAX_FLAGS = ("buy_tax", "sell_tax")
 
 
 def _get_json(url: str, params: dict, headers: dict | None = None) -> dict:
@@ -115,19 +123,32 @@ def _evm_security(token: str, chain: str) -> dict:
                 "reason": "contract source/flags not verifiable",
                 "checked_at": rr.get("checked_at")}
     flags = rr.get("flags") or {}
+    unknown = [key for key in _EVM_REQUIRED_BINARY_FLAGS
+               if flags.get(key) not in (0, 1)]
+    taxes = {}
+    for key in _EVM_REQUIRED_TAX_FLAGS:
+        try:
+            value = float(flags[key])
+            if not math.isfinite(value) or value < 0:
+                raise ValueError
+            taxes[key] = value
+        except (KeyError, TypeError, ValueError):
+            unknown.append(key)
+    if unknown:
+        return {"state": "unknown", "source": "GoPlus EVM",
+                "reason": "missing or invalid required fields",
+                "unknown_fields": unknown, "checked_at": rr.get("checked_at")}
+
     hard = []
     for key in ("is_honeypot", "owner_change_balance", "transfer_pausable",
                 "hidden_owner", "can_take_back_ownership", "is_blacklisted",
-                "cannot_sell_all"):
+                "trading_cooldown", "cannot_sell_all"):
         if flags.get(key) == 1:
             hard.append(key)
     if flags.get("is_mintable") == 1 and rr.get("owner_renounced") is not True:
         hard.append("mintable_with_live_or_unknown_owner")
-    try:
-        if float(flags.get("sell_tax") or 0) >= 0.05:
-            hard.append("sell_tax_gte_5pct")
-    except (TypeError, ValueError):
-        hard.append("sell_tax_unknown")
+    if taxes["sell_tax"] >= 0.05:
+        hard.append("sell_tax_gte_5pct")
     cautions = []
     if flags.get("is_proxy") == 1:
         cautions.append("upgradeable_proxy")

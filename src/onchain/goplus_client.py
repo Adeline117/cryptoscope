@@ -81,9 +81,14 @@ def token_security(token: str, chain: str, timeout: int = 20) -> dict:
     if d.get("code") != 1:
         return {"available": False, "reason": f"api code {d.get('code')}: {d.get('message')}"}
     results = d.get("result") or {}
-    row = next(iter(results.values()), None)
-    if not row:
-        return {"available": False, "reason": "token not indexed by GoPlus"}
+    expected = token.strip().lower()
+    matches = [row for address, row in results.items()
+               if isinstance(address, str) and address.strip().lower() == expected]
+    if len(matches) != 1 or not isinstance(matches[0], dict) or not matches[0]:
+        reason = ("token not indexed by GoPlus" if not results
+                  else "GoPlus response token mismatch")
+        return {"available": False, "reason": reason}
+    row = matches[0]
 
     open_source = _num(row.get("is_open_source"))
     lp_holders = row.get("lp_holders") or []

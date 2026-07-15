@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 
 def _event(**overrides):
     event = {"lane": "launch", "chain": "solana", "token": "Mint", "symbol": "T",
@@ -22,6 +24,27 @@ def _solana_row(**overrides):
         "default_account_state_upgradable": {"status": "0"},
     }
     row.update(overrides)
+    return row
+
+
+def _evm_risk(**overrides):
+    row = {
+        "available": True, "checked_at": "2026-07-15T12:00:00+00:00",
+        "is_open_source": 1, "owner_renounced": True, "lp_all_locked": True,
+        "facts": [], "unknowns": [],
+        "flags": {
+            "is_honeypot": 0, "is_mintable": 0, "transfer_pausable": 0,
+            "owner_change_balance": 0, "hidden_owner": 0,
+            "can_take_back_ownership": 0, "is_blacklisted": 0,
+            "trading_cooldown": 0, "cannot_sell_all": 0, "is_proxy": 0,
+            "buy_tax": 0.0, "sell_tax": 0.0,
+        },
+    }
+    for key, value in overrides.items():
+        if key == "flags":
+            row["flags"] = {**row["flags"], **value}
+        else:
+            row[key] = value
     return row
 
 
@@ -52,6 +75,77 @@ def test_solana_mint_or_freeze_authority_is_avoid():
     got = le.security_probe(_event(), fetch=risky)
     assert got["state"] == "avoid"
     assert set(got["hard_flags"]) == {"mintable", "freezable"}
+
+
+def test_evm_complete_clean_evidence_passes(monkeypatch):
+    from src.pipeline import launch_execution as le
+
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda *_args: _evm_risk())
+
+    got = le.security_probe(_event(chain="base", token="0xabc"))
+
+    assert got["state"] == "pass"
+
+
+def test_evm_missing_critical_flag_is_unknown_and_skips_route(monkeypatch):
+    from src.pipeline import launch_execution as le
+
+    risk = _evm_risk()
+    risk["flags"].pop("is_honeypot")
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda *_args: risk)
+    route_calls = []
+
+    got = le.assess(
+        _event(chain="base", token="0xabc"),
+        fetch=lambda *_args, **_kwargs: route_calls.append(True),
+    )
+
+    assert got["decision"] == "WATCH"
+    assert got["security_gate"]["state"] == "unknown"
+    assert "is_honeypot" in got["security_gate"]["unknown_fields"]
+    assert got["execution_probe"]["state"] == "skipped"
+    assert route_calls == []
+
+
+@pytest.mark.parametrize("tax", ["buy_tax", "sell_tax"])
+def test_evm_missing_tax_is_unknown(monkeypatch, tax):
+    from src.pipeline import launch_execution as le
+
+    risk = _evm_risk()
+    risk["flags"].pop(tax)
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda *_args: risk)
+
+    got = le.security_probe(_event(chain="base", token="0xabc"))
+
+    assert got["state"] == "unknown"
+    assert tax in got["unknown_fields"]
+
+
+def test_evm_trading_cooldown_is_hard_block(monkeypatch):
+    from src.pipeline import launch_execution as le
+
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk",
+                        lambda *_args: _evm_risk(flags={"trading_cooldown": 1}))
+
+    got = le.security_probe(_event(chain="base", token="0xabc"))
+
+    assert got["state"] == "avoid"
+    assert "trading_cooldown" in got["hard_flags"]
+
+
+def test_evm_existing_proxy_and_lp_cautions_remain_non_passing(monkeypatch):
+    from src.pipeline import launch_execution as le
+
+    monkeypatch.setattr("src.onchain.goplus_client.rug_risk", lambda *_args: _evm_risk(
+        flags={"is_proxy": 1}, lp_all_locked=False))
+
+    got = le.security_probe(_event(chain="base", token="0xabc"))
+
+    assert got["state"] == "caution"
+    assert set(got["cautions"]) == {"upgradeable_proxy", "lp_lock_not_verified"}
 
 
 def test_gate_downgrades_unknown_and_blocks_known_untradeable():

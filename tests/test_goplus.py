@@ -5,6 +5,8 @@ conclusion. A security API is the most dangerous place for that: "we couldn't ch
 must never render as "safe".
 """
 
+import json
+
 import src.onchain.goplus_client as gp
 
 
@@ -27,6 +29,46 @@ def _sec(**over):
         else:
             base[k] = v
     return base
+
+
+class _JsonResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode()
+
+
+def test_response_token_match_is_exact_after_evm_normalization(monkeypatch):
+    token = "0xAbC0000000000000000000000000000000000000"
+    payload = {"code": 1, "result": {token.lower(): {"is_open_source": "1"}}}
+    monkeypatch.setattr(gp.urllib.request, "urlopen",
+                        lambda *_args, **_kwargs: _JsonResponse(payload))
+    gp._CACHE.clear()
+
+    result = gp.token_security(token, "base")
+
+    assert result["available"] is True
+
+
+def test_response_for_different_token_is_unavailable(monkeypatch):
+    token = "0xAbC0000000000000000000000000000000000000"
+    other = "0xDef0000000000000000000000000000000000000"
+    payload = {"code": 1, "result": {other: {"is_open_source": "1"}}}
+    monkeypatch.setattr(gp.urllib.request, "urlopen",
+                        lambda *_args, **_kwargs: _JsonResponse(payload))
+    gp._CACHE.clear()
+
+    result = gp.token_security(token, "base")
+
+    assert result["available"] is False
+    assert "token mismatch" in result["reason"]
 
 
 def test_fetch_failure_is_unchecked_not_clean(monkeypatch):
