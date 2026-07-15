@@ -15,7 +15,10 @@ def cp(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger
     monkeypatch.setattr(cp, "DB", tmp_path / "paper.db")
     monkeypatch.setattr(opportunity_ledger, "DB", tmp_path / "opportunities.db")
-    monkeypatch.setattr(cp, "_roundtrip_slip", lambda sym, notional=cp.NOTIONAL: 0.05)
+    monkeypatch.setattr(
+        cp, "_roundtrip_slip",
+        lambda sym, notional=cp.NOTIONAL, phase="entry": 0.05,
+    )
     return cp
 
 
@@ -112,3 +115,30 @@ def test_annualized_summary_requires_long_enough_cohort(cp):
     stats = cp.paper_stats()
     assert stats["annualized_n"] == cp.MIN_ANNUALIZED_SAMPLES
     assert stats["avg_annualized_net_pct"] == 30
+
+
+def test_carry_slippage_uses_real_leg_direction_for_entry_and_exit(monkeypatch):
+    import src.pipeline.carry_paper as carry
+
+    monkeypatch.setattr(carry, "_post", lambda *_args, **_kwargs: {"levels": [
+        [{"px": "100", "sz": "0.5"}, {"px": "99", "sz": "1"}],
+        [{"px": "101", "sz": "0.5"}, {"px": "103", "sz": "1"}],
+    ]})
+    monkeypatch.setattr(carry, "_get", lambda *_args, **_kwargs: {"data": [{
+        "bids": [["200", "0.25"], ["198", "1"]],
+        "asks": [["201", "0.25"], ["204", "1"]],
+    }]})
+    monkeypatch.setattr(carry, "_okx_ctval", lambda _coin: 1.0)
+
+    hl_sell = carry._hl_slip("X", 100, "sell")
+    hl_buy = carry._hl_slip("X", 100, "buy")
+    okx_buy = carry._okx_slip("X", 100, "buy")
+    okx_sell = carry._okx_slip("X", 100, "sell")
+
+    assert carry._roundtrip_slip("X", 100, phase="entry") == pytest.approx(
+        hl_sell + okx_buy
+    )
+    assert carry._roundtrip_slip("X", 100, phase="exit") == pytest.approx(
+        hl_buy + okx_sell
+    )
+    assert carry._roundtrip_slip("X", 100, phase="bad") is None

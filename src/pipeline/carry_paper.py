@@ -148,49 +148,58 @@ def _okx_ctval(coin: str) -> float:
     return _OKX_CTVAL.get(coin, 1.0)
 
 
-def _hl_slip(coin: str, notional: float) -> float | None:
-    """Slippage % to fill `notional` USD by taking HL asks (VWAP vs best). sz is in coin
-    units on HL, so notional = px*sz directly. None if the book can't fill it."""
+def _hl_slip(coin: str, notional: float, side: str) -> float | None:
+    """Directional HL book slippage for a marketable buy or sell."""
     try:
         lv = _post("https://api.hyperliquid.xyz/info", {"type": "l2Book", "coin": coin})["levels"]
-        asks = lv[1]
-        best = float(asks[0]["px"])
+        levels = lv[1] if side == "buy" else lv[0]
+        best = float(levels[0]["px"])
         rem, qty = notional, 0.0
-        for L in asks:
+        for L in levels:
             px, sz = float(L["px"]), float(L["sz"])
             take = min(px * sz, rem); qty += take / px; rem -= take
             if rem <= 0:
                 break
         if rem > 0 or qty <= 0:
             return None
-        return (notional / qty / best - 1) * 100
+        average = notional / qty
+        return ((average / best - 1) if side == "buy" else (1 - average / best)) * 100
     except Exception:
         return None
 
 
-def _okx_slip(coin: str, notional: float) -> float | None:
-    """Slippage % to fill `notional` USD on OKX (sz in contracts × ctVal = coin units)."""
+def _okx_slip(coin: str, notional: float, side: str) -> float | None:
+    """Directional OKX book slippage (contract size converted to coin units)."""
     try:
         d = _get(f"https://www.okx.com/api/v5/market/books?instId={coin}-USDT-SWAP&sz=50")
-        asks = d["data"][0]["asks"]
+        levels = d["data"][0]["asks" if side == "buy" else "bids"]
         ctv = _okx_ctval(coin)
-        best = float(asks[0][0])
+        best = float(levels[0][0])
         rem, qty = notional, 0.0
-        for a in asks:
+        for a in levels:
             px, sz = float(a[0]), float(a[1]) * ctv
             take = min(px * sz, rem); qty += take / px; rem -= take
             if rem <= 0:
                 break
         if rem > 0 or qty <= 0:
             return None
-        return (notional / qty / best - 1) * 100
+        average = notional / qty
+        return ((average / best - 1) if side == "buy" else (1 - average / best)) * 100
     except Exception:
         return None
 
 
-def _roundtrip_slip(coin: str, notional: float = NOTIONAL) -> float | None:
-    """Measured entry (or exit) slippage across BOTH legs. None if either book is thin."""
-    hs, os_ = _hl_slip(coin, notional), _okx_slip(coin, notional)
+def _roundtrip_slip(coin: str, notional: float = NOTIONAL,
+                    phase: str = "entry") -> float | None:
+    """Measure the two legs in their actual direction for entry or exit."""
+    if phase == "entry":
+        hl_side, okx_side = "sell", "buy"   # short HL, long OKX
+    elif phase == "exit":
+        hl_side, okx_side = "buy", "sell"   # cover HL, close OKX long
+    else:
+        return None
+    hs = _hl_slip(coin, notional, hl_side)
+    os_ = _okx_slip(coin, notional, okx_side)
     if hs is None or os_ is None:
         return None
     return hs + os_            # one direction, both legs; close measures the other side
@@ -219,7 +228,7 @@ def run(carries: list[dict]) -> dict:
             # realized funding over the interval = diff(ann%) × (hours / 8760)
             accrued = (accrued or 0) + (last_diff or cur_diff) * (elapsed_h / 8760.0)
             if cur_diff < CLOSE_DIFF_FLOOR or cur is None:
-                exit_slip = _roundtrip_slip(sym) or entry_slip or 0
+                exit_slip = _roundtrip_slip(sym, phase="exit") or entry_slip or 0
                 try:
                     hold_h = (now - datetime.fromisoformat(open_rows[sym][2])).total_seconds() / 3600
                 except Exception:
@@ -243,7 +252,7 @@ def run(carries: list[dict]) -> dict:
         for sym, cur in by_sym.items():
             if sym in open_rows or (cur.get("net_ann") or 0) < OPEN_MIN_NET:
                 continue
-            slip = _roundtrip_slip(sym)
+            slip = _roundtrip_slip(sym, phase="entry")
             if slip is None:
                 continue                      # can't measure entry → don't open
             c.execute("INSERT INTO paper(symbol,entry_ts,entry_diff,pred_net,entry_slip,"
