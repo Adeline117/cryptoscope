@@ -376,14 +376,16 @@ function renderLaunchCoverage(d){
   const labels={live:"实时",degraded:"有缺口",stale:"已陈旧",disconnected:"已断开",unavailable:"不可用"};
   const cls=status==="live"?"b-good":status==="degraded"||status==="stale"?"b-warn":"b-danger";
   const complete=q.evidence?.complete||0, recent=q.recent_complete||0;
-  const recorded=states.qualified_recorded||0, pending=(states.market_pending||0)+(states.market_error||0), raw=states.raw_unqualified||0;
+  const trace=q.traceability||{},recorded=trace.traceable_unique_ledger_events??states.qualified_recorded??0;
+  const orphan=trace.orphan_rows??states.ledger_orphan??0,pending=(states.market_pending||0)+(states.market_error||0),raw=states.raw_unqualified||0;
+  const traceUnavailable=trace.state==="unavailable",traceLabel=traceUnavailable?"账本回读不可用":orphan?`${orphan} 条 orphan 已隔离`:pending?"仍在补市场数据":"当前无重试项";
   const evmHealthy=evmStreams.filter(x=>x.status==="live"&&!x.stale).length;
   const evmGaps=evmStreams.reduce((n,x)=>n+(x.open_gaps||0),0);
   const evmPending=(es.raw_unqualified||0)+(es.market_pending||0)+(es.market_error||0)+(es.below_threshold||0);
   const last=stream?.last_received_at?relMs(new Date(stream.last_received_at).getTime()):"无接收时钟";
   return `<section class="coverage-strip" aria-label="Launch 数据覆盖与缺口">
     <div class="coverage-card"><div class="ck"><span>Pump.fun 主链发行流</span><span class="chip ${cls}">${esc(labels[status]||status)}</span></div><div class="cv">${esc(recent)} <small class="dim">/ 近${esc(q.recent_hours??24)}h</small></div><div class="cs">身份完整证据累计 ${esc(complete)}；最后接收 ${esc(last)}。状态只证明监听情况，不等于无漏单。</div></div>
-    <div class="coverage-card"><div class="ck"><span>资格检查队列</span><span class="chip ${pending?"b-warn":"b-accent"}">${pending?"仍在补市场数据":"当前无重试项"}</span></div><div class="cv">${esc(recorded)} <small class="dim">已接入账本</small></div><div class="cs">原始待检查 ${esc(raw)} · 待索引/错误重试 ${esc(pending)} · 规则筛除 ${esc(states.screened_out||0)}。失败会退避，不会伪装成无机会。</div></div>
+    <div class="coverage-card"><div class="ck"><span>资格检查队列 / 账本回读</span><span class="chip ${traceUnavailable?"b-danger":orphan||pending?"b-warn":"b-accent"}">${esc(traceLabel)}</span></div><div class="cv">${esc(recorded)} <small class="dim">可追溯唯一账本事件</small></div><div class="cs">原始待检查 ${esc(raw)} · 待索引/错误重试 ${esc(pending)} · 规则筛除 ${esc(states.screened_out||0)} · orphan 隔离 ${esc(orphan)} 行/${esc(trace.orphan_unique_ledger_ids??0)} ID。只有能从 opportunity ledger 精确回读的唯一 ID 才计入账；失败会退避，不会伪装成无机会。</div></div>
     <div class="coverage-card"><div class="ck"><span>EVM 官方工厂流</span><span class="chip ${evmHealthy===evmStreams.length&&evmStreams.length?"b-good":"b-warn"}">${esc(evmHealthy)}/${esc(evmStreams.length||5)} 新鲜</span></div><div class="cv">${esc(eq.evidence?.complete||0)} <small class="dim">完整原始池</small></div><div class="cs">BSC / Base / Ethereum 共 5 条工厂流；前向实验边界 ${esc(utcClock(eq.bridge_started_at))}，边界前 ${esc(es.historical_raw_only||0)} 条仅作历史覆盖。</div></div>
     <div class="coverage-card"><div class="ck"><span>EVM 精确池资格</span><span class="chip ${evmPending?"b-warn":"b-accent"}">${esc(evmPending)} 待检查/重试</span></div><div class="cv">${esc(es.qualified_recorded||0)} <small class="dim">前向入账</small></div><div class="cs">只匹配工厂原始 pool；无唯一报价侧 ${esc((es.ambiguous_target||0)+(es.unsupported_quote_pair||0))} · 重复首事件 ${esc(es.duplicate_token_existing||0)} · 过期 ${esc(es.expired_unqualified||0)}。</div></div>
     <div class="coverage-card"><div class="ck"><span>已知覆盖缺口</span><span class="chip ${(stream?.open_gaps||evmGaps)?"b-danger":"b-good"}">${esc((stream?.open_gaps||0)+evmGaps)} 个 open gap</span></div><div class="cv">${p.available&&ep.available?"链上证据优先":"不可判"}</div><div class="cs">DEX Screener 池与 profiles 仅负责市场水合/补充发现，不代表全市场覆盖；链上缺口、RPC 与索引延迟都会漏掉机会。</div></div>

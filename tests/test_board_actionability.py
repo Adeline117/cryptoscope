@@ -117,6 +117,16 @@ def test_launch_detail_prefers_current_assessment_gate_evidence():
     assert "sg=r.security_gate||{},ep=r.execution_probe||{}" not in html
 
 
+def test_launch_coverage_counts_only_traceable_ledger_readbacks():
+    html = BOARD.read_text()
+
+    assert "traceable_unique_ledger_events" in html
+    assert "orphan_unique_ledger_ids" in html
+    assert "可追溯唯一账本事件" in html
+    assert "orphan 隔离" in html
+    assert "只有能从 opportunity ledger 精确回读的唯一 ID 才计入账" in html
+
+
 def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
     html = BOARD.read_text()
 

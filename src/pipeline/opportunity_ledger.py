@@ -219,6 +219,25 @@ def record_if_absent(candidate: dict) -> tuple[str, bool]:
     return record(candidate, refresh_existing=False)
 
 
+def event_id_readback_matches(ident: str, *, lane: str, chain: str,
+                              token: str) -> bool:
+    """Require one exact ledger row before another store may claim traceability.
+
+    Stream databases cannot enforce a foreign key into this SQLite file.  This
+    narrow read-back contract prevents a stale or fabricated ``ledger_event_id``
+    from being counted as a recorded opportunity merely because it is non-empty.
+    """
+    c = _conn()
+    try:
+        rows = c.execute(
+            "SELECT lane,chain,token FROM opportunities WHERE id=? LIMIT 2", (ident,)
+        ).fetchall()
+    finally:
+        c.close()
+    return (len(rows) == 1
+            and rows[0] == (str(lane), str(chain), str(token)))
+
+
 def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool]:
     """Append one immutable security/route measurement for an existing event."""
     kind = assessment.get("kind", "read_only_quote")

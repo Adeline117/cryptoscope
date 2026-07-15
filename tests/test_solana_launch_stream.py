@@ -245,10 +245,53 @@ def test_qualification_state_keeps_raw_evidence_and_ledger_link(sol):
     finally:
         c.close()
     assert row == ("complete", "qualified_recorded", now.isoformat(), "ledger-1")
-    summary = sol.qualification_summary(now=now)
+    summary = sol.qualification_summary(
+        now=now,
+        ledger_readback=lambda ledger_id, mint: ledger_id == "ledger-1" and mint == "mint",
+    )
     assert summary["raw_total"] == 1
     assert summary["evidence"] == {"complete": 1}
     assert summary["qualification"] == {"qualified_recorded": 1}
+    assert summary["traceability"]["traceable_unique_ledger_events"] == 1
+    assert summary["traceability"]["orphan_rows"] == 0
+
+
+def test_qualification_summary_quarantines_unreadable_ledger_ids(sol):
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    first = sol.parse_message(_notification())
+    sol.persist(first.payload, transaction=_transaction())
+    second_raw = _notification()
+    second_raw["params"]["result"]["value"]["signature"] = "sig-2"
+    second = sol.parse_message(second_raw)
+    second_tx = _transaction()
+    second_tx["transaction"]["signatures"] = ["sig-2"]
+    sol.persist(second.payload, transaction=second_tx)
+    sol.set_qualification("sig-1", "qualified_recorded",
+                          ledger_event_id="ledger-ok", at=now)
+    sol.set_qualification("sig-2", "qualified_recorded",
+                          ledger_event_id="ledger-missing", at=now)
+
+    summary = sol.qualification_summary(
+        now=now,
+        ledger_readback=lambda ledger_id, _mint: ledger_id == "ledger-ok",
+    )
+
+    assert summary["raw_qualification_states"] == {"qualified_recorded": 2}
+    assert summary["qualification"] == {
+        "qualified_recorded": 1,
+        "ledger_orphan": 1,
+    }
+    assert summary["traceability"] == {
+        "state": "partial",
+        "raw_marked_recorded_rows": 2,
+        "traceable_rows": 1,
+        "traceable_unique_ledger_events": 1,
+        "orphan_rows": 1,
+        "orphan_unique_ledger_ids": 1,
+        "missing_ledger_id_rows": 0,
+        "quarantined_state_rows": 0,
+        "readback_error_rows": 0,
+    }
 
 
 def test_unknown_qualification_state_is_rejected(sol):

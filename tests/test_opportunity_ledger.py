@@ -60,6 +60,21 @@ def test_record_if_absent_never_refreshes_first_event_provenance(tmp_path, monke
     assert row["payload"]["primary_evidence"]["pool"] == "first"
 
 
+def test_cross_store_ledger_id_requires_exact_unique_readback(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, inserted = ledger.record_if_absent(_candidate(token="MintAddress"))
+
+    assert inserted is True
+    assert ledger.event_id_readback_matches(
+        ident, lane="launch", chain="solana", token="MintAddress")
+    assert not ledger.event_id_readback_matches(
+        ident, lane="launch", chain="solana", token="different")
+    assert not ledger.event_id_readback_matches(
+        "missing", lane="launch", chain="solana", token="MintAddress")
+
+
 def test_carry_refresh_corrects_legacy_measurement_size_without_weakening_other_lanes(
         tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger

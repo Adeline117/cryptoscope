@@ -13,7 +13,9 @@ from copy import deepcopy
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
-from src.pipeline.opportunity_ledger import active, record, record_if_absent
+from src.pipeline.opportunity_ledger import (
+    active, event_id_readback_matches, record, record_if_absent,
+)
 
 PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
 PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
@@ -46,7 +48,20 @@ def _pair_for_token(chain: str, token: str, *, fetch=_json) -> dict | None:
     """Select the deepest observable pool for one identity-proven token."""
     pairs = fetch(PAIRS_URL.format(chain=chain, token=token))
     pairs = pairs if isinstance(pairs, list) else []
-    usable = [p for p in pairs if p.get("pairAddress") and p.get("priceUsd")]
+    def same_token(observed: object) -> bool:
+        observed, expected = str(observed or ""), str(token)
+        return observed == expected if chain == "solana" else observed.lower() == expected.lower()
+
+    # The token-pairs endpoint can return pools where the queried token is only the
+    # quote side, or even unrelated rows.  Launch price/FDV semantics require the
+    # identity-proven mint to be the base asset; never let a deeper unrelated pool
+    # replace it.
+    usable = [
+        p for p in pairs
+        if (p.get("pairAddress") and p.get("priceUsd")
+            and str(p.get("chainId") or "").lower() == str(chain).lower()
+            and same_token((p.get("baseToken") or {}).get("address")))
+    ]
     return max(usable, key=lambda p: _num((p.get("liquidity") or {}).get("usd")), default=None)
 
 
@@ -211,7 +226,7 @@ def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
 
     rows = stream.qualification_batch(now=now, limit=max_candidates)
     result = {"available": True, "attempted": 0, "recorded": 0, "inserted": 0,
-              "pending": 0, "errors": 0, "screened_out": 0}
+              "pending": 0, "errors": 0, "screened_out": 0, "orphaned": 0}
     for raw in rows:
         result["attempted"] += 1
         try:
@@ -255,6 +270,15 @@ def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
             "explorer_url": f"https://solscan.io/tx/{raw['signature']}",
         }
         ident, new = record_if_absent(event)
+        if not event_id_readback_matches(
+                ident, lane="launch", chain="solana", token=raw["mint"]):
+            stream.set_qualification(
+                raw["signature"], "ledger_orphan",
+                error="opportunity ledger ID failed exact read-back",
+                ledger_event_id=ident, at=now,
+            )
+            result["orphaned"] += 1
+            continue
         _, assessed = _append_assessment(
             ident, event, assessor, assessed=assessed,
             max_assessments=max_assessments, now=now)
@@ -503,7 +527,9 @@ def view() -> dict:
         streams = [item for item in stream_health.snapshot()
                    if item["source"] == "solana" and item["stream"] == "pump_fun_launches"]
         primary = {"available": True,
-                   "qualification": solana_launch_stream.qualification_summary(),
+                   "qualification": solana_launch_stream.qualification_summary(
+                       ledger_readback=lambda ident, mint: event_id_readback_matches(
+                           ident, lane="launch", chain="solana", token=mint)),
                    "streams": streams}
     except Exception as exc:
         primary = {"available": False, "reason": str(exc)[:120], "streams": []}

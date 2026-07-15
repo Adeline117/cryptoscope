@@ -46,6 +46,44 @@ def test_qualify_rejects_untradeable_or_late_pools():
     assert qualify(_pair(), now=late) is None
 
 
+def test_pair_hydration_rejects_unrelated_and_quote_side_deep_pools():
+    from src.pipeline.launch_radar import _pair_for_token
+
+    valid = _pair(pairAddress="valid", liquidity={"usd": 10_000},
+                  baseToken={"address": "Target", "symbol": "T"})
+    unrelated = _pair(pairAddress="unrelated", liquidity={"usd": 9_000_000},
+                      baseToken={"address": "Other", "symbol": "O"})
+    target_as_quote = _pair(
+        pairAddress="quote-side", liquidity={"usd": 8_000_000},
+        baseToken={"address": "Other", "symbol": "O"},
+        quoteToken={"address": "Target", "symbol": "T"},
+    )
+    wrong_chain = _pair(pairAddress="wrong-chain", chainId="base",
+                        liquidity={"usd": 7_000_000},
+                        baseToken={"address": "Target", "symbol": "T"})
+
+    got = _pair_for_token(
+        "solana", "Target",
+        fetch=lambda _url: [unrelated, target_as_quote, wrong_chain, valid],
+    )
+
+    assert got["pairAddress"] == "valid"
+    assert _pair_for_token(
+        "solana", "Target", fetch=lambda _url: [unrelated, target_as_quote]
+    ) is None
+
+
+def test_pair_hydration_matches_evm_address_case_insensitively():
+    from src.pipeline.launch_radar import _pair_for_token
+
+    pair = _pair(chainId="base", baseToken={"address": "0xabcdef", "symbol": "T"})
+    assert _pair_for_token("base", "0xAbCdEf", fetch=lambda _url: [pair]) == pair
+    solana = _pair(baseToken={"address": "CaseSensitive", "symbol": "T"})
+    assert _pair_for_token(
+        "solana", "casesensitive", fetch=lambda _url: [solana]
+    ) is None
+
+
 def test_ledger_keeps_first_seen_entry_when_event_is_refreshed(tmp_path, monkeypatch):
     import src.pipeline.opportunity_ledger as ol
     monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
@@ -164,7 +202,7 @@ def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
                      assessor=assessor)
     assert result["primary"] == {"available": True, "attempted": 1, "recorded": 1,
                                  "inserted": 1, "pending": 0, "errors": 0,
-                                 "screened_out": 0}
+                                 "screened_out": 0, "orphaned": 0}
     row = ol.active("launch", now=now)[0]
     assert row["primary_evidence"]["signature"] == "sig-primary"
     assert row["source"] == "Pump.fun standard logs + DEX Screener pool"
@@ -174,6 +212,35 @@ def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
     finally:
         c.close()
     assert state == ("qualified_recorded", row["id"])
+
+
+def test_primary_solana_launch_quarantines_failed_ledger_readback(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
+    monkeypatch.setattr(lr, "event_id_readback_matches", lambda *_args, **_kwargs: False)
+
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
+        now=now, max_profiles=0, max_primary=1, assessor=lambda event: event,
+    )
+
+    assert result["primary"]["recorded"] == 0
+    assert result["primary"]["inserted"] == 0
+    assert result["primary"]["orphaned"] == 1
+    c = stream._conn()
+    try:
+        state = c.execute(
+            "SELECT qualification_state,qualification_error,ledger_event_id "
+            "FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert state[0] == "ledger_orphan"
+    assert "failed exact read-back" in state[1]
+    assert state[2]
 
 
 def test_primary_market_miss_remains_retryable(tmp_path, monkeypatch):

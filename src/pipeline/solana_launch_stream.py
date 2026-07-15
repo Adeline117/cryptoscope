@@ -60,7 +60,7 @@ def _conn() -> sqlite3.Connection:
 
 QUALIFICATION_STATES = {
     "raw_unqualified", "market_pending", "market_error",
-    "screened_out", "qualified_recorded",
+    "screened_out", "qualified_recorded", "ledger_orphan",
 }
 RETRYABLE_QUALIFICATION_STATES = {
     "raw_unqualified", "market_pending", "market_error",
@@ -136,9 +136,16 @@ def set_qualification(signature: str, state: str, *, error: str | None = None,
         c.close()
 
 
-def qualification_summary(*, now: datetime | None = None,
-                          recent_hours: float = 24) -> dict:
-    """Expose evidence and qualification coverage without claiming completeness."""
+def qualification_summary(
+    *, now: datetime | None = None, recent_hours: float = 24,
+    ledger_readback: Callable[[str, str], bool] | None = None,
+) -> dict:
+    """Expose coverage, counting only uniquely readable ledger IDs as recorded.
+
+    Raw stream rows are immutable evidence.  A historical row whose claimed
+    ``ledger_event_id`` no longer resolves is exported as quarantined/orphaned,
+    never silently included in the recorded-opportunity count.
+    """
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     cutoff = (now - timedelta(hours=max(0, float(recent_hours)))).isoformat()
     c = _conn()
@@ -146,19 +153,68 @@ def qualification_summary(*, now: datetime | None = None,
         evidence = dict(c.execute(
             "SELECT evidence_state,COUNT(*) FROM raw_launches GROUP BY evidence_state"
         ).fetchall())
-        qualification = dict(c.execute(
+        raw_qualification = dict(c.execute(
             "SELECT qualification_state,COUNT(*) FROM raw_launches GROUP BY qualification_state"
         ).fetchall())
+        marked_recorded = c.execute(
+            "SELECT ledger_event_id,mint FROM raw_launches "
+            "WHERE qualification_state='qualified_recorded'"
+        ).fetchall()
         recent_complete = c.execute(
             "SELECT COUNT(*) FROM raw_launches WHERE evidence_state='complete' "
             "AND detected_at>=?", (cutoff,),
         ).fetchone()[0]
     finally:
         c.close()
+    traceable_ids: set[str] = set()
+    orphan_ids: set[str] = set()
+    traceable_rows = 0
+    orphan_rows = 0
+    missing_id_rows = 0
+    readback_error_rows = 0
+    for ledger_id, mint in marked_recorded:
+        valid = False
+        if ledger_id and mint and ledger_readback is not None:
+            try:
+                valid = bool(ledger_readback(str(ledger_id), str(mint)))
+            except Exception:
+                readback_error_rows += 1
+                continue
+        elif ledger_id and mint:
+            readback_error_rows += 1
+            continue
+        if valid:
+            traceable_rows += 1
+            traceable_ids.add(str(ledger_id))
+        else:
+            orphan_rows += 1
+            if ledger_id:
+                orphan_ids.add(str(ledger_id))
+            else:
+                missing_id_rows += 1
+
+    qualification = dict(raw_qualification)
+    qualification["qualified_recorded"] = len(traceable_ids)
+    quarantined_state_rows = int(raw_qualification.get("ledger_orphan") or 0)
+    if orphan_rows or quarantined_state_rows:
+        qualification["ledger_orphan"] = orphan_rows + quarantined_state_rows
     return {
         "raw_total": sum(evidence.values()),
         "evidence": evidence,
         "qualification": qualification,
+        "raw_qualification_states": raw_qualification,
+        "traceability": {
+            "state": ("unavailable" if readback_error_rows else
+                      "ok" if not orphan_rows and not quarantined_state_rows else "partial"),
+            "raw_marked_recorded_rows": len(marked_recorded),
+            "traceable_rows": traceable_rows,
+            "traceable_unique_ledger_events": len(traceable_ids),
+            "orphan_rows": orphan_rows + quarantined_state_rows,
+            "orphan_unique_ledger_ids": len(orphan_ids),
+            "missing_ledger_id_rows": missing_id_rows,
+            "quarantined_state_rows": quarantined_state_rows,
+            "readback_error_rows": readback_error_rows,
+        },
         "recent_hours": recent_hours,
         "recent_complete": recent_complete,
     }
