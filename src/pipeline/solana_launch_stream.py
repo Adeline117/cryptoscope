@@ -30,6 +30,7 @@ PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 PUBLIC_SOLANA_WS = "wss://api.mainnet-beta.solana.com/"
 MAX_BACKFILL_SLOTS = 16
 GAP_RETRY_SLOT_BUDGET = 1
+SKIPPED_SLOT_PROOF_LOOKAHEAD = 512
 HYDRATION_RETRY_BASE_SECONDS = 60
 HYDRATION_RETRY_MAX_SECONDS = 3600
 DB = DATA_DIR / "solana_launch_events.db"
@@ -766,14 +767,40 @@ def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
     if slot < first_available:
         raise RuntimeError(
             f"slot {slot} predates first available block {first_available}")
-    produced = rpc.call("getBlocks", [slot, slot, {"commitment": "finalized"}])
+    proof_end = min(finalized, slot + SKIPPED_SLOT_PROOF_LOOKAHEAD)
+    produced = rpc.call("getBlocks", [
+        slot, proof_end, {"commitment": "finalized"},
+    ])
     if not isinstance(produced, list):
         raise RuntimeError("getBlocks returned a non-list result")
+    if any(isinstance(value, bool) or not isinstance(value, int) for value in produced):
+        raise RuntimeError("getBlocks returned invalid slot coverage")
     produced_slots = [int(value) for value in produced]
-    if produced_slots not in ([], [slot]):
+    if (produced_slots != sorted(set(produced_slots))
+            or any(value < slot or value > proof_end for value in produced_slots)):
         raise RuntimeError("getBlocks returned invalid slot coverage")
     if not produced_slots:
-        return
+        raise RuntimeError(
+            f"slot {slot} has no bounded finalized skipped-slot proof")
+    first_produced = produced_slots[0]
+    if first_produced > slot:
+        successor = rpc.call("getBlock", [first_produced, {
+            "commitment": "finalized", "encoding": "json",
+            "transactionDetails": "none", "rewards": False,
+            "maxSupportedTransactionVersion": 0,
+        }])
+        if not isinstance(successor, dict):
+            raise RuntimeError(
+                f"finalized successor block {first_produced} is unavailable")
+        parent = successor.get("parentSlot")
+        if (isinstance(parent, bool) or not isinstance(parent, int)
+                or int(parent) < 0):
+            raise RuntimeError(
+                f"finalized successor block {first_produced} lacks parentSlot")
+        if int(parent) < slot:
+            return
+        raise RuntimeError(
+            f"provider omitted produced slot {slot}; successor parent is {parent}")
     block = rpc.call("getBlock", [slot, {
         "commitment": "finalized", "encoding": "json",
         "transactionDetails": "full", "rewards": False,

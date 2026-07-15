@@ -574,13 +574,73 @@ def test_open_slot_gap_is_retried_and_resolved(sol):
                 return 12
             if method == "getFirstAvailableBlock":
                 return 0
-            assert method == "getBlocks" and params[:2] == [11, 11]
-            return []
+            if method == "getBlocks":
+                assert params[:2] == [11, 12]
+                return [12]
+            assert method == "getBlock" and params[0] == 12
+            assert params[1]["transactionDetails"] == "none"
+            return {"parentSlot": 10}
 
     assert sol.retry_open_gaps(Rpc()) == {
         "attempted": 1, "recovered": 1, "progressed": 0, "failed": 0}
     assert stream_health.open_gaps("solana", "pump_fun_launches") == []
     assert stream_health.snapshot(stale_after_seconds=60)[0]["status"] == "live"
+
+
+def test_empty_getblocks_without_successor_proof_keeps_gap_open(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            if method == "getFirstAvailableBlock":
+                return 0
+            assert method == "getBlocks"
+            return []
+
+    assert sol.retry_open_gaps(Rpc()) == {
+        "attempted": 1, "recovered": 0, "progressed": 0, "failed": 1,
+    }
+    health = stream_health.snapshot(stale_after_seconds=60)[0]
+    assert health["status"] == "degraded" and health["open_gaps"] == 1
+
+
+def test_successor_parent_exposes_provider_omission_instead_of_resolving_gap(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 12
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return [12]
+            assert method == "getBlock" and params[0] == 12
+            return {"parentSlot": 11}
+
+    assert sol.retry_open_gaps(Rpc()) == {
+        "attempted": 1, "recovered": 0, "progressed": 0, "failed": 1,
+    }
+    health = stream_health.snapshot(stale_after_seconds=60)[0]
+    assert health["status"] == "degraded" and health["open_gaps"] == 1
+    c = stream_health._conn()
+    try:
+        error = c.execute("SELECT last_error FROM gaps").fetchone()[0]
+    finally:
+        c.close()
+    assert "omitted produced" in error
 
 
 def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
@@ -592,13 +652,15 @@ def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
 
         def call(self, method, params):
             if method == "getSlot":
-                return 12
+                return 13
             if method == "getFirstAvailableBlock":
                 return 0
             if method == "getBlocks":
-                assert params[0] == params[1]
-                return [11] if params[0] == 11 else []
+                return [value for value in (11, 13)
+                        if params[0] <= value <= params[1]]
             assert method == "getBlock"
+            if params[1]["transactionDetails"] == "none":
+                return {"parentSlot": 9 if params[0] == 11 else 11}
             self.slots.append(params[0])
             assert params[1]["encoding"] == "json"
             return {"transactions": [tx]}
@@ -633,8 +695,7 @@ def test_long_slot_gap_checkpoints_one_verified_slot_per_tick(sol):
             if method == "getFirstAvailableBlock":
                 return 0
             if method == "getBlocks":
-                assert params[0] == params[1]
-                return [params[0]]
+                return list(range(params[0], params[1] + 1))
             assert method == "getBlock"
             self.blocks.append(params[0])
             return {"transactions": []}
