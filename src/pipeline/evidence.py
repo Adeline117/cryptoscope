@@ -133,6 +133,10 @@ _CANDLE_CACHE: dict = {}
 _POOL_CACHE: dict = {}
 
 
+class OhlcvRateLimited(RuntimeError):
+    """The shared historical-price source requested a scheduler-level backoff."""
+
+
 def _ohlcv(chain: str, pool: str, before: int | None = None,
            timeframe: str = "hour") -> list[list]:
     """Candles, cached per (chain, pool, before, tf) and paced. A 429 must NOT silently
@@ -146,6 +150,7 @@ def _ohlcv(chain: str, pool: str, before: int | None = None,
     """
     import json
     import time
+    import urllib.error
     import urllib.request
     key = (chain, pool.lower(), before, timeframe)
     if key in _CANDLE_CACHE:
@@ -167,6 +172,18 @@ def _ohlcv(chain: str, pool: str, before: int | None = None,
             _CANDLE_CACHE[key] = out
             time.sleep(2.2)
             return out
+        except urllib.error.HTTPError as e:
+            try:
+                e.close()
+            except Exception:
+                pass
+            if e.code == 429:
+                # Retrying four times per token turns one shared quota response into
+                # minutes of sleeps and more 429s. Abort this resolver cycle; the
+                # hourly scheduler is the retry policy.
+                raise OhlcvRateLimited("GeckoTerminal OHLCV rate limited") from e
+            last = e
+            time.sleep(6 * (attempt + 1))
         except Exception as e:
             last = e
             time.sleep(6 * (attempt + 1))

@@ -124,6 +124,47 @@ def test_lookup_budget_reserves_a_slot_for_each_due_lane(ledger):
     assert set(lanes) == {"launch", "cascade"}
 
 
+def test_shared_ohlcv_rate_limit_stops_the_cycle_after_one_lookup(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+    from src.pipeline.evidence import OhlcvRateLimited
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    for i in range(5):
+        ledger.record(_launch((now - timedelta(hours=25)).isoformat(), f"launch-{i}"))
+    calls = []
+
+    def limited(row, when):
+        calls.append(row["id"])
+        raise OhlcvRateLimited("shared quota exhausted")
+
+    got = oo.resolve(now=now, price_at=limited, max_lookups=5)
+
+    assert len(calls) == 1
+    assert got["lookups"] == 1
+    assert got["source_backoff"] == "shared quota exhausted"
+    attempted = [r for r in ledger.outcome_rows()
+                 if (r["outcome"].get("attempts") or {}).get("24h")]
+    assert len(attempted) == 1
+
+
+def test_gecko_429_raises_without_per_token_sleep_retries(monkeypatch):
+    import urllib.error
+    import urllib.request
+    from src.pipeline import evidence
+
+    request = urllib.request.Request("https://api.geckoterminal.com/test")
+    error = urllib.error.HTTPError(request.full_url, 429, "rate limited", {}, None)
+    sleeps = []
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *_args, **_kwargs: (_ for _ in ()).throw(error))
+    monkeypatch.setattr("time.sleep", lambda seconds: sleeps.append(seconds))
+    evidence._CANDLE_CACHE.clear()
+
+    with pytest.raises(evidence.OhlcvRateLimited):
+        evidence._ohlcv("solana", "Pool", before=123)
+    assert sleeps == []
+
+
 def test_stats_expose_due_and_unpriced_24h_backlog(ledger):
     from src.pipeline import opportunity_outcomes as oo
 

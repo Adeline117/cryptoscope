@@ -106,7 +106,8 @@ def _hyperliquid_price_at(row: dict, when: datetime) -> float | None:
 def _default_price_at(row: dict, when: datetime) -> float | None:
     if row.get("lane") == "launch":
         from src.pipeline.outcome_tracker import _price_at
-        return _price_at(row.get("token"), row.get("chain"), when)
+        return _price_at(row.get("token"), row.get("chain"), when,
+                         raise_rate_limit=True)
     if row.get("lane") == "cascade":
         return _hyperliquid_price_at(row, when)
     return None
@@ -189,6 +190,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
     rows = opportunity_ledger.outcome_rows(open_only=True)
     tasks = _select_due_tasks(rows, now, max_lookups)
     lookups = settled = retired = 0
+    source_backoff = None
     by_lane: dict[str, int] = {}
     by_horizon: dict[str, int] = {}
     for task in tasks:
@@ -217,7 +219,18 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         attempts = dict(outcome.get("attempts") or {})
         attempts[name] = int(attempts.get(name) or 0) + 1
         outcome["attempts"] = attempts
-        price = price_at(row, t0 + timedelta(hours=hours))
+        try:
+            price = price_at(row, t0 + timedelta(hours=hours))
+        except Exception as exc:
+            from src.pipeline.evidence import OhlcvRateLimited
+            if not isinstance(exc, OhlcvRateLimited):
+                raise
+            source_backoff = str(exc)[:120]
+            outcome["price_source_backoff"] = {
+                "at": now.isoformat(), "horizon": name, "reason": source_backoff}
+            outcome["updated_at"] = now.isoformat()
+            opportunity_ledger.save_outcome(row["id"], outcome, "open")
+            break
         state = "open"
         if price is not None and price > 0:
             horizons[name] = _settled(entry, float(price), _direction(row), cost_pct)
@@ -237,6 +250,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         opportunity_ledger.save_outcome(row["id"], outcome, state)
     result = {"lookups": lookups, "settled": settled, "retired": retired,
               "lookups_by_lane": by_lane, "lookups_by_horizon": by_horizon,
+              "source_backoff": source_backoff,
               "pending_events": sum(1 for r in rows if r.get("lane") in SUPPORTED_LANES)}
     logger.info("opportunity_outcomes_resolved", **result)
     return result

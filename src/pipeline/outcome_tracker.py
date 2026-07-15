@@ -121,7 +121,8 @@ def _hit(direction: str, price0: float, price1: float, liquidity: float = 0) -> 
 UNRESOLVABLE_DAYS = 14      # past this, an unpriced alert will never resolve
 
 
-def _price_at(token: str, chain: str, when: datetime) -> float | None:
+def _price_at(token: str, chain: str, when: datetime, *,
+              raise_rate_limit: bool = False) -> float | None:
     """The price AT `when` — not the price whenever we happen to run.
 
     `_price()` returns the CURRENT price. The resolver used it for `price_24h`, which
@@ -155,6 +156,9 @@ def _price_at(token: str, chain: str, when: datetime) -> float | None:
             if best is not None and abs(best[0] - target) <= 2 * 3600:
                 return best[4]          # hourly close within 2h of the horizon
     except Exception as e:
+        from src.pipeline.evidence import OhlcvRateLimited
+        if raise_rate_limit and isinstance(e, OhlcvRateLimited):
+            raise
         logger.debug("price_at_failed", token=token, error=str(e)[:60])
     return None
 
