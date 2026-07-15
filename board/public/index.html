@@ -654,7 +654,7 @@ function carryHealthHtml(health){
       :["数据源不可用","b-danger","本轮无法判断是否存在 Carry 候选；已有纸面仓位保持开启，未知区间不累计资金费。"];
   const hl=health?.hl||{}, okx=health?.okx||{}, paper=health?.paper||{};
   const okxCounts=`观测 ${okx.observed??0}/${okx.requested??0} · 不支持 ${okx.unsupported??0} · 失败 ${okx.request_failed??0}`;
-  const okxGaps=`过期 ${okx.rate_stale??0} · 无效 ${okx.rate_invalid??0} · 超限 ${okx.request_cap??0}`;
+  const okxGaps=`超时 ${okx.request_timeout??0} · 过期 ${okx.rate_stale??0} · 无效 ${okx.rate_invalid??0} · 超限 ${okx.request_cap??0}`;
   const storage=[health?.snapshot_store,health?.scorecard].filter(x=>x&&x.state!=="ok").map(x=>x.error_kind).filter(Boolean).join(" · ");
   return `<section class="carry-health ${state}" aria-label="Carry 数据源健康">
     <div class="carry-health-head"><span class="carry-health-title">Carry 可判定性</span><span class="chip ${cfg[1]}">${cfg[0]}</span></div>

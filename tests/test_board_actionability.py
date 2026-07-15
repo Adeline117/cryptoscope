@@ -108,6 +108,7 @@ def test_carry_health_precedes_empty_state_and_distinguishes_unknown_from_empty(
         "不代表全市场没有机会",
     ):
         assert phrase in html
+    assert "okx.request_timeout" in html
     assert "当前无正资金费机会,市场杠杆也不拥挤" not in html
 
 

@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+from threading import Event, Lock
+from time import monotonic, sleep
 
 import pytest
 
@@ -62,12 +64,40 @@ def test_okx_funding_map_prefers_exact_then_multiplier_alias():
     def fetch(url):
         calls.append(url)
         return ({"code": "0", "data": [valid]} if "PEPE-USDT" in url
-                and "KPEPE" not in url else {"code": "0", "data": []})
+                and "KPEPE" not in url else {"code": "51001", "data": []})
 
     got = hl.okx_funding_map(["kPEPE"], fetch=fetch)
     assert got["kPEPE"] == pytest.approx(21.9)
     assert "KPEPE-USDT-SWAP" in calls[0]
     assert "PEPE-USDT-SWAP" in calls[1]
+
+
+def test_okx_funding_map_uses_only_verified_migration_aliases():
+    valid = _row(interval_h=4)
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        if "MATIC-USDT-SWAP" in url:
+            return {"code": "51001", "data": [], "msg": "instrument does not exist"}
+        return {"code": "0", "data": [valid]}
+
+    got = hl.okx_funding_map(["MATIC"], fetch=fetch)
+
+    assert got["MATIC"] == pytest.approx(21.9)
+    assert "MATIC-USDT-SWAP" in calls[0]
+    assert "POL-USDT-SWAP" in calls[1]
+
+
+def test_okx_nonzero_error_other_than_missing_instrument_fails_closed():
+    scan = hl.okx_funding_scan(
+        ["BTC"], fetch=lambda _url: {"code": "50011", "data": [],
+                                    "msg": "rate limit"},
+    )
+
+    assert scan["rates"] == {}
+    assert scan["status_by_symbol"] == {"BTC": "request_failed"}
+    assert scan["summary"]["state"] == "unavailable"
 
 
 def _ctx(name: str, *, funding_ann: float, oi_usd: float = 2_000_000) -> dict:
@@ -215,6 +245,68 @@ def test_okx_funding_scan_classifies_every_non_observation():
     }
     assert scan["rates"]["FRESH"] == pytest.approx(21.9)
     assert scan["summary"]["state"] == "partial"
+
+
+def test_okx_funding_scan_is_bounded_concurrent_and_order_stable():
+    symbols = [f"S{i:02d}" for i in range(12)]
+    lock = Lock()
+    active = 0
+    peak = 0
+
+    def fetch(url):
+        nonlocal active, peak
+        symbol = url.split("instId=")[1].split("-")[0]
+        index = int(symbol[1:])
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        try:
+            sleep(0.01 * (1 + (index % 3)))
+            return {"code": "0", "data": [
+                _row(fundingRate=str(0.0001 + index / 1_000_000))
+            ]}
+        finally:
+            with lock:
+                active -= 1
+
+    scan = hl.okx_funding_scan(
+        symbols, fetch=fetch, max_workers=3, scan_timeout_s=2,
+    )
+
+    assert 1 < peak <= 3
+    assert list(scan["status_by_symbol"]) == symbols
+    assert list(scan["rates"]) == symbols
+    assert all(status == "observed" for status in scan["status_by_symbol"].values())
+    assert scan["rates"]["S00"] < scan["rates"]["S11"]
+    assert scan["summary"]["max_workers"] == 3
+    assert scan["summary"]["request_timeout"] == 0
+
+
+def test_okx_funding_scan_whole_round_timeout_is_fail_closed():
+    gate = Event()
+    symbols = ["WAIT0", "WAIT1", "WAIT2", "WAIT3"]
+
+    def fetch(_url):
+        gate.wait(timeout=2)
+        return {"code": "0", "data": [_row()]}
+
+    started = monotonic()
+    try:
+        scan = hl.okx_funding_scan(
+            symbols, fetch=fetch, max_workers=2, scan_timeout_s=0.05,
+        )
+    finally:
+        gate.set()
+    elapsed = monotonic() - started
+
+    assert elapsed < 0.5
+    assert scan["rates"] == {}
+    assert scan["status_by_symbol"] == {
+        symbol: "request_timeout" for symbol in symbols
+    }
+    assert scan["summary"]["request_timeout"] == len(symbols)
+    assert scan["summary"]["state"] == "unavailable"
+    assert scan["summary"]["duration_ms"] < 500
 
 
 def test_scan_carry_never_turns_okx_failure_into_single_venue_entry(monkeypatch):

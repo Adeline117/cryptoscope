@@ -21,7 +21,9 @@ import json
 import math
 import sqlite3
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
+from time import monotonic
 
 import structlog
 
@@ -256,6 +258,8 @@ CARRY_DEFAULT_HOLD_DAYS = 14      # amortize the one-time cost over this hold. T
                                   # single biggest lever — and it EQUALS how long the
                                   # differential stays positive (measured, not assumed).
 OKX_FUNDING_REQUEST_CAP = 45
+OKX_FUNDING_MAX_WORKERS = 8
+OKX_FUNDING_SCAN_TIMEOUT_S = 75.0
 
 
 def _carry_net_ann(gross_edge_ann: float, hold_days: float = CARRY_DEFAULT_HOLD_DAYS) -> float:
@@ -372,11 +376,47 @@ def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
     return value if status == "observed" else None
 
 
+def _scan_okx_funding_symbol(symbol: str, fetch) -> tuple[float | None, str]:
+    """Scan exact then multiplier aliases for one symbol inside one bounded worker."""
+    status = "unsupported"
+    for base in okx_symbol_candidates(symbol):
+        try:
+            data = fetch(OKX_FUNDING_URL.format(base))
+        except TimeoutError:
+            return None, "request_timeout"
+        except Exception:
+            return None, "request_failed"
+        if not isinstance(data, dict):
+            return None, "request_failed"
+        code = str(data.get("code"))
+        # OKX uses 51001 for a verified nonexistent instId. This is the only nonzero
+        # response that may continue to a deterministic alias; rate limits and every
+        # other API error remain request failures.
+        if code == "51001" and data.get("data") == []:
+            continue
+        if code != "0":
+            return None, "request_failed"
+        rows = data.get("data")
+        if not isinstance(rows, list):
+            return None, "rate_invalid"
+        if not rows:
+            continue
+        value, status = _okx_funding_value(rows[0])
+        return value, status
+    return None, status
+
+
 def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
-                     fetch=None) -> dict:
-    """Typed per-symbol OKX funding scan; absence never hides transport or freshness."""
+                     fetch=None, *, max_workers: int = OKX_FUNDING_MAX_WORKERS,
+                     scan_timeout_s: float = OKX_FUNDING_SCAN_TIMEOUT_S) -> dict:
+    """Typed bounded-concurrent OKX scan with a hard whole-round deadline.
+
+    Per-symbol failures remain explicit; a timeout can never become ``unsupported``.
+    Output key order follows the input even though workers finish out of order.
+    """
     symbols = list(dict.fromkeys(str(c) for c in coins if c))
     attempted_at = datetime.now(timezone.utc).isoformat()
+    started = monotonic()
     if fetch is None:
         def fetch(url):
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -385,34 +425,46 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
     rates: dict[str, float] = {}
     statuses: dict[str, str] = {}
     limited = symbols[:max(cap, 0)]
+    try:
+        worker_limit = max(1, int(max_workers))
+    except (TypeError, ValueError):
+        worker_limit = OKX_FUNDING_MAX_WORKERS
+    actual_workers = min(worker_limit, len(limited)) if limited else 0
+    results: dict[str, tuple[float | None, str]] = {}
+    if limited:
+        executor = ThreadPoolExecutor(max_workers=actual_workers,
+                                      thread_name_prefix="okx-funding")
+        futures = {
+            executor.submit(_scan_okx_funding_symbol, symbol, fetch): symbol
+            for symbol in limited
+        }
+        try:
+            done, pending = wait(futures, timeout=max(float(scan_timeout_s), 0.0))
+            for future in done:
+                symbol = futures[future]
+                try:
+                    results[symbol] = future.result()
+                except TimeoutError:
+                    results[symbol] = (None, "request_timeout")
+                except Exception:
+                    results[symbol] = (None, "request_failed")
+            for future in pending:
+                results[futures[future]] = (None, "request_timeout")
+                future.cancel()
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     for symbol in limited:
-        status = "unsupported"
-        for base in okx_symbol_candidates(symbol):
-            try:
-                data = fetch(OKX_FUNDING_URL.format(base))
-            except Exception:
-                status = "request_failed"
-                break
-            if not isinstance(data, dict) or str(data.get("code")) != "0":
-                status = "request_failed"
-                break
-            rows = data.get("data")
-            if not isinstance(rows, list):
-                status = "rate_invalid"
-                break
-            if not rows:
-                continue
-            value, status = _okx_funding_value(rows[0])
-            if status == "observed" and value is not None:
-                rates[symbol] = value
-            break
+        value, status = results.get(symbol, (None, "request_timeout"))
         statuses[symbol] = status
+        if status == "observed" and value is not None:
+            rates[symbol] = value
     for symbol in symbols[len(limited):]:
         statuses[symbol] = "request_cap"
     counts = {name: sum(value == name for value in statuses.values()) for name in (
-        "observed", "unsupported", "request_failed", "rate_stale", "rate_invalid",
-        "request_cap")}
-    bad = counts["request_failed"] + counts["rate_stale"] + counts["rate_invalid"]
+        "observed", "unsupported", "request_failed", "request_timeout", "rate_stale",
+        "rate_invalid", "request_cap")}
+    bad = (counts["request_failed"] + counts["request_timeout"]
+           + counts["rate_stale"] + counts["rate_invalid"])
     if not symbols:
         state = "not_needed"
     elif bad and not rates and counts["unsupported"] == 0:
@@ -423,7 +475,9 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
         state = "ok"
     return {"rates": rates, "status_by_symbol": statuses,
             "summary": {"state": state, "attempted_at": attempted_at,
-                        "requested": len(symbols), **counts}}
+                        "requested": len(symbols), **counts,
+                        "duration_ms": round((monotonic() - started) * 1000),
+                        "max_workers": actual_workers}}
 
 
 def okx_funding_map(coins: list[str], cap: int = 45, fetch=None) -> dict[str, float]:
@@ -642,7 +696,8 @@ def scan_carry(rows: list[dict] | None = None, *,
                 "schema_version": 1, "state": "unavailable", "scan_at": scan_at,
                 "hl": hl_health, "okx": {"state": "not_needed", "requested": 0,
                                            "observed": 0, "unsupported": 0,
-                                           "request_failed": 0, "rate_stale": 0,
+                                           "request_failed": 0, "request_timeout": 0,
+                                           "rate_stale": 0,
                                            "rate_invalid": 0, "request_cap": 0},
                 "open_requested": len(priorities), "open_observed": 0,
                 "entry_deferred_by_cap": 0,
