@@ -60,6 +60,44 @@ def test_record_if_absent_never_refreshes_first_event_provenance(tmp_path, monke
     assert row["payload"]["primary_evidence"]["pool"] == "first"
 
 
+def test_carry_refresh_corrects_legacy_measurement_size_without_weakening_other_lanes(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    legacy = _candidate(
+        lane="carry", chain="hyperliquid+okx", token="BTC", event_key="paper:1",
+        decision="PAPER_OPEN", max_notional_usd=10_000,
+    )
+    ident, _ = ledger.record(legacy)
+    ledger.record({
+        **legacy, "decision": "WATCH", "max_notional_usd": None,
+        "measurement_notional_usd_per_leg": 10_000,
+        "measurement_gross_notional_usd": 20_000,
+        "position_limit_status": "unknown",
+    })
+    launch_id, _ = ledger.record(_candidate(token="launch", max_notional_usd=50))
+    ledger.record(_candidate(token="launch", decision="WATCH", max_notional_usd=None))
+
+    c = sqlite3.connect(tmp_path / "ledger.db")
+    stored = c.execute(
+        "SELECT decision,max_notional_usd FROM opportunities WHERE id=?", (ident,)
+    ).fetchone()
+    launch_stored = c.execute(
+        "SELECT decision,max_notional_usd FROM opportunities WHERE id=?", (launch_id,)
+    ).fetchone()
+    c.close()
+    assert stored == ("WATCH", None)
+    assert launch_stored == ("SMALL_PROBE", 50)
+    row = next(item for item in ledger.outcome_rows() if item["lane"] == "carry")
+    assert row["max_notional_usd"] is None
+    assert row["measurement_notional_usd_per_leg"] == 10_000
+    assert row["position_limit_status"] == "unknown"
+    assert row["action_level"] == "A1_WATCH"
+    assert row["actionable_now"] is False
+    assert row["auto_execution_allowed"] is False
+
+
 def test_invalidated_source_event_leaves_audit_row_but_not_active_list(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
 

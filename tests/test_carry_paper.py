@@ -264,10 +264,21 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
                         "edge_ann": 40}])
     assert opened["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 0}
     event = opportunity_ledger.outcome_rows()[0]
-    assert event["lane"] == "carry" and event["decision"] == "PAPER_OPEN"
+    assert event["lane"] == "carry" and event["decision"] == "WATCH"
     assert event["quote_at"] == event["detected_at"]
     assert event["executable_at"] is None       # measured book is not a real fill
     assert event["outcome_state"] == "open"
+    assert event["max_notional_usd"] is None
+    assert event["measurement_notional_usd_per_leg"] == cp.NOTIONAL
+    assert event["measurement_gross_notional_usd"] == cp.NOTIONAL * 2
+    assert event["position_limit_status"] == "unknown"
+    assert event["action_level"] == "A1_WATCH"
+    assert event["actionable_now"] is False
+    assert event["auto_execution_allowed"] is False
+    active = opportunity_ledger.active("carry")[0]
+    assert active["max_notional_usd"] is None
+    assert active["measurement_notional_usd_per_leg"] == cp.NOTIONAL
+    assert active["effective_decision"] == "WATCH"
 
     import sqlite3
     c = sqlite3.connect(str(cp.DB))

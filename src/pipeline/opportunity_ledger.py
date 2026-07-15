@@ -175,7 +175,13 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   cost_contract_version,cost_contract,cohort_version,payload,updated_at)
                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO UPDATE SET
-                    state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at
+                    state=excluded.state,
+                    decision=CASE WHEN opportunities.lane='carry'
+                                  THEN excluded.decision ELSE opportunities.decision END,
+                    max_notional_usd=CASE WHEN opportunities.lane='carry'
+                                          THEN excluded.max_notional_usd
+                                          ELSE opportunities.max_notional_usd END,
+                    payload=excluded.payload, updated_at=excluded.updated_at
             """, values)
         else:
             inserted = bool(c.execute("""INSERT INTO opportunities(
@@ -393,6 +399,32 @@ def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | No
             "action_reason_codes": ["all_manual_probe_gates_pass"]}
 
 
+def _normalize_carry_read(item: dict) -> dict:
+    """Keep legacy paper-book measurement size out of the position-limit field."""
+    if item.get("lane") != "carry":
+        return item
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    recorded_limit = item.get("max_notional_usd")
+    measurement = (item.get("measurement_notional_usd_per_leg")
+                   or payload.get("measurement_notional_usd_per_leg")
+                   or recorded_limit)
+    if recorded_limit is not None:
+        item["legacy_recorded_max_notional_usd"] = recorded_limit
+    item.update({
+        "max_notional_usd": None,
+        "measurement_notional_usd_per_leg": measurement,
+        "measurement_gross_notional_usd": (
+            measurement * 2 if isinstance(measurement, (int, float)) else None
+        ),
+        "position_limit_status": "unknown",
+        "action_level": "A1_WATCH",
+        "actionable_now": False,
+        "auto_execution_allowed": False,
+        "action_reason_codes": ["paper_measurement_not_position_limit"],
+    })
+    return item
+
+
 def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[dict]:
     """Return event cards plus a fail-closed current-actionability verdict."""
     if lane not in LANES:
@@ -456,6 +488,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                 item["outcome"] = json.loads(item["outcome"])
             except (TypeError, json.JSONDecodeError):
                 item["outcome"] = None
+        _normalize_carry_read(item)
         recorded_decision = item.get("decision") or "WATCH"
         effective_decision = recorded_decision
         expires_at = item.get("expires_at")
@@ -502,6 +535,11 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                 except (TypeError, ValueError):
                     seconds_to_expiry = None
                 expired = seconds_to_expiry is not None and seconds_to_expiry <= 0
+        elif lane == "carry":
+            effective_decision = "WATCH"
+            item.update({"action_level": "A1_WATCH", "actionable_now": False,
+                         "auto_execution_allowed": False,
+                         "action_reason_codes": ["paper_measurement_not_position_limit"]})
         else:
             item["actionable_now"] = effective_decision in {"SMALL_PROBE", "CLAIM_CHECK"}
         item["effective_decision"] = effective_decision
@@ -546,6 +584,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
                     None if key == "cost_contract" else {})
             except (TypeError, json.JSONDecodeError):
                 item[key] = None if key == "cost_contract" else {}
+        _normalize_carry_read(item)
         out.append(item)
     return out
 
