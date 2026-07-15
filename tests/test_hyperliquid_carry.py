@@ -34,6 +34,8 @@ def test_okx_funding_annualizes_actual_contract_interval():
         _row(interval_h=0),
         _row(interval_h=25),
         _row(age_ms=hl.OKX_FUNDING_MAX_AGE_MS + 1),
+        _row(fundingRate="nan"),
+        _row(fundingRate="inf"),
     ],
 )
 def test_okx_funding_rejects_missing_invalid_or_stale_period(row):
@@ -51,3 +53,17 @@ def test_okx_funding_map_omits_unverifiable_interval():
 
     assert got["GOOD"] == pytest.approx(21.9)
     assert "BAD" not in got
+
+
+def test_okx_funding_map_prefers_exact_then_multiplier_alias():
+    valid = _row(interval_h=4)
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return {"data": [valid]} if "PEPE-USDT" in url and "KPEPE" not in url else {"data": []}
+
+    got = hl.okx_funding_map(["kPEPE"], fetch=fetch)
+    assert got["kPEPE"] == pytest.approx(21.9)
+    assert "KPEPE-USDT-SWAP" in calls[0]
+    assert "PEPE-USDT-SWAP" in calls[1]

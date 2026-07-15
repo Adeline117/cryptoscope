@@ -19,6 +19,7 @@ Y%, net Z% (vs predicted)".
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import urllib.request
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ from datetime import datetime, timezone
 import structlog
 
 from src.config import DATA_DIR
+from src.onchain.okx_symbols import candidates as okx_symbol_candidates
 
 logger = structlog.get_logger()
 
@@ -40,6 +42,7 @@ FEE_PCT_ONEWAY_BOTHLEGS = 0.095
 MIN_ANNUALIZED_HOLD_H = 30 * 24
 MIN_ANNUALIZED_SAMPLES = 5
 _OKX_CTVAL: dict[str, float] = {}
+_OKX_META_LOADED = False
 
 
 def edge_exclusion_reasons(sample: dict) -> list[str]:
@@ -222,36 +225,80 @@ def _post(url: str, body: dict, timeout: int = 10):
         return json.loads(response.read())
 
 
-def _okx_ctval(coin: str) -> float:
-    """OKX contract value (coin units per contract), bulk-fetched once and cached. 1.0
-    fallback keeps slippage a rough-but-real estimate rather than crashing."""
-    if not _OKX_CTVAL:
+def _load_okx_contracts() -> None:
+    """Cache only live linear USDT contracts with a verified positive contract value."""
+    global _OKX_META_LOADED
+    if _OKX_META_LOADED:
+        return
+    try:
+        data = _get("https://www.okx.com/api/v5/public/instruments?instType=SWAP")
+    except Exception:
+        return
+    items = (data.get("data") if isinstance(data, dict)
+             and str(data.get("code")) == "0" else None)
+    if not isinstance(items, list) or not items:
+        return
+    _OKX_META_LOADED = True
+    for item in items:
+        inst_id = str(item.get("instId") or "")
+        parts = inst_id.split("-")
+        if (len(parts) != 3 or parts[1:] != ["USDT", "SWAP"]
+                or item.get("state") != "live" or item.get("ctType") != "linear"
+                or item.get("settleCcy") != "USDT"):
+            continue
+        base = parts[0].upper()
+        if str(item.get("ctValCcy") or "").upper() != base:
+            continue
         try:
-            d = _get("https://www.okx.com/api/v5/public/instruments?instType=SWAP")
-            for it in d.get("data", []):
-                if it.get("ctValCcy") and it.get("instId", "").endswith("-USDT-SWAP"):
-                    _OKX_CTVAL[it["instId"].split("-")[0]] = float(it.get("ctVal") or 1.0)
-        except Exception:
-            pass
-    return _OKX_CTVAL.get(coin, 1.0)
+            value = float(item["ctVal"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value > 0:
+            _OKX_CTVAL[base] = value
+
+
+def _okx_contract(coin: str) -> tuple[str, float] | None:
+    """Return the exact live OKX base and ctVal; metadata uncertainty fails closed."""
+    _load_okx_contracts()
+    for base in okx_symbol_candidates(coin):
+        value = _OKX_CTVAL.get(base)
+        if value is not None:
+            return base, value
+    return None
+
+
+def _okx_ctval(coin: str) -> float | None:
+    contract = _okx_contract(coin)
+    return contract[1] if contract else None
 
 
 def _hl_slip(coin: str, notional: float, side: str) -> float | None:
     """Directional HL book slippage for a marketable buy or sell."""
     try:
+        notional = float(notional)
+    except (TypeError, ValueError):
+        return None
+    if side not in {"buy", "sell"} or not math.isfinite(notional) or notional <= 0:
+        return None
+    try:
         lv = _post("https://api.hyperliquid.xyz/info", {"type": "l2Book", "coin": coin})["levels"]
         levels = lv[1] if side == "buy" else lv[0]
         best = float(levels[0]["px"])
+        if not math.isfinite(best) or best <= 0:
+            return None
         rem, qty = notional, 0.0
         for L in levels:
             px, sz = float(L["px"]), float(L["sz"])
+            if not all(math.isfinite(x) and x > 0 for x in (px, sz)):
+                return None
             take = min(px * sz, rem); qty += take / px; rem -= take
             if rem <= 0:
                 break
         if rem > 0 or qty <= 0:
             return None
         average = notional / qty
-        return ((average / best - 1) if side == "buy" else (1 - average / best)) * 100
+        slip = ((average / best - 1) if side == "buy" else (1 - average / best)) * 100
+        return max(0.0, slip) if math.isfinite(slip) and slip >= -1e-9 else None
     except Exception:
         return None
 
@@ -259,20 +306,36 @@ def _hl_slip(coin: str, notional: float, side: str) -> float | None:
 def _okx_slip(coin: str, notional: float, side: str) -> float | None:
     """Directional OKX book slippage (contract size converted to coin units)."""
     try:
-        d = _get(f"https://www.okx.com/api/v5/market/books?instId={coin}-USDT-SWAP&sz=50")
+        notional = float(notional)
+    except (TypeError, ValueError):
+        return None
+    if side not in {"buy", "sell"} or not math.isfinite(notional) or notional <= 0:
+        return None
+    try:
+        contract = _okx_contract(coin)
+        if contract is None:
+            return None
+        base, ctv = contract
+        d = _get(f"https://www.okx.com/api/v5/market/books?instId={base}-USDT-SWAP&sz=50")
+        if not isinstance(d, dict) or str(d.get("code")) != "0":
+            return None
         levels = d["data"][0]["asks" if side == "buy" else "bids"]
-        ctv = _okx_ctval(coin)
         best = float(levels[0][0])
+        if not math.isfinite(best) or best <= 0:
+            return None
         rem, qty = notional, 0.0
         for a in levels:
             px, sz = float(a[0]), float(a[1]) * ctv
+            if not all(math.isfinite(x) and x > 0 for x in (px, sz)):
+                return None
             take = min(px * sz, rem); qty += take / px; rem -= take
             if rem <= 0:
                 break
         if rem > 0 or qty <= 0:
             return None
         average = notional / qty
-        return ((average / best - 1) if side == "buy" else (1 - average / best)) * 100
+        slip = ((average / best - 1) if side == "buy" else (1 - average / best)) * 100
+        return max(0.0, slip) if math.isfinite(slip) and slip >= -1e-9 else None
     except Exception:
         return None
 
@@ -288,7 +351,8 @@ def _roundtrip_slip(coin: str, notional: float = NOTIONAL,
         return None
     hs = _hl_slip(coin, notional, hl_side)
     os_ = _okx_slip(coin, notional, okx_side)
-    if hs is None or os_ is None:
+    if (hs is None or os_ is None or not math.isfinite(hs) or not math.isfinite(os_)
+            or hs < 0 or os_ < 0):
         return None
     return hs + os_            # one direction, both legs; close measures the other side
 

@@ -258,11 +258,11 @@ def test_carry_slippage_uses_real_leg_direction_for_entry_and_exit(monkeypatch):
         [{"px": "100", "sz": "0.5"}, {"px": "99", "sz": "1"}],
         [{"px": "101", "sz": "0.5"}, {"px": "103", "sz": "1"}],
     ]})
-    monkeypatch.setattr(carry, "_get", lambda *_args, **_kwargs: {"data": [{
+    monkeypatch.setattr(carry, "_get", lambda *_args, **_kwargs: {"code": "0", "data": [{
         "bids": [["200", "0.25"], ["198", "1"]],
         "asks": [["201", "0.25"], ["204", "1"]],
     }]})
-    monkeypatch.setattr(carry, "_okx_ctval", lambda _coin: 1.0)
+    monkeypatch.setattr(carry, "_okx_contract", lambda _coin: ("X", 1.0))
 
     hl_sell = carry._hl_slip("X", 100, "sell")
     hl_buy = carry._hl_slip("X", 100, "buy")
@@ -276,3 +276,103 @@ def test_carry_slippage_uses_real_leg_direction_for_entry_and_exit(monkeypatch):
         hl_buy + okx_sell
     )
     assert carry._roundtrip_slip("X", 100, phase="bad") is None
+
+
+def test_okx_contract_metadata_maps_multiplier_symbols_and_never_defaults(monkeypatch):
+    import src.pipeline.carry_paper as carry
+
+    carry._OKX_CTVAL.clear()
+    monkeypatch.setattr(carry, "_OKX_META_LOADED", False)
+    monkeypatch.setattr(carry, "_get", lambda *_args, **_kwargs: {"code": "0", "data": [
+        {"instId": "BTC-USDT-SWAP", "state": "live", "ctType": "linear",
+         "settleCcy": "USDT", "ctValCcy": "BTC", "ctVal": "0.01"},
+        {"instId": "PEPE-USDT-SWAP", "state": "live", "ctType": "linear",
+         "settleCcy": "USDT", "ctValCcy": "PEPE", "ctVal": "10000000"},
+    ]})
+
+    assert carry._okx_contract("BTC") == ("BTC", 0.01)
+    assert carry._okx_contract("kPEPE") == ("PEPE", 10_000_000)
+    assert carry._okx_contract("1000PEPE") == ("PEPE", 10_000_000)
+    assert carry._okx_ctval("UNKNOWN") is None
+
+
+@pytest.mark.parametrize("ctval", [None, "", "0", "-1", "nan", "inf", "bad"])
+def test_okx_contract_metadata_rejects_invalid_ctval(monkeypatch, ctval):
+    import src.pipeline.carry_paper as carry
+
+    carry._OKX_CTVAL.clear()
+    monkeypatch.setattr(carry, "_OKX_META_LOADED", False)
+    monkeypatch.setattr(carry, "_get", lambda *_args, **_kwargs: {"code": "0", "data": [{
+        "instId": "X-USDT-SWAP", "state": "live", "ctType": "linear",
+        "settleCcy": "USDT", "ctValCcy": "X", "ctVal": ctval,
+    }]})
+    assert carry._okx_contract("X") is None
+
+
+@pytest.mark.parametrize("override", [
+    {"state": "suspend"}, {"ctType": "inverse"}, {"settleCcy": "USD"},
+    {"ctValCcy": "OTHER"}, {"instId": "X-USDC-SWAP"},
+])
+def test_okx_contract_metadata_rejects_nontradable_or_mismatched_contract(monkeypatch,
+                                                                         override):
+    import src.pipeline.carry_paper as carry
+
+    carry._OKX_CTVAL.clear()
+    monkeypatch.setattr(carry, "_OKX_META_LOADED", False)
+    item = {"instId": "X-USDT-SWAP", "state": "live", "ctType": "linear",
+            "settleCcy": "USDT", "ctValCcy": "X", "ctVal": "1"}
+    item.update(override)
+    monkeypatch.setattr(
+        carry, "_get", lambda *_args, **_kwargs: {"code": "0", "data": [item]}
+    )
+    assert carry._okx_contract("X") is None
+
+
+def test_okx_contract_metadata_network_failure_remains_retryable(monkeypatch):
+    import src.pipeline.carry_paper as carry
+
+    carry._OKX_CTVAL.clear()
+    monkeypatch.setattr(carry, "_OKX_META_LOADED", False)
+    calls = []
+
+    def fail(*_args, **_kwargs):
+        calls.append(1)
+        raise OSError("offline")
+
+    monkeypatch.setattr(carry, "_get", fail)
+    assert carry._okx_contract("X") is None
+    assert carry._okx_contract("X") is None
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "nan", "inf"])
+def test_okx_slippage_rejects_malformed_book_numbers(monkeypatch, bad):
+    import src.pipeline.carry_paper as carry
+
+    monkeypatch.setattr(carry, "_okx_contract", lambda _coin: ("X", 1.0))
+    monkeypatch.setattr(carry, "_get", lambda *_args, **_kwargs: {"code": "0", "data": [{
+        "bids": [["100", bad]], "asks": [["101", bad]],
+    }]})
+    assert carry._okx_slip("X", 100, "buy") is None
+    assert carry._okx_slip("X", 100, "sell") is None
+
+
+def test_okx_slippage_uses_resolved_multiplier_symbol(monkeypatch):
+    import src.pipeline.carry_paper as carry
+
+    urls = []
+    monkeypatch.setattr(carry, "_okx_contract", lambda _coin: ("PEPE", 10_000_000.0))
+    monkeypatch.setattr(carry, "_get", lambda url, **_kwargs: urls.append(url) or {
+        "code": "0", "data": [{"bids": [["0.00001", "100"]],
+                                  "asks": [["0.000011", "100"]]}],
+    })
+    assert carry._okx_slip("kPEPE", 100, "buy") == pytest.approx(0)
+    assert "instId=PEPE-USDT-SWAP" in urls[0]
+
+
+def test_roundtrip_slippage_rejects_nonfinite_leg(monkeypatch):
+    import src.pipeline.carry_paper as carry
+
+    monkeypatch.setattr(carry, "_hl_slip", lambda *_args, **_kwargs: float("nan"))
+    monkeypatch.setattr(carry, "_okx_slip", lambda *_args, **_kwargs: 0.1)
+    assert carry._roundtrip_slip("X") is None

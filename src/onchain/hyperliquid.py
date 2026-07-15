@@ -18,6 +18,7 @@ dependent — we score |funding| annualized and OI change, and label strength, n
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import urllib.request
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ from datetime import datetime, timezone
 import structlog
 
 from src.config import DATA_DIR
+from src.onchain.okx_symbols import candidates as okx_symbol_candidates
 
 logger = structlog.get_logger()
 
@@ -325,7 +327,8 @@ def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
         return None
     age_ms = now_ms - observed_ms
     interval_h = (next_ms - funding_ms) / 3_600_000
-    if age_ms < -5_000 or age_ms > OKX_FUNDING_MAX_AGE_MS or not (0.5 <= interval_h <= 24):
+    if (not math.isfinite(rate) or age_ms < -5_000 or age_ms > OKX_FUNDING_MAX_AGE_MS
+            or not (0.5 <= interval_h <= 24)):
         return None
     return rate * (24 / interval_h) * 365 * 100
 
@@ -345,15 +348,18 @@ def okx_funding_map(coins: list[str], cap: int = 45, fetch=None) -> dict[str, fl
             with urllib.request.urlopen(req, timeout=8) as response:
                 return json.loads(response.read())
     for c in coins[:cap]:
-        base = c[1:] if c.startswith("k") else c        # HL kPEPE → OKX PEPE
-        try:
-            d = fetch(OKX_FUNDING_URL.format(base))
-            rows = d.get("data") or []
-            annualized = _okx_funding_ann(rows[0]) if rows else None
+        for base in okx_symbol_candidates(c):
+            try:
+                d = fetch(OKX_FUNDING_URL.format(base))
+                rows = d.get("data") or []
+            except Exception:
+                break
+            if not rows:
+                continue
+            annualized = _okx_funding_ann(rows[0])
             if annualized is not None:
                 out[c] = annualized
-        except Exception:
-            continue
+            break
     return out
 
 
