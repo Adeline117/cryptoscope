@@ -1,15 +1,20 @@
-# Only add campaigns from their official project/claim URLs. This file intentionally
-# starts empty: an unverified rumour is not an airdrop opportunity.
+# Only add campaigns whose activity page and a separate evidence/terms page both sit
+# below a trust root reviewed in src/pipeline/airdrop_radar.py. Runtime verification
+# must read both pages and match every marker; a configured row is not self-authenticating.
 #
 # campaigns:
 #   - id: example-season-1
 #     project: Example Protocol
 #     chain: ethereum
 #     official_url: https://example.org/airdrop
-#     official_domains: [example.org]  # exact domain or its subdomains only
+#     source_evidence_url: https://example.org/blog/airdrop-announcement
+#     official_markers: ["Example claim"]
+#     source_evidence_markers: ["eligibility", "deadline"]
 #     status: research            # research | active | claimable | expired
 #     deadline: "2026-12-31T00:00:00+00:00"
 #     estimated_cost_usd: 20
+#     capital_required_usd: 100   # capital at risk is not the same as spent cost
+#     risk_notes: ["Reward is not guaranteed"]
 #     wallets:
 #       - "0x..."                # a wallet you control; never add seed phrases
 #     tasks:
@@ -21,4 +26,52 @@
 #       claimed_at: "2026-12-01T00:00:00+00:00"
 #       reward_usd: 100
 #       actual_cost_usd: 5
-campaigns: []
+campaigns:
+  - id: starknet-strk20-shield-rush-2026
+    project: STRK20 Shield Rush
+    chain: starknet
+    trust_root: starknet.io
+    official_url: https://strk20.starknet.io/shield-rush
+    source_evidence_url: https://strk20.starknet.io/shield-rush/terms
+    official_markers:
+      - Complete daily privacy quests.
+      - Earn STRK.
+    source_evidence_markers:
+      - Quests are verified on-chain.
+      - Sybil behavior
+      - KYC
+    status: active
+    capital_required_usd: 70
+    kyc_required: true
+    risk_notes:
+      - Daily rewards are finite and not guaranteed.
+      - Requires at least $70 per qualifying shield; this is capital exposure, not a known fee.
+      - Copperx KYC is required before disbursement.
+      - Automation and Sybil behavior are prohibited.
+    wallets: []
+    tasks:
+      - name: Shield at least $70 in an eligible token today
+      - name: Complete the campaign's on-chain daily quest and streak checks
+
+  - id: starknet-strkbtc-faucet-2026
+    project: strkBTC Faucet
+    chain: starknet
+    trust_root: starknet.io
+    official_url: https://strkbtc.starknet.io/faucet
+    source_evidence_url: https://strkbtc.starknet.io/faucet/terms-of-use
+    official_markers:
+      - Free strkBTC
+      - opening soon
+    source_evidence_markers:
+      - Starknet Foundation
+      - distribution campaign
+      - one claim per user
+    status: research
+    risk_notes:
+      - Registration and selection do not guarantee a distribution.
+      - One claim per user, X account, and wallet; automation and Sybil behavior are prohibited.
+      - Jurisdiction and wallet screening apply.
+    wallets: []
+    tasks:
+      - name: Check the official page for the live registration deadline
+      - name: Use one owned Starknet wallet only if selected

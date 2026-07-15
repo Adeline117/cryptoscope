@@ -116,6 +116,23 @@ def test_estimated_cost_is_unknown_when_missing_and_rejects_invalid_values():
                          source_verifier=_verified_source) is None
 
 
+def test_capital_requirement_and_campaign_risks_are_distinct_from_cost():
+    from src.pipeline.airdrop_radar import normalize
+
+    got = normalize(_campaign(
+        estimated_cost_usd=None, capital_required_usd=70, kyc_required=True,
+        risk_notes=["Reward not guaranteed", "Sybil prohibited", ""],
+    ), source_verifier=_verified_source)
+
+    assert got["estimated_cost_usd"] is None
+    assert got["capital_required_usd"] == 70
+    assert got["kyc_required"] is True
+    assert got["risk_notes"] == ["Reward not guaranteed", "Sybil prohibited"]
+    for invalid in (-1, True, float("nan")):
+        assert normalize(_campaign(capital_required_usd=invalid),
+                         source_verifier=_verified_source) is None
+
+
 def test_sync_reports_verified_unverified_and_rejected_coverage(tmp_path, monkeypatch):
     import src.pipeline.airdrop_radar as ar
     import src.pipeline.opportunity_ledger as ol

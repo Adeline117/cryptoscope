@@ -152,6 +152,19 @@ def _estimated_cost(campaign: dict) -> tuple[float | None, bool]:
     return (cost, True) if math.isfinite(cost) and cost >= 0 else (None, False)
 
 
+def _optional_nonnegative(campaign: dict, field: str) -> tuple[float | None, bool]:
+    if field not in campaign or campaign.get(field) is None:
+        return None, True
+    value = campaign.get(field)
+    if isinstance(value, bool):
+        return None, False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None, False
+    return (number, True) if math.isfinite(number) and number >= 0 else (None, False)
+
+
 def _transaction_url(value: object, chain: str) -> str | None:
     parsed = _https_url(value)
     allowed = EXPLORER_HOSTS.get(chain, set())
@@ -280,8 +293,11 @@ def normalize(campaign: dict, now: datetime | None = None,
     )
     status = campaign.get("status", "research")
     estimated_cost, cost_valid = _estimated_cost(campaign)
+    capital_required, capital_valid = _optional_nonnegative(
+        campaign, "capital_required_usd"
+    )
     if (not ident or not project or not trusted_urls or status not in VALID_STATUS
-            or not cost_valid):
+            or not cost_valid or not capital_valid):
         return None
     url, source_evidence_url, trust_root = trusted_urls
     configured_root = campaign.get("trust_root")
@@ -304,6 +320,8 @@ def normalize(campaign: dict, now: datetime | None = None,
         return None
     wallets = [str(w) for w in campaign.get("wallets", []) if str(w).strip()]
     tasks = [t for t in campaign.get("tasks", []) if isinstance(t, dict) and t.get("name")]
+    risk_notes = [str(note).strip() for note in campaign.get("risk_notes", [])
+                  if isinstance(note, str) and note.strip()]
     official_markers, evidence_markers = _campaign_markers(campaign)
     official_verified = _source_page_verified(url, official_markers, source_verifier)
     evidence_verified = _source_page_verified(
@@ -326,6 +344,9 @@ def normalize(campaign: dict, now: datetime | None = None,
         "event_at": announced_at, "detected_at": now.isoformat(),
         "decision_at": now.isoformat(), "expires_at": deadline,
         "deadline": deadline, "estimated_cost_usd": estimated_cost,
+        "capital_required_usd": capital_required,
+        "kyc_required": campaign.get("kyc_required") is True,
+        "risk_notes": risk_notes,
         "wallet_count": len(wallets), "task_count": len(tasks), "evidence_state": evidence_state,
         "official_state": source_state, "source_state": source_state,
         "source_verification": {
