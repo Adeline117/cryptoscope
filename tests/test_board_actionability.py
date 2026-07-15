@@ -250,6 +250,15 @@ def test_carry_ui_discloses_quarantined_legacy_open_episodes():
     assert "旧协议 open 隔离" in html
 
 
+def test_carry_ui_discloses_bounded_entry_quote_capacity():
+    html = BOARD.read_text()
+
+    assert "new_entry_quote_attempted" in html
+    assert "new_entry_quote_cap" in html
+    assert "new_entry_candidates_deferred" in html
+    assert "容量延后" in html
+
+
 def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     html = BOARD.read_text()
 

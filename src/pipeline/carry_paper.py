@@ -3,8 +3,8 @@
 This measures differential persistence and order-book impact without claiming fills,
 funding settlements, basis PnL, account fees, collateral cost or real profitability:
 
-  · opens a paper position for every fat-net cross-venue carry not already open,
-    snapshotting entry slippage from the LIVE order books (HL + OKX),
+  · opens at most a small ranked batch of fat-net cross-venue paper episodes per
+    cycle, snapshotting entry slippage from the LIVE order books (HL + OKX),
   · accrues the observed funding differential only between consecutive valid updates;
     source gaps are measured explicitly and never backfilled as profit,
   · closes the paper episode when the differential decays below a floor, producing an
