@@ -140,6 +140,85 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     assert accrued == pytest.approx(40 / 8760, rel=0.02)
 
 
+def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeypatch):
+    import sqlite3
+
+    exit_quote = {"value": None}
+
+    def slip(_sym, notional=cp.NOTIONAL, phase="entry"):
+        return 0.05 if phase == "entry" else exit_quote["value"]
+
+    monkeypatch.setattr(cp, "_roundtrip_slip", slip)
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    c = sqlite3.connect(str(cp.DB))
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    c.execute("UPDATE paper SET entry_ts=?,last_ts=?,last_diff=40 WHERE symbol='X'",
+              (past, past))
+    c.commit()
+    c.close()
+
+    pending = cp.run([], observations=[{
+        "symbol": "X", "status": "observed", "cross": True,
+        "observation_version": 1, "observed_edge_ann": 1,
+    }])
+    assert pending["n_open"] == pending["n_exit_pending"] == 1
+    assert pending["n_closed_total"] == 0
+    position = pending["open_positions"][0]
+    assert position["status"] == "exit_pending"
+    assert position["measurement_state"] == "exit_quote_gap"
+    assert position["exit_signal_diff_ann_pct"] == 1
+    assert cp.open_symbols() == ["X"]
+    from src.pipeline import opportunity_ledger
+    event = opportunity_ledger.outcome_rows()[0]
+    assert event["outcome_state"] == "open"
+    assert event["outcome"]["status"] == "exit_pending"
+    assert "net_return_pct" not in event["outcome"]
+
+    c = sqlite3.connect(str(cp.DB))
+    frozen = c.execute(
+        "SELECT accrued_pct,exit_signal_ts FROM paper WHERE symbol='X'"
+    ).fetchone()
+    c.execute(
+        "UPDATE paper SET last_ts=? WHERE symbol='X'",
+        ((datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),),
+    )
+    c.commit()
+    c.close()
+    still_pending = cp.run([], observations=[])
+    assert still_pending["n_exit_pending"] == 1
+    c = sqlite3.connect(str(cp.DB))
+    assert c.execute(
+        "SELECT accrued_pct,exit_signal_ts FROM paper WHERE symbol='X'"
+    ).fetchone() == frozen
+    c.close()
+
+    exit_quote["value"] = 0.08
+    closed = cp.run([], observations=[])
+    assert closed["n_open"] == 0 and closed["n_closed"] == 1
+    recent = closed["recent"][0]
+    assert recent["exit_signal_at"] == frozen[1]
+    assert recent["exit_quote_at"]
+    assert recent["exit_quote_delay_s"] >= 0
+    c = sqlite3.connect(str(cp.DB))
+    status, exit_slip, complete = c.execute(
+        "SELECT status,exit_slip,cost_complete FROM paper WHERE symbol='X'"
+    ).fetchone()
+    c.close()
+    assert (status, exit_slip, complete) == ("closed", 0.08, 1)
+
+
+def test_delayed_exit_quote_is_retained_but_excluded_from_edge_sample(cp):
+    sample = {
+        "episode_version": 2, "observation_version": 1,
+        "close_reason": "diff_below_floor", "cost_complete": True,
+        "entry_slip_pct": 0.05, "exit_slip_pct": 0.05,
+        "exit_quote_delay_s": cp.CARRY_EXIT_QUOTE_SLA_S + 1,
+        "unmeasured_h": 0, "hold_h": 24, "funding_accrued_pct": 0.1,
+        "net_return_pct": -0.19,
+    }
+    assert cp.edge_exclusion_reasons(sample) == ["exit_quote_outside_sla"]
+
+
 def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
     import sqlite3
 
@@ -221,8 +300,8 @@ def test_annualized_summary_requires_long_enough_cohort(cp):
         c.execute("""INSERT INTO paper(
             symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,
             last_ts,last_diff,status,exit_ts,exit_slip,hold_h,realized_net,close_reason,
-            cost_complete,observation_version
-        ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,'diff_below_floor',1,1)""",
+            cost_complete,observation_version,exit_quote_delay_s
+        ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,'diff_below_floor',1,1,0)""",
                   (f"L{i}", "2026-01-01T00:00:00+00:00", 40, 30, 0.05, 10_000,
                    3.0, "2026-02-01T00:00:00+00:00", 1,
                    "2026-02-01T00:00:00+00:00", 0.05,
@@ -240,17 +319,17 @@ def test_stats_quarantine_legacy_bad_exit_cost_and_funding_gaps(cp):
             "2026-01-03T00:00:00+00:00", 1,
             "2026-01-03T00:00:00+00:00", 0.05, 48, 30)
     rows = [
-        ("VALID", *base, "diff_below_floor", 2, 1, 0, 1),
-        ("LEGACY", *base, "diff_below_floor", None, 1, 0, 1),
-        ("MISSING", *base, "market_missing", 2, 1, 0, 1),
-        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor", 2, 0, 0, 1),
-        ("GAP", *base, "diff_below_floor", 2, 1, 5, 1),
+        ("VALID", *base, "diff_below_floor", 2, 1, 0, 1, 0),
+        ("LEGACY", *base, "diff_below_floor", None, 1, 0, 1, 0),
+        ("MISSING", *base, "market_missing", 2, 1, 0, 1, 0),
+        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor", 2, 0, 0, 1, 0),
+        ("GAP", *base, "diff_below_floor", 2, 1, 5, 1, 0),
     ]
     c.executemany("""INSERT INTO paper(
         symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,last_ts,
         last_diff,status,exit_ts,exit_slip,hold_h,realized_net,close_reason,
-        episode_version,cost_complete,unmeasured_h,observation_version
-    ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,?,?,?,?,?)""", rows)
+        episode_version,cost_complete,unmeasured_h,observation_version,exit_quote_delay_s
+    ) VALUES (?,?,?,?,?,?,?,?,?,'closed',?,?,?,?,?,?,?,?,?,?)""", rows)
     c.commit()
     c.close()
 

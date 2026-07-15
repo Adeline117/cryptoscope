@@ -39,6 +39,7 @@ CLOSE_DIFF_FLOOR = 2.0     # differential decayed below this (ann %) → natural
 # taker 0.05% = 0.095%. A round trip (enter + exit) is 2× that = 0.19%. Slippage is
 # MEASURED from the book separately (entry_slip + exit_slip), never folded in here.
 FEE_PCT_ONEWAY_BOTHLEGS = 0.095
+CARRY_EXIT_QUOTE_SLA_S = 60
 MIN_ANNUALIZED_HOLD_H = 30 * 24
 MIN_ANNUALIZED_SAMPLES = 5
 _OKX_CTVAL: dict[str, float] = {}
@@ -62,6 +63,12 @@ def edge_exclusion_reasons(sample: dict) -> list[str]:
             or sample.get("exit_slip_pct") is None):
         reasons.append("incomplete_cost")
     try:
+        quote_delay_s = float(sample["exit_quote_delay_s"])
+        if quote_delay_s < 0 or quote_delay_s > CARRY_EXIT_QUOTE_SLA_S:
+            reasons.append("exit_quote_outside_sla")
+    except (KeyError, TypeError, ValueError):
+        reasons.append("exit_quote_outside_sla")
+    try:
         if float(sample.get("unmeasured_h") or 0) > 1e-9:
             reasons.append("incomplete_funding_path")
     except (TypeError, ValueError):
@@ -84,7 +91,8 @@ def _conn() -> sqlite3.Connection:
         last_attempt_ts TEXT, last_valid_ts TEXT, unmeasured_h REAL DEFAULT 0,
         measurement_state TEXT DEFAULT 'observed',
         episode_version INTEGER DEFAULT 2, cost_complete INTEGER DEFAULT 0,
-        observation_version INTEGER)""")
+        observation_version INTEGER, exit_signal_ts TEXT, exit_signal_diff REAL,
+        exit_quote_ts TEXT, exit_quote_delay_s REAL)""")
     cols = {r[1] for r in c.execute("PRAGMA table_info(paper)").fetchall()}
     if "close_reason" not in cols:
         c.execute("ALTER TABLE paper ADD COLUMN close_reason TEXT")
@@ -97,6 +105,10 @@ def _conn() -> sqlite3.Connection:
         "episode_version": "INTEGER",
         "cost_complete": "INTEGER",
         "observation_version": "INTEGER",
+        "exit_signal_ts": "TEXT",
+        "exit_signal_diff": "REAL",
+        "exit_quote_ts": "TEXT",
+        "exit_quote_delay_s": "REAL",
     }
     added: set[str] = set()
     for name, declaration in additions.items():
@@ -144,7 +156,8 @@ def _sync_opportunity_ledger() -> dict:
             "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,"
             "accrued_pct,last_ts,last_diff,status,exit_ts,exit_slip,hold_h,"
             "realized_net,close_reason,last_attempt_ts,last_valid_ts,unmeasured_h,"
-            "measurement_state,episode_version,cost_complete,observation_version "
+            "measurement_state,episode_version,cost_complete,observation_version,"
+            "exit_signal_ts,exit_signal_diff,exit_quote_ts,exit_quote_delay_s "
             "FROM paper ORDER BY id"
         ).fetchall()
     finally:
@@ -154,7 +167,8 @@ def _sync_opportunity_ledger() -> dict:
         (pid, symbol, entry_ts, entry_diff, pred_net, entry_slip, notional,
          accrued_pct, last_ts, last_diff, status, exit_ts, exit_slip, hold_h,
          realized_net, close_reason, last_attempt_ts, last_valid_ts, unmeasured_h,
-         measurement_state, episode_version, cost_complete, observation_version) = row
+         measurement_state, episode_version, cost_complete, observation_version,
+         exit_signal_ts, exit_signal_diff, exit_quote_ts, exit_quote_delay_s) = row
         estimated_roundtrip_cost = ((entry_slip or 0) * 2
                                     + 2 * FEE_PCT_ONEWAY_BOTHLEGS)
         candidate = {
@@ -190,6 +204,8 @@ def _sync_opportunity_ledger() -> dict:
             "unmeasured_h": unmeasured_h or 0,
             "measurement_state": measurement_state or "observed",
             "cost_complete": bool(cost_complete),
+            "exit_signal_at": exit_signal_ts, "exit_signal_diff_ann_pct": exit_signal_diff,
+            "exit_quote_at": exit_quote_ts, "exit_quote_delay_s": exit_quote_delay_s,
         }
         state = "open"
         if status == "closed":
@@ -369,7 +385,7 @@ def open_symbols() -> list[str]:
     c = _conn()
     try:
         return [row[0] for row in c.execute(
-            "SELECT symbol FROM paper WHERE status='open' ORDER BY id"
+            "SELECT symbol FROM paper WHERE status IN ('open','exit_pending') ORDER BY id"
         ).fetchall()]
     finally:
         c.close()
@@ -406,12 +422,48 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
     try:
         open_rows = {r[1]: r for r in c.execute(
             "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,"
-            "last_ts,last_diff,last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state "
-            "FROM paper WHERE status='open'").fetchall()}
+            "last_ts,last_diff,last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state,"
+            "status,exit_signal_ts,exit_signal_diff FROM paper "
+            "WHERE status IN ('open','exit_pending')").fetchall()}
         # 1) ACCRUE + maybe CLOSE existing open positions
         for sym, row in open_rows.items():
             (pid, _, _, _, pred_net, entry_slip, notional, accrued, last_ts, last_diff,
-             _last_attempt_ts, _last_valid_ts, unmeasured_h, measurement_state) = row
+             _last_attempt_ts, _last_valid_ts, unmeasured_h, measurement_state, status,
+             exit_signal_ts, exit_signal_diff) = row
+            if status == "exit_pending":
+                measured_exit_slip = _roundtrip_slip(sym, phase="exit")
+                if measured_exit_slip is None:
+                    c.execute(
+                        "UPDATE paper SET last_attempt_ts=?,measurement_state='exit_quote_gap' "
+                        "WHERE id=?",
+                        (now.isoformat(), pid),
+                    )
+                    continue
+                try:
+                    signal_dt = datetime.fromisoformat(exit_signal_ts)
+                    hold_h = max(
+                        (signal_dt - datetime.fromisoformat(row[2])).total_seconds() / 3600, 0
+                    )
+                    quote_delay_s = max((now - signal_dt).total_seconds(), 0)
+                except Exception:
+                    signal_dt = now
+                    hold_h = 0
+                    quote_delay_s = 0
+                cost_complete = entry_slip is not None
+                hold_yr = max(hold_h / 8760.0, 1e-6)
+                cost = ((entry_slip + measured_exit_slip
+                         + 2 * FEE_PCT_ONEWAY_BOTHLEGS) if cost_complete else None)
+                realized_net = ((accrued or 0) / hold_yr - cost / hold_yr
+                                if cost is not None else None)
+                c.execute(
+                    "UPDATE paper SET status='closed',exit_ts=?,exit_slip=?,hold_h=?,"
+                    "realized_net=?,close_reason='diff_below_floor',last_attempt_ts=?,"
+                    "measurement_state='observed',cost_complete=?,exit_quote_ts=?,"
+                    "exit_quote_delay_s=? WHERE id=?",
+                    (signal_dt.isoformat(), measured_exit_slip, hold_h, realized_net,
+                     now.isoformat(), int(cost_complete), now.isoformat(), quote_delay_s, pid),
+                )
+                continue
             cur = observed_by_sym.get(sym)
             try:
                 elapsed_h = max(
@@ -438,26 +490,38 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             accrued = (accrued or 0) + interval_diff * (elapsed_h / 8760.0)
             if cur_diff < CLOSE_DIFF_FLOOR:
                 measured_exit_slip = _roundtrip_slip(sym, phase="exit")
-                cost_complete = measured_exit_slip is not None and entry_slip is not None
-                exit_slip = measured_exit_slip if measured_exit_slip is not None else None
                 try:
                     hold_h = (now - datetime.fromisoformat(open_rows[sym][2])).total_seconds() / 3600
                 except Exception:
                     hold_h = 0
+                if measured_exit_slip is None:
+                    c.execute(
+                        "UPDATE paper SET status='exit_pending',accrued_pct=?,last_ts=?,"
+                        "last_diff=?,last_attempt_ts=?,last_valid_ts=?,unmeasured_h=?,"
+                        "measurement_state='exit_quote_gap',cost_complete=0,"
+                        "exit_signal_ts=?,exit_signal_diff=? WHERE id=?",
+                        (accrued, now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
+                         unmeasured_h or 0, now.isoformat(), cur_diff, pid),
+                    )
+                    continue
+                cost_complete = entry_slip is not None
                 # realized net %/yr = accrued funding annualized − all costs (slippage both
                 # sides + fees both legs both sides), amortized over the real hold.
                 hold_yr = max(hold_h / 8760.0, 1e-6)
                 # one-time round-trip cost = slippage in + slippage out + fees(2× one-way)
-                cost = ((entry_slip + exit_slip + 2 * FEE_PCT_ONEWAY_BOTHLEGS)
+                cost = ((entry_slip + measured_exit_slip + 2 * FEE_PCT_ONEWAY_BOTHLEGS)
                         if cost_complete else None)
                 realized_net = accrued / hold_yr - cost / hold_yr if cost is not None else None
                 c.execute("UPDATE paper SET status='closed', exit_ts=?, exit_slip=?, hold_h=?, "
                           "accrued_pct=?, realized_net=?, last_ts=?, last_diff=?,"
                           "close_reason='diff_below_floor',last_attempt_ts=?,last_valid_ts=?,"
-                          "unmeasured_h=?,measurement_state='observed',cost_complete=? WHERE id=?",
-                          (now.isoformat(), exit_slip, hold_h, accrued, realized_net,
+                          "unmeasured_h=?,measurement_state='observed',cost_complete=?,"
+                          "exit_signal_ts=?,exit_signal_diff=?,exit_quote_ts=?,"
+                          "exit_quote_delay_s=0 WHERE id=?",
+                          (now.isoformat(), measured_exit_slip, hold_h, accrued, realized_net,
                            now.isoformat(), cur_diff, now.isoformat(), now.isoformat(),
-                           unmeasured_h or 0, int(cost_complete), pid))
+                           unmeasured_h or 0, int(cost_complete), now.isoformat(), cur_diff,
+                           now.isoformat(), pid))
             else:
                 c.execute(
                     "UPDATE paper SET accrued_pct=?,last_ts=?,last_diff=?,last_attempt_ts=?,"
@@ -501,13 +565,14 @@ def paper_stats() -> dict:
     try:
         closed_all = c.execute("SELECT symbol,hold_h,entry_slip,exit_slip,realized_net,pred_net,"
                            "accrued_pct,entry_ts,exit_ts,close_reason,episode_version,cost_complete,"
-                           "unmeasured_h,observation_version "
+                           "unmeasured_h,observation_version,exit_signal_ts,exit_quote_ts,"
+                           "exit_quote_delay_s "
                            "FROM paper WHERE status='closed'").fetchall()
         opened = c.execute(
             "SELECT symbol,entry_ts,last_ts,entry_diff,last_diff,pred_net,entry_slip,notional,"
             "last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state,episode_version,"
-            "observation_version "
-            "FROM paper WHERE status='open' ORDER BY entry_ts DESC"
+            "observation_version,status,exit_signal_ts,exit_signal_diff "
+            "FROM paper WHERE status IN ('open','exit_pending') ORDER BY entry_ts DESC"
         ).fetchall()
     finally:
         c.close()
@@ -520,6 +585,7 @@ def paper_stats() -> dict:
             "entry_slip_pct": row[2], "exit_slip_pct": row[3],
             "cost_complete": cost_complete, "unmeasured_h": row[12],
             "observation_version": row[13],
+            "exit_quote_delay_s": row[16],
             "hold_h": row[1], "funding_accrued_pct": row[6],
             "net_return_pct": net_return,
         }
@@ -532,10 +598,12 @@ def paper_stats() -> dict:
             excluded[reason] = excluded.get(reason, 0) + 1
     out = {
         "n_open": len(opened), "n_closed": len(valid_closed),
+        "n_exit_pending": sum(row[14] == "exit_pending" for row in opened),
         "n_closed_total": len(closed_all),
         "n_closed_excluded": len(closed_all) - len(valid_closed),
         "excluded_by_reason": excluded,
         "exit_rule": f"valid paired observation: differential < {CLOSE_DIFF_FLOOR}% ann",
+        "exit_quote_sla_s": CARRY_EXIT_QUOTE_SLA_S,
         "open_positions": [
             {
                 "symbol": row[0], "entry_at": row[1], "last_measured_at": row[9],
@@ -548,6 +616,8 @@ def paper_stats() -> dict:
                 "measurement_state": row[11] or "observed",
                 "episode_version": row[12],
                 "observation_version": row[13],
+                "status": row[14], "exit_signal_at": row[15],
+                "exit_signal_diff_ann_pct": row[16],
                 "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
                 "execution_mode": "paper_orderbook_measurement",
             }
@@ -573,6 +643,8 @@ def paper_stats() -> dict:
             "annualized_min_hold_days": MIN_ANNUALIZED_HOLD_H // 24,
             "recent": [{"symbol": r[0], "hold_days": round((r[1] or 0) / 24, 1),
                         "entry_at": r[7], "closed_at": r[8],
+                        "exit_signal_at": r[14], "exit_quote_at": r[15],
+                        "exit_quote_delay_s": r[16],
                         "close_reason": r[9] or "legacy_unknown",
                         "funding_accrued_pct": round(r[6] or 0, 4),
                         "cost_pct": round((r[2] or 0) + (r[3] or 0)
