@@ -774,11 +774,10 @@ async def _run_operator_sentinel():
     logger.info("scheduled_operator_sentinel")
     from src.pipeline.operator_sentinel import run_and_alert
 
-    # check_run is synchronous and can take minutes across all tracked clusters. It
-    # used to freeze the event loop, delaying the 2/3-minute structure/launch feeds.
-    # Offload it to the bounded shared executor and serialize it with accumulation.
+    # run_and_alert offloads its synchronous check_run phase to the bounded shared
+    # executor. Serialize that whole operation with accumulation.
     async with _heavy_io_lock():
-        await asyncio.to_thread(run_and_alert, use_transfers=True)
+        await run_and_alert(use_transfers=True)
 
 
 async def _run_operator_id_push():

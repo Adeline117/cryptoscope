@@ -55,7 +55,7 @@ async def test_descriptor_heavy_jobs_do_not_overlap(monkeypatch):
         await release_accumulation.wait()
         return {"status": "complete"}
 
-    def sentinel(use_transfers=False):
+    async def sentinel(use_transfers=False):
         sentinel_started.set()
         return 0
 
@@ -71,3 +71,23 @@ async def test_descriptor_heavy_jobs_do_not_overlap(monkeypatch):
     release_accumulation.set()
     await asyncio.gather(first, second)
     assert sentinel_started.is_set()
+
+
+@pytest.mark.asyncio
+async def test_operator_scan_runs_off_event_loop(monkeypatch):
+    import threading
+
+    from src.pipeline import operator_sentinel
+
+    loop_thread = threading.get_ident()
+    scan_threads = []
+
+    def check_run(use_transfers=False):
+        scan_threads.append(threading.get_ident())
+        return []
+
+    monkeypatch.setattr(operator_sentinel, "check_run", check_run)
+    monkeypatch.setattr(operator_sentinel, "_load", lambda: {})
+
+    assert await operator_sentinel.run_and_alert(use_transfers=True) == 0
+    assert scan_threads and scan_threads[0] != loop_thread

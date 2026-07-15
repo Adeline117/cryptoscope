@@ -1282,7 +1282,12 @@ def alerts_muted() -> bool:
 
 async def run_and_alert(use_transfers: bool = False) -> int:
     """Scheduler entry: check + (maybe) push Telegram. Returns alert count."""
-    alerts = check_run(use_transfers=use_transfers)   # log_alert runs inside — always
+    import asyncio
+
+    # check_run is synchronous and can take minutes across all tracked clusters.
+    # Running it on the event-loop thread delayed the 2/3-minute Launch/Structure
+    # ledgers until the scan ended. The scheduler bounds this shared executor.
+    alerts = await asyncio.to_thread(check_run, use_transfers=use_transfers)
     if alerts and not alerts_muted():
         from src.distribution.telegram_sender import send_alert
         await send_alert(_format(alerts))
