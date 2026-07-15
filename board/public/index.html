@@ -341,6 +341,10 @@ function utcClock(ts){
   const d=new Date(ts); if(Number.isNaN(d.getTime()))return "—";
   return d.toISOString().replace("T"," ").replace(/\.\d{3}Z$/," UTC");
 }
+function invalidationCondition(r){
+  const operator=String(r?.side||"LONG").toUpperCase()==="SHORT"?"≥":"≤";
+  return `${operator} $${esc(r?.invalidation_price??"—")}`;
+}
 function launchLifecycleHtml(r){
   const detected=new Date(r?.detected_at||"");
   const horizons=r?.outcome?.horizons||{};
@@ -361,7 +365,7 @@ function launchLifecycleHtml(r){
   const quote=r?.quote_at&&r?.expires_at
     ?`${esc(utcClock(r.quote_at))} → ${esc(utcClock(r.expires_at))}（${esc(expiryText(r))}）`
     :"无完整双向报价时钟，不可按首次价行动";
-  return `<br><b>进入窗口</b>: ${quote}<br><b>价格失效</b>: 若用户自行建仓，价格 ≤ $${esc(r?.invalidation_price??"—")} 时论文失效；系统不会代为卖出。<br><b>固定评估（不是平仓）</b>: ${clocks}<small>收益扣除冻结的估算成本；真实成交成本标记: ${r?.outcome?.cost_is_real_fill===true?"真实":"非真实成交"}。</small><br><b>真实离场</b>: 无——系统没有成交、没有持仓，也不会自动平仓。`;
+  return `<br><b>进入窗口</b>: ${quote}<br><b>价格失效</b>: 若用户自行建仓，价格 ${invalidationCondition(r)} 时论文失效；系统不会代为卖出。<br><b>固定评估（不是平仓）</b>: ${clocks}<small>收益扣除冻结的估算成本；真实成交成本标记: ${r?.outcome?.cost_is_real_fill===true?"真实":"非真实成交"}。</small><br><b>真实离场</b>: 无——系统没有成交、没有持仓，也不会自动平仓。`;
 }
 
 function renderLaunchCoverage(d){

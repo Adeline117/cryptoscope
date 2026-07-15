@@ -46,6 +46,17 @@ def test_board_exposes_launch_quote_invalidation_and_measurement_clocks_honestly
     assert "系统没有成交、没有持仓，也不会自动平仓" in html
 
 
+def test_board_uses_side_aware_invalidation_for_short_events():
+    html = BOARD.read_text()
+    short_event = {"side": "SHORT", "entry_price": 100, "invalidation_price": 103}
+
+    assert short_event["invalidation_price"] > short_event["entry_price"]
+    assert "function invalidationCondition(r)" in html
+    assert 'String(r?.side||"LONG").toUpperCase()==="SHORT"?"≥":"≤"' in html
+    assert '价格 ${invalidationCondition(r)} 时论文失效' in html
+    assert '价格 ≤ $${esc(r?.invalidation_price??"—")} 时论文失效' not in html
+
+
 def test_legacy_discovery_views_cannot_bypass_canonical_trade_gates():
     html = BOARD.read_text()
 
