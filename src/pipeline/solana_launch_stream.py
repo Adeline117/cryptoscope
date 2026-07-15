@@ -144,10 +144,16 @@ def _account_keys(tx: dict) -> tuple[list[str], set[str]]:
     return keys, signers
 
 
+def _instructions(tx: dict):
+    yield from _message(tx).get("instructions") or []
+    for group in (tx.get("meta") or {}).get("innerInstructions") or []:
+        yield from group.get("instructions") or []
+
+
 def _extract_identity(tx: dict) -> tuple[str | None, str | None, str | None]:
     """Cross-check the creation instruction with transaction signer metadata."""
     _, signers = _account_keys(tx)
-    for instruction in _message(tx).get("instructions") or []:
+    for instruction in _instructions(tx):
         if instruction.get("programId") != PUMP_FUN_PROGRAM:
             continue
         accounts = [str(value) for value in instruction.get("accounts") or []]

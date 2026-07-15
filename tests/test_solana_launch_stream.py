@@ -103,6 +103,22 @@ def test_ambiguous_signers_do_not_become_creator_claim(sol):
         c.close()
 
 
+def test_inner_creation_instruction_can_prove_wrapped_launch(sol):
+    tx = _transaction()
+    creation = tx["transaction"]["message"]["instructions"].pop()
+    tx["transaction"]["message"]["instructions"].append(
+        {"programId": "router", "accounts": ["creator"], "data": "wrapper"})
+    tx["meta"]["innerInstructions"] = [{"index": 0, "instructions": [creation]}]
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=tx)
+    c = sol._conn()
+    try:
+        assert c.execute("SELECT evidence_state,creator,mint FROM raw_launches").fetchone() \
+            == ("complete", "creator", "mint")
+    finally:
+        c.close()
+
+
 def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
     tx = _transaction()
 
