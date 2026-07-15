@@ -687,16 +687,23 @@ def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) ->
 
 def retry_open_gaps(spec: FactorySpec, rpc: JsonRpc, *, limit: int = 10) -> dict:
     gaps = stream_health.open_gaps(spec.chain, spec.stream, limit=limit)
-    recovered = failed = 0
+    advanced = recovered = failed = 0
     for gap in gaps:
-        if backfill_blocks(gap["from_cursor"], gap["to_cursor"], spec=spec, rpc=rpc):
-            if stream_health.resolve_gap(gap["id"], details={
-                    "backfilled": True, "retry": True,
-                    "from": gap["from_cursor"], "to": gap["to_cursor"]}):
+        start = int(gap["from_cursor"])
+        end = min(int(gap["to_cursor"]), start + MAX_BACKFILL_BLOCKS - 1)
+        if backfill_blocks(start, end, spec=spec, rpc=rpc):
+            state = stream_health.advance_gap(gap["id"], end, details={
+                "backfilled": True, "retry": True,
+                "from": start, "to": end,
+            })
+            if state == "resolved":
                 recovered += 1
+            elif state == "advanced":
+                advanced += 1
         else:
             failed += 1
-    return {"attempted": len(gaps), "recovered": recovered, "failed": failed}
+    return {"attempted": len(gaps), "advanced": advanced,
+            "recovered": recovered, "failed": failed}
 
 
 class _EvmSocket:

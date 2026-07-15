@@ -254,7 +254,7 @@ def test_short_missing_block_range_is_backfilled_and_gap_resolved(evm):
             raise AssertionError(method)
 
     assert evm.retry_open_gaps(spec, Rpc()) == {
-        "attempted": 1, "recovered": 1, "failed": 0}
+        "attempted": 1, "advanced": 0, "recovered": 1, "failed": 0}
     assert stream_health.open_gaps("bsc", spec.stream) == []
     c = evm._conn()
     try:
@@ -289,6 +289,66 @@ def test_backfill_limit_counts_both_endpoints(evm):
     spec = evm.bsc_pancake_v2_spec()
     assert evm.backfill_blocks(1, evm.MAX_BACKFILL_BLOCKS + 1,
                                spec=spec, rpc=Rpc()) is False
+
+
+def test_oversized_gap_checkpoints_one_verified_prefix_per_retry(evm):
+    from src.pipeline import stream_health
+
+    spec = evm.bsc_pancake_v2_spec()
+    start = 100
+    stream_health.observe("bsc", spec.stream, cursor=start, expect_contiguous=True)
+    stream_health.observe("bsc", spec.stream,
+                          cursor=start + evm.MAX_BACKFILL_BLOCKS + 2,
+                          expect_contiguous=True)
+    requests = []
+
+    class Rpc:
+        def call(self, method, params):
+            assert method == "eth_getLogs"
+            request = params[0]
+            requests.append((int(request["fromBlock"], 16),
+                             int(request["toBlock"], 16)))
+            return []
+
+    assert evm.retry_open_gaps(spec, Rpc()) == {
+        "attempted": 1, "advanced": 1, "recovered": 0, "failed": 0}
+    remaining = stream_health.open_gaps("bsc", spec.stream)
+    assert [(gap["from_cursor"], gap["to_cursor"]) for gap in remaining] == [
+        (start + evm.MAX_BACKFILL_BLOCKS + 1,
+         start + evm.MAX_BACKFILL_BLOCKS + 1)]
+    assert stream_health.snapshot()[0]["status"] == "degraded"
+
+    assert evm.retry_open_gaps(spec, Rpc()) == {
+        "attempted": 1, "advanced": 0, "recovered": 1, "failed": 0}
+    assert requests == [
+        (start + 1, start + evm.MAX_BACKFILL_BLOCKS),
+        (start + evm.MAX_BACKFILL_BLOCKS + 1,
+         start + evm.MAX_BACKFILL_BLOCKS + 1),
+    ]
+    assert stream_health.open_gaps("bsc", spec.stream) == []
+    assert stream_health.snapshot()[0]["status"] == "live"
+
+
+def test_failed_gap_prefix_does_not_advance_or_claim_recovery(evm):
+    from src.pipeline import stream_health
+
+    spec = evm.base_aerodrome_spec()
+    stream_health.observe("base", spec.stream, cursor=10, expect_contiguous=True)
+    stream_health.observe("base", spec.stream,
+                          cursor=evm.MAX_BACKFILL_BLOCKS + 12,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            raise RuntimeError("temporary RPC failure")
+
+    before = stream_health.open_gaps("base", spec.stream)
+    assert evm.retry_open_gaps(spec, Rpc()) == {
+        "attempted": 1, "advanced": 0, "recovered": 0, "failed": 1}
+    after = stream_health.open_gaps("base", spec.stream)
+    assert [(gap["from_cursor"], gap["to_cursor"]) for gap in after] == [
+        (before[0]["from_cursor"], before[0]["to_cursor"])]
+    assert stream_health.snapshot()[0]["status"] == "degraded"
 
 
 def _persist_complete(evm):
