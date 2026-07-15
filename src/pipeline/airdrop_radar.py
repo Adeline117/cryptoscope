@@ -10,7 +10,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+import json
+import os
 import re
+import urllib.request
 
 import yaml
 
@@ -24,6 +27,12 @@ EXPLORER_HOSTS = {
     "base": {"basescan.org"},
     "bsc": {"bscscan.com"},
     "solana": {"solscan.io"},
+}
+DEFAULT_RPCS = {
+    "ethereum": "https://ethereum-rpc.publicnode.com",
+    "base": "https://mainnet.base.org",
+    "bsc": "https://bsc-dataseed.binance.org",
+    "solana": "https://api.mainnet-beta.solana.com",
 }
 
 
@@ -73,6 +82,66 @@ def _transaction_url(value: object, chain: str) -> str | None:
     return parsed[0] if valid else None
 
 
+def _rpc_url(chain: str) -> str | None:
+    configured = os.getenv(f"RPC_{chain.upper()}", "").split(",", 1)[0].strip()
+    return configured or DEFAULT_RPCS.get(chain)
+
+
+def _rpc_json(url: str, method: str, params: list) -> dict:
+    request = urllib.request.Request(
+        url,
+        data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
+                         "params": params}).encode(),
+        headers={"Content-Type": "application/json", "User-Agent": "CryptoScope/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=12) as response:
+        data = json.loads(response.read().decode())
+    return data if isinstance(data, dict) else {}
+
+
+def _verify_transaction(tx_url: str, chain: str, fetch=_rpc_json) -> dict | None:
+    """Require a successful mainnet transaction and derive its time from chain data."""
+    rpc = _rpc_url(chain)
+    tx_id = urlparse(tx_url).path.rstrip("/").rsplit("/", 1)[-1]
+    if not rpc or not tx_id:
+        return None
+    try:
+        if chain == "solana":
+            response = fetch(rpc, "getTransaction", [tx_id, {
+                "encoding": "json", "commitment": "confirmed",
+                "maxSupportedTransactionVersion": 0,
+            }])
+            result = response.get("result")
+            signatures = (((result or {}).get("transaction") or {}).get("signatures") or [])
+            block_time = (result or {}).get("blockTime")
+            if (not isinstance(result, dict) or tx_id not in signatures
+                    or (result.get("meta") or {}).get("err") is not None
+                    or not block_time):
+                return None
+            confirmed_at = datetime.fromtimestamp(int(block_time), tz=timezone.utc)
+            return {"source": "solana_mainnet_rpc", "tx_id": tx_id,
+                    "slot": result.get("slot"), "confirmed_at": confirmed_at.isoformat(),
+                    "onchain_success": True}
+
+        receipt_response = fetch(rpc, "eth_getTransactionReceipt", [tx_id])
+        receipt = receipt_response.get("result")
+        if (not isinstance(receipt, dict) or receipt.get("status") != "0x1"
+                or str(receipt.get("transactionHash", "")).lower() != tx_id.lower()
+                or not receipt.get("blockNumber")):
+            return None
+        block_number = receipt["blockNumber"]
+        block_response = fetch(rpc, "eth_getBlockByNumber", [block_number, False])
+        block = block_response.get("result")
+        if not isinstance(block, dict) or not block.get("timestamp"):
+            return None
+        confirmed_at = datetime.fromtimestamp(int(block["timestamp"], 16), tz=timezone.utc)
+        return {"source": f"{chain}_mainnet_rpc", "tx_id": tx_id,
+                "block_number": int(block_number, 16),
+                "confirmed_at": confirmed_at.isoformat(), "onchain_success": True}
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return None
+
+
 def _timestamp(value: object) -> str | None:
     if value in (None, ""):
         return None
@@ -85,7 +154,7 @@ def _timestamp(value: object) -> str | None:
     return dt.astimezone(timezone.utc).isoformat()
 
 
-def _claim_outcome(campaign: dict) -> dict | None:
+def _claim_outcome(campaign: dict, verifier=_verify_transaction) -> dict | None:
     """Accept a realized claim only with complete public evidence and actual cost."""
     raw = campaign.get("claim")
     if not isinstance(raw, dict):
@@ -100,17 +169,24 @@ def _claim_outcome(campaign: dict) -> dict | None:
         return None
     if not claimed_at or not tx_url or reward_usd < 0 or actual_cost_usd < 0:
         return None
+    verification = verifier(tx_url, chain)
+    if not isinstance(verification, dict) or verification.get("onchain_success") is not True:
+        return None
     return {
-        "version": 1, "kind": "airdrop_claim", "claimed_at": claimed_at,
+        "version": 2, "kind": "airdrop_claim",
+        "claimed_at": verification["confirmed_at"],
+        "reported_claimed_at": claimed_at,
         "tx_url": tx_url, "gross_reward_usd": reward_usd,
         "chain": chain,
         "actual_cost_usd": actual_cost_usd,
         "net_reward_usd": reward_usd - actual_cost_usd,
         "reward_is_claimed": True, "cost_is_actual": True,
+        "transaction_verification": verification,
     }
 
 
-def normalize(campaign: dict, now: datetime | None = None) -> dict | None:
+def normalize(campaign: dict, now: datetime | None = None,
+              claim_verifier=_verify_transaction) -> dict | None:
     """Validate a manually curated campaign without asserting eligibility."""
     now = now or datetime.now(timezone.utc)
     ident, project = str(campaign.get("id") or ""), str(campaign.get("project") or "")
@@ -128,7 +204,7 @@ def normalize(campaign: dict, now: datetime | None = None) -> dict | None:
     announced_at = _timestamp(campaign.get("announced_at"))
     if campaign.get("announced_at") and not announced_at:
         return None
-    claim_outcome = _claim_outcome(campaign)
+    claim_outcome = _claim_outcome(campaign, verifier=claim_verifier)
     if status == "claimed" and not claim_outcome:
         return None
     wallets = [str(w) for w in campaign.get("wallets", []) if str(w).strip()]
@@ -152,11 +228,12 @@ def normalize(campaign: dict, now: datetime | None = None) -> dict | None:
     }
 
 
-def sync(path: Path = WATCHLIST, now: datetime | None = None) -> dict:
+def sync(path: Path = WATCHLIST, now: datetime | None = None,
+         claim_verifier=_verify_transaction) -> dict:
     campaigns = _load(path)
     inserted = 0
     for campaign in campaigns:
-        event = normalize(campaign, now=now)
+        event = normalize(campaign, now=now, claim_verifier=claim_verifier)
         if event:
             ident, new = record(event)
             if event.get("claim_outcome"):
