@@ -30,7 +30,8 @@
 这些是执行和存活门槛，不是预测模型。结果以 `opportunity_ledger.py` 的首次观察快照记录，并在网站的 `🚀 Launch` 作战台展示。
 
 原始候选还不能直接成为 `SMALL_PROBE`。`launch_execution.py` 先做 GoPlus
-安全检查，再用拟议仓位进行买入→卖出双向路由报价：Solana 使用 Jupiter，
+安全检查，再用拟议仓位进行买入→卖出双向路由报价：Solana 使用 Jupiter
+Swap V2 `/order` 且不传 `taker`（只返回报价、不构建交易），
 EVM 记录 0x 指示价但在 gas 未折算为美元前仍只允许 WATCH。缺 key、缺字段、
 取数失败均为 UNKNOWN；蜜罐、可冻结/改余额/高卖税或无卖出路由为 AVOID。
 报价是只读快照，不是实盘成交；配置项为 `JUPITER_API_KEY`、`ZEROX_API_KEY`。

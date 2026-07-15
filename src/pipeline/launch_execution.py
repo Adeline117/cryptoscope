@@ -19,7 +19,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Callable
 
-JUPITER_QUOTE = "https://api.jup.ag/swap/v1/quote"
+JUPITER_ORDER = "https://api.jup.ag/swap/v2/order"
 JUPITER_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 ZEROX_PRICE = "https://api.0x.org/swap/allowance-holder/price"
 MAX_ROUNDTRIP_LOSS_PCT = 5.0
@@ -166,30 +166,29 @@ def _jupiter_route(event: dict, key: str, fetch: Fetch) -> dict:
     if notional <= 0 or not token:
         return {"state": "unknown", "reason": "missing quote notional/token"}
     headers = {"x-api-key": key}
-    common = {"slippageBps": 100, "restrictIntermediateTokens": "true",
-              "instructionVersion": "V2"}
+    common = {"slippageBps": 100}
     try:
-        buy = fetch(JUPITER_QUOTE, {**common, "inputMint": JUPITER_USDC,
+        buy = fetch(JUPITER_ORDER, {**common, "inputMint": JUPITER_USDC,
                     "outputMint": token, "amount": str(round(notional * 1_000_000))}, headers)
         token_out = int(buy.get("outAmount") or 0)
         if token_out <= 0 or not buy.get("routePlan"):
             raise ValueError("no buy route")
-        sell = fetch(JUPITER_QUOTE, {**common, "inputMint": token,
+        sell = fetch(JUPITER_ORDER, {**common, "inputMint": token,
                      "outputMint": JUPITER_USDC, "amount": str(token_out)}, headers)
         back_raw = int(sell.get("outAmount") or 0)
         if back_raw <= 0 or not sell.get("routePlan"):
             raise ValueError("no sell route")
     except Exception as exc:
-        return {"state": "untradeable", "source": "Jupiter Swap v1",
+        return {"state": "untradeable", "source": "Jupiter Swap v2 order",
                 "reason": str(exc)[:80], "read_only": True}
     back_usd = back_raw / 1_000_000
     loss = _roundtrip(notional, back_usd)
     return {"state": "quoted" if loss <= MAX_ROUNDTRIP_LOSS_PCT else "untradeable",
-            "source": "Jupiter Swap v1", "read_only": True,
+            "source": "Jupiter Swap v2 order", "read_only": True,
             "roundtrip_loss_pct": loss, "notional_usd": notional,
             "roundtrip_back_usd": round(back_usd, 6),
-            "buy_price_impact_pct": float(buy.get("priceImpactPct") or 0) * 100,
-            "sell_price_impact_pct": float(sell.get("priceImpactPct") or 0) * 100,
+            "buy_price_impact_pct": abs(float(buy.get("priceImpact") or 0)) * 100,
+            "sell_price_impact_pct": abs(float(sell.get("priceImpact") or 0)) * 100,
             "buy_routes": _route_labels(buy), "sell_routes": _route_labels(sell),
             "network_fees_included": False, "is_real_fill": False,
             "checked_at": datetime.now(timezone.utc).isoformat()}
@@ -232,7 +231,7 @@ def route_probe(event: dict, fetch: Fetch = _get_json) -> dict:
     if chain == "solana":
         key = os.getenv("JUPITER_API_KEY", "")
         if not key:
-            return {"state": "unknown", "source": "Jupiter Swap v1",
+            return {"state": "unknown", "source": "Jupiter Swap v2 order",
                     "reason": "JUPITER_API_KEY not configured", "read_only": True}
         return _jupiter_route(event, key, fetch)
     if chain in _EVM_USDC:

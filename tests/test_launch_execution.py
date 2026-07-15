@@ -68,16 +68,25 @@ def test_gate_downgrades_unknown_and_blocks_known_untradeable():
 def test_jupiter_roundtrip_quote_replaces_modeled_cost():
     from src.pipeline import launch_execution as le
 
+    requests = []
+
     def quotes(url, params, headers):
+        requests.append((url, params, headers))
         if params["inputMint"] == le.JUPITER_USDC:
-            return {"outAmount": "1000000000", "priceImpactPct": "0.004",
+            return {"outAmount": "1000000000", "priceImpact": "-0.004",
                     "routePlan": [{"swapInfo": {"label": "Raydium"}}]}
-        return {"outAmount": "58800000", "priceImpactPct": "0.006",
+        return {"outAmount": "58800000", "priceImpact": "-0.006",
                 "routePlan": [{"swapInfo": {"label": "Meteora"}}]}
 
     route = le._jupiter_route(_event(), "key", quotes)
     assert route["state"] == "quoted"
     assert route["roundtrip_loss_pct"] == 2.0
+    assert route["buy_price_impact_pct"] == 0.4
+    assert route["sell_price_impact_pct"] == 0.6
+    assert all(url == le.JUPITER_ORDER for url, _, _ in requests)
+    assert all("restrictIntermediateTokens" not in params and
+               "instructionVersion" not in params for _, params, _ in requests)
+    assert all(headers == {"x-api-key": "key"} for _, _, headers in requests)
     event = le.gate(_event(), {"state": "pass"}, route)
     assert event["decision"] == "SMALL_PROBE"
     assert event["roundtrip_cost_pct_est"] == 2.0
