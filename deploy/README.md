@@ -22,6 +22,10 @@ launchctl load ~/Library/LaunchAgents/com.cryptoscope.scheduler.plist
 # Independent read-only Hyperliquid BBO/L2/trades/context stream
 cp deploy/com.cryptoscope.hyperliquid.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.cryptoscope.hyperliquid.plist
+
+# Independent read-only standard Solana Pump.fun launch evidence stream
+cp deploy/com.cryptoscope.solana-launches.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.cryptoscope.solana-launches.plist
 ```
 
 Manage it:
@@ -30,8 +34,10 @@ Manage it:
 launchctl list | grep cryptoscope          # status (PID, exit code)
 launchctl unload ~/Library/LaunchAgents/com.cryptoscope.scheduler.plist   # stop
 launchctl unload ~/Library/LaunchAgents/com.cryptoscope.hyperliquid.plist # stop market stream
+launchctl unload ~/Library/LaunchAgents/com.cryptoscope.solana-launches.plist # stop launch stream
 tail -f logs/scheduler.err.log             # logs
 tail -f logs/hyperliquid.err.log           # stream errors/reconnects
+tail -f logs/solana-launches.err.log        # launch stream errors/reconnects
 ```
 
 `KeepAlive` restarts the process on crash; `RunAtLoad` starts it on login/boot.
@@ -42,6 +48,12 @@ and serializes its two descriptor-heavy scans.
 The Hyperliquid stream is a separate read-only process so a socket reconnect cannot
 stall cron jobs. It uses only public subscriptions; `HL_STREAM_COINS=BTC,ETH,SOL`
 can override the default universe.
+
+The Solana launch stream is also isolated and read-only. It defaults to standard
+public `logsSubscribe`/JSON-RPC endpoints, records only raw Pump.fun creation
+evidence, and never promotes an event to a trade. Set `SOLANA_STREAM_WS_URL` and
+`SOLANA_STREAM_RPC_URL` to dedicated provider endpoints for sustained production
+rate limits; paid Helius `transactionSubscribe` access is not required.
 
 ## Credentials
 
