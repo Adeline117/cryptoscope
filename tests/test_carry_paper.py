@@ -342,15 +342,68 @@ def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
     assert state[1] == past and state[2] != past
     assert state[3] == pytest.approx(48, abs=0.1)
 
+    stats = _run(cp, [{"symbol": "X", "cross": True,
+                      "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+    c = sqlite3.connect(str(cp.DB))
+    rows = c.execute(
+        "SELECT accrued_pct,measurement_state,status,episode_version,observation_version "
+        "FROM paper WHERE symbol='X' ORDER BY id"
+    ).fetchall()
+    c.close()
+    assert rows == [
+        (0.0, "legacy_quarantined", "quarantined", None, None),
+        (0.0, "observed", "open", cp.CURRENT_EPISODE_VERSION, 1),
+    ]
+    assert stats["n_open"] == 1
+    assert stats["n_quarantined_total"] == 1
+    assert cp.open_symbols() == ["X"]
+
+    from src.pipeline import opportunity_ledger
+    ledger_rows = opportunity_ledger.outcome_rows()
+    assert [row["outcome_state"] for row in ledger_rows] == ["unresolvable", "open"]
+    assert ledger_rows[0]["outcome"]["quarantine_reason"] == \
+        "legacy_observation_protocol"
+
+
+def test_legacy_open_episode_never_accrues_or_closes_from_valid_v1_quote(cp):
+    import sqlite3
+
     _run(cp, [{"symbol": "X", "cross": True,
               "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     c = sqlite3.connect(str(cp.DB))
-    accrued, measurement_state = c.execute(
-        "SELECT accrued_pct,measurement_state FROM paper WHERE symbol='X'"
+    c.execute(
+        "UPDATE paper SET entry_ts=?,last_ts=?,last_valid_ts=?,last_diff=40,"
+        "accrued_pct=0,episode_version=NULL,observation_version=NULL WHERE symbol='X'",
+        (past, past, past),
+    )
+    c.commit()
+    c.close()
+
+    assert cp.open_symbols() == []
+    before_run = cp.paper_stats()
+    assert before_run["n_open"] == 0
+    assert before_run["n_quarantined_total"] == 1
+    assert cp._sync_opportunity_ledger() == {
+        "status": "ok", "synced": 1, "resolved": 0,
+    }
+    from src.pipeline import opportunity_ledger
+    assert opportunity_ledger.outcome_rows()[0]["outcome_state"] == "unresolvable"
+
+    stats = cp.run([], observations=[{
+        "symbol": "X", "status": "observed", "cross": True,
+        "observation_version": 1, "observed_edge_ann": 1,
+    }])
+    c = sqlite3.connect(str(cp.DB))
+    row = c.execute(
+        "SELECT accrued_pct,last_ts,last_valid_ts,status,measurement_state FROM paper "
+        "WHERE symbol='X'"
     ).fetchone()
     c.close()
-    assert accrued == 0
-    assert measurement_state == "observed"
+    assert row == (0.0, past, past, "quarantined", "legacy_quarantined")
+    assert stats["n_open"] == 0
+    assert stats["n_closed_total"] == 0
+    assert stats["n_quarantined_total"] == 1
 
 
 def test_open_and_close_share_one_carry_ledger_lifecycle(cp):

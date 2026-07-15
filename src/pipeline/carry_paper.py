@@ -214,6 +214,11 @@ def _sync_opportunity_ledger() -> dict:
          realized_net, close_reason, last_attempt_ts, last_valid_ts, unmeasured_h,
          measurement_state, episode_version, cost_complete, observation_version,
          exit_signal_ts, exit_signal_diff, exit_quote_ts, exit_quote_delay_s) = row
+        legacy_active = (
+            status in {"open", "exit_pending"}
+            and (episode_version != CURRENT_EPISODE_VERSION or observation_version != 1)
+        )
+        sync_status = "quarantined" if legacy_active else status
         measurement_notional = float(notional or NOTIONAL)
         entry_contract = carry_paper_contract(
             notional_usd_per_leg=measurement_notional,
@@ -232,7 +237,7 @@ def _sync_opportunity_ledger() -> dict:
             "event_key": f"paper:{pid}", "symbol": symbol,
             "source": "Hyperliquid + OKX live order books",
             "event_at": entry_ts, "detected_at": entry_ts, "decision_at": entry_ts,
-            "quote_at": entry_ts, "state": f"paper_{status}",
+            "quote_at": entry_ts, "state": f"paper_{sync_status}",
             "decision": "WATCH", "max_notional_usd": None,
             "measurement_notional_usd_per_leg": measurement_notional,
             "measurement_gross_notional_usd": measurement_notional * 2,
@@ -260,7 +265,7 @@ def _sync_opportunity_ledger() -> dict:
             "observation_version": observation_version,
             "kind": "delta_neutral_carry_paper",
             "execution_mode": "paper_orderbook_measurement",
-            "cost_is_real_fill": False, "status": status,
+            "cost_is_real_fill": False, "status": sync_status,
             "cost_contract": outcome_contract,
             "quoted_rate_integral_pct": accrued_pct or 0,
             "settled_funding_pct": None, "basis_pnl_pct": None,
@@ -277,7 +282,15 @@ def _sync_opportunity_ledger() -> dict:
             "exit_quote_at": exit_quote_ts, "exit_quote_delay_s": exit_quote_delay_s,
         }
         state = "open"
-        if status == "closed":
+        if sync_status == "quarantined":
+            outcome.update({
+                "quarantine_reason": close_reason or "legacy_observation_protocol",
+                "proxy_sample_eligible": False,
+                "edge_sample_eligible": False,
+                "real_edge_eligible": False,
+            })
+            state = "unresolvable"
+        elif sync_status == "closed":
             outcome.update({
                 "closed_at": exit_ts, "hold_h": hold_h,
                 "close_reason": close_reason or "legacy_unknown",
@@ -462,11 +475,13 @@ def _roundtrip_slip(coin: str, notional: float = NOTIONAL,
 
 
 def open_symbols() -> list[str]:
-    """Symbols with an open paper episode, in stable creation order."""
+    """Symbols with a current-protocol open episode, in stable creation order."""
     c = _conn()
     try:
         return [row[0] for row in c.execute(
-            "SELECT symbol FROM paper WHERE status IN ('open','exit_pending') ORDER BY id"
+            "SELECT symbol FROM paper WHERE status IN ('open','exit_pending') "
+            "AND episode_version=? AND observation_version=1 ORDER BY id",
+            (CURRENT_EPISODE_VERSION,),
         ).fetchall()]
     finally:
         c.close()
@@ -496,11 +511,27 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                                                    "observed_edge_ann": edge}
     c = _conn()
     try:
+        # A historical open row cannot be upgraded in place: its entry snapshot and
+        # already-integrated path were produced under an unknown protocol. Preserve it
+        # as an auditable, unresolvable row, but never let it accrue, close, request
+        # quotes, or block a fresh v3 episode for the same symbol.
+        c.execute(
+            "UPDATE paper SET status='quarantined',"
+            "measurement_state='legacy_quarantined',"
+            "close_reason='legacy_observation_protocol' "
+            "WHERE status IN ('open','exit_pending') AND "
+            "(episode_version IS NULL OR episode_version<>? OR "
+            "observation_version IS NULL OR observation_version<>1)",
+            (CURRENT_EPISODE_VERSION,),
+        )
         open_rows = {r[1]: r for r in c.execute(
             "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,"
             "last_ts,last_diff,last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state,"
             "status,exit_signal_ts,exit_signal_diff FROM paper "
-            "WHERE status IN ('open','exit_pending')").fetchall()}
+            "WHERE status IN ('open','exit_pending') AND episode_version=? "
+            "AND observation_version=1",
+            (CURRENT_EPISODE_VERSION,),
+        ).fetchall()}
         # 1) ACCRUE + maybe CLOSE existing open positions
         for sym, row in open_rows.items():
             (pid, _, _, _, pred_net, entry_slip, notional, accrued, last_ts, last_diff,
@@ -658,8 +689,17 @@ def paper_stats() -> dict:
             "SELECT symbol,entry_ts,last_ts,entry_diff,last_diff,pred_net,entry_slip,notional,"
             "last_attempt_ts,last_valid_ts,unmeasured_h,measurement_state,episode_version,"
             "observation_version,status,exit_signal_ts,exit_signal_diff "
-            "FROM paper WHERE status IN ('open','exit_pending') ORDER BY entry_ts DESC"
+            "FROM paper WHERE status IN ('open','exit_pending') AND episode_version=? "
+            "AND observation_version=1 ORDER BY entry_ts DESC",
+            (CURRENT_EPISODE_VERSION,),
         ).fetchall()
+        quarantined_total = c.execute(
+            "SELECT COUNT(*) FROM paper WHERE status='quarantined' OR "
+            "(status IN ('open','exit_pending') AND "
+            "(episode_version IS NULL OR episode_version<>? OR "
+            "observation_version IS NULL OR observation_version<>1))",
+            (CURRENT_EPISODE_VERSION,),
+        ).fetchone()[0]
     finally:
         c.close()
 
@@ -694,6 +734,7 @@ def paper_stats() -> dict:
         "n_open": len(opened), "n_closed": len(proxy_closed),
         "n_proxy_closed": len(proxy_closed), "real_edge_n": 0,
         "n_exit_pending": sum(row[14] == "exit_pending" for row in opened),
+        "n_quarantined_total": quarantined_total,
         "n_closed_total": len(closed_all),
         "n_closed_excluded": len(closed_all) - len(proxy_closed),
         "excluded_by_reason": excluded,
