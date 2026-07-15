@@ -32,6 +32,18 @@
     <key>ThrottleInterval</key>
     <integer>30</integer>
 
+    <!-- Keep the limit finite, but leave headroom for overlapping HTTP/RPC work. -->
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>2048</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+
     <key>StandardOutPath</key>
     <string>/Users/adelinewen/cryptoscope/logs/scheduler.out.log</string>
     <key>StandardErrorPath</key>

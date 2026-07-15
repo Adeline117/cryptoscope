@@ -29,6 +29,9 @@ tail -f logs/scheduler.err.log             # logs
 ```
 
 `KeepAlive` restarts the process on crash; `RunAtLoad` starts it on login/boot.
+The LaunchAgent grants a finite 2048-fd soft limit (4096 hard limit). The scheduler
+also raises a smaller inherited soft limit to `SCHEDULER_NOFILE_SOFT` (default 2048)
+and serializes its two descriptor-heavy scans.
 
 ## Credentials
 

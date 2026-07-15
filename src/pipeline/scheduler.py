@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import resource
 from concurrent.futures import ThreadPoolExecutor
 
 import structlog
@@ -14,6 +15,42 @@ from apscheduler.triggers.cron import CronTrigger
 from src.config import load_settings
 
 logger = structlog.get_logger()
+
+_HEAVY_IO_LOCK: asyncio.Lock | None = None
+_HEAVY_IO_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def _heavy_io_lock() -> asyncio.Lock:
+    """One-at-a-time boundary for the two descriptor-heavy legacy scans.
+
+    Pytest creates a fresh event loop per async test, so construct the lock lazily
+    per loop rather than binding a module-global lock to the first loop forever.
+    The production scheduler has one loop for its entire lifetime.
+    """
+    global _HEAVY_IO_LOCK, _HEAVY_IO_LOOP
+    loop = asyncio.get_running_loop()
+    if _HEAVY_IO_LOCK is None or _HEAVY_IO_LOOP is not loop:
+        _HEAVY_IO_LOCK, _HEAVY_IO_LOOP = asyncio.Lock(), loop
+    return _HEAVY_IO_LOCK
+
+
+def _scheduler_nofile_target() -> int:
+    """Desired soft fd limit: enough burst room, still finite and configurable."""
+    try:
+        return max(256, min(8192, int(os.getenv("SCHEDULER_NOFILE_SOFT", "2048"))))
+    except ValueError:
+        return 2048
+
+
+def _configure_fd_limit() -> tuple[int, int]:
+    """Raise launchd's small default soft limit without weakening the hard limit."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = _scheduler_nofile_target()
+    ceiling = target if hard == resource.RLIM_INFINITY else min(target, hard)
+    if soft < ceiling:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (ceiling, hard))
+        soft = ceiling
+    return soft, hard
 
 
 def _scheduler_worker_count() -> int:
@@ -554,7 +591,11 @@ async def _run_accumulation():
     logger.info("scheduled_accumulation_detection")
     from src.pipeline.accumulation_pipeline import run_accumulation_pipeline
 
-    result = await run_accumulation_pipeline()
+    # This scan repeatedly creates short-lived HTTP/SQLite resources. Never overlap
+    # it with operator_sentinel: their :00/:30 schedules previously crossed the
+    # launchd soft fd limit and made an ordinary state-file write fail with EMFILE.
+    async with _heavy_io_lock():
+        result = await run_accumulation_pipeline()
     logger.info("accumulation_detection_done", **result)
 
 
@@ -733,7 +774,11 @@ async def _run_operator_sentinel():
     logger.info("scheduled_operator_sentinel")
     from src.pipeline.operator_sentinel import run_and_alert
 
-    await run_and_alert(use_transfers=True)   # 5-min: reliable transfer-based detection
+    # check_run is synchronous and can take minutes across all tracked clusters. It
+    # used to freeze the event loop, delaying the 2/3-minute structure/launch feeds.
+    # Offload it to the bounded shared executor and serialize it with accumulation.
+    async with _heavy_io_lock():
+        await asyncio.to_thread(run_and_alert, use_transfers=True)
 
 
 async def _run_operator_id_push():
@@ -1421,6 +1466,7 @@ async def main():
         pass
 
     _configure_runtime_logging()
+    nofile_soft, nofile_hard = _configure_fd_limit()
 
     # All ``asyncio.to_thread`` calls share this executor.  Keep it bounded so
     # concurrent recurring scans cannot exhaust sockets/files/SQLite descriptors.
@@ -1431,7 +1477,8 @@ async def main():
     asyncio.get_running_loop().set_default_executor(executor)
 
     logger.info("starting_scheduler", io_workers=_scheduler_worker_count(),
-                log_level=logging.getLevelName(_scheduler_log_level()))
+                log_level=logging.getLevelName(_scheduler_log_level()),
+                nofile_soft=nofile_soft, nofile_hard=nofile_hard)
     scheduler = create_scheduler()
     scheduler.start()
 
