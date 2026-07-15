@@ -48,6 +48,7 @@ EXCHANGES: dict[str, dict[str, Any]] = {
 
 POLL_INTERVAL_SECONDS = 60
 FAILURE_LOG_INTERVAL_SECONDS = 3600
+MIN_INVENTORY_RETAIN_RATIO = 0.75
 _LAST_FAILURE_LOG: dict[str, float] = {}
 
 
@@ -136,11 +137,13 @@ def _load_snapshot(exchange: str) -> set[str]:
 
 
 def _save_snapshot(exchange: str, symbols: set[str]) -> None:
-    """Persist the current symbol set to disk."""
+    """Atomically persist a complete symbol set without exposing a partial file."""
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     path = _snapshot_path(exchange)
-    with open(path, "w") as f:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w") as f:
         json.dump(sorted(symbols), f)
+    tmp.replace(path)
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +211,21 @@ def check_exchange_result(
         return result
 
     previous_symbols = _load_snapshot(exchange)
-    _save_snapshot(exchange, current_symbols)
+    # A non-empty response can still be truncated by a gateway or upstream partial
+    # failure. Replacing a healthy inventory with a sharply smaller one would make
+    # the next recovery look like hundreds of fake new listings. Fail closed and
+    # retain the last complete baseline. Genuine mass delistings can be reviewed
+    # manually; this lane only needs additions quickly.
+    if (len(previous_symbols) >= 100
+            and len(current_symbols) < len(previous_symbols) * MIN_INVENTORY_RETAIN_RATIO):
+        result["error"] = (f"inventory truncated: {len(current_symbols)} current vs "
+                           f"{len(previous_symbols)} previous")
+        return result
+    try:
+        _save_snapshot(exchange, current_symbols)
+    except OSError as exc:
+        result["error"] = f"snapshot write failed: {str(exc)[:120]}"
+        return result
     result.update({"status": "ok", "symbol_count": len(current_symbols),
                    "baseline_ready": bool(previous_symbols)})
 
@@ -251,8 +268,20 @@ def check_exchange(
 
 def check_all_exchanges_with_status(timeout: float = 25.0) -> dict[str, Any]:
     """Check every configured source without converting failures to empty scans."""
-    sources = [check_exchange_result(exchange, timeout=timeout)
-               for exchange in EXCHANGES]
+    sources = []
+    for exchange in EXCHANGES:
+        try:
+            sources.append(check_exchange_result(exchange, timeout=timeout))
+        except Exception as exc:
+            # One broken parser or local snapshot must not erase the health evidence
+            # from every other exchange in the same scan.
+            sources.append({
+                "exchange": exchange,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "status": "failed", "symbol_count": None,
+                "baseline_ready": False, "new_count": 0, "alerts": [],
+                "error": f"unexpected source failure: {str(exc)[:160]}",
+            })
     return {
         "alerts": [alert for source in sources for alert in source["alerts"]],
         "sources": [{k: v for k, v in source.items() if k != "alerts"}

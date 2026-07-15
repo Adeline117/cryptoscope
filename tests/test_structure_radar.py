@@ -17,6 +17,8 @@ def test_listing_is_recorded_once_as_watch_only(tmp_path, monkeypatch):
     assert event["decision"] == "WATCH"
     assert event["event_type"] == "new_listing"
     assert event["source"] == "okx"
+    assert event["symbol"] == "ABC"
+    assert event["markets"] == ["ABC-USDT"]
 
 
 def test_structure_scan_uses_public_detector_and_returns_ledger(tmp_path, monkeypatch):
@@ -39,7 +41,7 @@ def test_structure_scan_uses_public_detector_and_returns_ledger(tmp_path, monkey
     got = sr.scan()
     assert got["scanned"] == 1 and got["configured_sources"] == 3
     assert got["inserted"] == 1
-    assert got["events"][0]["symbol"] == "ABC-USDT"
+    assert got["events"][0]["symbol"] == "ABC"
     view = sr.view()
     assert view["scanned"] == 1 and view["configured_sources"] == 3
     assert [s["status"] for s in view["source_health"]] == ["failed", "ok", "failed"]
@@ -133,6 +135,61 @@ def test_coinbase_is_an_official_fail_closed_listing_source(tmp_path, monkeypatc
     assert result["symbol_count"] == 1
     assert result["baseline_ready"] is False
     assert result["alerts"] == []
+
+
+def test_truncated_inventory_never_replaces_healthy_snapshot(tmp_path, monkeypatch):
+    import json
+    import src.collectors.listing_detector as ld
+
+    monkeypatch.setattr(ld, "SNAPSHOT_DIR", tmp_path)
+    original = {f"COIN{i}-USD" for i in range(200)}
+    ld._save_snapshot("coinbase", original)
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"id": f"COIN{i}-USD", "status": "online"} for i in range(20)]
+
+    monkeypatch.setattr(ld.httpx, "get", lambda *_args, **_kwargs: Response())
+    result = ld.check_exchange_result("coinbase")
+
+    assert result["status"] == "failed"
+    assert "inventory truncated" in result["error"]
+    assert set(json.loads((tmp_path / "coinbase_symbols.json").read_text())) == original
+
+
+def test_snapshot_write_failure_isolated_from_other_sources(monkeypatch):
+    import src.collectors.listing_detector as ld
+
+    def check(exchange, timeout):
+        if exchange == "binance":
+            raise OSError("disk full")
+        return {"exchange": exchange, "status": "ok", "alerts": [],
+                "symbol_count": 1, "baseline_ready": True, "new_count": 0}
+
+    monkeypatch.setattr(ld, "check_exchange_result", check)
+    result = ld.check_all_exchanges_with_status()
+
+    assert result["sources"][0]["status"] == "failed"
+    assert "disk full" in result["sources"][0]["error"]
+    assert all(source["status"] == "ok" for source in result["sources"][1:])
+
+
+def test_same_asset_multi_quote_listing_is_one_structure_event(tmp_path, monkeypatch):
+    import src.pipeline.opportunity_ledger as ol
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    ts = "2026-07-15T08:00:00+00:00"
+    rows = [_listing(ts), {**_listing(ts), "symbol": "ABC-USDC"},
+            {**_listing(ts), "symbol": "ABC-EUR"}]
+
+    assert sr.record_listings(rows) == 1
+    event = ol.active("structure")[0]
+    assert event["symbol"] == "ABC"
+    assert event["markets"] == ["ABC-EUR", "ABC-USDC", "ABC-USDT"]
 
 
 def test_listing_source_failure_is_warned_hourly_without_hiding_health(monkeypatch):

@@ -15,6 +15,20 @@ from src.pipeline.opportunity_ledger import active, record
 
 SOURCE_HEALTH_FILE = DATA_DIR / "structure_source_health.json"
 
+_KNOWN_QUOTES = ("FDUSD", "USDT", "USDC", "TUSD", "BUSD", "DAI", "USD",
+                 "EUR", "TRY", "BTC", "ETH", "BNB")
+
+
+def _base_asset(symbol: str) -> str:
+    """Normalize a spot market into its base asset for one listing event."""
+    symbol = str(symbol).upper()
+    if "-" in symbol:
+        return symbol.split("-", 1)[0]
+    for quote in _KNOWN_QUOTES:
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return symbol[:-len(quote)]
+    return symbol
+
 
 def _save_source_health(sources: list[dict]) -> None:
     """Atomically preserve the last per-source evidence for read-only exports."""
@@ -36,18 +50,28 @@ def _load_source_health() -> dict:
 
 
 def record_listings(listings: list[dict]) -> int:
-    inserted = 0
+    grouped: dict[tuple[str, str, str], dict] = {}
     for listing in listings:
         exchange, symbol = listing.get("exchange"), listing.get("symbol")
-        if not exchange or not symbol:
+        event_at = listing.get("detected_at")
+        if not exchange or not symbol or not event_at:
             continue
+        base = _base_asset(symbol)
+        key = (str(exchange), base, str(event_at))
+        group = grouped.setdefault(key, {**listing, "base_asset": base, "markets": []})
+        group["markets"].append(str(symbol))
+
+    inserted = 0
+    for (exchange, base, event_at), listing in grouped.items():
+        markets = sorted(set(listing["markets"]))
         event_at = listing.get("detected_at")
         event = {
-            "lane": "structure", "chain": "cex", "token": symbol,
-            "event_key": f"listing:{exchange}:{symbol}:{event_at}", "symbol": symbol,
+            "lane": "structure", "chain": "cex", "token": base,
+            "event_key": f"listing:{exchange}:{base}:{event_at}", "symbol": base,
             "source": exchange, "event_at": event_at, "state": "live",
             "decision": "WATCH", "event_type": "new_listing",
-            "message": listing.get("message", ""),
+            "message": f"{exchange.upper()} 新增 {base} 市场: {', '.join(markets)}",
+            "markets": markets,
             "reasons": ["公开交易所新增交易对", "先记录流动性变化，未验证为方向信号"],
         }
         _, new = record(event)
