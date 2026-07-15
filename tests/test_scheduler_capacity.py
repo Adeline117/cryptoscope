@@ -150,3 +150,24 @@ def test_opportunity_export_has_an_independent_scheduler_job():
     jobs = {job.id: job for job in scheduler.get_jobs()}
     assert "opportunity_export" in jobs and "board_export" in jobs
     assert jobs["opportunity_export"].func is not jobs["board_export"].func
+
+
+@pytest.mark.asyncio
+async def test_canonical_outcomes_publish_before_slow_legacy_resolver(monkeypatch):
+    from src.pipeline import board_export, opportunity_outcomes, outcome_tracker, scheduler
+
+    order = []
+    monkeypatch.setattr(opportunity_outcomes, "resolve",
+                        lambda: order.append("canonical") or {"lookups": 1})
+    monkeypatch.setattr(board_export, "render_stats",
+                        lambda _opps: order.append("render_stats") or {"view": "stats"})
+    monkeypatch.setattr(board_export, "write_views",
+                        lambda **_views: order.append("write_stats") or ["stats"])
+    monkeypatch.setattr(board_export, "push_to_blob",
+                        lambda _paths: order.append("push_stats") or 1)
+    monkeypatch.setattr(outcome_tracker, "resolve_outcomes",
+                        lambda: order.append("legacy") or 0)
+
+    await scheduler._run_resolve_outcomes()
+
+    assert order == ["canonical", "render_stats", "write_stats", "push_stats", "legacy"]

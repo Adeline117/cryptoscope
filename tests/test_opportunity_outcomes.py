@@ -35,8 +35,8 @@ def test_resolver_settles_one_horizon_per_event_and_preserves_entry(ledger):
     first = oo.resolve(now=now, price_at=price_at, max_lookups=20)
     assert first["lookups"] == first["settled"] == 1
     row = ledger.outcome_rows()[0]
-    assert set(row["outcome"]["horizons"]) == {"1h"}
-    assert row["outcome"]["horizons"]["1h"]["net_return_pct_est"] == pytest.approx(9.0)
+    assert set(row["outcome"]["horizons"]) == {"24h"}
+    assert row["outcome"]["horizons"]["24h"]["net_return_pct_est"] == pytest.approx(9.0)
     assert row["outcome_state"] == "open"
 
     oo.resolve(now=now, price_at=price_at, max_lookups=20)
@@ -68,21 +68,80 @@ def test_missing_old_1h_price_does_not_retire_valid_24h_outcome(ledger):
 
     now = datetime(2026, 7, 30, 12, tzinfo=timezone.utc)
     ledger.record(_launch((now - timedelta(days=22)).isoformat()))
-    prices = iter((None, 110.0, 120.0))
+    prices = iter((110.0, None, 120.0))
     oo.resolve(now=now, price_at=lambda row, when: next(prices))
     first = ledger.outcome_rows()[0]
     assert first["outcome_state"] == "open"
-    assert first["outcome"]["unavailable_horizons"] == ["1h"]
+    assert "24h" in first["outcome"]["horizons"]
 
     oo.resolve(now=now, price_at=lambda row, when: next(prices))
     second = ledger.outcome_rows()[0]
-    assert "24h" in second["outcome"]["horizons"]
+    assert second["outcome"]["unavailable_horizons"] == ["1h"]
     assert second["outcome_state"] == "open"
 
     oo.resolve(now=now, price_at=lambda row, when: next(prices))
     final = ledger.outcome_rows()[0]
     assert "7d" in final["outcome"]["horizons"]
     assert final["outcome_state"] == "resolved"
+
+
+def test_overdue_24h_is_not_starved_by_fresh_1h_tasks(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    ledger.record(_launch((now - timedelta(hours=25)).isoformat(), "old"))
+    for i in range(25):
+        ledger.record(_launch((now - timedelta(hours=2)).isoformat(), f"fresh-{i}"))
+    calls = []
+
+    got = oo.resolve(now=now, price_at=lambda row, when: calls.append((row["token"], when)) or 101,
+                     max_lookups=1)
+
+    assert got["lookups_by_horizon"] == {"24h": 1}
+    assert calls[0][0] == "old"
+    row = next(r for r in ledger.outcome_rows() if r["token"] == "old")
+    assert "24h" in row["outcome"]["horizons"]
+
+
+def test_lookup_budget_reserves_a_slot_for_each_due_lane(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    for i in range(10):
+        ledger.record(_launch((now - timedelta(hours=25)).isoformat(), f"launch-{i}"))
+    ledger.record({"lane": "cascade", "chain": "hyperliquid", "token": "CAS",
+                   "symbol": "CAS", "detected_at": (now - timedelta(hours=25)).isoformat(),
+                   "entry_price": 100, "decision": "SMALL_PROBE", "state": "firing",
+                   "side": "SHORT", "roundtrip_cost_pct_est": 0.2,
+                   "cost_model": "test"})
+    lanes = []
+
+    got = oo.resolve(now=now,
+                     price_at=lambda row, when: lanes.append(row["lane"]) or 101,
+                     max_lookups=2)
+
+    assert got["lookups_by_lane"] == {"cascade": 1, "launch": 1}
+    assert set(lanes) == {"launch", "cascade"}
+
+
+def test_stats_expose_due_and_unpriced_24h_backlog(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime.now(timezone.utc)
+    due_id, _ = ledger.record(_launch((now - timedelta(hours=26)).isoformat(), "due"))
+    ledger.record(_launch((now - timedelta(hours=2)).isoformat(), "new"))
+    row = next(r for r in ledger.outcome_rows() if r["id"] == due_id)
+    ledger.save_outcome(due_id, {"attempts": {"24h": 1},
+                                 "attempted_at": {"24h": now.isoformat()},
+                                 "horizons": {}})
+
+    stat = oo.lane_stats()["launch"]
+
+    assert stat["resolved_24h"] == 0
+    assert stat["not_due_24h"] == 1
+    assert stat["due_24h"] == 1
+    assert stat["attempted_unpriced_24h"] == 1
+    assert stat["oldest_due_24h_hours"] >= 1.9
 
 
 def test_stats_refuse_rate_below_minimum_sample(ledger):

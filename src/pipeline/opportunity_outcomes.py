@@ -27,6 +27,7 @@ from src.pipeline import opportunity_ledger
 logger = structlog.get_logger()
 
 HORIZONS = (("1h", 1), ("24h", 24), ("7d", 7 * 24))
+HORIZON_PRIORITY = {"24h": 0, "1h": 1, "7d": 2}
 MIN_N = 20
 MAX_PRICE_LOOKUPS = 20       # hard network/resource budget per hourly resolver run
 UNRESOLVABLE_DAYS = 21       # 7d horizon plus a generous historical-data grace period
@@ -119,6 +120,62 @@ def _settled(entry: float, price: float, direction: str, cost_pct: float) -> dic
             "net_return_pct_est": round(net, 4), "positive_after_cost": net > 0}
 
 
+def _next_due_task(row: dict, now: datetime) -> dict | None:
+    """Choose one due horizon for an event, prioritizing the 24h evidence gate."""
+    try:
+        t0 = _aware(row["detected_at"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    outcome = row.get("outcome") or {}
+    horizons = outcome.get("horizons") or {}
+    unavailable = set(outcome.get("unavailable_horizons") or [])
+    attempted_at = outcome.get("attempted_at") or {}
+    candidates = []
+    for name, hours in HORIZONS:
+        due_at = t0 + timedelta(hours=hours)
+        if now < due_at or name in horizons or name in unavailable:
+            continue
+        candidates.append({
+            "row": row, "name": name, "hours": hours, "due_at": due_at,
+            "key": (HORIZON_PRIORITY[name], attempted_at.get(name) or "",
+                    due_at.isoformat()),
+        })
+    return min(candidates, key=lambda task: task["key"], default=None)
+
+
+def _select_due_tasks(rows: list[dict], now: datetime, budget: int) -> list[dict]:
+    """Reserve one slot per live lane, then fill the remaining oldest priorities."""
+    tasks = []
+    for row in rows:
+        if row.get("lane") not in SUPPORTED_LANES or not _direction(row):
+            continue
+        try:
+            if float(row.get("entry_price") or 0) <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        task = _next_due_task(row, now)
+        if task:
+            tasks.append(task)
+    budget = max(0, budget)
+    if not tasks or budget == 0:
+        return []
+    lane_heads = []
+    for lane in sorted({task["row"]["lane"] for task in tasks}):
+        lane_heads.append(min((task for task in tasks if task["row"]["lane"] == lane),
+                              key=lambda task: task["key"]))
+    selected = sorted(lane_heads, key=lambda task: task["key"])[:budget]
+    selected_ids = {task["row"]["id"] for task in selected}
+    for task in sorted(tasks, key=lambda item: item["key"]):
+        if len(selected) >= budget:
+            break
+        if task["row"]["id"] in selected_ids:
+            continue
+        selected.append(task)
+        selected_ids.add(task["row"]["id"])
+    return selected
+
+
 def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
             max_lookups: int = MAX_PRICE_LOOKUPS) -> dict:
     """Resolve at most one missing horizon per event within a hard lookup budget.
@@ -130,13 +187,12 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
     now = now or datetime.now(timezone.utc)
     price_at = price_at or _default_price_at
     rows = opportunity_ledger.outcome_rows(open_only=True)
-    rows.sort(key=lambda r: (r.get("outcome") or {}).get("last_attempt_at") or "")
+    tasks = _select_due_tasks(rows, now, max_lookups)
     lookups = settled = retired = 0
-    for row in rows:
-        if lookups >= max(0, max_lookups):
-            break
-        if row.get("lane") not in SUPPORTED_LANES or not _direction(row):
-            continue
+    by_lane: dict[str, int] = {}
+    by_horizon: dict[str, int] = {}
+    for task in tasks:
+        row, name, hours = task["row"], task["name"], task["hours"]
         try:
             entry = float(row.get("entry_price") or 0)
             t0 = _aware(row["detected_at"])
@@ -151,14 +207,13 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         outcome.update({"version": 1, "direction": _direction(row),
                         "cost_pct_est": cost_pct, "cost_model": cost_model,
                         "cost_is_real_fill": False, "horizons": horizons})
-        missing = next(((name, hours) for name, hours in HORIZONS
-                        if now >= t0 + timedelta(hours=hours)
-                        and name not in horizons and name not in unavailable), None)
-        if not missing:
-            continue
-        name, hours = missing
         lookups += 1
+        by_lane[row["lane"]] = by_lane.get(row["lane"], 0) + 1
+        by_horizon[name] = by_horizon.get(name, 0) + 1
         outcome["last_attempt_at"] = now.isoformat()
+        attempted_at = dict(outcome.get("attempted_at") or {})
+        attempted_at[name] = now.isoformat()
+        outcome["attempted_at"] = attempted_at
         attempts = dict(outcome.get("attempts") or {})
         attempts[name] = int(attempts.get(name) or 0) + 1
         outcome["attempts"] = attempts
@@ -181,6 +236,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         outcome["updated_at"] = now.isoformat()
         opportunity_ledger.save_outcome(row["id"], outcome, state)
     result = {"lookups": lookups, "settled": settled, "retired": retired,
+              "lookups_by_lane": by_lane, "lookups_by_horizon": by_horizon,
               "pending_events": sum(1 for r in rows if r.get("lane") in SUPPORTED_LANES)}
     logger.info("opportunity_outcomes_resolved", **result)
     return result
@@ -274,6 +330,34 @@ def _airdrop_stats(rows: list[dict]) -> dict:
     }
 
 
+def _horizon_24h_progress(rows: list[dict], *, now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
+    progress = {"resolved_24h": 0, "not_due_24h": 0, "due_24h": 0,
+                "attempted_unpriced_24h": 0, "unavailable_24h": 0,
+                "oldest_due_24h_hours": None}
+    overdue = []
+    for row in rows:
+        try:
+            due_at = _aware(row["detected_at"]) + timedelta(hours=24)
+        except (TypeError, ValueError, KeyError):
+            continue
+        outcome = row.get("outcome") or {}
+        if "24h" in (outcome.get("horizons") or {}):
+            progress["resolved_24h"] += 1
+        elif "24h" in set(outcome.get("unavailable_horizons") or []):
+            progress["unavailable_24h"] += 1
+        elif now < due_at:
+            progress["not_due_24h"] += 1
+        else:
+            progress["due_24h"] += 1
+            overdue.append((now - due_at).total_seconds() / 3600)
+            if int((outcome.get("attempts") or {}).get("24h") or 0) > 0:
+                progress["attempted_unpriced_24h"] += 1
+    if overdue:
+        progress["oldest_due_24h_hours"] = round(max(overdue), 1)
+    return progress
+
+
 def actionability_gate(lane: str) -> dict:
     """Translate measured evidence into a fail-closed live action gate.
 
@@ -341,14 +425,16 @@ def lane_stats() -> dict:
         common = {"n": n, "hits": positives, "pending": pending,
                   "unresolvable": unresolvable, "metric": "positive_after_estimated_cost",
                   "cost_is_real_fill": False}
+        common.update(_horizon_24h_progress(measurable))
         if lane == "launch":
             common["legacy_unfrozen_n"] = sum((r.get("cohort_version") or 0) < 2
                                                 for r in measurable)
             common["probe"] = _cohort(measurable, "SMALL_PROBE")
             common["control"] = _cohort(measurable, "WATCH")
         if n < MIN_N:
-            out[lane] = {**common, "verdict": "不可判",
-                         "edge_verdict": "不可判", "note": f"24h样本 {n}/{MIN_N},继续积累"}
+            out[lane] = {**common, "verdict": "不可判", "edge_verdict": "不可判",
+                         "note": (f"24h样本 {n}/{MIN_N};到期待结算"
+                                  f" {common['due_24h']},继续积累")}
             continue
         rate = positives / n
         lo, hi = wilson(positives, n)

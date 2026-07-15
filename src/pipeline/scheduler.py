@@ -1245,12 +1245,20 @@ async def _run_resolve_outcomes():
     from src.pipeline.outcome_tracker import resolve_outcomes
     from src.pipeline.opportunity_outcomes import resolve as resolve_opportunities
 
-    # Both resolvers perform synchronous historical-price I/O. Keep them off the
-    # event loop and run sequentially inside the shared bounded executor so outcome
-    # measurement cannot starve the 3-minute discovery jobs or reopen the old FD leak.
-    alerts = await asyncio.to_thread(resolve_outcomes)
+    # Canonical five-lane evidence is small and directly gates the product. Run it
+    # before the legacy resolver, which can spend tens of minutes on historical
+    # controls, then publish its scorecard immediately instead of waiting for :50.
     opportunities = await asyncio.to_thread(resolve_opportunities)
-    logger.info("scheduled_resolve_outcomes_done", alerts=alerts, **opportunities)
+    from src.pipeline import board_export
+    stats = await asyncio.to_thread(board_export.render_stats, None)
+    paths = await asyncio.to_thread(board_export.write_views, stats=stats)
+    pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+    # Both resolvers perform synchronous historical-price I/O. Keep them off the
+    # event loop and sequential inside the bounded executor so they cannot reopen
+    # the old FD leak.
+    alerts = await asyncio.to_thread(resolve_outcomes)
+    logger.info("scheduled_resolve_outcomes_done", alerts=alerts,
+                stats_pushed=pushed, **opportunities)
 
 
 async def _run_majors_monitor():
