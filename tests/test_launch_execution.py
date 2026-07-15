@@ -92,6 +92,24 @@ def test_jupiter_roundtrip_quote_replaces_modeled_cost():
     assert event["roundtrip_cost_pct_est"] == 2.0
     assert event["cost_model"].startswith("live_read_only_roundtrip_quote")
     assert event["execution_probe"]["is_real_fill"] is False
+    assert event["quote_at"] == route["checked_at"]
+    assert event["expires_at"] > event["quote_at"]
+    assert event["executable_at"] is None
+
+
+def test_nominal_quoted_route_without_a_valid_quote_clock_is_watch_only():
+    from src.pipeline.launch_execution import gate
+
+    event = gate(
+        _event(),
+        {"state": "pass"},
+        {"state": "quoted", "roundtrip_loss_pct": 1.0,
+         "checked_at": "not-a-clock", "is_real_fill": False},
+    )
+
+    assert event["decision"] == "WATCH"
+    assert event["quote_at"] is None and event["expires_at"] is None
+    assert event["executable_at"] is None
 
 
 def test_jupiter_excessive_roundtrip_loss_is_untradeable():

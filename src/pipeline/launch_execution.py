@@ -16,13 +16,14 @@ import json
 import os
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 JUPITER_ORDER = "https://api.jup.ag/swap/v2/order"
 JUPITER_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 ZEROX_PRICE = "https://api.0x.org/swap/allowance-holder/price"
 MAX_ROUNDTRIP_LOSS_PCT = 5.0
+QUOTE_TTL_SECONDS = 60
 
 # 0x's indicative route is retained as evidence but not promoted to executable:
 # network gas is not yet converted to USD. BSC is deliberately omitted because its
@@ -244,10 +245,27 @@ def route_probe(event: dict, fetch: Fetch = _get_json) -> dict:
             "read_only": True}
 
 
-def gate(event: dict, security: dict, execution: dict) -> dict:
+def gate(event: dict, security: dict, execution: dict,
+         *, now: datetime | None = None) -> dict:
     """Attach evidence and fail closed. Mutates and returns ``event``."""
+    now = now or datetime.now(timezone.utc)
     event["security_gate"] = security
     event["execution_probe"] = execution
+    event["decision_at"] = now.isoformat()
+    event["executable_at"] = None
+    checked_at = execution.get("checked_at")
+    quote_at = None
+    if checked_at:
+        try:
+            quote_at = datetime.fromisoformat(str(checked_at).replace("Z", "+00:00"))
+            if quote_at.tzinfo is None:
+                quote_at = None
+            else:
+                quote_at = quote_at.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            quote_at = None
+    event["quote_at"] = quote_at.isoformat() if quote_at else None
+    event["expires_at"] = None
     if event.get("decision") != "SMALL_PROBE":
         return event
     sec_state, route_state = security.get("state"), execution.get("state")
@@ -259,6 +277,15 @@ def gate(event: dict, security: dict, execution: dict) -> dict:
         loss = float(execution.get("roundtrip_loss_pct") or 0)
         event["roundtrip_cost_pct_est"] = max(0.0, loss)
         event["cost_model"] = "live_read_only_roundtrip_quote_excluding_network_fees"
+        # A route quote proves momentary route availability, not a fill. Keep the
+        # executable clock empty and give the recommendation a deliberately short
+        # lifetime so the board cannot display an old route as a current entry.
+        if quote_at is None:
+            event["decision"] = "WATCH"
+        else:
+            event["expires_at"] = (
+                quote_at + timedelta(seconds=QUOTE_TTL_SECONDS)
+            ).isoformat()
     if event["decision"] != "SMALL_PROBE":
         event.setdefault("reasons", []).append(
             f"执行门降级: security={sec_state or 'unknown'}, route={route_state or 'unknown'}")
