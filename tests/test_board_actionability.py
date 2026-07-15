@@ -36,3 +36,17 @@ def test_board_exposes_launch_quote_invalidation_and_measurement_clocks_honestly
     assert "固定评估（不是平仓）" in html
     assert "收益扣除冻结的估算成本" in html
     assert "系统没有成交、没有持仓，也不会自动平仓" in html
+
+
+def test_legacy_discovery_views_cannot_bypass_canonical_trade_gates():
+    html = BOARD.read_text()
+
+    assert "未过统一安全/路由门" in html
+    assert "任何行在进入 Launch 账本并通过完整门禁前都只能观察" in html
+    assert "不属于统一机会账本，也不是入场清单" in html
+    assert "只用于避开，不生成做空指令" in html
+    assert "🐋 钱包活动" in html and "🔎 旧版线索" in html
+    assert "快查合约再小仓埋伏" not in html
+    assert "能埋伏,小仓+止损" not in html
+    assert "要动只能空" not in html
+    assert "派发(可做空/避开)" not in html

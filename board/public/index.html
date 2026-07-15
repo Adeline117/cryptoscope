@@ -180,15 +180,15 @@
       <button class="tab" data-v="launch" role="tab">🚀 Launch <span class="ct" id="ct-launch"></span></button>
       <button class="tab" data-v="structure" role="tab">🏗 结构 <span class="ct" id="ct-structure"></span></button>
       <button class="tab" data-v="airdrop" role="tab">🪂 空投 <span class="ct" id="ct-airdrop"></span></button>
-      <button class="tab" data-v="watch" role="tab">🐋 实时买入 <span class="ct" id="ct-watch"></span></button>
-      <button class="tab" data-v="opp" role="tab">💎 早期扫描 <span class="ct" id="ct-opp"></span></button>
+      <button class="tab" data-v="watch" role="tab">🐋 钱包活动 <span class="ct" id="ct-watch"></span></button>
+      <button class="tab" data-v="opp" role="tab">🔎 旧版线索 <span class="ct" id="ct-opp"></span></button>
       <button class="tab" data-v="avoid" role="tab">🛡️ 避雷 <span class="ct" id="ct-avoid"></span></button>
     </div>
     <div class="grp">
       <button class="tab" data-v="perp" role="tab">🔥 永续拥挤 <span class="ct" id="ct-perp"></span></button>
     </div>
     <div class="grp">
-      <button class="tab" data-v="op" role="tab">💰 庄 <span class="ct" id="ct-op"></span></button>
+      <button class="tab" data-v="op" role="tab">🛡️ 操盘防御 <span class="ct" id="ct-op"></span></button>
     </div>
   </div>
 
@@ -343,9 +343,9 @@ const LANES={
     detail:r=>`<span class="so">所以👉</span> ${effectiveDecision(r)==="CLAIM_CHECK"?"只从白名单官方域名打开领取页，使用自己的钱包核验资格；不要签署不明交易。":effectiveDecision(r)==="EXPIRED"?"领取窗口已过期，不要连接旧 claim 页面或签署补领交易。":"先补全自有钱包与任务证据，不能根据项目名称假定有资格。"}<br>官方域名状态: ${esc(r.official_state||"unknown")} · 当前决策 ${esc(effectiveDecision(r))}<br>官方链接: ${esc(r.official_url||"—")}<br>钱包 ${r.wallet_count??0} · 任务 ${r.task_count??0}<br>${(r.tasks||[]).map(t=>esc(t.name)+(t.evidence?" ✓":" · 未证")).join("<br>")}`,
   },
   watch:{
-    title:d=>`最早的信号:盯 <b>${d?.watched_wallets||0}</b> 个已验证盈利钱包,谁<b>刚买了什么</b>——分钟级,早于任何排名。`,
-    stat:d=>{const s=d?.watch||[];const c=s.filter(x=>x.n_buyers>=2).length;return[["窗口内",s.length,""],["收敛",c,"个多钱包同买"]]},
-    readme:"收敛(≥2个独立聪明钱同窗买同一个)是能给的最强早信号。诚实天花板:仍晚于创建区块的内部狙击者(1-5分钟清仓);<b>单个钱包买=线索不是确认</b>。铁律:小仓、2x卖回本金、止损。",
+    title:d=>`原始钱包活动线索:盯 <b>${d?.watched_wallets||0}</b> 个历史盈利钱包,记录谁<b>刚买了什么</b>——只用于提高调查优先级。`,
+    stat:d=>{const s=d?.watch||[];const c=s.filter(x=>x.n_buyers>=2).length;return[["窗口内",s.length,"原始活动"],["同窗出现",c,"个多钱包同买"],["可行动",0,"未过统一安全/路由门"]]},
+    readme:"多钱包同窗买入只提高调查优先级，不证明代币安全、可卖或价格仍可成交；钱包也可能是关联方、诱饵或正在制造退出流动性。这个旧视图没有逐行安全门、双向路由和报价过期时钟，<b>任何行在进入 Launch 账本并通过完整门禁前都只能观察</b>。",
     rows:d=>d?.watch||[],
     id:r=>r.chain+r.token, flash:r=>r.n_buyers,
     empty:"这批聪明钱最近没买新东西(正常,好机会稀疏)。每15分钟刷新。",
@@ -355,12 +355,12 @@ const LANES={
       {k:"usd",label:"买入额",n:1,cell:r=>usd(r.usd_bought),sort:r=>r.usd_bought||0},
       {k:"t",label:"何时",n:1,cell:r=>r.mins_ago!=null?`<span class="up">${r.mins_ago<60?r.mins_ago+'分前':(r.mins_ago/60).toFixed(1)+'时前'}</span>`:"—",sort:r=>r.mins_ago??1e9},
     ],
-    detail:r=>`<b>${r.n_buyers}</b> 个已验证盈利钱包${r.n_buyers>=2?'同窗':''}买入。<span class="so">所以👉</span> ${r.n_buyers>=2?"多个独立聪明钱同进=最强早信号,快查合约再小仓埋伏。":"只有一个,当线索;等第二个跟进。"}<br>买入钱包: ${(r.buyers||[]).map((w,i)=>walletName(w,i)+" ("+short(w)+")").join(" · ")}<br>${esc(r.token||"")}`,
+    detail:r=>`<b>${r.n_buyers}</b> 个历史盈利钱包${r.n_buyers>=2?'同窗':''}买入。<span class="so">所以👉</span> ${r.n_buyers>=2?"提高调查优先级，但未通过统一安全门、双向路由和报价时钟，不得按此买入。":"单钱包行为只作原始线索，不作方向判断。"}<br>当前动作: <b>仅观察</b> · 需转入 Launch 账本重新发现与门禁<br>买入钱包: ${(r.buyers||[]).map((w,i)=>walletName(w,i)+" ("+short(w)+")").join(" · ")}<br>${esc(r.token||"")}`,
   },
   opp:{
-    title:d=>`新低流通币里聪明钱<b>刚进场</b>的——<b>先够新、再接盘风险低</b>排序(把"你当接盘侠概率"压在上涨潜力前)。`,
-    stat:d=>{const s=(d?.opportunities||[]);return[["命中",s.length,""],["确认新鲜",s.filter(x=>x.confirmed_fresh).length,"<12h"],["低接盘险",s.filter(x=>x.exit_risk?.level==="low").length,""]]},
-    readme:"残酷基率:pump.fun 只 ~3% 交易者赚过 $1k、99% 币归零、跟单只赚被跟者零头(3% vs 14%)。这板子<b>帮你避开当接盘侠</b>,不保证赚。动量列 1m/5m/1h 各自染色。",
+    title:d=>`旧版聪明钱筛选线索——按新鲜度与接盘风险排序，<b>不属于统一机会账本，也不是入场清单</b>。`,
+    stat:d=>{const s=(d?.opportunities||[]);return[["线索",s.length,"旧版筛选"],["确认新鲜",s.filter(x=>x.confirmed_fresh).length,"<12h"],["低接盘险",s.filter(x=>x.exit_risk?.level==="low").length,"不等于安全"],["可行动",0,"未过统一门禁"]]},
+    readme:"这页保留为发现与反例素材。低接盘风险只表示当前未看到部分红旗，不证明合约安全、能卖出或报价仍有效；它缺少统一账本的首次报价、双向路由和过期时钟。<b>所有非 AVOID 行也只能观察，必须由 Launch 赛道重新发现并通过完整门禁</b>。",
     rows:d=>d?.opportunities||[],
     id:r=>r.chain+r.token, flash:r=>r.smart_money,
     cols:[
@@ -373,7 +373,7 @@ const LANES={
       {k:"mc",label:"市值",n:1,cell:r=>usd(r.mcap),sort:r=>r.mcap||0},
     ],
     detail:r=>{const xr=r.exit_risk||{},rug=r.rug||{},mp=r.manipulation||{};
-      return `<span class="so">所以👉</span> ${xr.level==="high"?"高概率你是接盘侠,别碰。":xr.level==="med"?"有接盘信号,极小仓。":"够新+聪明钱刚进+没明显接盘信号=能埋伏,小仓+止损。"} `+
+      return `<span class="so">所以👉</span> ${xr.level==="high"?"高概率成为退出流动性，避开。":"仅保留为调查线索；未通过统一安全、双向路由和报价有效期门禁，不得据此买入。"} `+
       `狙击 ${r.snipers??"—"} · 机器人 ${r.bots??"—"}${xr.reasons?.length?"<br>接盘信号: "+xr.reasons.map(esc).join("、"):""}${rug.facts?.length?"<br>合约: "+rug.facts.map(esc).join("、"):""}${mp.reasons?.length?"<br>操纵: "+mp.reasons.map(esc).join("、"):""}<br>${esc(r.token||"")}`},
   },
   avoid:{
@@ -402,12 +402,12 @@ const LANES={
   op:{
     title:d=>{const o=(d?.operators||[]).filter(x=>x.ok);const c={};o.forEach(x=>c[classOp(x)]=(c[classOp(x)]||0)+1);const dn=o.filter(depNow).length;return (dn?`<b style="color:var(--danger)">🔴 ${dn} 个操盘簇正在向交易所充值(派发启动·领先砸盘)→ 避开</b>。`:'')+`盯着的币里<b>真有庄在做盘的只有 ${(c.armed||0)+(c.accum||0)+(c.dump||0)} 个</b>;<b style="color:var(--violet)">${c.issuer||0} 个其实是项目方持币不是妖币</b>。`},
     stat:d=>{const o=d?.operators||[];return[["哨兵",o.length,""],["真操盘",o.filter(x=>["armed","accum","dump"].includes(classOp(x))).length,""],["🔴正在派发",o.filter(depNow).length,"避开"]]},
-    readme:"这条线是<b>派发/做空探测器 + 庄vs发行方判别器,不是跟买器</b>。<b>🔴派发启动</b>=操盘簇正在往交易所充值(领先砸盘数分钟-数小时)——诚实用法是<b>避开(别接盘)</b>;做空是候选,<b>edge仍在测量</b>(通用短信号实测16次仅命中1次、疑似负edge/响得晚,所以此领先信号单独隔离测、Telegram暂静音)。顶刊实证:跟庄买吸筹对散户是<b>负EV</b>。有结构性 edge 的只在<b>派发(可做空/避开)</b>和 operator-vs-issuer 判别,不在买。集中≠妖币。",
+    readme:"这条线是<b>派发避险探测器 + 庄vs发行方判别器，不是多空指令</b>。<b>🔴派发启动</b>=操盘簇正在往交易所充值(可能领先卖出数分钟至数小时)，当前诚实用法只有<b>避开(别接盘)</b>；做空优势尚未验证，通用短信号实测16次仅命中1次、疑似负 edge/响得晚，因此 Telegram 静音。跟庄吸筹对散户也是负 EV。集中≠妖币。",
     rows:d=>(d?.operators||[]).slice().sort((a,b)=>(depNow(b)-depNow(a))||(OPRANK[classOp(a)]-OPRANK[classOp(b)])),
     id:r=>r.chain+r.token, flash:null,
     cols:[
       {k:"sym",label:"代币",cell:r=>idc(r.symbol,CHAIN[r.chain]||r.chain),sort:r=>r.symbol||""},
-      {k:"v",label:"判读",c:1,cell:r=>{const k=classOp(r);const m=OPMAP[k];const dep=depNow(r)?`<span class="chip b-danger" title="操盘簇正在向交易所充值=领先砸盘信号(先于卖出数分钟-数小时)。诚实用法:避开别接盘。做空是候选,edge测量中(通用短信号实测1/16、疑似负edge)。${esc(rel(Math.round(new Date(r.flow_scan_ts).getTime()/1000)))}扫描">🔴派发启动</span> `:'';return dep+`<span class="chip b-${m.b}">${m.label}</span>`},sort:r=>depNow(r)?-1:OPRANK[classOp(r)]},
+      {k:"v",label:"判读",c:1,cell:r=>{const k=classOp(r);const m=OPMAP[k];const dep=depNow(r)?`<span class="chip b-danger" title="操盘簇正在向交易所充值，可能领先卖出数分钟至数小时。当前只用于避开；做空优势未验证。${esc(rel(Math.round(new Date(r.flow_scan_ts).getTime()/1000)))}扫描">🔴派发启动</span> `:'';return dep+`<span class="chip b-${m.b}">${m.label}</span>`},sort:r=>depNow(r)?-1:OPRANK[classOp(r)]},
       {k:"conc",label:"最大持有",n:1,cell:r=>{const p=r.largest_entity_pct;return p==null?"—":`<span class="num">${(+p).toFixed(1)}%</span> <span class="bar" style="width:${Math.min(p,40)*1.4}px;background:var(--${classOp(r)==='issuer'?'violet':'accent'})"></span>`+(r.supply_verified===false?' <span class="chip b-warn">未核实</span>':'')},sort:r=>r.largest_entity_pct||0},
       {k:"acq",label:"获取",c:1,cell:r=>{const a=r.acquisition;return a==="bought"?'<span class="chip b-good">买入</span>':a==="allocated"?'<span class="chip b-violet">分配</span>':'<span class="chip">?</span>'},sort:r=>r.acquisition||""},
       {k:"liq",label:"流动性",n:1,cell:r=>usd(r.liquidity_usd),sort:r=>r.liquidity_usd||0},
@@ -420,7 +420,7 @@ function avoidRows(d){return (d?.opportunities||[]).filter(o=>["avoid","caution"
   .sort((a,b)=>{const sev=x=>(x.rug?.level==="avoid"?3:0)+(x.manipulation?.level==="severe"?3:x.manipulation?.level==="moderate"?1:0)+(x.exit_risk?.level==="high"?2:0);return sev(b)-sev(a)})}
 
 // operator classifier
-const OPMAP={dump:{label:"正在出货",b:"danger",so:"对手盘就是庄,别接飞刀,要动只能空。"},armed:{label:"庄在场·待动",b:"warn",so:"盯着等它出手,现在不是买卖点。"},accum:{label:"疑似吸筹",b:"warn",so:"别跟买——跟庄吸筹对散户是负EV,且这「吸筹」可能是庄的wash farm诱饵。当观察,不当买入信号。"},issuer:{label:"项目方持币",b:"violet",so:"别当妖币,防的是团队解锁砸盘。"},faded:{label:"庄已走·散",b:"",so:"当普通币看。"},unknown:{label:"查不清",b:"accent",so:"数据不足,别信这条。"}};
+const OPMAP={dump:{label:"正在出货",b:"danger",so:"对手盘可能是操盘簇，别接飞刀；只用于避开，不生成做空指令。"},armed:{label:"庄在场·待动",b:"warn",so:"盯着等它出手,现在不是买卖点。"},accum:{label:"疑似吸筹",b:"warn",so:"别跟买——跟庄吸筹对散户是负EV,且这「吸筹」可能是庄的wash farm诱饵。当观察,不当买入信号。"},issuer:{label:"项目方持币",b:"violet",so:"别当妖币,防的是团队解锁砸盘。"},faded:{label:"庄已走·散",b:"",so:"当普通币看。"},unknown:{label:"查不清",b:"accent",so:"数据不足,别信这条。"}};
 const OPRANK={dump:0,armed:1,accum:2,issuer:3,faded:4,unknown:5};
 // live 'deposit' event = operator cluster moving inventory to a CEX right now (leading
 // dump signal). Fresh only (flow scan within 3h) so a stale phase isn't shown as live.
