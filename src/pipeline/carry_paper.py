@@ -40,6 +40,7 @@ MODELED_ROUNDTRIP_FEE_PCT = 2 * MODELED_FEE_PCT_ONEWAY_BOTH_LEGS
 CURRENT_EPISODE_VERSION = 3
 CARRY_EXIT_QUOTE_SLA_S = 60
 CARRY_OBSERVATION_MAX_AGE_S = 60
+CARRY_MAX_VALID_INTERVAL_S = 10 * 60
 MIN_ANNUALIZED_HOLD_H = 30 * 24
 MIN_ANNUALIZED_SAMPLES = 5
 _OKX_CTVAL: dict[str, float] = {}
@@ -600,7 +601,8 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             # Left-rectangle quote-rate integral, not exchange funding settlements.
             # A recovery observation only re-establishes the measurement clock. The
             # preceding interval remains unknown and must not be filled with last_diff.
-            if measurement_state != "observed":
+            if (measurement_state != "observed"
+                    or elapsed_h * 3600 > CARRY_MAX_VALID_INTERVAL_S):
                 unmeasured_h = (unmeasured_h or 0) + elapsed_h
                 elapsed_h = 0
             interval_diff = last_diff if last_diff is not None else cur_diff

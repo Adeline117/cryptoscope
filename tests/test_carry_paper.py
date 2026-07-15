@@ -82,10 +82,18 @@ def test_accrues_and_closes_with_correct_quote_proxy(cp):
               "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     import sqlite3
     c = sqlite3.connect(str(cp.DB))
-    # backdate entry + last update to 5 days ago, diff held at 40 the whole time
-    past = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-    c.execute("UPDATE paper SET entry_ts=?, last_ts=?, last_diff=40, accrued_pct=0 WHERE symbol='X'",
-              (past, past))
+    # Build a five-day path from already-observed short intervals, leaving only the
+    # latest five-minute interval for this run to integrate. One five-day leap would
+    # be scheduler downtime, not evidence.
+    now = datetime.now(timezone.utc)
+    past = (now - timedelta(days=5)).isoformat()
+    last = (now - timedelta(minutes=5)).isoformat()
+    accrued_before = 40 * ((5 * 24 - 5 / 60) / 8760)
+    c.execute(
+        "UPDATE paper SET entry_ts=?,last_ts=?,last_valid_ts=?,last_diff=40,"
+        "accrued_pct=? WHERE symbol='X'",
+        (past, last, last, accrued_before),
+    )
     c.commit(); c.close()
     # differential decays below the floor → natural close
     stats = cp.run([], observations=[{
@@ -176,7 +184,10 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.close()
 
     c = sqlite3.connect(str(cp.DB))
-    observed_start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    observed_minutes = 5
+    observed_start = (
+        datetime.now(timezone.utc) - timedelta(minutes=observed_minutes)
+    ).isoformat()
     c.execute("UPDATE paper SET last_ts=? WHERE symbol='X'", (observed_start,))
     c.commit()
     c.close()
@@ -185,7 +196,35 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c = sqlite3.connect(str(cp.DB))
     accrued = c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0]
     c.close()
-    assert accrued == pytest.approx(40 / 8760, rel=0.02)
+    assert accrued == pytest.approx(40 * (observed_minutes / 60) / 8760, rel=0.02)
+
+
+def test_scheduler_downtime_is_unknown_and_never_backfilled_as_quote_rate(cp):
+    import sqlite3
+
+    _run(cp, [{"symbol": "X", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+    past = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    c = sqlite3.connect(str(cp.DB))
+    c.execute(
+        "UPDATE paper SET last_ts=?,last_valid_ts=?,last_diff=40,accrued_pct=0,"
+        "unmeasured_h=0,measurement_state='observed' WHERE symbol='X'",
+        (past, past),
+    )
+    c.commit()
+    c.close()
+
+    recovered = _run(cp, [{"symbol": "X", "cross": True,
+                           "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+    position = recovered["open_positions"][0]
+    assert position["measurement_state"] == "observed"
+    assert position["unmeasured_h"] == pytest.approx(3, abs=0.1)
+    c = sqlite3.connect(str(cp.DB))
+    accrued = c.execute(
+        "SELECT accrued_pct FROM paper WHERE symbol='X'"
+    ).fetchone()[0]
+    c.close()
+    assert accrued == 0
 
 
 def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
@@ -235,9 +274,14 @@ def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeyp
     _run(cp, [{"symbol": "X", "cross": True,
               "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
     c = sqlite3.connect(str(cp.DB))
-    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    c.execute("UPDATE paper SET entry_ts=?,last_ts=?,last_diff=40 WHERE symbol='X'",
-              (past, past))
+    now = datetime.now(timezone.utc)
+    past = (now - timedelta(days=1)).isoformat()
+    last = (now - timedelta(minutes=5)).isoformat()
+    c.execute(
+        "UPDATE paper SET entry_ts=?,last_ts=?,last_valid_ts=?,last_diff=40 "
+        "WHERE symbol='X'",
+        (past, last, last),
+    )
     c.commit()
     c.close()
 
@@ -472,9 +516,15 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
 
     import sqlite3
     c = sqlite3.connect(str(cp.DB))
-    past = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
-    c.execute("UPDATE paper SET entry_ts=?,last_ts=?,last_diff=40,accrued_pct=0 WHERE symbol='X'",
-              (past, past))
+    now = datetime.now(timezone.utc)
+    past = (now - timedelta(days=5)).isoformat()
+    last = (now - timedelta(minutes=5)).isoformat()
+    accrued_before = 40 * ((5 * 24 - 5 / 60) / 8760)
+    c.execute(
+        "UPDATE paper SET entry_ts=?,last_ts=?,last_valid_ts=?,last_diff=40,"
+        "accrued_pct=? WHERE symbol='X'",
+        (past, last, last, accrued_before),
+    )
     c.commit()
     c.close()
     closed = _run(cp, [{"symbol": "X", "cross": True,
