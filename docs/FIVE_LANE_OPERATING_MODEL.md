@@ -36,8 +36,9 @@ EVM 记录 0x 指示价但在 gas 未折算为美元前仍只允许 WATCH。缺 
 取数失败均为 UNKNOWN；蜜罐、可冻结/改余额/高卖税或无卖出路由为 AVOID。
 报价是只读快照，不是实盘成交；配置项为 `JUPITER_API_KEY`、`ZEROX_API_KEY`。
 修复前的旧账本允许决策随轮询刷新，因此这些事件只保留在总体结果分布中，
-不会进入 `SMALL_PROBE` 对 `WATCH` 的 cohort 比较；只有 `cohort_version=2`
-且首次决策已冻结的新事件可以用于相对 edge 判断。
+不会进入 `SMALL_PROBE` 对 `WATCH` 的优势判决。2026-07-15 19:00 UTC 起只有
+`cohort_version=4` 且首次决策、成本合同与协议时钟均冻结的新事件可以进入
+预注册前向检验；v1-v3 永久只作描述，不能回填或改标签进入新样本。
 
 ## 统一验收指标
 
@@ -49,8 +50,12 @@ EVM 记录 0x 指示价但在 gas 未折算为美元前仍只允许 WATCH。缺 
 
 `opportunity_outcomes.py` 按账本中不可改写的首次发现价结算 1h、24h、7d。
 Launch/Cascade 会扣除事件发现时冻结的往返成本估算，但该估算不是实盘成交证明；
-只有样本达到 20 才展示分布。Launch 的 `SMALL_PROBE` 必须与同一候选宇宙的
-`WATCH` 同期对照，置信区间未分离时仍显示“不可判”。没有方向假设的 Structure
+只有样本达到 20 才展示描述性分布；这不是优势门。Launch 的 `SMALL_PROBE`
+必须按预注册的 100/200/400/800/1600/3200 每组固定前缀，与同一候选宇宙的
+`WATCH` 同期对照。主终点固定为成本后 24h log 增长效用，并先按 UTC 日聚合；
+只有结果覆盖、共享市场日和经济效应门都通过，再由 `arch` 的 stationary-bootstrap
+SPA/Reality Check 在全族 5% 的 sequential alpha 预算下判定。否则仍显示“不可判”。
+没有方向假设的 Structure
 事件不计算命中率。Carry 在真实双腿结算、basis、账户费率、抵押资金成本和调仓成本齐全前，只报告报价率积分减盘口与建模费用的描述性代理，`real_edge_n` 保持 0 或不可判；Airdrop 只有经链上成功交易核验的领取结果才进入净回报账本。
 
 ## 空投的证据门

@@ -15,16 +15,17 @@ def ledger(tmp_path, monkeypatch):
 
 
 def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE",
-            *, v3: bool = False) -> dict:
+            *, protocol: bool = False) -> dict:
     item = {"lane": "launch", "chain": "solana", "token": token, "symbol": token,
             "detected_at": detected_at, "entry_price": 100.0, "decision": decision,
             "state": "live", "max_notional_usd": 50,
             "roundtrip_cost_pct_est": 1.0, "cost_model": "test_frozen_cost"}
-    if v3:
+    if protocol:
         from src.pipeline.execution_cost import discovery_contract
-        item.update({"cohort_version": 3, "cost_contract": discovery_contract(
+        from src.pipeline.edge_validation import LAUNCH_COST_METHOD
+        item.update({"cohort_version": 4, "cost_contract": discovery_contract(
             notional_usd=50, modeled_roundtrip_pct=1.0,
-            method="constant_product_roundtrip_plus_0.60pct_buffer_v1")})
+            method=LAUNCH_COST_METHOD)})
     return item
 
 
@@ -252,25 +253,31 @@ def test_legacy_mutable_decision_is_excluded_from_cohort(ledger):
     assert oo.lane_stats()["launch"]["legacy_unfrozen_n"] == 1
 
 
-def test_launch_edge_requires_and_uses_watch_control(ledger):
+def test_old_twenty_sample_wilson_separation_cannot_pass_edge_gate(ledger):
     from src.pipeline import opportunity_outcomes as oo
+    from src.pipeline import edge_validation as ev
 
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = (datetime.fromisoformat(ev.PROTOCOL_START_AT) + timedelta(days=1)).isoformat()
     for i in range(oo.MIN_N):
-        ident, _ = ledger.record(_launch(ts, f"probe-{i}", "SMALL_PROBE", v3=True))
+        ident, _ = ledger.record(_launch(
+            ts, f"probe-{i}", "SMALL_PROBE", protocol=True
+        ))
         ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": 8.0}}},
                             "resolved")
     for i in range(oo.MIN_N):
-        ident, _ = ledger.record(_launch(ts, f"watch-{i}", "WATCH", v3=True))
+        ident, _ = ledger.record(_launch(
+            ts, f"watch-{i}", "WATCH", protocol=True
+        ))
         ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": -2.0}}},
                             "resolved")
 
     stat = oo.lane_stats()["launch"]
     assert stat["verdict"] == "measured"
-    assert stat["edge_verdict"] == "有edge迹象"
+    assert stat["edge_verdict"] == "不可判"
     assert stat["probe"]["n"] == stat["control"]["n"] == oo.MIN_N
-    assert stat["probe"]["lo"] > stat["control"]["hi"]
-    assert oo.actionability_gate("launch")["state"] == "pass"
+    assert stat["edge_validation"]["state"] == "collecting"
+    assert stat["edge_validation"]["next_look_n_per_arm"] == 100
+    assert oo.actionability_gate("launch")["state"] == "collecting"
 
 
 def test_cascade_has_no_action_gate_without_matched_control(ledger):

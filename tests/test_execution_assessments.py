@@ -6,12 +6,18 @@ import pytest
 
 def _setup(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
+    from src.pipeline.edge_validation import LAUNCH_COST_METHOD
+    from src.pipeline.execution_cost import discovery_contract
 
     monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    contract = discovery_contract(notional_usd=25, modeled_roundtrip_pct=1.2,
+                                  method=LAUNCH_COST_METHOD)
     ident, _ = ledger.record({
         "lane": "launch", "chain": "solana", "token": "token", "symbol": "T",
         "decision": "WATCH", "state": "live", "entry_price": 1.0,
-        "max_notional_usd": 25,
+        "max_notional_usd": 25, "detected_at": "2026-07-16T11:00:00+00:00",
+        "roundtrip_cost_pct_est": 1.2, "cost_contract": contract,
+        "cohort_version": 4,
     })
     return ledger, ident
 
@@ -38,7 +44,7 @@ def _assessment(at, **overrides):
 
 def test_two_quotes_are_retained_and_latest_is_selected(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    first = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    first = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     second = first + timedelta(minutes=1)
 
     first_id, inserted = ledger.append_execution_assessment(ident, _assessment(first))
@@ -60,7 +66,7 @@ def test_two_quotes_are_retained_and_latest_is_selected(tmp_path, monkeypatch):
 
 def test_duplicate_assessment_is_idempotent(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     assessment = _assessment(at)
     first = ledger.append_execution_assessment(ident, assessment)
     second = ledger.append_execution_assessment(ident, assessment)
@@ -72,7 +78,7 @@ def test_assessment_table_rejects_mutation(tmp_path, monkeypatch):
     import sqlite3
 
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     assessment_id, _ = ledger.append_execution_assessment(ident, _assessment(at))
     c = ledger._conn()
     try:
@@ -85,10 +91,10 @@ def test_assessment_table_rejects_mutation(tmp_path, monkeypatch):
 
 def test_assessment_rejects_bad_clocks_notional_and_fill_claims(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="timezone"):
         ledger.append_execution_assessment(
-            ident, _assessment(at, assessed_at="2026-07-15T12:00:00"))
+            ident, _assessment(at, assessed_at="2026-07-16T12:00:00"))
     with pytest.raises(ValueError, match="expiry"):
         ledger.append_execution_assessment(
             ident, _assessment(at, expires_at=(at - timedelta(seconds=1)).isoformat()))
@@ -125,13 +131,7 @@ def test_discovery_cost_contract_is_stored_on_immutable_row(tmp_path, monkeypatc
 
 def test_fresh_partial_quote_resolves_to_paper_ready_not_actionable(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute("UPDATE opportunities SET cohort_version=3 WHERE id=?", (ident,))
-        c.commit()
-    finally:
-        c.close()
+    now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     ledger.append_execution_assessment(ident, _assessment(now))
     row = ledger.active("launch", now=now)[0]
     assert row["action_level"] == "A2_PAPER_READY"
@@ -141,15 +141,9 @@ def test_fresh_partial_quote_resolves_to_paper_ready_not_actionable(tmp_path, mo
     assert row["current_assessment"]["entry_reference_price"] == 1.1
 
 
-def test_expired_v3_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
+def test_expired_v4_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute("UPDATE opportunities SET cohort_version=3 WHERE id=?", (ident,))
-        c.commit()
-    finally:
-        c.close()
+    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     ledger.append_execution_assessment(ident, _assessment(at))
     row = ledger.active("launch", now=at + timedelta(seconds=61))[0]
     assert row["action_level"] == "A1_WATCH"
@@ -158,13 +152,7 @@ def test_expired_v3_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch)
 
 def test_known_untradeable_reverse_route_is_blocked(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute("UPDATE opportunities SET cohort_version=3 WHERE id=?", (ident,))
-        c.commit()
-    finally:
-        c.close()
+    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     ledger.append_execution_assessment(ident, _assessment(at, route_state="untradeable"))
     row = ledger.active("launch", now=at)[0]
     assert row["action_level"] == "A0_BLOCKED"
@@ -176,10 +164,10 @@ def test_a3_requires_every_manual_gate_and_still_disables_auto_trade(tmp_path, m
     from src.pipeline import opportunity_outcomes
 
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     c = ledger._conn()
     try:
-        c.execute("UPDATE opportunities SET cohort_version=3,decision='SMALL_PROBE' WHERE id=?",
+        c.execute("UPDATE opportunities SET decision='SMALL_PROBE' WHERE id=?",
                   (ident,))
         c.commit()
     finally:

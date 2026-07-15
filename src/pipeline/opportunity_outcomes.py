@@ -23,6 +23,12 @@ from typing import Callable
 import structlog
 
 from src.pipeline import opportunity_ledger
+from src.pipeline.edge_validation import (
+    LAUNCH_COST_METHOD,
+    LOOK_SIZES as EDGE_LOOK_SIZES,
+    is_protocol_event,
+    launch_forward_validation,
+)
 
 logger = structlog.get_logger()
 
@@ -32,8 +38,6 @@ MIN_N = 20
 MAX_PRICE_LOOKUPS = 20       # hard network/resource budget per hourly resolver run
 UNRESOLVABLE_DAYS = 21       # 7d horizon plus a generous historical-data grace period
 SUPPORTED_LANES = {"launch", "cascade"}
-LAUNCH_V3_COST_METHOD = "constant_product_roundtrip_plus_0.60pct_buffer_v1"
-
 PriceAt = Callable[[dict, datetime], float | None]
 
 
@@ -269,11 +273,7 @@ def _percentile(values: list[float], p: float) -> float | None:
 def _cohort(rows: list[dict], decision: str) -> dict:
     vals = []
     for row in rows:
-        contract = row.get("cost_contract") or {}
-        if (row.get("decision") != decision or row.get("cohort_version") != 3
-                or row.get("cost_contract_version") != 1
-                or contract.get("purpose") != "discovery_outcome"
-                or contract.get("method") != LAUNCH_V3_COST_METHOD):
+        if row.get("decision") != decision or not is_protocol_event(row):
             continue
         point = ((row.get("outcome") or {}).get("horizons") or {}).get("24h")
         if point and point.get("net_return_pct_est") is not None:
@@ -412,21 +412,29 @@ def actionability_gate(lane: str) -> dict:
         return {"state": "blocked", "lane": lane, "edge_verdict": "不可判",
                 "reason": f"evidence read failed: {str(exc)[:80]}"}
     edge = stat.get("edge_verdict") or "不可判"
-    common = {"lane": lane, "edge_verdict": edge, "minimum_n": MIN_N,
+    validation = stat.get("edge_validation") or {}
+    common = {"lane": lane, "edge_verdict": edge,
+              "minimum_n": EDGE_LOOK_SIZES[0] if lane == "launch" else MIN_N,
               "measured_n": int(stat.get("n") or 0),
               "cost_is_real_fill": stat.get("cost_is_real_fill", False)}
-    if edge == "有edge迹象":
-        return {**common, "state": "pass", "reason": stat.get("edge_note")}
-    if edge == "无edge/负":
-        return {**common, "state": "blocked", "reason": stat.get("edge_note")}
     if lane == "launch":
+        validation_state = validation.get("state")
+        detail = {"protocol_id": validation.get("protocol_id"),
+                  "protocol_state": validation_state,
+                  "look_n_per_arm": validation.get("look_n_per_arm"),
+                  "next_look_n_per_arm": validation.get("next_look_n_per_arm")}
+        if validation_state == "pass":
+            return {**common, **detail, "state": "pass",
+                    "reason": validation.get("reason")}
+        if validation_state == "no_edge_observed":
+            return {**common, **detail, "state": "blocked",
+                    "reason": validation.get("reason")}
         probe, control = stat.get("probe") or {}, stat.get("control") or {}
-        return {**common, "state": "collecting",
+        return {**common, **detail, "state": "collecting",
                 "probe_n": int(probe.get("n") or 0),
                 "control_n": int(control.get("n") or 0),
-                "reason": (f"成本后24h同期对照不足: SMALL_PROBE "
-                           f"{int(probe.get('n') or 0)}/{MIN_N}, WATCH "
-                           f"{int(control.get('n') or 0)}/{MIN_N}")}
+                "reason": (validation.get("reason")
+                           or "前向 SPA/Reality Check 证据尚不可判")}
     return {**common, "state": "collecting",
             "reason": "Cascade 尚无同期可比 WATCH 对照；仅继续纸面测量"}
 
@@ -472,11 +480,17 @@ def lane_stats() -> dict:
                                                 for r in measurable)
             common["legacy_v2_descriptive_n"] = sum(r.get("cohort_version") == 2
                                                      for r in measurable)
-            common["v3_cost_method"] = LAUNCH_V3_COST_METHOD
+            common["legacy_v3_descriptive_n"] = sum(r.get("cohort_version") == 3
+                                                     for r in measurable)
+            common["v4_cost_method"] = LAUNCH_COST_METHOD
             common["probe"] = _cohort(measurable, "SMALL_PROBE")
             common["control"] = _cohort(measurable, "WATCH")
+            common["edge_validation"] = launch_forward_validation(measurable)
+            common["edge_verdict"] = common["edge_validation"]["edge_verdict"]
+            common["edge_note"] = common["edge_validation"]["reason"]
         if n < MIN_N:
-            out[lane] = {**common, "verdict": "不可判", "edge_verdict": "不可判",
+            out[lane] = {**common, "verdict": "不可判",
+                         "edge_verdict": common.get("edge_verdict", "不可判"),
                          "note": (f"24h样本 {n}/{MIN_N};到期待结算"
                                   f" {common['due_24h']},继续积累")}
             continue
@@ -488,26 +502,13 @@ def lane_stats() -> dict:
                 "p90_net_24h": round(_percentile(points, 0.90) or 0, 3),
                 "p99_net_24h": round(_percentile(points, 0.99) or 0, 3),
                 "max_net_24h": round(max(points), 3),
-                "edge_verdict": "不可判", "edge_note": "缺少同期可比对照"}
+                "edge_verdict": common.get("edge_verdict", "不可判"),
+                "edge_note": common.get("edge_note", "缺少同期可比对照")}
         if lane == "launch":
-            probe, watch = stat["probe"], stat["control"]
-            if probe["n"] >= MIN_N and watch["n"] >= MIN_N:
-                plo, phi = wilson(probe["positives"], probe["n"])
-                wlo, whi = wilson(watch["positives"], watch["n"])
-                probe["lo"], probe["hi"] = round(plo, 3), round(phi, 3)
-                watch["lo"], watch["hi"] = round(wlo, 3), round(whi, 3)
-                if plo > whi and probe["median_net_24h"] > watch["median_net_24h"]:
-                    stat["edge_verdict"] = "有edge迹象"
-                    stat["edge_note"] = "SMALL_PROBE成本后正收益率区间高于WATCH对照"
-                elif (probe["positive_rate"] <= watch["positive_rate"] and
-                      probe["median_net_24h"] <= watch["median_net_24h"]):
-                    stat["edge_verdict"] = "无edge/负"
-                    stat["edge_note"] = "执行门未优于同期WATCH对照"
-                else:
-                    stat["edge_note"] = "试验组与WATCH对照区间仍重叠"
-            else:
-                stat["edge_note"] = (f"同期对照不足: SMALL_PROBE {probe['n']}/{MIN_N},"
-                                     f"WATCH {watch['n']}/{MIN_N}")
+            # Wilson intervals remain descriptive for the overall hit-rate card.
+            # They are intentionally forbidden from promoting the action gate; only
+            # the pre-registered sequential SPA result above can do that.
+            stat["edge_validation"] = common["edge_validation"]
         out[lane] = stat
     return out
 

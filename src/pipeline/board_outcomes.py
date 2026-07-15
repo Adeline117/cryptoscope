@@ -1,10 +1,10 @@
 """Board measurement layer — the honest fix for 'detection without measurement'.
 
-The board surfaces buy signals but had ZERO evidence any of them make money (the same
-unmeasured-signal trap this repo was built to kill — the 44%-fake lesson). This logs
-each lane's picks with an entry price, resolves them N hours later against historical
-candles, and reports the REAL hit rate with a Wilson interval — refusing to quote a
-number until the sample can support one ('不可判' until then, by design).
+This is the frozen legacy measurement store for pre-ledger board picks. It logs entry
+prices and resolves historical candles, but it does not have the pre-registered
+candidate universe, contemporaneous control, fixed looks, complete execution costs,
+or real fills required to claim an edge. Rates and Wilson intervals are descriptive;
+``edge_verdict`` therefore remains ``不可判`` at every sample size.
 
 Reuses the proven honesty machinery verbatim: outcome_tracker._price_at / _hit
 (slippage-aware, reads the horizon price from candles so a late resolve is still
@@ -133,8 +133,7 @@ def resolve() -> int:
 
 
 def lane_stats() -> dict:
-    """Per-lane honest hit rate: {lane: {n, hits, rate, lo, hi, verdict, pending}}.
-    verdict is '不可判' until n>=MIN_N — never quote a rate the sample can't support."""
+    """Describe legacy hit rates while keeping the edge verdict permanently unknown."""
     from src.pipeline.evidence import wilson
     from src.pipeline.outcome_tracker import _hit
     c = _conn()
@@ -157,15 +156,20 @@ def lane_stats() -> dict:
                 lo, hi = wilson(hits, n)
                 base = sum(brs) / len(brs) if brs else None
                 lift = round(rate / base, 2) if base else None
-                edge = ("有edge迹象" if lift and lift >= 1.15 else
-                        "无edge/负" if lift and lift <= 1.0 else "接近随机")
                 out[lane] = {"n": n, "hits": hits, "rate": round(rate, 3),
                              "lo": round(lo, 3), "hi": round(hi, 3),
                              "base_rate": round(base, 3) if base else None, "lift": lift,
-                             "verdict": "measured", "edge": edge, "pending": pending}
+                             "verdict": "measured", "edge": "不可判",
+                             "edge_verdict": "不可判", "pending": pending,
+                             "cohort_kind": "legacy_observational_descriptive",
+                             "cost_is_real_fill": False, "real_edge_eligible": False,
+                             "note": ("冻结旧 picks 的描述性命中率；缺预注册候选宇宙、"
+                                      "同期对照、完整成本与固定 look，不能判定优势")}
             else:
                 out[lane] = {"n": n, "hits": hits, "verdict": "不可判", "pending": pending,
-                             "note": f"样本 {n}/{MIN_N},还在积累"}
+                             "edge": "不可判", "edge_verdict": "不可判",
+                             "real_edge_eligible": False,
+                             "note": f"冻结旧样本 {n}/{MIN_N};仅作描述,不能判定优势"}
     finally:
         c.close()
     return out

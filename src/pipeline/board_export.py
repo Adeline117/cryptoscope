@@ -319,8 +319,9 @@ def render_stats(opportunities: dict | None) -> dict:
         lanes.update(opportunity_lane_stats())
         return _envelope({"lanes": lanes,
                           "note": "五线事件按首次价结算1h/24h/7d并扣发现时冻结的成本估算。"
-                                  "样本<20或缺同期对照时只报不可判；纸面成本不冒充真实成交。"
-                                  "旧聪明钱分数为冻结历史，不再新增不可行动 picks。"},
+                                  "Launch 优势只认 v4 前向固定 look 与 SPA/Reality Check；"
+                                  "纸面成本不冒充真实成交。旧聪明钱分数和 picks 为冻结历史，"
+                                  "只作描述且永远不可据此判定优势。"},
                          view="stats")
     except Exception as e:
         logger.warning("render_stats_failed", error=str(e)[:120])

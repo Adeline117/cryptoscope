@@ -42,7 +42,7 @@ def test_lane_stats_refuses_number_below_min_n(bo):
     assert "rate" not in st
 
 
-def test_lane_stats_computes_lift_and_edge_at_min_n(bo):
+def test_legacy_lane_stats_can_describe_lift_but_never_claim_edge(bo):
     # 7 of MIN_N hit (+6% > flat 5%), base_rate 0.25 each → apples-to-apples lift
     c = bo._conn()
     for i in range(bo.MIN_N):
@@ -55,7 +55,11 @@ def test_lane_stats_computes_lift_and_edge_at_min_n(bo):
     assert st["n"] == bo.MIN_N and st["hits"] == 7           # scored at flat 5% from prices
     assert st["lo"] < st["rate"] < st["hi"]                  # Wilson brackets the point
     assert st["base_rate"] == 0.25 and st["lift"] == round((7 / bo.MIN_N) / 0.25, 2)
-    assert st["edge"] in ("有edge迹象", "接近随机", "无edge/负")
+    assert st["edge"] == st["edge_verdict"] == "不可判"
+    assert st["cohort_kind"] == "legacy_observational_descriptive"
+    assert st["real_edge_eligible"] is False
+    assert st["cost_is_real_fill"] is False
+    assert "不能判定优势" in st["note"]
 
 
 def test_stats_render_is_read_only_and_never_runs_legacy_price_backfill(monkeypatch):
@@ -67,13 +71,13 @@ def test_stats_render_is_read_only_and_never_runs_legacy_price_backfill(monkeypa
     monkeypatch.setattr(board_outcomes, "log_picks", forbidden)
     monkeypatch.setattr(board_outcomes, "resolve", forbidden)
     monkeypatch.setattr(board_outcomes, "lane_stats", lambda: {
-        "opp": {"verdict": "measured", "edge": "无edge/负"},
+        "opp": {"verdict": "measured", "edge": "不可判"},
     })
     monkeypatch.setattr(opportunity_outcomes, "lane_stats", lambda: {
         "launch": {"verdict": "不可判", "edge_verdict": "不可判"},
     })
 
     payload = board_export.render_stats({"opportunities": [{"price": 1.0}]})
-    assert payload["lanes"]["opp"]["edge"] == "无edge/负"
+    assert payload["lanes"]["opp"]["edge"] == "不可判"
     assert payload["lanes"]["launch"]["edge_verdict"] == "不可判"
     assert "冻结历史" in payload["note"]

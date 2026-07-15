@@ -371,9 +371,11 @@ def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | No
     if item.get("decision") == "AVOID":
         return {**common, "action_level": "A0_BLOCKED",
                 "action_reason_codes": ["discovery_hard_block"]}
-    if (item.get("cohort_version") or 0) < 3:
+    from src.pipeline.edge_validation import is_protocol_event
+
+    if not is_protocol_event(item):
         return {**common, "action_level": "A1_WATCH",
-                "action_reason_codes": ["legacy_without_v3_contract"]}
+                "action_reason_codes": ["outside_frozen_edge_protocol"]}
     if assessment is None:
         return {**common, "action_level": "A1_WATCH",
                 "action_reason_codes": ["assessment_missing"]}

@@ -23,7 +23,7 @@ def test_qualify_emits_small_probe_only_for_fresh_tradeable_flow():
     assert got["decision"] == "SMALL_PROBE"
     assert got["invalidation_price"] == pytest.approx(0.00007)
     assert got["max_notional_usd"] == 60  # 0.3% of pool, not an unbounded suggestion
-    assert got["cohort_version"] == 3
+    assert got["cohort_version"] == 4
     assert got["cost_contract"]["purpose"] == "discovery_outcome"
 
 
@@ -182,7 +182,7 @@ def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
     import src.pipeline.opportunity_ledger as ol
 
-    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
     pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
 
@@ -279,7 +279,7 @@ def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):
     import src.pipeline.opportunity_ledger as ol
 
     monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
-    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     event = lr.qualify(_pair(pairCreatedAt=int(now.timestamp() * 1000)), now=now)
     event["detected_at"] = now.isoformat()
     ident, _ = ol.record(event)

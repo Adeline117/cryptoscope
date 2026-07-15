@@ -123,7 +123,9 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
         "max_notional_usd": max_notional, "age_min": round(age_min, 1),
         "roundtrip_cost_pct_est": roundtrip_cost,
         "cost_model": "constant_product_roundtrip_plus_0.60pct_buffer",
-        "cost_contract": cost_contract, "cohort_version": 3,
+        # v4 starts a fresh, pre-registered forward-validation cohort.  Earlier
+        # versions remain descriptive and can never be relabeled into this sample.
+        "cost_contract": cost_contract, "cohort_version": 4,
         "fdv": fdv, "liquidity_usd": liq, "volume_m5": vol5,
         "buys_m5": buys, "sells_m5": sells, "flow_ratio": round(flow_ratio, 2),
         "boost_active": boost, "pair": pair.get("pairAddress"), "url": pair.get("url"),
@@ -467,7 +469,7 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
 def refresh_quotes(*, now: datetime | None = None, assessor=None,
                    max_candidates: int = 1, refresh_before_seconds: int = 30,
                    retry_after_seconds: int = 60) -> dict:
-    """Refresh a bounded set of v3 probe-candidate quotes without rediscovery.
+    """Refresh a bounded set of protocol-eligible v4 quotes without rediscovery.
 
     Discovery remains a three-minute event job. This fast path only appends current
     read-only measurements and never changes the frozen cohort, price, or cost.
@@ -475,9 +477,10 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
     from src.pipeline import opportunity_ledger as ledger
 
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    from src.pipeline.edge_validation import is_protocol_event
+
     rows = [row for row in ledger.outcome_rows(open_only=True)
-            if row.get("lane") == "launch" and row.get("cohort_version") == 3
-            and row.get("decision") == "SMALL_PROBE"]
+            if row.get("decision") == "SMALL_PROBE" and is_protocol_event(row)]
     recent = []
     for row in rows:
         try:

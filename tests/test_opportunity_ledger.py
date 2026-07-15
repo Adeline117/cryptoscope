@@ -217,7 +217,8 @@ def test_active_actionability_fails_closed_on_missing_or_expired_quote(tmp_path,
     assert rows["fresh"]["effective_decision"] == "WATCH"
     assert rows["fresh"]["actionable_now"] is False
     assert rows["fresh"]["evidence_gate"]["state"] == "collecting"
-    assert "SMALL_PROBE 0/20" in rows["fresh"]["actionability_reason"]
+    assert "至少需要 100 个候选" in rows["fresh"]["actionability_reason"]
+    assert "SMALL_PROBE 0, WATCH 0" in rows["fresh"]["actionability_reason"]
     assert rows["fresh"]["seconds_to_expiry"] == 60
     assert rows["expired"]["effective_decision"] == "WATCH"
     assert rows["expired"]["actionable_now"] is False
@@ -250,5 +251,5 @@ def test_active_probe_requires_proven_cost_after_control_edge(tmp_path, monkeypa
     assert fresh["evidence_gate"]["edge_verdict"] == "不可判"
     assert fresh["effective_decision"] == "WATCH"
     assert fresh["action_level"] == "A1_WATCH"
-    assert fresh["action_reason_codes"] == ["legacy_without_v3_contract"]
+    assert fresh["action_reason_codes"] == ["outside_frozen_edge_protocol"]
     assert fresh["actionable_now"] is False
