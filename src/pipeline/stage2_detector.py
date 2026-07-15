@@ -91,7 +91,7 @@ async def run_stage2_detector(send: bool = True) -> dict:
     if not tokens:
         return {"status": "empty_watchlist", "checked": 0, "events": 0}
 
-    checked = events = 0
+    checked = candidates = events = blocked = 0
     for entry in tokens:
         token, chain = entry["token"], entry["chain"]
         pair = _best_pair(token, chain)
@@ -101,38 +101,69 @@ async def run_stage2_detector(send: bool = True) -> dict:
         event = detect_launch_prep(pair)
         if not event:
             continue
-        events += 1
-        await _emit_launch(entry, pair, event, send=send)
-        try:
-            watchlist.set_status(token, chain, "launching")
-        except Exception:
-            pass
+        candidates += 1
+        result = await _emit_launch(entry, pair, event, send=send)
+        if result["directional_recorded"]:
+            events += 1
+            try:
+                watchlist.set_status(token, chain, "launching")
+            except Exception:
+                pass
+        else:
+            blocked += 1
 
-    summary = {"status": "complete", "checked": checked, "events": events}
+    summary = {"status": "complete", "checked": checked, "candidates": candidates,
+               "events": events, "blocked_security": blocked}
     logger.info("stage2_detector_complete", **summary)
     return summary
 
 
-async def _commit_security_ok(token: str, chain: str) -> tuple[bool, int]:
-    """Re-run the contract gate at commit time (the contract can change)."""
+async def _commit_security(token: str, chain: str, checker_factory=None) -> dict:
+    """Re-run contract facts at commit time; unavailable data is never clean."""
     try:
-        from src.collectors.contract_security import ContractSecurityChecker
+        if checker_factory is None:
+            from src.collectors.contract_security import ContractSecurityChecker
+            checker_factory = ContractSecurityChecker
 
         chain_id: int | str = "solana" if chain in ("solana", "sol") else {
             "ethereum": 1, "eth": 1, "base": 8453, "bsc": 56,
             "arbitrum": 42161, "optimism": 10, "polygon": 137,
         }.get(chain, 1)
-        result = await ContractSecurityChecker().check_token(chain_id, token)
-        return (not result.is_honeypot and result.risk_score >= 50), result.risk_score
+        result = await checker_factory().check_token(chain_id, token)
     except Exception as e:
         logger.debug("stage2_security_failed", token=token, error=str(e))
-        return True, 50  # don't block on checker failure; mark unknown
+        return {"state": "unknown", "score": None,
+                "reason": f"security check failed: {str(e)[:80]}"}
+    risks = [str(value) for value in (result.risks or [])]
+    lowered = " ".join(risks).lower()
+    if (not isinstance(result.raw, dict) or not result.raw
+            or "unable to verify" in lowered or "not found" in lowered):
+        return {"state": "unknown", "score": result.risk_score,
+                "reason": risks[0] if risks else "security evidence unavailable",
+                "risks": risks[:8]}
+    if result.is_honeypot or result.risk_score < 50:
+        state = "avoid"
+    elif result.risk_score < 70:
+        state = "caution"
+    else:
+        state = "pass"
+    return {"state": state, "score": result.risk_score,
+            "is_honeypot": bool(result.is_honeypot), "risks": risks[:8],
+            "checked_at": datetime.now(timezone.utc).isoformat()}
 
 
-async def _emit_launch(entry: dict, pair: dict, event: dict, send: bool = True) -> None:
+async def _emit_launch(entry: dict, pair: dict, event: dict, send: bool = True,
+                       security_check=None) -> dict:
     token, chain = entry["token"], entry["chain"]
-    safe, score = await _commit_security_ok(token, chain)
+    security_check = security_check or _commit_security
+    security = await security_check(token, chain)
+    score = security.get("score")
     symbol = entry.get("symbol") or (pair.get("baseToken", {}) or {}).get("symbol", token[:6])
+
+    if security.get("state") != "pass":
+        logger.warning("stage2_security_blocked", token=token, chain=chain,
+                       state=security.get("state"), score=score)
+        return {"directional_recorded": False, "security": security}
 
     # Record for precision tracking.
     try:
@@ -142,17 +173,17 @@ async def _emit_launch(entry: dict, pair: dict, event: dict, send: bool = True) 
             signal_type="stage2_launch", asset=symbol, chain=chain,
             direction="LONG", confidence=event["confidence"],
             entry_price=float(pair.get("priceUsd") or 0),
-            metadata={**event, "token_address": token, "security_score": score},
+            metadata={**event, "token_address": token, "security_gate": security,
+                      "paper_only": True},
         )
     except Exception as e:
         logger.debug("stage2_scorecard_failed", error=str(e))
 
     if not send:
-        return
+        return {"directional_recorded": True, "security": security}
     try:
         from src.distribution.telegram_sender import send_critical_alert
 
-        gate = "✅ 安全" if safe else "⚠️ 合约有风险，谨慎"
         msg = (
             f"🚀 <b>启动信号 · {symbol}</b>\n"
             f"<i>{chain}链 · 之前在吸筹的盘，现在开始拉了</i>\n"
@@ -160,7 +191,7 @@ async def _emit_launch(entry: dict, pair: dict, event: dict, send: bool = True) 
             f"· 5分钟成交量加速 <b>{event['volume_accel']:.1f}倍</b>（相对每小时均速）\n"
             f"· 5分钟价格 <b>+{event['price_move_m5']:.1f}%</b>\n"
             f"· 买/卖 {event['buys_m5']}/{event['sells_m5']}（买压主导）\n"
-            f"· commit 时刻合约复检：{gate}（{score}/100）\n"
+            f"· commit 时刻合约复检：✅ 通过（{score}/100）\n"
             f"信号强度 {event['confidence']}/100\n"
             f"📍 <code>{token}</code>\n"
             f"🔗 <a href=\"{pair.get('url', '')}\">看 K 线</a>\n"
@@ -169,3 +200,4 @@ async def _emit_launch(entry: dict, pair: dict, event: dict, send: bool = True) 
         await send_critical_alert(msg)
     except Exception as e:
         logger.warning("stage2_alert_failed", error=str(e))
+    return {"directional_recorded": True, "security": security}
