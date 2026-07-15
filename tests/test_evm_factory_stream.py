@@ -34,6 +34,16 @@ def _log(evm, *, removed=False, block=100):
     }
 
 
+def _v3_log(evm, *, removed=False, block=100):
+    item = _log(evm, removed=removed, block=block)
+    item["address"] = evm.PANCAKE_V3_FACTORY
+    item["topics"][0] = evm.POOL_CREATED_TOPIC
+    item["topics"].append("0x" + f"{500:064x}")
+    item["data"] = "0x" + f"{10:064x}" + _word(
+        "0x4444444444444444444444444444444444444444")
+    return item
+
+
 def _notification(item):
     return {"jsonrpc": "2.0", "method": "eth_subscription",
             "params": {"subscription": "0xsub", "result": item}}
@@ -48,12 +58,22 @@ def test_subscribes_to_official_factory_event_and_heads(evm):
 
 
 def test_configured_specs_cover_official_bsc_base_and_ethereum_factories(evm):
-    specs = {spec.chain: spec for spec in evm.configured_specs()}
-    assert set(specs) == {"bsc", "base", "ethereum"}
-    assert specs["bsc"].address == evm.PANCAKE_V2_FACTORY
-    assert specs["base"].address == evm.PANCAKE_V2_BASE_FACTORY
-    assert specs["ethereum"].address == evm.PANCAKE_V2_ETH_FACTORY
+    specs = {(spec.chain, spec.venue): spec for spec in evm.configured_specs()}
+    assert set(specs) == {("bsc", "pancakeswap_v2"),
+                          ("bsc", "pancakeswap_v3"),
+                          ("base", "pancakeswap_v2"),
+                          ("ethereum", "pancakeswap_v2")}
+    assert specs[("bsc", "pancakeswap_v2")].address == evm.PANCAKE_V2_FACTORY
+    assert specs[("bsc", "pancakeswap_v3")].address == evm.PANCAKE_V3_FACTORY
+    assert specs[("base", "pancakeswap_v2")].address == evm.PANCAKE_V2_BASE_FACTORY
+    assert specs[("ethereum", "pancakeswap_v2")].address == evm.PANCAKE_V2_ETH_FACTORY
     assert all(spec.ws_urls and spec.rpc_urls for spec in specs.values())
+
+
+def test_factory_specs_reject_malformed_chain_constants(evm):
+    with pytest.raises(ValueError, match="address"):
+        evm.FactorySpec("bsc", "bad", "0x1234", "pair_v2",
+                        evm.PAIR_CREATED_TOPIC, ("wss://test",), ("https://test",))
 
 
 def test_pair_created_decodes_raw_pool_evidence(evm):
@@ -63,6 +83,16 @@ def test_pair_created_decodes_raw_pool_evidence(evm):
     assert event.payload["token1"] == "0x2222222222222222222222222222222222222222"
     assert event.payload["pool"] == "0x3333333333333333333333333333333333333333"
     assert event.payload["pair_index"] == 42 and event.payload["block_number"] == 100
+
+
+def test_v3_pool_created_decodes_fee_tick_and_pool(evm):
+    spec = evm.bsc_pancake_v3_spec()
+    event = evm.parse_message(_notification(_v3_log(evm)), spec=spec)
+    assert event.payload["kind"] == "pool_v3"
+    assert event.payload["fee"] == 500 and event.payload["tick_spacing"] == 10
+    assert event.payload["pool"] == "0x4444444444444444444444444444444444444444"
+    assert evm.subscribe_requests(spec)[0]["params"][1]["topics"] == [
+        evm.POOL_CREATED_TOPIC]
 
 
 def test_new_head_supplies_contiguous_block_cursor_and_time(evm):
@@ -88,6 +118,28 @@ def test_complete_pool_stays_raw_unqualified(evm):
                        "0x3333333333333333333333333333333333333333", 42,
                        "1970-01-01T00:00:05+00:00", 0, "complete",
                        "raw_unqualified", 64)
+    finally:
+        c.close()
+
+
+def test_complete_v3_pool_uses_separate_raw_schema(evm):
+    class Rpc:
+        def call(self, method, params):
+            return {"number": "0x64", "timestamp": "0x5"}
+
+    spec = evm.bsc_pancake_v3_spec()
+    event = evm.parse_message(_notification(_v3_log(evm)), spec=spec)
+    evm.persist(event.payload, rpc=Rpc())
+    c = evm._conn()
+    try:
+        row = c.execute("SELECT venue,token0,token1,pool,fee,tick_spacing,"
+                        "evidence_state,qualification_state FROM raw_v3_pools").fetchone()
+        assert row == ("pancakeswap_v3",
+                       "0x1111111111111111111111111111111111111111",
+                       "0x2222222222222222222222222222222222222222",
+                       "0x4444444444444444444444444444444444444444",
+                       500, 10, "complete", "raw_unqualified")
+        assert c.execute("SELECT COUNT(*) FROM raw_pools").fetchone()[0] == 0
     finally:
         c.close()
 

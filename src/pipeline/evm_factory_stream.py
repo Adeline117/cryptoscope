@@ -20,11 +20,14 @@ from src.pipeline.stream_runner import StreamEvent, StreamRunner
 logger = structlog.get_logger()
 
 PAIR_CREATED_TOPIC = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
+POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 PANCAKE_V2_FACTORY = "0xca143ce32fe78f1f7019d7d551a6402fc5350c73"
 PANCAKE_V2_BASE_FACTORY = "0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e"
 PANCAKE_V2_ETH_FACTORY = "0x1097053fd2ea711dad45caccc45eff7548fcb362"
+PANCAKE_V3_FACTORY = "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865"
 PUBLIC_BSC_WS = ("wss://bsc-rpc.publicnode.com", "wss://bsc.drpc.org")
-PUBLIC_BSC_RPC = ("https://bsc.rpc.blxrbdn.com", "https://bsc.drpc.org")
+PUBLIC_BSC_RPC = ("https://bsc.rpc.blxrbdn.com", "https://bsc.drpc.org",
+                  "https://56.rpc.thirdweb.com")
 PUBLIC_BASE_WS = ("wss://base-rpc.publicnode.com", "wss://base.drpc.org")
 PUBLIC_BASE_RPC = ("https://mainnet.base.org", "https://base.drpc.org")
 PUBLIC_ETH_WS = ("wss://ethereum-rpc.publicnode.com", "wss://eth.drpc.org")
@@ -41,12 +44,25 @@ class FactorySpec:
     chain: str
     venue: str
     address: str
+    event_kind: str
+    topic: str
     ws_urls: tuple[str, ...]
     rpc_urls: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        if self.event_kind not in {"pair_v2", "pool_v3"}:
+            raise ValueError("unsupported factory event kind")
+        for value, size, name in ((self.address, 40, "address"),
+                                  (self.topic, 64, "topic")):
+            raw = value.removeprefix("0x")
+            if (len(raw) != size
+                    or any(ch not in "0123456789abcdef" for ch in raw)):
+                raise ValueError(f"factory {name} must be lowercase canonical hex")
+
     @property
     def stream(self) -> str:
-        return f"{self.venue}_pairs"
+        suffix = "pairs" if self.event_kind == "pair_v2" else "pools"
+        return f"{self.venue}_{suffix}"
 
 
 def _urls(env_name: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
@@ -58,6 +74,7 @@ def _urls(env_name: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
 def bsc_pancake_v2_spec() -> FactorySpec:
     return FactorySpec(
         chain="bsc", venue="pancakeswap_v2", address=PANCAKE_V2_FACTORY,
+        event_kind="pair_v2", topic=PAIR_CREATED_TOPIC,
         ws_urls=_urls("BSC_FACTORY_WS_URLS", PUBLIC_BSC_WS),
         rpc_urls=_urls("BSC_FACTORY_RPC_URLS", PUBLIC_BSC_RPC),
     )
@@ -66,6 +83,7 @@ def bsc_pancake_v2_spec() -> FactorySpec:
 def base_pancake_v2_spec() -> FactorySpec:
     return FactorySpec(
         chain="base", venue="pancakeswap_v2", address=PANCAKE_V2_BASE_FACTORY,
+        event_kind="pair_v2", topic=PAIR_CREATED_TOPIC,
         ws_urls=_urls("BASE_FACTORY_WS_URLS", PUBLIC_BASE_WS),
         rpc_urls=_urls("BASE_FACTORY_RPC_URLS", PUBLIC_BASE_RPC),
     )
@@ -74,13 +92,23 @@ def base_pancake_v2_spec() -> FactorySpec:
 def ethereum_pancake_v2_spec() -> FactorySpec:
     return FactorySpec(
         chain="ethereum", venue="pancakeswap_v2", address=PANCAKE_V2_ETH_FACTORY,
+        event_kind="pair_v2", topic=PAIR_CREATED_TOPIC,
         ws_urls=_urls("ETH_FACTORY_WS_URLS", PUBLIC_ETH_WS),
         rpc_urls=_urls("ETH_FACTORY_RPC_URLS", PUBLIC_ETH_RPC),
     )
 
 
+def bsc_pancake_v3_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="bsc", venue="pancakeswap_v3", address=PANCAKE_V3_FACTORY,
+        event_kind="pool_v3", topic=POOL_CREATED_TOPIC,
+        ws_urls=_urls("BSC_FACTORY_WS_URLS", PUBLIC_BSC_WS),
+        rpc_urls=_urls("BSC_FACTORY_RPC_URLS", PUBLIC_BSC_RPC),
+    )
+
+
 def configured_specs() -> tuple[FactorySpec, ...]:
-    return (bsc_pancake_v2_spec(), base_pancake_v2_spec(),
+    return (bsc_pancake_v2_spec(), bsc_pancake_v3_spec(), base_pancake_v2_spec(),
             ethereum_pancake_v2_spec())
 
 
@@ -102,13 +130,26 @@ def _conn() -> sqlite3.Connection:
         PRIMARY KEY(chain,transaction_hash,log_index))""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_raw_pools_block "
               "ON raw_pools(chain,venue,block_number,log_index)")
+    c.execute("""CREATE TABLE IF NOT EXISTS raw_v3_pools(
+        chain TEXT NOT NULL, venue TEXT NOT NULL, factory TEXT NOT NULL,
+        transaction_hash TEXT NOT NULL, log_index INTEGER NOT NULL,
+        block_number INTEGER NOT NULL, block_hash TEXT, transaction_index INTEGER,
+        token0 TEXT NOT NULL, token1 TEXT NOT NULL, pool TEXT NOT NULL,
+        fee INTEGER NOT NULL, tick_spacing INTEGER NOT NULL, block_at TEXT,
+        detected_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        raw_payload_hash TEXT NOT NULL, removed INTEGER NOT NULL DEFAULT 0,
+        evidence_state TEXT NOT NULL,
+        qualification_state TEXT NOT NULL DEFAULT 'raw_unqualified',
+        PRIMARY KEY(chain,transaction_hash,log_index))""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_raw_v3_pools_block "
+              "ON raw_v3_pools(chain,venue,block_number,log_index)")
     return c
 
 
 def subscribe_requests(spec: FactorySpec) -> list[dict]:
     return [
         {"jsonrpc": "2.0", "id": 1, "method": "eth_subscribe", "params": [
-            "logs", {"address": spec.address, "topics": [PAIR_CREATED_TOPIC]},
+            "logs", {"address": spec.address, "topics": [spec.topic]},
         ]},
         {"jsonrpc": "2.0", "id": 2, "method": "eth_subscribe",
          "params": ["newHeads"]},
@@ -136,6 +177,22 @@ def _hash32(value: object, field: str) -> str:
     return "0x" + raw
 
 
+def _uint_word(value: object, field: str) -> int:
+    raw = str(value).lower().removeprefix("0x")
+    if len(raw) != 64 or any(ch not in "0123456789abcdef" for ch in raw):
+        raise ValueError(f"EVM factory log has invalid {field}")
+    return int(raw, 16)
+
+
+def _int24_word(value: str, field: str) -> int:
+    number = _uint_word(value, field)
+    if number >= 1 << 255:
+        number -= 1 << 256
+    if not -(1 << 23) <= number < (1 << 23):
+        raise ValueError(f"EVM factory log has invalid {field}")
+    return number
+
+
 def parse_message(raw: object, *, spec: FactorySpec | None = None) -> StreamEvent | None:
     spec = spec or bsc_pancake_v2_spec()
     msg = json.loads(raw) if isinstance(raw, (str, bytes, bytearray)) else raw
@@ -156,28 +213,28 @@ def parse_message(raw: object, *, spec: FactorySpec | None = None) -> StreamEven
         return StreamEvent({"kind": "head", "block_number": block},
                            cursor=block, event_at=event_at)
     topics = result.get("topics") or []
+    expected_topics = 3 if spec.event_kind == "pair_v2" else 4
     if (str(result.get("address", "")).lower() != spec.address
-            or len(topics) != 3 or str(topics[0]).lower() != PAIR_CREATED_TOPIC):
+            or len(topics) != expected_topics
+            or str(topics[0]).lower() != spec.topic):
         return None
     data = str(result.get("data", "")).lower().removeprefix("0x")
     if len(data) != 128:
-        raise ValueError("PancakeSwap PairCreated data must contain two ABI words")
+        raise ValueError("factory creation data must contain two ABI words")
     removed = result.get("removed", False)
     if not isinstance(removed, bool):
         raise ValueError("EVM factory log removed flag must be boolean")
     token0 = _word_address(topics[1], "token0")
     token1 = _word_address(topics[2], "token1")
-    pool = _word_address(data[:64], "pair")
-    pair_index = int(data[64:], 16)
+    pool_word = data[:64] if spec.event_kind == "pair_v2" else data[64:]
+    pool = _word_address(pool_word, "pool")
     zero = "0x" + "0" * 40
     if token0 == zero or token1 == zero or pool == zero:
         raise ValueError("PairCreated addresses must be non-zero")
     if int(token0, 16) >= int(token1, 16):
         raise ValueError("PairCreated tokens must be distinct and sorted")
-    if pair_index <= 0:
-        raise ValueError("PairCreated index must be positive")
     payload = {
-        "kind": "pool", "chain": spec.chain, "venue": spec.venue,
+        "kind": spec.event_kind, "chain": spec.chain, "venue": spec.venue,
         "factory": spec.address,
         "transaction_hash": _hash32(result.get("transactionHash"), "transaction hash"),
         "log_index": _hex_int(result.get("logIndex"), "log index"),
@@ -185,8 +242,22 @@ def parse_message(raw: object, *, spec: FactorySpec | None = None) -> StreamEven
         "block_hash": _hash32(result.get("blockHash"), "block hash"),
         "transaction_index": _hex_int(result.get("transactionIndex"), "transaction index"),
         "token0": token0, "token1": token1, "pool": pool,
-        "pair_index": pair_index, "removed": removed,
+        "removed": removed,
     }
+    if spec.event_kind == "pair_v2":
+        pair_index = _uint_word(data[64:], "pair index")
+        if pair_index <= 0:
+            raise ValueError("PairCreated index must be positive")
+        payload["pair_index"] = pair_index
+    elif spec.event_kind == "pool_v3":
+        fee = _uint_word(topics[3], "fee")
+        tick_spacing = _int24_word(data[:64], "tick spacing")
+        if not 0 < fee <= 1_000_000 or tick_spacing <= 0:
+            raise ValueError("PoolCreated fee and tick spacing must be positive")
+        payload["fee"] = fee
+        payload["tick_spacing"] = tick_spacing
+    else:
+        raise ValueError(f"unsupported factory event kind: {spec.event_kind}")
     return StreamEvent(payload)
 
 
@@ -236,7 +307,8 @@ def _hash(payload: dict) -> str:
 
 
 def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
-    if not isinstance(payload, dict) or payload.get("kind") != "pool":
+    if (not isinstance(payload, dict)
+            or payload.get("kind") not in {"pair_v2", "pool_v3"}):
         return
     now = datetime.now(timezone.utc).isoformat()
     block_at = None
@@ -250,22 +322,38 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
                            block=payload["block_number"], error=str(exc)[:120])
     c = _conn()
     try:
-        c.execute("""INSERT INTO raw_pools(
-            chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
-            transaction_index,token0,token1,pool,pair_index,block_at,detected_at,
-            updated_at,raw_payload_hash,removed,evidence_state,qualification_state
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'raw_unqualified')
-        ON CONFLICT(chain,transaction_hash,log_index) DO UPDATE SET
-          block_number=excluded.block_number,block_hash=excluded.block_hash,
-          block_at=COALESCE(raw_pools.block_at,excluded.block_at),
-          updated_at=excluded.updated_at,raw_payload_hash=excluded.raw_payload_hash,
-          removed=excluded.removed,evidence_state=excluded.evidence_state""",
-                  (payload["chain"], payload["venue"], payload["factory"],
-                   payload["transaction_hash"].lower(), payload["log_index"],
-                   payload["block_number"], payload.get("block_hash"),
-                   payload["transaction_index"], payload["token0"], payload["token1"],
-                   payload["pool"], payload["pair_index"], block_at, now, now,
-                   _hash(payload), int(payload["removed"]), state))
+        common = (payload["chain"], payload["venue"], payload["factory"],
+                  payload["transaction_hash"].lower(), payload["log_index"],
+                  payload["block_number"], payload.get("block_hash"),
+                  payload["transaction_index"], payload["token0"], payload["token1"],
+                  payload["pool"])
+        if payload["kind"] == "pair_v2":
+            c.execute("""INSERT INTO raw_pools(
+                chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
+                transaction_index,token0,token1,pool,pair_index,block_at,detected_at,
+                updated_at,raw_payload_hash,removed,evidence_state,qualification_state
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'raw_unqualified')
+            ON CONFLICT(chain,transaction_hash,log_index) DO UPDATE SET
+              block_number=excluded.block_number,block_hash=excluded.block_hash,
+              block_at=COALESCE(raw_pools.block_at,excluded.block_at),
+              updated_at=excluded.updated_at,raw_payload_hash=excluded.raw_payload_hash,
+              removed=excluded.removed,evidence_state=excluded.evidence_state""",
+                      (*common, payload["pair_index"], block_at, now, now,
+                       _hash(payload), int(payload["removed"]), state))
+        else:
+            c.execute("""INSERT INTO raw_v3_pools(
+                chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
+                transaction_index,token0,token1,pool,fee,tick_spacing,block_at,
+                detected_at,updated_at,raw_payload_hash,removed,evidence_state,
+                qualification_state
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'raw_unqualified')
+            ON CONFLICT(chain,transaction_hash,log_index) DO UPDATE SET
+              block_number=excluded.block_number,block_hash=excluded.block_hash,
+              block_at=COALESCE(raw_v3_pools.block_at,excluded.block_at),
+              updated_at=excluded.updated_at,raw_payload_hash=excluded.raw_payload_hash,
+              removed=excluded.removed,evidence_state=excluded.evidence_state""",
+                      (*common, payload["fee"], payload["tick_spacing"], block_at,
+                       now, now, _hash(payload), int(payload["removed"]), state))
         c.commit()
     finally:
         c.close()
@@ -278,7 +366,7 @@ def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) ->
         return False
     try:
         logs = rpc.call("eth_getLogs", [{
-            "address": spec.address, "topics": [PAIR_CREATED_TOPIC],
+            "address": spec.address, "topics": [spec.topic],
             "fromBlock": hex(start), "toBlock": hex(end),
         }])
         if not isinstance(logs, list):

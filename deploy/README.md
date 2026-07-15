@@ -62,7 +62,8 @@ evidence, and never promotes an event to a trade. Set `SOLANA_STREAM_WS_URL` and
 rate limits; paid Helius `transactionSubscribe` access is not required.
 
 The EVM factory process runs isolated streams for the official PancakeSwap V2
-factories on BSC, Base, and Ethereum. Each records `PairCreated` as raw,
+factories on BSC, Base, and Ethereum plus PancakeSwap V3 on BSC. Each records
+`PairCreated` or `PoolCreated` as raw,
 reorg-aware evidence and uses its own `newHeads` cursor plus bounded `eth_getLogs`
 recovery; a new pool is never turned directly into a trade signal.
 
