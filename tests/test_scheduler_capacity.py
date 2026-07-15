@@ -153,6 +153,41 @@ async def test_anomaly_screen_runs_off_event_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_daily_perp_cex_sweep_and_market_reads_run_off_event_loop(monkeypatch):
+    """The hour-long daily sweep must not freeze five-minute Carry exports."""
+    import threading
+
+    from src.onchain import operator_id
+    from src.pipeline import outcome_tracker, perp_scanner, operator_sentinel, scheduler
+
+    loop_thread = threading.get_ident()
+    call_threads = []
+    hit = {
+        "address": "0xtoken", "chain": "base", "symbol": "TEST",
+        "cex_outflow": 1, "pct_of_cluster": 1,
+    }
+
+    def scan_cex_deposits():
+        call_threads.append(("scan", threading.get_ident()))
+        return [hit]
+
+    def token_market(address):
+        assert address == "0xtoken"
+        call_threads.append(("market", threading.get_ident()))
+        return {"available": False}
+
+    monkeypatch.setattr(perp_scanner, "scan_cex_deposits", scan_cex_deposits)
+    monkeypatch.setattr(operator_id, "_token_market", token_market)
+    monkeypatch.setattr(outcome_tracker, "log_alert", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(operator_sentinel, "alerts_muted", lambda: True)
+
+    await scheduler._run_perp_cex_scan()
+
+    assert [name for name, _thread in call_threads] == ["scan", "market"]
+    assert all(thread != loop_thread for _name, thread in call_threads)
+
+
+@pytest.mark.asyncio
 async def test_early_accumulation_sync_stages_run_off_event_loop(monkeypatch):
     import threading
 

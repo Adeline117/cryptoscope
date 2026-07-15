@@ -972,13 +972,18 @@ async def _run_perp_cex_scan():
     """Daily: dump-precursor scan over the perp (shortable) universe — top holders
     moving to CEX deposits. Runs on our own validated infra (holders + cex_flow),
     not a third-party feed. ~60 min for the full EVM set; quiet baseline is normal."""
+    import asyncio
+
     logger.info("scheduled_perp_cex_scan")
     from src.onchain.operator_id import _token_market
     from src.pipeline.operator_sentinel import alerts_muted
     from src.pipeline.outcome_tracker import log_alert
     from src.pipeline.perp_scanner import scan_cex_deposits
 
-    hits = scan_cex_deposits()
+    # This is a roughly hour-long synchronous network sweep. Running it directly in
+    # an ``async def`` freezes the scheduler loop, so even the independent five-minute
+    # Carry export cannot start. Keep it inside the shared bounded executor instead.
+    hits = await asyncio.to_thread(scan_cex_deposits)
 
     # RECORD EVERY EVENT, ALWAYS. This scan used to push to Telegram and store
     # nothing — so the perp short thesis could never accumulate the ~120-150
@@ -987,7 +992,7 @@ async def _run_perp_cex_scan():
     logged = 0
     for h in hits:
         try:
-            mkt = _token_market(h["address"])
+            mkt = await asyncio.to_thread(_token_market, h["address"])
             px = float(mkt.get("price_usd") or 0) if mkt.get("available") else 0.0
             liq = float(mkt.get("liquidity_usd") or 0) if mkt.get("available") else 0.0
             if not px:
