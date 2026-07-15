@@ -574,12 +574,29 @@ def _envelope(body: dict, *, view: str) -> dict:
 
 def _atomic_json(path, payload: dict) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    temp.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False,
+                               separators=(",", ":")))
     temp.replace(path)
 
 
 def write_views(**views: dict) -> list:
     """Atomically write views and merge their clocks into a durable manifest."""
+    from src.contract.board_view import validate_board_view
+
+    prepared = []
+    # Validate the complete batch before touching any file. A later malformed view
+    # must not leave an earlier view (or the manifest) half-updated.
+    for name, payload in views.items():
+        if payload is None:
+            continue
+        try:
+            cadence_min, grace_min = VIEW_FRESHNESS[name]
+        except KeyError as exc:
+            raise ValueError(f"unknown board view freshness policy: {name}") from exc
+        validate_board_view(name, payload, cadence_min=cadence_min,
+                            grace_min=grace_min)
+        prepared.append((name, payload))
+
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     paths = []
     with _WRITE_LOCK:
@@ -589,9 +606,7 @@ def write_views(**views: dict) -> list:
         except (OSError, json.JSONDecodeError):
             previous = {}
         manifest = dict(previous.get("view_status") or {})
-        for name, payload in views.items():
-            if payload is None:
-                continue
+        for name, payload in prepared:
             p = EXPORT_DIR / f"{name}.json"
             _atomic_json(p, payload)
             paths.append(p)

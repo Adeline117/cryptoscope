@@ -102,7 +102,7 @@ def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path,
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    launch = board_export._envelope({}, view="launch")
+    launch = board_export._envelope({"events": []}, view="launch")
     perps = board_export._envelope({}, view="perps")
     board_export.write_views(launch=launch)
     board_export.write_views(perps=perps)
@@ -110,7 +110,9 @@ def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path,
     original_perps_status = json.loads((tmp_path / "meta.json").read_text())["view_status"][
         "perps"
     ]
-    board_export.write_views(launch=board_export._envelope({}, view="launch"), perps=None)
+    board_export.write_views(
+        launch=board_export._envelope({"events": []}, view="launch"), perps=None
+    )
 
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert meta["views"] == ["launch", "perps"]
