@@ -77,3 +77,14 @@ def test_launch_action_requires_statistical_evidence_gate():
     assert "成本后 24h 试验组相对同期 WATCH 对照的证据门" in html
     assert "只做纸面结算，不可行动" in html
     assert "优势门:" in html
+
+
+def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
+    html = BOARD.read_text()
+
+    assert "它尚不是已证明的正 EV" in html
+    assert "Carry 优势证据" in html
+    assert "当前没有通过证据门的真 edge" in html
+    assert "模型净额/年" in html and "纸面结构" in html
+    assert "唯一「个人真能做出正EV」" not in html
+    assert "唯一有结构 edge 的" not in html
