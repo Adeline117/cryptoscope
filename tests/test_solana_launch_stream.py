@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -112,6 +115,42 @@ def test_subscriptions_use_standard_solana_methods(sol):
     assert requests[0]["params"][0] == {"mentions": [sol.PUMP_FUN_PROGRAM]}
     assert requests[1]["method"] == "slotSubscribe"
     assert all(request["method"] != "transactionSubscribe" for request in requests)
+
+
+def test_concurrent_legacy_hydration_migration_is_idempotent(sol):
+    legacy = sqlite3.connect(sol.DB)
+    legacy.execute("""CREATE TABLE raw_launches(
+        signature TEXT PRIMARY KEY, slot INTEGER NOT NULL, transaction_index INTEGER,
+        program TEXT NOT NULL, event_type TEXT NOT NULL, creator TEXT, mint TEXT,
+        detected_at TEXT NOT NULL, hydrated_at TEXT, raw_payload_hash TEXT NOT NULL,
+        hydration_payload_hash TEXT, logs TEXT NOT NULL,
+        evidence_state TEXT NOT NULL DEFAULT 'raw_only', hydration_error TEXT,
+        qualification_state TEXT NOT NULL DEFAULT 'raw_unqualified')""")
+    legacy.commit()
+    legacy.close()
+
+    workers = 12
+    start = threading.Barrier(workers)
+
+    def connect_and_read_schema() -> tuple[str, ...]:
+        start.wait(timeout=5)
+        connection = sol._conn()
+        try:
+            return tuple(
+                row[1] for row in connection.execute("PRAGMA table_info(raw_launches)")
+            )
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        schemas = list(pool.map(lambda _index: connect_and_read_schema(), range(workers)))
+
+    expected = (
+        "qualification_attempted_at", "qualification_error", "qualified_at",
+        "ledger_event_id", "hydration_retry_count", "hydration_next_retry_at",
+        "hydration_attempted_at", "hydration_last_rpc_error",
+    )
+    assert all(schema[-8:] == expected for schema in schemas)
 
 
 def test_creation_is_parsed_and_hydrated_as_raw_unqualified(sol):
@@ -269,7 +308,9 @@ def test_rpc_failed_launch_is_rehydrated_later(sol):
     event = sol.parse_message(_notification())
     sol.persist(event.payload)
     assert sol.rehydrate_pending(RecoveringRpc()) == {
-        "attempted": 1, "completed": 1, "failed": 0}
+        "attempted": 1, "completed": 1, "incomplete": 0,
+        "rpc_failed": 0,
+    }
     c = sol._conn()
     try:
         assert c.execute("SELECT evidence_state,creator,mint FROM raw_launches").fetchone() \
@@ -298,6 +339,225 @@ def test_incomplete_identity_is_only_retried_during_startup_audit(sol):
     assert sol.rehydrate_pending(rpc)["attempted"] == 0
     assert sol.rehydrate_pending(rpc, include_incomplete=True)["completed"] == 1
     assert rpc.calls == 1
+
+
+def test_hydration_queue_is_fifo_so_new_launches_cannot_starve_old_rows(sol):
+    base = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    for index, signature in enumerate(("a-tie", "b-tie", "newest")):
+        raw = _notification()
+        raw["params"]["result"]["context"]["slot"] = 100 if index < 2 else 101
+        raw["params"]["result"]["value"]["signature"] = signature
+        sol.persist(sol.parse_message(raw).payload)
+        c = sol._conn()
+        try:
+            c.execute(
+                "UPDATE raw_launches SET detected_at=? WHERE signature=?",
+                ((base if index < 2 else base + timedelta(seconds=1)).isoformat(),
+                 signature),
+            )
+            c.commit()
+        finally:
+            c.close()
+    c = sol._conn()
+    try:
+        c.execute(
+            """UPDATE raw_launches SET evidence_state='rpc_unavailable',
+                      hydration_retry_count=1,hydration_next_retry_at=?
+               WHERE signature='b-tie'""",
+            ((base - timedelta(seconds=1)).isoformat(),),
+        )
+        c.commit()
+    finally:
+        c.close()
+
+    calls = []
+
+    class Rpc:
+        def call(self, method, params):
+            assert method == "getTransaction"
+            calls.append(params[0])
+            tx = _transaction()
+            tx["transaction"]["signatures"] = [params[0]]
+            return tx
+
+    result = sol.rehydrate_pending(Rpc(), limit=2, now=base + timedelta(minutes=1))
+
+    assert calls == ["a-tie", "b-tie"]
+    assert result == {
+        "attempted": 2, "completed": 2, "incomplete": 0,
+        "rpc_failed": 0,
+    }
+    c = sol._conn()
+    try:
+        assert c.execute(
+            "SELECT signature FROM raw_launches WHERE evidence_state='raw_only'"
+        ).fetchall() == [("newest",)]
+    finally:
+        c.close()
+
+
+def test_hydration_rpc_failures_back_off_persistently(sol):
+    base = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload)
+    c = sol._conn()
+    try:
+        c.execute("UPDATE raw_launches SET detected_at=?", (
+            (base - timedelta(minutes=1)).isoformat(),
+        ))
+        c.commit()
+    finally:
+        c.close()
+
+    class FlakyRpc:
+        def __init__(self):
+            self.calls = 0
+            self.fail = True
+
+        def call(self, method, params):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError("rate limited")
+            return _transaction()
+
+    rpc = FlakyRpc()
+    first = sol.rehydrate_pending(rpc, now=base)
+    assert first == {
+        "attempted": 1, "completed": 0, "incomplete": 0,
+        "rpc_failed": 1,
+    }
+    c = sol._conn()
+    try:
+        retry = c.execute(
+            "SELECT hydration_retry_count,hydration_next_retry_at FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert retry == (1, (base + timedelta(seconds=60)).isoformat())
+    hydration = sol.qualification_summary(now=base)["hydration"]
+    assert hydration == {
+        "state": "backlogged", "pending_total": 1,
+        "by_state": {"raw_only": 0, "rpc_unavailable": 1},
+        "due": 0, "deferred": 1,
+        "oldest_pending_at": (base - timedelta(minutes=1)).isoformat(),
+        "oldest_pending_age_seconds": 60, "max_retry_count": 1,
+    }
+
+    assert sol.rehydrate_pending(rpc, now=base + timedelta(seconds=59))["attempted"] == 0
+    second = sol.rehydrate_pending(rpc, now=base + timedelta(seconds=60))
+    assert second["rpc_failed"] == 1 and rpc.calls == 2
+    c = sol._conn()
+    try:
+        retry = c.execute(
+            "SELECT hydration_retry_count,hydration_next_retry_at FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert retry == (2, (base + timedelta(seconds=180)).isoformat())
+
+    rpc.fail = False
+    recovered = sol.rehydrate_pending(rpc, now=base + timedelta(seconds=180))
+    assert recovered == {
+        "attempted": 1, "completed": 1, "incomplete": 0, "rpc_failed": 0,
+    }
+    c = sol._conn()
+    try:
+        reset = c.execute(
+            "SELECT evidence_state,hydration_retry_count,hydration_next_retry_at "
+            "FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert reset == ("complete", 0, None)
+
+
+def test_hydration_outcome_does_not_count_ambiguous_identity_as_complete(sol):
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload)
+    ambiguous = _transaction()
+    ambiguous["transaction"]["message"]["accountKeys"].append(
+        {"pubkey": "sponsor", "signer": True})
+    ambiguous["transaction"]["message"]["instructions"][0]["accounts"].append(
+        "sponsor")
+
+    class Rpc:
+        def call(self, method, params):
+            return ambiguous
+
+    assert sol.rehydrate_pending(Rpc()) == {
+        "attempted": 1, "completed": 0, "incomplete": 1,
+        "rpc_failed": 0,
+    }
+
+
+def test_late_ambiguous_hydration_cannot_downgrade_complete_evidence(sol):
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+    ambiguous = _transaction()
+    ambiguous["transaction"]["message"]["accountKeys"].append(
+        {"pubkey": "sponsor", "signer": True})
+    ambiguous["transaction"]["message"]["instructions"][0]["accounts"].append(
+        "sponsor")
+    c = sol._conn()
+    try:
+        before = c.execute(
+            "SELECT creator,mint,hydration_payload_hash FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+
+    assert sol._set_hydration("sig-1", ambiguous, None) == "complete"
+    c = sol._conn()
+    try:
+        after = c.execute(
+            "SELECT evidence_state,creator,mint,hydration_payload_hash FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert after == ("complete", before[0], before[1], before[2])
+
+
+def test_failed_incomplete_audit_preserves_captured_transaction_evidence(sol):
+    base = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    ambiguous = _transaction()
+    ambiguous["transaction"]["message"]["accountKeys"].append(
+        {"pubkey": "sponsor", "signer": True})
+    ambiguous["transaction"]["message"]["instructions"][0]["accounts"].append(
+        "sponsor")
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=ambiguous)
+    c = sol._conn()
+    try:
+        before = c.execute(
+            "SELECT hydrated_at,hydration_payload_hash,hydration_error FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+
+    class BrokenRpc:
+        def call(self, method, params):
+            raise RuntimeError("temporary outage")
+
+    result = sol.rehydrate_pending(
+        BrokenRpc(), include_incomplete=True, now=base,
+    )
+    assert result == {
+        "attempted": 1, "completed": 0, "incomplete": 0, "rpc_failed": 1,
+    }
+    c = sol._conn()
+    try:
+        after = c.execute(
+            """SELECT evidence_state,hydrated_at,hydration_payload_hash,
+                      hydration_error,hydration_retry_count,hydration_attempted_at,
+                      hydration_last_rpc_error
+               FROM raw_launches"""
+        ).fetchone()
+    finally:
+        c.close()
+    assert after == (
+        "incomplete", before[0], before[1], before[2], 1, base.isoformat(),
+        "temporary outage",
+    )
 
 
 def test_open_slot_gap_is_retried_and_resolved(sol):
@@ -489,7 +749,8 @@ def test_unresolved_raw_create_is_retained_and_does_not_block_the_gap(sol):
             return _transaction()
 
     assert sol.rehydrate_pending(HydrationRpc(), include_incomplete=True) == {
-        "attempted": 1, "completed": 1, "failed": 0,
+        "attempted": 1, "completed": 1, "incomplete": 0,
+        "rpc_failed": 0,
     }
     c = sol._conn()
     try:

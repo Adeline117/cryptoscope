@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -29,35 +30,77 @@ PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 PUBLIC_SOLANA_WS = "wss://api.mainnet-beta.solana.com/"
 MAX_BACKFILL_SLOTS = 16
 GAP_RETRY_SLOT_BUDGET = 1
+HYDRATION_RETRY_BASE_SECONDS = 60
+HYDRATION_RETRY_MAX_SECONDS = 3600
 DB = DATA_DIR / "solana_launch_events.db"
+
+
+def _enable_wal(c: sqlite3.Connection) -> None:
+    """Enable WAL without losing a simultaneous scheduler/worker startup race."""
+    deadline = time.monotonic() + 8.0
+    while True:
+        try:
+            current = c.execute("PRAGMA journal_mode").fetchone()
+            if current and str(current[0]).lower() == "wal":
+                return
+            changed = c.execute("PRAGMA journal_mode=WAL").fetchone()
+            if changed and str(changed[0]).lower() == "wal":
+                return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+        if time.monotonic() >= deadline:
+            raise sqlite3.OperationalError("timed out enabling WAL journal mode")
+        time.sleep(0.05)
 
 
 def _conn() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=10)
-    c.execute("PRAGMA busy_timeout=8000")
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA synchronous=NORMAL")
-    c.execute("""CREATE TABLE IF NOT EXISTS raw_launches(
-        signature TEXT PRIMARY KEY, slot INTEGER NOT NULL, transaction_index INTEGER,
-        program TEXT NOT NULL, event_type TEXT NOT NULL, creator TEXT, mint TEXT,
-        detected_at TEXT NOT NULL, hydrated_at TEXT, raw_payload_hash TEXT NOT NULL,
-        hydration_payload_hash TEXT, logs TEXT NOT NULL,
-        evidence_state TEXT NOT NULL DEFAULT 'raw_only', hydration_error TEXT,
-        qualification_state TEXT NOT NULL DEFAULT 'raw_unqualified')""")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_slot ON raw_launches(slot)")
-    columns = {row[1] for row in c.execute("PRAGMA table_info(raw_launches)")}
-    for name, kind in (
-        ("qualification_attempted_at", "TEXT"),
-        ("qualification_error", "TEXT"),
-        ("qualified_at", "TEXT"),
-        ("ledger_event_id", "TEXT"),
-    ):
-        if name not in columns:
-            c.execute(f"ALTER TABLE raw_launches ADD COLUMN {name} {kind}")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_qualification "
-              "ON raw_launches(evidence_state,qualification_state,detected_at DESC)")
-    return c
+    try:
+        c.execute("PRAGMA busy_timeout=8000")
+        _enable_wal(c)
+        c.execute("PRAGMA synchronous=NORMAL")
+        c.execute("""CREATE TABLE IF NOT EXISTS raw_launches(
+            signature TEXT PRIMARY KEY, slot INTEGER NOT NULL, transaction_index INTEGER,
+            program TEXT NOT NULL, event_type TEXT NOT NULL, creator TEXT, mint TEXT,
+            detected_at TEXT NOT NULL, hydrated_at TEXT, raw_payload_hash TEXT NOT NULL,
+            hydration_payload_hash TEXT, logs TEXT NOT NULL,
+            evidence_state TEXT NOT NULL DEFAULT 'raw_only', hydration_error TEXT,
+            qualification_state TEXT NOT NULL DEFAULT 'raw_unqualified')""")
+        migrations = (
+            ("qualification_attempted_at", "TEXT"),
+            ("qualification_error", "TEXT"),
+            ("qualified_at", "TEXT"),
+            ("ledger_event_id", "TEXT"),
+            ("hydration_retry_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("hydration_next_retry_at", "TEXT"),
+            ("hydration_attempted_at", "TEXT"),
+            ("hydration_last_rpc_error", "TEXT"),
+        )
+        columns = {row[1] for row in c.execute("PRAGMA table_info(raw_launches)")}
+        if any(name not in columns for name, _kind in migrations):
+            # Scheduler and the stream process can open the same legacy evidence
+            # DB together. Re-read the schema while holding the write lock so a
+            # stale PRAGMA result can never trigger a duplicate ALTER TABLE.
+            c.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in c.execute("PRAGMA table_info(raw_launches)")}
+            for name, kind in migrations:
+                if name not in columns:
+                    c.execute(f"ALTER TABLE raw_launches ADD COLUMN {name} {kind}")
+                    columns.add(name)
+            c.commit()
+        c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_slot ON raw_launches(slot)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_qualification "
+                  "ON raw_launches(evidence_state,qualification_state,detected_at DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_hydration_queue "
+                  "ON raw_launches(evidence_state,hydration_next_retry_at,detected_at,slot)")
+        c.commit()
+        return c
+    except Exception:
+        c.rollback()
+        c.close()
+        raise
 
 
 QUALIFICATION_STATES = {
@@ -166,6 +209,17 @@ def qualification_summary(
             "SELECT COUNT(*) FROM raw_launches WHERE evidence_state='complete' "
             "AND detected_at>=?", (cutoff,),
         ).fetchone()[0]
+        pending_total, due_pending, deferred_pending, oldest_pending_at, max_retry = \
+            c.execute(
+                """SELECT COUNT(*),
+                          SUM(CASE WHEN hydration_next_retry_at IS NULL
+                                        OR hydration_next_retry_at<=? THEN 1 ELSE 0 END),
+                          SUM(CASE WHEN hydration_next_retry_at>? THEN 1 ELSE 0 END),
+                          MIN(detected_at),MAX(hydration_retry_count)
+                   FROM raw_launches
+                   WHERE evidence_state IN ('raw_only','rpc_unavailable')""",
+                (now.isoformat(), now.isoformat()),
+            ).fetchone()
     finally:
         c.close()
     traceable_ids: set[str] = set()
@@ -200,9 +254,29 @@ def qualification_summary(
     quarantined_state_rows = int(raw_qualification.get("ledger_orphan") or 0)
     if orphan_rows or quarantined_state_rows:
         qualification["ledger_orphan"] = orphan_rows + quarantined_state_rows
+    oldest_pending_age_seconds = None
+    if oldest_pending_at:
+        try:
+            oldest = datetime.fromisoformat(str(oldest_pending_at)).astimezone(timezone.utc)
+            oldest_pending_age_seconds = max(0, round((now - oldest).total_seconds()))
+        except (TypeError, ValueError):
+            pass
     return {
         "raw_total": sum(evidence.values()),
         "evidence": evidence,
+        "hydration": {
+            "state": "backlogged" if pending_total else "ok",
+            "pending_total": int(pending_total or 0),
+            "by_state": {
+                state: int(evidence.get(state) or 0)
+                for state in ("raw_only", "rpc_unavailable")
+            },
+            "due": int(due_pending or 0),
+            "deferred": int(deferred_pending or 0),
+            "oldest_pending_at": oldest_pending_at,
+            "oldest_pending_age_seconds": oldest_pending_age_seconds,
+            "max_retry_count": int(max_retry or 0),
+        },
         "qualification": qualification,
         "raw_qualification_states": raw_qualification,
         "traceability": {
@@ -441,8 +515,16 @@ def _extract_identity(tx: dict) -> tuple[str | None, str | None, str | None]:
     return None, None, "creation instruction did not prove one creator signer and mint signer"
 
 
-def _set_hydration(signature: str, tx: dict | None, error: str | None) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+def _hydration_retry_delay(retry_count: int) -> int:
+    exponent = min(10, max(0, int(retry_count) - 1))
+    return min(HYDRATION_RETRY_MAX_SECONDS,
+               HYDRATION_RETRY_BASE_SECONDS * (2 ** exponent))
+
+
+def _set_hydration(signature: str, tx: dict | None, error: str | None,
+                   *, at: datetime | None = None) -> str:
+    now_dt = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now = now_dt.isoformat()
     creator = mint = None
     if tx is not None and error is None:
         creator, mint, error = _extract_identity(tx)
@@ -450,12 +532,57 @@ def _set_hydration(signature: str, tx: dict | None, error: str | None) -> None:
                                                    else "incomplete")
     c = _conn()
     try:
-        c.execute("""UPDATE raw_launches SET creator=?,mint=?,hydrated_at=?,
-                     hydration_payload_hash=?,evidence_state=?,hydration_error=?
-                     WHERE signature=?""",
-                  (creator, mint, now, _hash(tx) if tx is not None else None,
-                   state, str(error)[:240] if error else None, signature))
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT hydration_retry_count,evidence_state FROM raw_launches "
+            "WHERE signature=?",
+            (signature,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown Solana launch signature: {signature}")
+        current_retry = int(row[0] or 0)
+        previous_state = str(row[1])
+        rpc_failed = tx is None
+        if previous_state == "complete" and state != "complete":
+            # Two workers may have selected the same raw row before either wrote.
+            # A slower ambiguous response must never downgrade complete identity
+            # evidence committed by the winner.
+            c.execute(
+                "UPDATE raw_launches SET hydration_attempted_at=? WHERE signature=?",
+                (now, signature),
+            )
+            c.commit()
+            return "complete"
+        if rpc_failed and previous_state in {"complete", "incomplete"}:
+            # A later audit outage cannot erase a payload already captured.
+            state = previous_state
+        retry_count = current_retry + 1 if rpc_failed else 0
+        next_retry_at = (
+            now_dt + timedelta(seconds=_hydration_retry_delay(retry_count))
+        ).isoformat() if rpc_failed else None
+        if rpc_failed:
+            c.execute("""UPDATE raw_launches SET hydration_attempted_at=?,
+                         evidence_state=?,
+                         hydration_error=CASE WHEN evidence_state IN
+                           ('complete','incomplete') THEN hydration_error ELSE ? END,
+                         hydration_last_rpc_error=?,hydration_retry_count=?,
+                         hydration_next_retry_at=? WHERE signature=?""",
+                      (now, state, str(error)[:240] if error else None,
+                       str(error)[:240] if error else None, retry_count,
+                       next_retry_at, signature))
+        else:
+            c.execute("""UPDATE raw_launches SET creator=?,mint=?,hydrated_at=?,
+                         hydration_attempted_at=?,hydration_payload_hash=?,
+                         evidence_state=?,hydration_error=?,
+                         hydration_last_rpc_error=NULL,hydration_retry_count=0,
+                         hydration_next_retry_at=NULL WHERE signature=?""",
+                      (creator, mint, now, now, _hash(tx), state,
+                       str(error)[:240] if error else None, signature))
         c.commit()
+        return state
+    except Exception:
+        c.rollback()
+        raise
     finally:
         c.close()
 
@@ -490,6 +617,9 @@ def _transaction(rpc: JsonRpc, signature: str) -> dict:
     }])
     if not isinstance(result, dict):
         raise RuntimeError("confirmed transaction is not available")
+    signatures = ((result.get("transaction") or {}).get("signatures") or [])
+    if not signatures or str(signatures[0]) != str(signature):
+        raise RuntimeError("RPC transaction signature does not match request")
     return result
 
 
@@ -498,20 +628,28 @@ def persist(payload: object, *, rpc: JsonRpc | None = None,
     if not isinstance(payload, dict) or payload.get("kind") != "launch":
         return
     _insert_raw(payload)
+    if transaction is not None:
+        # A database/evidence failure must propagate to gap recovery. It is not
+        # an RPC outage and must never be relabelled as one by the handler below.
+        _set_hydration(payload["signature"], transaction, None)
+        return
+    if rpc is None:
+        return
     try:
-        tx = transaction if transaction is not None else (
-            _transaction(rpc, payload["signature"]) if rpc is not None else None)
-        if tx is not None:
-            _set_hydration(payload["signature"], tx, None)
+        tx = _transaction(rpc, payload["signature"])
     except Exception as exc:
         _set_hydration(payload["signature"], None, str(exc))
         logger.warning("solana_launch_hydration_failed",
                        signature=payload["signature"][:12], error=str(exc)[:120])
+        return
+    _set_hydration(payload["signature"], tx, None)
 
 
 def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
-                      include_incomplete: bool = False) -> dict:
-    """Retry raw/RPC-failed evidence without repeatedly guessing ambiguous rows."""
+                      include_incomplete: bool = False,
+                      now: datetime | None = None) -> dict:
+    """Retry due evidence oldest-first without repeatedly guessing ambiguous rows."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     states = ["raw_only", "rpc_unavailable"]
     if include_incomplete:
         states.append("incomplete")
@@ -520,19 +658,29 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
     try:
         rows = c.execute(
             f"SELECT signature FROM raw_launches WHERE evidence_state IN ({placeholders}) "
-            "ORDER BY slot DESC LIMIT ?", (*states, max(0, int(limit))),
+            "AND (hydration_next_retry_at IS NULL OR hydration_next_retry_at<=?) "
+            "ORDER BY detected_at ASC,slot ASC,signature ASC LIMIT ?",
+            (*states, now.isoformat(), max(0, int(limit))),
         ).fetchall()
     finally:
         c.close()
-    completed = failed = 0
+    completed = incomplete = rpc_failed = 0
     for (signature,) in rows:
         try:
-            _set_hydration(signature, _transaction(rpc, signature), None)
-            completed += 1
+            tx = _transaction(rpc, signature)
         except Exception as exc:
-            _set_hydration(signature, None, str(exc))
-            failed += 1
-    return {"attempted": len(rows), "completed": completed, "failed": failed}
+            _set_hydration(signature, None, str(exc), at=now)
+            rpc_failed += 1
+            continue
+        state = _set_hydration(signature, tx, None, at=now)
+        if state == "complete":
+            completed += 1
+        else:
+            incomplete += 1
+    return {
+        "attempted": len(rows), "completed": completed,
+        "incomplete": incomplete, "rpc_failed": rpc_failed,
+    }
 
 
 def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
