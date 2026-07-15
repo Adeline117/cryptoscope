@@ -73,6 +73,9 @@ def test_overview_names_stale_inputs_and_mobile_shows_every_tab():
     assert "条陈旧:" in board
     assert "最新 ${newest.name}" in board
     assert "最老 ${oldest.name}" in board
+    assert "视图按时" in board
+    assert "源新鲜" not in board
+    assert "上游市场源的覆盖与失败" in board
     assert "grid-template-columns:repeat(3,minmax(0,1fr))" in board
     assert ".grp{display:contents}" in board
 
