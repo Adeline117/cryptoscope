@@ -493,6 +493,7 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
             logger.warning("evm_pool_timestamp_failed", chain=payload["chain"],
                            block=payload["block_number"], error=str(exc)[:120])
     c = _conn()
+    ledger_event_id = None
     try:
         common = (payload["chain"], payload["venue"], payload["factory"],
                   payload["transaction_hash"].lower(), payload["log_index"],
@@ -526,6 +527,13 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
                            WHERE chain=? AND transaction_hash=? AND log_index=?""",
                           (payload["chain"], payload["transaction_hash"].lower(),
                            payload["log_index"]))
+                row = c.execute(
+                    "SELECT ledger_event_id FROM raw_pools WHERE chain=? "
+                    "AND transaction_hash=? AND log_index=?",
+                    (payload["chain"], payload["transaction_hash"].lower(),
+                     payload["log_index"]),
+                ).fetchone()
+                ledger_event_id = row[0] if row else None
         else:
             c.execute("""INSERT INTO raw_v3_pools(
                 chain,venue,factory,transaction_hash,log_index,block_number,block_hash,
@@ -550,9 +558,21 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
                            WHERE chain=? AND transaction_hash=? AND log_index=?""",
                           (payload["chain"], payload["transaction_hash"].lower(),
                            payload["log_index"]))
+                row = c.execute(
+                    "SELECT ledger_event_id FROM raw_v3_pools WHERE chain=? "
+                    "AND transaction_hash=? AND log_index=?",
+                    (payload["chain"], payload["transaction_hash"].lower(),
+                     payload["log_index"]),
+                ).fetchone()
+                ledger_event_id = row[0] if row else None
         c.commit()
     finally:
         c.close()
+    if payload["removed"] and ledger_event_id:
+        from src.pipeline.opportunity_ledger import invalidate
+        invalidate(ledger_event_id, state="reorg_removed",
+                   reason=(f"{payload['chain']} factory log removed by reorg: "
+                           f"{payload['transaction_hash']}:{payload['log_index']}"))
 
 
 def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -> bool:

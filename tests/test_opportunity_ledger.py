@@ -60,6 +60,19 @@ def test_record_if_absent_never_refreshes_first_event_provenance(tmp_path, monke
     assert row["payload"]["primary_evidence"]["pool"] == "first"
 
 
+def test_invalidated_source_event_leaves_audit_row_but_not_active_list(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate())
+    assert ledger.invalidate(ident, state="reorg_removed", reason="factory reorg")
+    assert ledger.active("launch") == []
+    row = ledger.outcome_rows()[0]
+    assert row["state"] == "reorg_removed"
+    assert row["outcome_state"] == "unresolvable"
+    assert row["outcome"]["invalidation"]["reason"] == "factory reorg"
+
+
 def test_clock_requires_timezone_and_preserves_late_discovery(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
 

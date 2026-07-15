@@ -214,6 +214,29 @@ def test_removed_log_arriving_first_is_never_qualification_candidate(evm):
         c.close()
 
 
+def test_reorg_invalidates_already_linked_ledger_event(evm, tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    original = evm.parse_message(_notification(_log(evm)))
+    evm.persist(original.payload)
+    ident, _ = ledger.record({"lane": "launch", "chain": "bsc", "token": "token",
+                              "symbol": "T", "state": "live", "decision": "WATCH",
+                              "entry_price": 1.0})
+    c = evm._conn()
+    try:
+        c.execute("UPDATE raw_pools SET ledger_event_id=?,"
+                  "qualification_state='qualified_recorded'", (ident,))
+        c.commit()
+    finally:
+        c.close()
+
+    removed = evm.parse_message(_notification(_log(evm, removed=True)))
+    evm.persist(removed.payload)
+    assert ledger.active("launch") == []
+    assert ledger.outcome_rows()[0]["state"] == "reorg_removed"
+
+
 def test_short_missing_block_range_is_backfilled_and_gap_resolved(evm):
     from src.pipeline import stream_health
 

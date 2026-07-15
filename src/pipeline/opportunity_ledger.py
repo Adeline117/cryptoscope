@@ -283,3 +283,28 @@ def save_outcome(ident: str, outcome: dict, state: str = "open") -> None:
         c.commit()
     finally:
         c.close()
+
+
+def invalidate(ident: str, *, reason: str, state: str = "invalidated") -> bool:
+    """Retire disproven source evidence without deleting its audit trail."""
+    if state not in {"invalidated", "reorg_removed"}:
+        raise ValueError(f"unknown invalidation state: {state}")
+    now = datetime.now(timezone.utc).isoformat()
+    c = _conn()
+    try:
+        row = c.execute("SELECT outcome FROM opportunities WHERE id=?", (ident,)).fetchone()
+        if row is None:
+            return False
+        try:
+            outcome = json.loads(row[0]) if row[0] else {}
+        except (TypeError, json.JSONDecodeError):
+            outcome = {}
+        outcome["invalidation"] = {"state": state, "reason": str(reason)[:240], "at": now}
+        c.execute("""UPDATE opportunities SET state=?,outcome_state='unresolvable',
+                     outcome=?,updated_at=? WHERE id=?""",
+                  (state, json.dumps(outcome, ensure_ascii=False, separators=(",", ":")),
+                   now, ident))
+        c.commit()
+        return True
+    finally:
+        c.close()

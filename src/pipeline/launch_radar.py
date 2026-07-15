@@ -287,7 +287,8 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
         state = "qualified_recorded" if new else "duplicate_token_existing"
         stream.set_qualification(raw, state,
                                  reason=None if new else "token already has a first launch event",
-                                 target_token=target, ledger_event_id=ident, at=now)
+                                 target_token=target,
+                                 ledger_event_id=ident if new else None, at=now)
         result["recorded"] += int(new)
         result["inserted"] += int(new)
         result["duplicates"] += int(not new)
