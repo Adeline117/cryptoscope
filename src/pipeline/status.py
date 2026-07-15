@@ -55,7 +55,7 @@ def _accrual_health() -> str:
     pat = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*?%s")
     for job, label in [("perp_cex_scan_done", "perp CEX充值扫描(日)"),
                        ("perp_mobilization_done", "perp 戒备事件扫描(6h)"),
-                       ("operator_sentinel_done", "哨兵(5min)"),
+                       ("operator_sentinel_done", "哨兵(15min)"),
                        ("outcomes_resolved", "结算(1h)")]:
         hits = re.findall(pat.pattern % job, tail, re.M)
         if hits:

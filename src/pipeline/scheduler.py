@@ -276,10 +276,12 @@ def create_scheduler() -> AsyncIOScheduler:
     )
 
     # Operator sentinel → watch confirmed clusters (BASED…) for distribute/rug/
-    # launch every 15 min. Free (archive eth_call + DexScreener).
+    # launch every 15 min. A full 12-target pass normally takes 6-8 minutes, so the
+    # old five-minute trigger guaranteed max_instances skips and noisy false alarms.
+    # A relative interval also avoids a permanent collision with :00/:30 accumulation.
     scheduler.add_job(
         _run_operator_sentinel,
-        CronTrigger(minute="*/5"),
+        IntervalTrigger(minutes=15),
         id="operator_sentinel",
         name="操作者哨兵 (庄买/庄卖/砸盘/rug → Telegram)",
     )

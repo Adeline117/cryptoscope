@@ -214,6 +214,14 @@ def test_perps_export_is_independent_from_wallet_watch():
     assert "*/5" in str(jobs["perps_export"].trigger)
 
 
+def test_operator_sentinel_interval_matches_observed_runtime():
+    from src.pipeline.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+    job = {item.id: item for item in scheduler.get_jobs()}["operator_sentinel"]
+    assert job.trigger.interval.total_seconds() == 15 * 60
+
+
 def test_launch_quote_refresh_has_bounded_independent_fast_job():
     from src.pipeline.scheduler import create_scheduler
 
