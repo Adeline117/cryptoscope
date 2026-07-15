@@ -73,18 +73,22 @@ def get(path: str, timeout: int = 25):
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     return json.loads(r.read().decode())
             except urllib.error.HTTPError as e:
-                if e.code == 429:              # rate limited → back off, retry same key
+                # HTTPError is also the live response object; close it before retrying
+                # or rotating keys so repeated 400/429 replies cannot leak sockets.
+                code = e.code
+                e.close()
+                if code == 429:              # rate limited → back off, retry same key
                     last_err = "429 (rate limited, backing off)"
                     time.sleep(0.6 * (attempt + 1))
                     continue
-                if e.code == 401:              # quota/plan → terminal, park key
+                if code == 401:              # quota/plan → terminal, park key
                     _dead.add(k)
                     last_err = "401 (key parked)"
                     if all(kk in _dead for kk in all_keys):
                         logger.warning("moralis_quota_exhausted",
                                        note="HTTP 401 — all Moralis keys parked (quota/plan)")
                     break
-                last_err = str(e)
+                last_err = f"HTTP Error {code}"
                 break
             except Exception as e:
                 last_err = str(e)

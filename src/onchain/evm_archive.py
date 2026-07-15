@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 import structlog
@@ -100,8 +101,13 @@ class ArchiveRPC:
                 if "error" not in data:
                     return data
                 last_err = data["error"]
+            except urllib.error.HTTPError as e:
+                # HTTPError owns the response socket.  Keeping it in ``last_err``
+                # without closing leaked one CLOSE_WAIT FD per rejected RPC call.
+                last_err = f"HTTP Error {e.code}: {e.reason}"
+                e.close()
             except Exception as e:
-                last_err = e
+                last_err = str(e)
             self._idx += 1  # rotate on failure
         raise RuntimeError(f"all RPCs failed for {self.chain}: {last_err}")
 
@@ -124,8 +130,11 @@ class ArchiveRPC:
                 if "error" not in data and data.get("result") is not None:
                     return data
                 last_err = data.get("error")
+            except urllib.error.HTTPError as e:
+                last_err = f"HTTP Error {e.code}: {e.reason}"
+                e.close()
             except Exception as e:
-                last_err = e
+                last_err = str(e)
         raise RuntimeError(f"all logs RPCs failed for {self.chain}: {last_err}")
 
     def logs_head(self) -> int:
