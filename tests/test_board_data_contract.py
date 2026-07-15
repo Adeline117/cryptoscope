@@ -124,3 +124,23 @@ def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkey
     assert json.loads((tmp_path / "launch.json").read_text())["events"][0][
         "action_level"
     ] == "A1_WATCH"
+
+
+def test_full_export_render_failure_never_replaces_last_good_launch(tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    old = _view(board_export, "launch", {"events": [_launch_event()]})
+    board_export.write_views(launch=old)
+    before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    monkeypatch.setattr(board_export, "render_launch", lambda: (_ for _ in ()).throw(
+        RuntimeError("launch ledger unavailable")))
+    pushed = []
+    monkeypatch.setattr(board_export, "push_to_blob",
+                        lambda paths: pushed.extend(paths) or len(paths))
+
+    with pytest.raises(RuntimeError, match="ledger unavailable"):
+        board_export.run(push=True)
+
+    assert {path.name: path.read_bytes() for path in tmp_path.glob("*.json")} == before
+    assert pushed == []

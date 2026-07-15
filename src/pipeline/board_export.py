@@ -275,8 +275,10 @@ def render_launch() -> dict:
         return _envelope(view(), view="launch")
     except Exception as e:
         logger.warning("render_launch_failed", error=str(e)[:120])
-        return _envelope({"events": [], "scan_error": str(e)[:120],
-                          "source": "Launch event ledger"}, view="launch")
+        # Never turn a ledger/read failure into a newly-fresh empty market.  Every
+        # scheduled caller treats this exception as stale-if-error and leaves the
+        # existing local/Blob launch view untouched.
+        raise
 
 
 def render_structure() -> dict:
@@ -653,13 +655,17 @@ def push_to_blob(paths: list) -> int:
 
 
 def run(push: bool = True, include_operators: bool = True,
-        include_opportunities: bool = True, include_perps: bool = True) -> dict:
+        include_opportunities: bool = True, include_perps: bool = True,
+        include_launch: bool = True) -> dict:
     """Render the money-making lanes → Blob. perps (#2/#3) is keyless & fast;
     opportunities (#1) is the home-grown smart-money radar; operators (庄) is the
     verdict engine (slow). Independent scheduler jobs can omit their separately-owned
     views without overwriting the last successful export."""
     perps = render_perps() if include_perps else None   # independent five-minute job
-    launch = render_launch()                            # #1 low-float first-seen events
+    # The scheduler's independent scan/quote jobs own the Launch observation clock.
+    # Manual full exports may opt in, but regular exports must not synthesize a fresh
+    # delivery timestamp without a source observation.
+    launch = render_launch() if include_launch else None
     structure = render_structure()                      # public listings / later unlocks
     airdrop = render_airdrop()                          # official, owned-wallet workbench
     opportunities = render_opportunities() if include_opportunities else None

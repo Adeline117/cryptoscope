@@ -34,7 +34,11 @@ def test_unknown_view_cannot_inherit_a_generous_default_sla():
 def test_regular_export_can_skip_separately_scheduled_scanners(monkeypatch):
     from src.pipeline import board_export
 
-    for name in ("render_launch", "render_structure", "render_airdrop"):
+    monkeypatch.setattr(
+        board_export, "render_launch",
+        lambda: (_ for _ in ()).throw(AssertionError("regular export owns no launch clock")),
+    )
+    for name in ("render_structure", "render_airdrop"):
         monkeypatch.setattr(board_export, name, lambda: {})
     monkeypatch.setattr(
         board_export, "render_perps",
@@ -53,7 +57,8 @@ def test_regular_export_can_skip_separately_scheduled_scanners(monkeypatch):
     monkeypatch.setattr(board_export, "write_views", lambda **views: [])
 
     result = board_export.run(push=False, include_operators=False,
-                              include_opportunities=False, include_perps=False)
+                              include_opportunities=False, include_perps=False,
+                              include_launch=False)
     assert result["views_written"] == 0
 
 

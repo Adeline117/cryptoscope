@@ -711,7 +711,7 @@ async def _run_launch_radar():
 
 
 async def _run_launch_quotes():
-    """Refresh a bounded quote set and publish the lane's freshness heartbeat."""
+    """Publish only a real quote assessment; keep idle liveness local."""
     import asyncio
 
     logger.info("scheduled_launch_quote_refresh")
@@ -719,16 +719,17 @@ async def _run_launch_quotes():
         from src.pipeline.launch_radar import refresh_quotes
         max_candidates = max(1, min(5, int(os.getenv("LAUNCH_QUOTE_REFRESH_MAX", "1"))))
         result = await asyncio.to_thread(refresh_quotes, max_candidates=max_candidates)
-        # An idle quote pass still proves that the bounded refresh job ran. Re-render
-        # the read-only view so its delivery clock remains aligned with the advertised
-        # 30-second cadence; this does not synthesize a quote or mutate the event ledger.
+        # Job liveness is local operational state, not a market/source observation.
+        # It must never advance the public view's generated_at clock.
+        from src.pipeline.operator_sentinel import _record_detector_heartbeat
+        await asyncio.to_thread(_record_detector_heartbeat, "launch_quote_refresh")
+        if not result["refreshed"]:
+            logger.info("launch_quote_refresh_idle", **result, pushed=0)
+            return
         from src.pipeline import board_export
         launch = await asyncio.to_thread(board_export.render_launch)
         paths = await asyncio.to_thread(board_export.write_views, launch=launch)
         pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
-        if not result["refreshed"]:
-            logger.info("launch_quote_refresh_idle", **result, pushed=pushed)
-            return
         logger.info("launch_quote_refresh_done", **result, pushed=pushed)
     except Exception as exc:
         logger.error("launch_quote_refresh_failed", error=str(exc)[:120])
@@ -765,6 +766,7 @@ async def _run_board_export():
             include_operators=False,
             include_opportunities=False,
             include_perps=False,
+            include_launch=False,
         )
         logger.info("board_export_done", **res)
     except Exception as e:

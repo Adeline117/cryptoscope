@@ -281,35 +281,98 @@ def test_launch_quote_refresh_has_bounded_independent_fast_job():
 
 
 @pytest.mark.asyncio
-async def test_idle_launch_quote_refresh_publishes_valid_heartbeat_without_event_mutation(
-        tmp_path, monkeypatch):
-    import json
+async def test_idle_launch_quote_refresh_keeps_liveness_local(monkeypatch):
+    from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
 
-    from src.pipeline import board_export, launch_radar, scheduler
-
-    event = {
-        "id": "launch-1", "lane": "launch", "action_level": "A1_WATCH",
-        "actionable_now": False, "auto_execution_allowed": False,
-        "effective_decision": "WATCH", "entry_price": 0.000123,
-    }
-    launch = board_export._envelope({"events": [event]}, view="launch")
-    pushed = []
+    heartbeats = []
     monkeypatch.setattr(launch_radar, "refresh_quotes", lambda **kwargs: {
         "eligible": 0, "attempted": 0, "refreshed": 0, "skipped_fresh": 0,
         "skipped_backoff": 0, "errors": 0})
-    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    monkeypatch.setattr(board_export, "render_launch", lambda: launch)
-    monkeypatch.setattr(
-        board_export, "push_to_blob",
-        lambda paths: pushed.extend(path.name for path in paths) or len(paths),
-    )
+    monkeypatch.setattr(operator_sentinel, "_record_detector_heartbeat",
+                        lambda name: heartbeats.append(name))
+    monkeypatch.setattr(board_export, "render_launch", lambda: (_ for _ in ()).throw(
+        AssertionError("idle refresh must not render")))
+    monkeypatch.setattr(board_export, "write_views", lambda **_views: (_ for _ in ()).throw(
+        AssertionError("idle refresh must not write")))
+    monkeypatch.setattr(board_export, "push_to_blob", lambda _paths: (_ for _ in ()).throw(
+        AssertionError("idle refresh must not push")))
 
     await scheduler._run_launch_quotes()
 
-    written = json.loads((tmp_path / "launch.json").read_text())
-    assert written["events"] == [event]
-    assert written["generated_at"] == launch["generated_at"]
-    assert set(pushed) == {"launch.json", "meta.json"}
+    assert heartbeats == ["launch_quote_refresh"]
+
+
+@pytest.mark.asyncio
+async def test_real_launch_quote_refresh_publishes_assessment(monkeypatch):
+    from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
+
+    calls = []
+    launch = {"events": [{"id": "launch-1"}]}
+    monkeypatch.setattr(launch_radar, "refresh_quotes", lambda **kwargs: {
+        "eligible": 1, "attempted": 1, "refreshed": 1, "skipped_fresh": 0,
+        "skipped_backoff": 0, "errors": 0})
+    monkeypatch.setattr(operator_sentinel, "_record_detector_heartbeat",
+                        lambda name: calls.append(("heartbeat", name)))
+    monkeypatch.setattr(board_export, "render_launch",
+                        lambda: calls.append(("render",)) or launch)
+    monkeypatch.setattr(board_export, "write_views",
+                        lambda **views: calls.append(("write", views)) or ["launch"])
+    monkeypatch.setattr(board_export, "push_to_blob",
+                        lambda paths: calls.append(("push", paths)) or 1)
+
+    await scheduler._run_launch_quotes()
+
+    assert calls == [
+        ("heartbeat", "launch_quote_refresh"),
+        ("render",),
+        ("write", {"launch": launch}),
+        ("push", ["launch"]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_launch_render_failure_preserves_last_good_view(tmp_path, monkeypatch):
+    from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    old = board_export._envelope({"events": [{
+        "id": "launch-1", "lane": "launch", "action_level": "A1_WATCH",
+        "actionable_now": False, "auto_execution_allowed": False,
+        "effective_decision": "WATCH",
+    }]}, view="launch")
+    board_export.write_views(launch=old)
+    before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    monkeypatch.setattr(launch_radar, "refresh_quotes", lambda **kwargs: {
+        "eligible": 1, "attempted": 1, "refreshed": 1, "skipped_fresh": 0,
+        "skipped_backoff": 0, "errors": 0})
+    monkeypatch.setattr(operator_sentinel, "_record_detector_heartbeat", lambda _name: None)
+    monkeypatch.setattr(launch_radar, "view",
+                        lambda: (_ for _ in ()).throw(RuntimeError("ledger unavailable")))
+    pushed = []
+    monkeypatch.setattr(board_export, "push_to_blob",
+                        lambda paths: pushed.extend(paths) or len(paths))
+
+    await scheduler._run_launch_quotes()
+
+    assert {path.name: path.read_bytes() for path in tmp_path.glob("*.json")} == before
+    assert pushed == []
+
+
+@pytest.mark.asyncio
+async def test_launch_scan_render_failure_also_preserves_last_good(monkeypatch):
+    from src.pipeline import board_export, launch_radar, scheduler
+
+    monkeypatch.setattr(launch_radar, "scan", lambda: {
+        "scanned": 1, "assessed": 0, "inserted": 0, "events": [],
+    })
+    monkeypatch.setattr(board_export, "render_launch", lambda: (_ for _ in ()).throw(
+        RuntimeError("ledger unavailable")))
+    monkeypatch.setattr(board_export, "write_views", lambda **_views: (_ for _ in ()).throw(
+        AssertionError("failed render must not write")))
+    monkeypatch.setattr(board_export, "push_to_blob", lambda _paths: (_ for _ in ()).throw(
+        AssertionError("failed render must not push")))
+
+    await scheduler._run_launch_radar()
 
 
 @pytest.mark.asyncio
@@ -344,6 +407,7 @@ async def test_regular_board_export_excludes_independent_scans(monkeypatch):
         "include_operators": False,
         "include_opportunities": False,
         "include_perps": False,
+        "include_launch": False,
     }]
 
 
