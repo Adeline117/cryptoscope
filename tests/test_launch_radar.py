@@ -101,3 +101,93 @@ def test_cascade_without_fresh_executable_book_is_watch_only(tmp_path, monkeypat
     assert row["quote_at"] is None and row["expires_at"] is None
     assert row["execution_probe"]["state"] == "unknown"
     assert "stale book" in row["execution_probe"]["reason"]
+
+
+def _raw_solana_launch(tmp_path, monkeypatch, *, now):
+    import src.pipeline.opportunity_ledger as ol
+    from src.pipeline import solana_launch_stream as stream
+    from src.pipeline import stream_health
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    monkeypatch.setattr(stream, "DB", tmp_path / "solana.db")
+    monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
+    c = stream._conn()
+    try:
+        c.execute("""INSERT INTO raw_launches(
+            signature,slot,program,event_type,creator,mint,detected_at,hydrated_at,
+            raw_payload_hash,hydration_payload_hash,logs,evidence_state,qualification_state
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  ("sig-primary", 123, stream.PUMP_FUN_PROGRAM, "pump_fun_createv2",
+                   "creator", "Token", now.isoformat(), now.isoformat(), "a" * 64,
+                   "b" * 64, "[]", "complete", "raw_unqualified"))
+        c.commit()
+    finally:
+        c.close()
+    return stream
+
+
+def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
+
+    def fetch(url):
+        if url == lr.PROFILES_URL:
+            return []
+        assert url.endswith("/solana/Token")
+        return [pair]
+
+    def assessor(event):
+        event["decision"] = "WATCH"
+        event["security_gate"] = {"state": "unknown", "reason": "test"}
+        event["execution_probe"] = {"state": "skipped"}
+        return event
+
+    result = lr.scan(fetch=fetch, now=now, max_profiles=0, max_primary=1,
+                     assessor=assessor)
+    assert result["primary"] == {"available": True, "attempted": 1, "recorded": 1,
+                                 "inserted": 1, "pending": 0, "errors": 0,
+                                 "screened_out": 0}
+    row = ol.active("launch", now=now)[0]
+    assert row["primary_evidence"]["signature"] == "sig-primary"
+    assert row["source"] == "Pump.fun standard logs + DEX Screener pool"
+    c = stream._conn()
+    try:
+        state = c.execute("SELECT qualification_state,ledger_event_id FROM raw_launches").fetchone()
+    finally:
+        c.close()
+    assert state == ("qualified_recorded", row["id"])
+
+
+def test_primary_market_miss_remains_retryable(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+
+    result = lr.scan(fetch=lambda url: [] if url == lr.PROFILES_URL else [], now=now,
+                     max_profiles=0, max_primary=1, assessor=lambda event: event)
+    assert result["primary"]["pending"] == 1
+    c = stream._conn()
+    try:
+        state, error = c.execute(
+            "SELECT qualification_state,qualification_error FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert state == "market_pending" and "not indexed" in error
+
+
+def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+
+    now = datetime.now(timezone.utc)
+    _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    payload = lr.view()
+    solana = payload["primary_sources"]["solana"]
+    assert solana["available"] is True
+    assert solana["qualification"]["raw_total"] == 1
+    assert solana["qualification"]["recent_complete"] == 1

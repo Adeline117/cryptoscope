@@ -38,6 +38,11 @@ def _pair_for(profile: dict, fetch=_json) -> dict | None:
     chain, token = profile.get("chainId"), profile.get("tokenAddress")
     if chain not in SUPPORTED_CHAINS or not token:
         return None
+    return _pair_for_token(chain, token, fetch=fetch)
+
+
+def _pair_for_token(chain: str, token: str, *, fetch=_json) -> dict | None:
+    """Select the deepest observable pool for one identity-proven token."""
     pairs = fetch(PAIRS_URL.format(chain=chain, token=token))
     pairs = pairs if isinstance(pairs, list) else []
     usable = [p for p in pairs if p.get("pairAddress") and p.get("priceUsd")]
@@ -105,8 +110,93 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     }
 
 
+def _assess_candidate(event: dict, assessor, *, assessed: int,
+                      max_assessments: int) -> tuple[dict, int]:
+    if event.get("decision") != "SMALL_PROBE":
+        return event, assessed
+    if assessed < max(0, max_assessments):
+        assessed += 1
+        try:
+            return assessor(event), assessed
+        except Exception as exc:
+            event["decision"] = "WATCH"
+            event["security_gate"] = {
+                "state": "unknown", "reason": f"assessment failed: {str(exc)[:60]}",
+            }
+            event["execution_probe"] = {"state": "skipped", "reason": "assessment failed"}
+            return event, assessed
+    event["decision"] = "WATCH"
+    event["security_gate"] = {
+        "state": "unknown", "reason": "per-scan assessment budget exhausted",
+    }
+    event["execution_probe"] = {"state": "skipped", "reason": "assessment budget exhausted"}
+    event["reasons"].append("执行门降级:本轮安全/路由检查预算已用完")
+    return event, assessed
+
+
+def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
+                         max_assessments: int, max_candidates: int) -> tuple[dict, int]:
+    """Bridge standard Pump.fun log evidence into the conservative launch ledger."""
+    from src.pipeline import solana_launch_stream as stream
+
+    rows = stream.qualification_batch(now=now, limit=max_candidates)
+    result = {"available": True, "attempted": 0, "recorded": 0, "inserted": 0,
+              "pending": 0, "errors": 0, "screened_out": 0}
+    for raw in rows:
+        result["attempted"] += 1
+        try:
+            pair = _pair_for_token("solana", raw["mint"], fetch=fetch)
+        except Exception as exc:
+            # A shared market-data failure should not fan out into one failed request
+            # per mint. Record the first miss and retry it after the persisted backoff.
+            stream.set_qualification(raw["signature"], "market_error", error=str(exc), at=now)
+            result["errors"] += 1
+            break
+        if not pair:
+            stream.set_qualification(raw["signature"], "market_pending",
+                                     error="DEX pool not indexed yet", at=now)
+            result["pending"] += 1
+            continue
+        event = qualify(pair, now=now, source="Pump.fun standard logs + DEX Screener pool")
+        if event is None:
+            created_ms = pair.get("pairCreatedAt")
+            try:
+                age_hours = ((now - datetime.fromtimestamp(
+                    float(created_ms) / 1000, tz=timezone.utc)).total_seconds() / 3600)
+            except (TypeError, ValueError, OSError):
+                age_hours = 0
+            terminal = age_hours > 24
+            state = "screened_out" if terminal else "market_pending"
+            reason = ("pool is older than the 24h launch window" if terminal
+                      else "pool not yet within liquidity/FDV launch bounds")
+            stream.set_qualification(raw["signature"], state, error=reason, at=now)
+            result["screened_out" if terminal else "pending"] += 1
+            continue
+        event["detected_at"] = raw["detected_at"]
+        event["decision_at"] = now.isoformat()
+        event["primary_evidence"] = {
+            "source": "Solana logsSubscribe + confirmed transaction",
+            "program": stream.PUMP_FUN_PROGRAM,
+            "signature": raw["signature"],
+            "creator": raw["creator"],
+            "slot": raw["slot"],
+            "event_type": raw["event_type"],
+            "evidence_state": "complete",
+            "explorer_url": f"https://solscan.io/tx/{raw['signature']}",
+        }
+        event, assessed = _assess_candidate(
+            event, assessor, assessed=assessed, max_assessments=max_assessments)
+        ident, new = record(event)
+        stream.set_qualification(raw["signature"], "qualified_recorded",
+                                 ledger_event_id=ident, at=now)
+        result["recorded"] += 1
+        result["inserted"] += int(new)
+    return result, assessed
+
+
 def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CANDIDATES,
-         assessor=None, max_assessments: int = MAX_EXECUTION_ASSESSMENTS) -> dict:
+         assessor=None, max_assessments: int = MAX_EXECUTION_ASSESSMENTS,
+         max_primary: int = 20) -> dict:
     """Discover pools, then safety/round-trip gate only raw actionable candidates.
 
     The hard assessment budget bounds GoPlus/router calls. Anything beyond the budget
@@ -115,43 +205,49 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
     now = now or datetime.now(timezone.utc)
     if assessor is None:
         from src.pipeline.launch_execution import assess as assessor
+    inserted = assessed = 0
+    try:
+        primary, assessed = _scan_primary_solana(
+            fetch, now=now, assessor=assessor, assessed=assessed,
+            max_assessments=max_assessments, max_candidates=max(0, max_primary))
+        inserted += primary["inserted"]
+    except Exception as exc:
+        primary = {"available": False, "attempted": 0, "recorded": 0, "inserted": 0,
+                   "pending": 0, "errors": 1, "screened_out": 0,
+                   "reason": str(exc)[:120]}
     profiles = fetch(PROFILES_URL)
     profiles = profiles if isinstance(profiles, list) else []
-    inserted = assessed = 0
     for profile in profiles[:max_profiles]:
         try:
             pair = _pair_for(profile, fetch)
             event = qualify(pair, now=now) if pair else None
             if event:
-                if event.get("decision") == "SMALL_PROBE":
-                    if assessed < max(0, max_assessments):
-                        assessed += 1
-                        try:
-                            event = assessor(event)
-                        except Exception as exc:
-                            event["decision"] = "WATCH"
-                            event["security_gate"] = {"state": "unknown",
-                                                      "reason": f"assessment failed: {str(exc)[:60]}"}
-                            event["execution_probe"] = {"state": "skipped",
-                                                        "reason": "assessment failed"}
-                    else:
-                        event["decision"] = "WATCH"
-                        event["security_gate"] = {"state": "unknown",
-                                                  "reason": "per-scan assessment budget exhausted"}
-                        event["execution_probe"] = {"state": "skipped",
-                                                    "reason": "assessment budget exhausted"}
-                        event["reasons"].append("执行门降级:本轮安全/路由检查预算已用完")
+                event, assessed = _assess_candidate(
+                    event, assessor, assessed=assessed, max_assessments=max_assessments)
                 _, new = record(event)
                 inserted += int(new)
         except Exception:
             continue
-    return {"scanned": len(profiles[:max_profiles]), "assessed": assessed, "inserted": inserted,
-            "events": active("launch"), "source": "DEX Screener profiles + pools"}
+    return {"scanned": len(profiles[:max_profiles]) + primary["attempted"],
+            "profile_scanned": len(profiles[:max_profiles]), "primary": primary,
+            "assessed": assessed, "inserted": inserted,
+            "events": active("launch"),
+            "source": "Primary chain launch evidence + DEX Screener pools/profiles"}
 
 
 def view() -> dict:
     """Read-only board payload; scanning belongs to a scheduled ingestion path."""
-    return {"events": active("launch"), "source": "Launch event ledger"}
+    try:
+        from src.pipeline import solana_launch_stream, stream_health
+        streams = [item for item in stream_health.snapshot()
+                   if item["source"] == "solana" and item["stream"] == "pump_fun_launches"]
+        primary = {"available": True,
+                   "qualification": solana_launch_stream.qualification_summary(),
+                   "streams": streams}
+    except Exception as exc:
+        primary = {"available": False, "reason": str(exc)[:120], "streams": []}
+    return {"events": active("launch"), "primary_sources": {"solana": primary},
+            "source": "Launch event ledger + primary chain stream health"}
 
 
 if __name__ == "__main__":
