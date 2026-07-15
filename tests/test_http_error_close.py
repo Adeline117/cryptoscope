@@ -9,8 +9,8 @@ import pytest
 
 
 class TrackedHTTPError(urllib.error.HTTPError):
-    def __init__(self, url: str, code: int = 403):
-        super().__init__(url, code, "rejected", {}, io.BytesIO(b"blocked"))
+    def __init__(self, url: str, code: int = 403, headers: dict | None = None):
+        super().__init__(url, code, "rejected", headers or {}, io.BytesIO(b"blocked"))
         self.was_closed = False
 
     def close(self):
@@ -119,3 +119,37 @@ def test_factory_rpc_clients_close_rejected_responses(monkeypatch):
     assert len(evm_errors) == 2
     assert all(error.was_closed and error.fp.closed for error in evm_errors)
     assert solana_error.was_closed and solana_error.fp.closed
+
+
+def test_solana_rate_limit_closes_response_and_preserves_retry_after(monkeypatch):
+    from src.pipeline import solana_launch_stream
+
+    error = TrackedHTTPError(
+        "https://solana.invalid", code=429, headers={"Retry-After": "37"},
+    )
+    monkeypatch.setattr(
+        solana_launch_stream.urllib.request,
+        "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(error),
+    )
+
+    with pytest.raises(solana_launch_stream.RpcPressureError) as raised:
+        solana_launch_stream.JsonRpc("https://solana.invalid").call("getBlock", [])
+
+    assert raised.value.kind == "rate_limited"
+    assert raised.value.retry_after_seconds == 37
+    assert error.was_closed and error.fp.closed
+
+    malformed = TrackedHTTPError(
+        "https://solana.invalid", code=429,
+        headers={"Retry-After": "Infinity"},
+    )
+    monkeypatch.setattr(
+        solana_launch_stream.urllib.request,
+        "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(malformed),
+    )
+    with pytest.raises(solana_launch_stream.RpcPressureError) as malformed_result:
+        solana_launch_stream.JsonRpc("https://solana.invalid").call("getBlock", [])
+    assert malformed_result.value.retry_after_seconds is None
+    assert malformed.was_closed and malformed.fp.closed

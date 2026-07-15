@@ -7,14 +7,18 @@ the corresponding transaction proves both its mint and creator signer.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
+import math
 import os
+import socket
 import sqlite3
 import threading
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Callable
 
 import structlog
@@ -33,7 +37,75 @@ GAP_RETRY_SLOT_BUDGET = 1
 SKIPPED_SLOT_PROOF_LOOKAHEAD = 512
 HYDRATION_RETRY_BASE_SECONDS = 60
 HYDRATION_RETRY_MAX_SECONDS = 3600
+RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS = 60
+RPC_PRESSURE_MAX_COOLDOWN_SECONDS = 3600
 DB = DATA_DIR / "solana_launch_events.db"
+
+
+class RpcPressureError(RuntimeError):
+    """Transport/rate pressure that must stop all RPC work for this cycle."""
+
+    def __init__(self, message: str, *, kind: str,
+                 retry_after_seconds: int | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.retry_after_seconds = retry_after_seconds
+
+
+class TransactionUnavailableError(RuntimeError):
+    """One confirmed transaction is unavailable; this is not capacity pressure."""
+
+
+def _retry_after_seconds(value: object, *, now: datetime | None = None) -> int | None:
+    if value is None:
+        return None
+    try:
+        seconds = math.ceil(float(str(value).strip()))
+    except (TypeError, ValueError, OverflowError):
+        try:
+            until = parsedate_to_datetime(str(value))
+            if until.tzinfo is None:
+                return None
+            current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+            seconds = math.ceil((until.astimezone(timezone.utc) - current).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return min(RPC_PRESSURE_MAX_COOLDOWN_SECONDS, max(0, int(seconds)))
+
+
+def _as_rpc_pressure(error: Exception) -> RpcPressureError | None:
+    if isinstance(error, RpcPressureError):
+        return error
+    if isinstance(error, urllib.error.HTTPError):
+        if int(error.code) == 429:
+            return RpcPressureError(str(error), kind="rate_limited")
+        if int(error.code) in {502, 503, 504}:
+            return RpcPressureError(str(error), kind="transport")
+        return None
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return RpcPressureError(
+            str(error) or type(error).__name__, kind="timeout")
+    if isinstance(error, http.client.IncompleteRead):
+        return RpcPressureError(str(error), kind="truncated")
+    if isinstance(error, urllib.error.URLError):
+        reason = getattr(error, "reason", None)
+        if isinstance(reason, (TimeoutError, socket.timeout)):
+            return RpcPressureError(str(error), kind="timeout")
+        return RpcPressureError(str(error), kind="transport")
+    if isinstance(error, ConnectionError):
+        return RpcPressureError(str(error), kind="transport")
+    return None
+
+
+def _circuit_cooldown_seconds(retry_after_seconds: int | None,
+                              pressure_count: int) -> int:
+    exponential = RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS * (
+        2 ** min(6, max(0, int(pressure_count) - 1))
+    )
+    return min(
+        RPC_PRESSURE_MAX_COOLDOWN_SECONDS,
+        max(exponential, max(0, int(retry_after_seconds or 0))),
+    )
 
 
 def _enable_wal(c: sqlite3.Connection) -> None:
@@ -523,7 +595,8 @@ def _hydration_retry_delay(retry_count: int) -> int:
 
 
 def _set_hydration(signature: str, tx: dict | None, error: str | None,
-                   *, at: datetime | None = None) -> str:
+                   *, at: datetime | None = None,
+                   retry_after_seconds: int | None = None) -> str:
     now_dt = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     now = now_dt.isoformat()
     creator = mint = None
@@ -558,8 +631,15 @@ def _set_hydration(signature: str, tx: dict | None, error: str | None,
             # A later audit outage cannot erase a payload already captured.
             state = previous_state
         retry_count = current_retry + 1 if rpc_failed else 0
+        retry_delay = min(
+            HYDRATION_RETRY_MAX_SECONDS,
+            max(
+                _hydration_retry_delay(retry_count),
+                max(0, int(retry_after_seconds or 0)),
+            ),
+        )
         next_retry_at = (
-            now_dt + timedelta(seconds=_hydration_retry_delay(retry_count))
+            now_dt + timedelta(seconds=retry_delay)
         ).isoformat() if rpc_failed else None
         if rpc_failed:
             c.execute("""UPDATE raw_launches SET hydration_attempted_at=?,
@@ -593,21 +673,55 @@ class JsonRpc:
         self.endpoint = endpoint
         self.timeout = timeout
 
-    def call(self, method: str, params: list) -> object:
+    def call(self, method: str, params: list, *, timeout: float | None = None) -> object:
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
                            "params": params}).encode()
         request = urllib.request.Request(
             self.endpoint, data=body,
             headers={"Content-Type": "application/json", "User-Agent": "CryptoScope/1.0"})
+        effective_timeout = self.timeout if timeout is None else min(
+            self.timeout, max(0.001, float(timeout)),
+        )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=effective_timeout) as response:
                 result = json.load(response)
         except urllib.error.HTTPError as error:
             # The exception is also the HTTP response and owns its socket.
-            error.close()
+            try:
+                retry_after = _retry_after_seconds(
+                    (error.headers or {}).get("Retry-After"),
+                )
+                code = int(error.code)
+                if code == 429:
+                    raise RpcPressureError(
+                        f"Solana RPC {method} returned HTTP 429",
+                        kind="rate_limited", retry_after_seconds=retry_after,
+                    ) from error
+                if code in {502, 503, 504}:
+                    raise RpcPressureError(
+                        f"Solana RPC {method} returned HTTP {code}",
+                        kind="transport", retry_after_seconds=retry_after,
+                    ) from error
+                raise
+            finally:
+                error.close()
+        except Exception as error:
+            pressure = _as_rpc_pressure(error)
+            if pressure is not None:
+                raise pressure from error
             raise
         if result.get("error"):
-            raise RuntimeError(f"Solana RPC {method} failed: {result['error']}")
+            rpc_error = result["error"]
+            if isinstance(rpc_error, dict) and rpc_error.get("code") == 429:
+                raise RpcPressureError(
+                    f"Solana RPC {method} returned JSON-RPC 429",
+                    kind="rate_limited",
+                )
+            error = RuntimeError(f"Solana RPC {method} failed: {rpc_error}")
+            pressure = _as_rpc_pressure(error)
+            if pressure is not None:
+                raise pressure
+            raise error
         return result.get("result")
 
 
@@ -617,7 +731,7 @@ def _transaction(rpc: JsonRpc, signature: str) -> dict:
         "maxSupportedTransactionVersion": 0,
     }])
     if not isinstance(result, dict):
-        raise RuntimeError("confirmed transaction is not available")
+        raise TransactionUnavailableError("confirmed transaction is not available")
     signatures = ((result.get("transaction") or {}).get("signatures") or [])
     if not signatures or str(signatures[0]) != str(signature):
         raise RuntimeError("RPC transaction signature does not match request")
@@ -639,7 +753,11 @@ def persist(payload: object, *, rpc: JsonRpc | None = None,
     try:
         tx = _transaction(rpc, payload["signature"])
     except Exception as exc:
-        _set_hydration(payload["signature"], None, str(exc))
+        pressure = _as_rpc_pressure(exc)
+        _set_hydration(
+            payload["signature"], None, str(exc),
+            retry_after_seconds=(pressure.retry_after_seconds if pressure else None),
+        )
         logger.warning("solana_launch_hydration_failed",
                        signature=payload["signature"][:12], error=str(exc)[:120])
         return
@@ -665,12 +783,28 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
         ).fetchall()
     finally:
         c.close()
-    completed = incomplete = rpc_failed = 0
+    attempted = completed = incomplete = unavailable = rpc_failed = pressure_failed = 0
+    pressure_kind = None
+    retry_after = None
     for (signature,) in rows:
+        attempted += 1
         try:
             tx = _transaction(rpc, signature)
-        except Exception as exc:
+        except TransactionUnavailableError as exc:
             _set_hydration(signature, None, str(exc), at=now)
+            unavailable += 1
+            continue
+        except Exception as exc:
+            pressure = _as_rpc_pressure(exc)
+            _set_hydration(
+                signature, None, str(exc), at=now,
+                retry_after_seconds=(pressure.retry_after_seconds if pressure else None),
+            )
+            if pressure is not None:
+                pressure_failed += 1
+                pressure_kind = pressure.kind
+                retry_after = pressure.retry_after_seconds
+                break
             rpc_failed += 1
             continue
         state = _set_hydration(signature, tx, None, at=now)
@@ -679,8 +813,11 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
         else:
             incomplete += 1
     return {
-        "attempted": len(rows), "completed": completed,
-        "incomplete": incomplete, "rpc_failed": rpc_failed,
+        "attempted": attempted, "completed": completed,
+        "incomplete": incomplete, "unavailable": unavailable,
+        "rpc_failed": rpc_failed, "pressure_failed": pressure_failed,
+        "pressure_kind": pressure_kind,
+        "retry_after_seconds": retry_after,
     }
 
 
@@ -688,6 +825,8 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                     slot_budget: int = GAP_RETRY_SLOT_BUDGET) -> dict:
     gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
     attempted = recovered = progressed = failed = 0
+    pressure_kind = None
+    retry_after = None
     # A public Solana block can be several MB.  Verify and checkpoint at most one
     # slot per maintenance tick so historical recovery cannot starve live data.
     remaining_budget = min(GAP_RETRY_SLOT_BUDGET, max(0, int(slot_budget)))
@@ -711,28 +850,98 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                 progressed += 1
         except Exception as exc:
             failed += 1
-            deferred = stream_health.defer_gap(gap["id"], str(exc))
+            pressure = _as_rpc_pressure(exc)
+            pressure_kind = pressure.kind if pressure else None
+            retry_after = pressure.retry_after_seconds if pressure else None
+            deferred = stream_health.defer_gap(
+                gap["id"], str(exc),
+                base_delay_seconds=max(
+                    60, int(math.ceil(retry_after or 0)),
+                ),
+            )
             logger.warning(
                 "solana_launch_backfill_failed", slot=start,
                 error=str(exc)[:120],
                 next_retry_at=(deferred or {}).get("next_retry_at"),
             )
-    return {"attempted": attempted, "recovered": recovered,
-            "progressed": progressed, "failed": failed}
+    return {
+        "attempted": attempted, "recovered": recovered,
+        "progressed": progressed, "failed": failed,
+        "pressure_kind": pressure_kind,
+        "retry_after_seconds": retry_after,
+    }
 
 
 def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
-                    *, interval_seconds: float = 60) -> None:
+                    *, interval_seconds: float = 60,
+                    monotonic: Callable[[], float] = time.monotonic) -> None:
+    circuit_open_until = 0.0
+    circuit_kind = None
+    pressure_count = 0
     while not stop.is_set():
-        # Recover the oldest missing chain evidence before spending RPC budget on
-        # transactions that are already durably present as raw evidence.
-        gaps = retry_open_gaps(rpc)
-        if gaps["attempted"]:
-            logger.info("solana_launch_gap_retry", **gaps)
-        result = rehydrate_pending(rpc, limit=5)
-        if result["attempted"]:
-            logger.info("solana_launch_rehydrated", **result)
-        if stop.wait(max(1, interval_seconds)):
+        cycle_started = monotonic()
+        try:
+            cycle_now = monotonic()
+            if circuit_open_until and cycle_now < circuit_open_until:
+                logger.warning(
+                    "solana_launch_rpc_circuit_open",
+                    pressure_kind=circuit_kind,
+                    remaining_seconds=max(0, round(circuit_open_until - cycle_now)),
+                )
+            else:
+                half_open = circuit_open_until > 0
+                # Recover the oldest missing chain evidence before spending RPC
+                # budget on transactions already durably present as raw evidence.
+                gaps = retry_open_gaps(rpc)
+                if gaps["attempted"]:
+                    logger.info("solana_launch_gap_retry", **gaps)
+                result = None
+                if gaps["pressure_kind"] is None and not (
+                    half_open and gaps["attempted"]
+                ):
+                    result = rehydrate_pending(rpc, limit=1 if half_open else 5)
+                    if result["attempted"]:
+                        logger.info("solana_launch_rehydrated", **result)
+
+                pressure_lane = None
+                pressure_kind = gaps["pressure_kind"]
+                retry_after = gaps["retry_after_seconds"]
+                if pressure_kind is not None:
+                    pressure_lane = "gap"
+                elif result is not None and result["pressure_kind"] is not None:
+                    pressure_lane = "hydration"
+                    pressure_kind = result["pressure_kind"]
+                    retry_after = result["retry_after_seconds"]
+
+                if pressure_lane is not None:
+                    pressure_count += 1
+                    cooldown = _circuit_cooldown_seconds(
+                        retry_after, pressure_count,
+                    )
+                    circuit_open_until = monotonic() + cooldown
+                    circuit_kind = pressure_kind
+                    logger.warning(
+                        "solana_launch_rpc_pressure",
+                        lane=pressure_lane, pressure_kind=pressure_kind,
+                        retry_after_seconds=retry_after,
+                        circuit_seconds=cooldown,
+                    )
+                elif half_open and (
+                    gaps["attempted"]
+                    or (result is not None and result["attempted"])
+                ):
+                    circuit_open_until = 0.0
+                    circuit_kind = None
+                    pressure_count = 0
+                    logger.info("solana_launch_rpc_circuit_recovered")
+        except Exception as exc:
+            # One transient database/provider defect must never silently kill the
+            # only maintenance thread.
+            logger.exception(
+                "solana_launch_maintenance_failed", error=str(exc)[:240],
+            )
+        elapsed = monotonic() - cycle_started
+        if stop.wait(max(1.0, float(interval_seconds) - elapsed)):
             break
 
 
