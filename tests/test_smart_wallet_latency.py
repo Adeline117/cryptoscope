@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from src.onchain import gmgn, smart_wallets
 from src.pipeline import board_export
@@ -105,3 +106,11 @@ def test_watch_export_exposes_failed_source_health(monkeypatch):
     assert payload["source_health"] == health
     assert payload["scan_error"] == "source_unavailable"
     assert payload["watched_wallets"] == 25
+
+
+def test_board_discloses_wallet_rotation_and_source_failure_semantics():
+    html = (Path(__file__).parents[1] / "board" / "public" / "index.html").read_text()
+
+    assert "45分钟新鲜缓存" in html
+    assert "源不可用，空列表不代表没有买入" in html
+    assert "源失败或缓存覆盖不足绝不解释成没有活动" in html
