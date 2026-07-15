@@ -221,6 +221,19 @@ def test_build_samples_from_snapshots(tmp_path):
     assert len(s["features"]["effective_series"]) == 2
 
 
+def test_build_samples_keeps_solana_outcome_keys_case_sensitive(tmp_path):
+    from src.onchain import holder_snapshot as hs
+
+    db = tmp_path / "snap.db"
+    hs.save_snapshot(
+        "MintCase", "solana", [{"address": "A", "balance": 100}], db_path=db,
+    )
+
+    assert wf.build_samples_from_snapshots(
+        {"mintcase": 3.0}, chain="solana", db_path=db,
+    ) == []
+
+
 def test_evm_archive_rpc_config(monkeypatch):
     from src.onchain.evm_archive import ArchiveRPC, _default_rpcs
 

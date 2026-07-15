@@ -82,11 +82,26 @@ def build_samples_from_snapshots(
     from src.onchain.entity_clustering import effective_concentration
 
     kwargs = {"db_path": db_path} if db_path is not None else {}
+    # EVM snapshot ids are stored canonically lowercase, while a supplied outcome
+    # ledger may retain checksum casing. Match those identities case-insensitively
+    # but preserve the outcome ledger's spelling in the emitted sample. Solana
+    # identifiers remain exact-case and never enter this alias map.
+    evm_outcomes = {
+        str(token).lower(): (str(token), max_return)
+        for token, max_return in outcomes.items()
+    }
     samples: list[dict] = []
     for token, ch in hs.list_tokens(**kwargs):
         if chain and ch != chain:
             continue
-        if token not in outcomes:
+        if token in outcomes:
+            outcome_token, max_return = token, outcomes[token]
+        elif hs._is_evm_chain(ch):
+            matched = evm_outcomes.get(token.lower())
+            if matched is None:
+                continue
+            outcome_token, max_return = matched
+        else:
             continue
         history = hs.get_holders_history(token, ch, **kwargs)
         if not history:
@@ -98,7 +113,7 @@ def build_samples_from_snapshots(
             gap_series.append(m["concentration_gap"])
         eff_top = eff_series[-1] if eff_series else 0
         samples.append({
-            "token": token,
+            "token": outcome_token,
             "timestamp": history[-1][0],  # latest snapshot time
             "features": {
                 "gap_series": gap_series,
@@ -106,7 +121,7 @@ def build_samples_from_snapshots(
                 "float_active": max(0.0, min(1.0, 1 - eff_top / 100)),
                 "security_passed": True,
             },
-            "max_return": float(outcomes[token]),
+            "max_return": float(max_return),
         })
     logger.info("backtest_samples_built", count=len(samples))
     return samples
