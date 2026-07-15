@@ -20,6 +20,7 @@ event) — fast gas/mempool signals are confirmation only, handled elsewhere.
 Input `market_data` keys (per token):
   - "gap_series":    list[float]  effective_top_n_pct - nominal_top_n_pct over time
   - "effective_series": list[float]  effective_top_n_pct over time
+  - "dynamic_evidence_eligible": bool  latest point is independently changed
   - "float_active":  float 0-1  weak-hand / turnover indicator (1 = very active)
   - "security_passed": bool  Stage-0 contract gate result
   - "token_symbol", "token_address", "chain": labels (optional)
@@ -84,12 +85,19 @@ class AccumulationDivergenceSignal:
         float_active = float(market_data.get("float_active", 0) or 0)
         security_passed = market_data.get("security_passed", None)
 
+        # This is a dynamic signal. Repeated cached/static holder responses have
+        # unknown currentness without provider block/etag provenance and must fail
+        # closed, even if their artificial zero final delta creates "deceleration".
+        if market_data.get("dynamic_evidence_eligible") is not True:
+            return None
+
         # Need enough history.
         if len(gap_series) < self.MIN_POINTS or len(eff_series) < self.MIN_POINTS:
             return None
 
-        # Stage-0 safety gate: only commit on tokens that passed (or unknown→skip).
-        if security_passed is False:
+        # Stage-0 safety gate is affirmative: missing/unknown evidence is not a
+        # pass, including direct/composite callers that bypass the main pipeline.
+        if security_passed is not True:
             return None
 
         gap_slope = _slope(gap_series)

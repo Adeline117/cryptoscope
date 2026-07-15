@@ -172,6 +172,7 @@ def _good_market_data(**over):
     md = {
         "gap_series": [2, 5, 9, 12, 14],
         "effective_series": [20, 28, 34, 38, 40],  # rising, decelerating
+        "dynamic_evidence_eligible": True,
         "float_active": 0.6,
         "security_passed": True,
         "token_symbol": "T",
@@ -222,11 +223,74 @@ async def test_signal_insufficient_history():
 
 
 @pytest.mark.asyncio
-async def test_signal_security_failed():
+@pytest.mark.parametrize("security_passed", [False, None])
+async def test_signal_security_not_affirmatively_passed(security_passed):
     sig = await AccumulationDivergenceSignal().evaluate(
-        _good_market_data(security_passed=False)
+        _good_market_data(security_passed=security_passed)
     )
     assert sig is None
+
+
+@pytest.mark.asyncio
+async def test_signal_missing_security_evidence_fails_closed():
+    data = _good_market_data()
+    data.pop("security_passed")
+
+    assert await AccumulationDivergenceSignal().evaluate(data) is None
+
+
+@pytest.mark.asyncio
+async def test_signal_blocks_rise_then_static_false_long():
+    # This exact shape satisfies the old mathematical gates: the repeated final
+    # provider response creates a zero delta, which looks like deceleration.
+    data = _good_market_data(
+        gap_series=[0, 2, 4, 4],
+        effective_series=[20, 30, 35, 35],
+        dynamic_evidence_eligible=False,
+    )
+    assert _slope(data["gap_series"]) >= AccumulationDivergenceSignal.MIN_GAP_SLOPE
+    assert is_decelerating(data["effective_series"]) is True
+
+    assert await AccumulationDivergenceSignal().evaluate(data) is None
+
+
+@pytest.mark.asyncio
+async def test_signal_still_accepts_changing_fresh_control():
+    data = _good_market_data(
+        gap_series=[0, 2, 4, 6],
+        effective_series=[20, 27, 32, 35],
+        dynamic_evidence_eligible=True,
+    )
+
+    sig = await AccumulationDivergenceSignal().evaluate(data)
+    assert sig is not None
+    assert sig.direction == "LONG"
+
+
+def test_live_series_blocks_healthy_source_with_unknown_static_currentness(monkeypatch):
+    from src.pipeline import accumulation_pipeline as pipeline
+
+    history = [
+        ("2026-07-15T00:00:00+00:00", [{"address": "0x1", "balance": 20}]),
+        ("2026-07-15T01:00:00+00:00", [{"address": "0x1", "balance": 30}]),
+        ("2026-07-15T02:00:00+00:00", [{"address": "0x1", "balance": 35}]),
+        ("2026-07-15T03:00:00+00:00", [{"address": "0x1", "balance": 35}]),
+    ]
+    monkeypatch.setattr(pipeline.hs, "get_holders_history", lambda *a, **k: history)
+    monkeypatch.setattr(
+        pipeline.hs,
+        "snapshot_freshness",
+        lambda *a, **k: {
+            "stale": False,
+            "source_healthy": True,
+            "reason": "fresh",
+            "currentness": "unknown_static",
+            "dynamic_evidence_eligible": False,
+            "identical_run": 2,
+        },
+    )
+
+    assert pipeline._build_series("0xtoken", "ethereum") is None
 
 
 # --------------------------------------------------------------------------

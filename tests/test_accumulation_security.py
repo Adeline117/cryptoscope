@@ -67,3 +67,42 @@ async def test_security_gate_accepts_verified_low_risk_watch_token():
     assert passed == [candidate]
     assert candidate["security_state"] == "pass"
     assert candidate["security_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_security_gate_unknown_chain_never_falls_back_to_ethereum():
+    calls = []
+
+    class Checker:
+        async def check_token(self, chain, address):
+            calls.append((chain, address))
+            return _result(score=90)
+
+    candidate = {
+        "source": "watch_token", "chain": "avalanch-typo", "address": "0xabc",
+    }
+
+    passed = await _security_gate([candidate], checker_factory=Checker)
+
+    assert passed == []
+    assert calls == []
+    assert candidate["security_state"] == "unknown"
+    assert candidate["security_passed"] is False
+    assert "unsupported chain" in candidate["security_risks"][0]
+
+
+@pytest.mark.asyncio
+async def test_security_gate_routes_avalanche_alias_to_43114():
+    calls = []
+
+    class Checker:
+        async def check_token(self, chain, address):
+            calls.append((chain, address))
+            return _result(score=90)
+
+    candidate = {"source": "watch_token", "chain": "avax", "address": "0xabc"}
+
+    passed = await _security_gate([candidate], checker_factory=Checker)
+
+    assert passed == [candidate]
+    assert calls == [(43114, "0xabc")]

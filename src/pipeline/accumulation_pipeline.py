@@ -20,6 +20,7 @@ import structlog
 
 from src.onchain import holder_snapshot as hs
 from src.onchain import watchlist
+from src.onchain.chain_identity import security_chain_id
 from src.onchain.entity_clustering import effective_concentration
 from src.signals.accumulation_divergence import (
     AccumulationDivergenceSignal,
@@ -36,17 +37,8 @@ MIN_SECURITY_SCORE = 70  # directional analysis requires verified low-risk evide
 # class of bug as the 2h-highlight stale-item leak).
 SERIES_WINDOW_DAYS = 7
 
-# pool_watcher chain string → contract_security chain id / key
-_CHAIN_ID = {
-    "ethereum": 1, "eth": 1, "base": 8453, "bsc": 56,
-    "arbitrum": 42161, "optimism": 10, "polygon": 137,
-}
-
-
-def _chain_for_security(chain: str) -> int | str:
-    if chain in ("solana", "sol"):
-        return "solana"
-    return _CHAIN_ID.get(chain, 1)
+def _chain_for_security(chain: str) -> int | str | None:
+    return security_chain_id(chain)
 
 
 def _load_watch_tokens() -> list[dict]:
@@ -119,7 +111,20 @@ async def _security_gate(candidates: list[dict], checker_factory=None) -> list[d
         if not addr:
             continue
         try:
-            result = await checker.check_token(_chain_for_security(chain), addr)
+            security_chain = _chain_for_security(chain)
+            if security_chain is None:
+                c["security_score"] = None
+                c["security_passed"] = False
+                c["security_state"] = "unknown"
+                c["security_risks"] = [f"unsupported chain: {chain or 'missing'}"]
+                logger.warning(
+                    "security_chain_unsupported",
+                    chain=chain,
+                    address=addr,
+                    note="unknown chain is never routed to Ethereum",
+                )
+                continue
+            result = await checker.check_token(security_chain, addr)
             c["security_score"] = result.risk_score
             risks = [str(value) for value in (result.risks or [])]
             lowered = " ".join(risks).lower()
@@ -163,14 +168,28 @@ def _build_series(token: str, chain: str) -> dict | None:
     if not history:
         return None
 
-    # Freshness gate (enforce, don't just report): a stalled/frozen holder feed makes
-    # the latest snapshot a ghost — the SIREN "48% whale that was long gone" case.
-    # Building a concentration/divergence signal on it is worse than no signal.
+    # Source health and dynamic currentness are separate gates. A recent fetch can
+    # be healthy while returning the same state as the previous row; without block
+    # or etag provenance that duplicate is not an independent slope observation.
     fresh = hs.snapshot_freshness(token, chain)
     if fresh.get("stale"):
         logger.debug("series_skipped_stale_snapshot", token=token, chain=chain,
                      reason=fresh.get("reason"), age_hours=fresh.get("age_hours"))
         return None
+    if fresh.get("dynamic_evidence_eligible") is not True:
+        logger.debug(
+            "series_skipped_dynamic_currentness_unknown",
+            token=token,
+            chain=chain,
+            currentness=fresh.get("currentness"),
+            identical_run=fresh.get("identical_run"),
+        )
+        return None
+
+    # Old cached copies must not survive as independent observations elsewhere in
+    # the window either. The newest transition remains independently changed by
+    # the gate above.
+    history = hs.deduplicate_holder_history(history, chain)
 
     # Collect every address seen across snapshots, resolve funders once.
     from src.onchain.entity_clustering import _norm
@@ -210,6 +229,8 @@ def _build_series(token: str, chain: str) -> dict | None:
         "effective_series": eff_series,
         "gap_series": gap_series,
         "latest": latest_metrics,
+        "dynamic_evidence_eligible": True,
+        "currentness": fresh.get("currentness"),
     }
 
 
@@ -264,6 +285,7 @@ async def run_accumulation_pipeline(send: bool = True) -> dict:
         market_data = {
             "effective_series": series["effective_series"],
             "gap_series": series["gap_series"],
+            "dynamic_evidence_eligible": series["dynamic_evidence_eligible"],
             "float_active": float_active,
             "security_passed": c.get("security_passed", None),
             "token_symbol": c.get("symbol", addr[:6]),
