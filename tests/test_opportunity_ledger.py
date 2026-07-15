@@ -42,14 +42,17 @@ def test_clocks_are_canonical_and_first_observation_is_immutable(tmp_path, monke
     assert row["expires_at"] == "2026-07-14T12:03:00+00:00"
 
 
-def test_clock_requires_timezone_and_sane_expiry(tmp_path, monkeypatch):
+def test_clock_requires_timezone_and_preserves_late_discovery(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
 
     monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
     with pytest.raises(ValueError, match="timezone"):
         ledger.record(_candidate(detected_at="2026-07-14T12:00:00"))
-    with pytest.raises(ValueError, match="expires_at cannot precede"):
-        ledger.record(_candidate(expires_at="2026-07-14T11:00:00Z"))
+    # A source can be discovered only after its deadline. Preserve that miss instead
+    # of rejecting the event or pretending the system saw it while actionable.
+    ledger.record(_candidate(expires_at="2026-07-14T11:00:00Z"))
+    row = ledger.outcome_rows()[0]
+    assert row["expires_at"] < row["detected_at"]
 
 
 def test_legacy_schema_backfills_only_provable_decision_clock(tmp_path, monkeypatch):

@@ -104,8 +104,6 @@ def record(candidate: dict) -> tuple[str, bool]:
         "executable_at": _utc_iso(candidate.get("executable_at"), field="executable_at"),
         "expires_at": _utc_iso(candidate.get("expires_at"), field="expires_at"),
     }
-    if clocks["expires_at"] and clocks["expires_at"] < detected_at:
-        raise ValueError("expires_at cannot precede detected_at")
     payload = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
     values = (ident, lane, chain, token, candidate.get("symbol", "?"),
               detected_at, clocks["event_at"], clocks["decision_at"], clocks["quote_at"],
