@@ -10,6 +10,10 @@ OPPORTUNITY_OUTCOMES = (
 )
 
 
+def test_board_uses_inline_favicon_without_a_production_404():
+    assert '<link rel="icon" href="data:,">' in BOARD.read_text()
+
+
 def test_board_uses_effective_decision_and_client_side_expiry():
     html = BOARD.read_text()
 
