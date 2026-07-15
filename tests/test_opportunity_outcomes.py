@@ -138,3 +138,27 @@ def test_watch_only_structure_never_gets_directional_hit_rate(ledger):
     assert stat["verdict"] == "not_directional"
     assert "rate" not in stat
     assert "不把事后涨跌" in stat["note"]
+
+
+def test_carry_uses_absolute_non_directional_outcomes_without_claiming_real_edge(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    ts = datetime.now(timezone.utc).isoformat()
+    for i in range(oo.MIN_N):
+        ident, _ = ledger.record({
+            "lane": "carry", "chain": "hyperliquid+okx", "token": f"C{i}",
+            "event_key": f"paper:{i}", "symbol": f"C{i}", "detected_at": ts,
+            "decision": "PAPER_OPEN", "state": "paper_closed",
+        })
+        ledger.save_outcome(ident, {
+            "kind": "delta_neutral_carry_paper", "net_return_pct": 0.25,
+            "cost_is_real_fill": False,
+        }, "resolved")
+
+    stat = oo.lane_stats()["carry"]
+    assert stat["verdict"] == "measured"
+    assert stat["edge_verdict"] == "不可判"
+    assert stat["metric"] == "absolute_net_return_after_measured_book_costs"
+    assert stat["median_net_return_pct"] == 0.25
+    assert stat["cost_is_real_fill"] is False
+    assert "实盘" in stat["note"]

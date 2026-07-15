@@ -209,6 +209,42 @@ def _cohort(rows: list[dict], decision: str) -> dict:
             "median_net_24h": statistics.median(vals) if vals else None}
 
 
+def _carry_stats(rows: list[dict]) -> dict:
+    """Measure closed delta-neutral paper episodes without inventing direction."""
+    from src.pipeline.evidence import wilson
+
+    closed = []
+    for row in rows:
+        outcome = row.get("outcome") or {}
+        if outcome.get("kind") != "delta_neutral_carry_paper":
+            continue
+        value = outcome.get("net_return_pct")
+        if row.get("outcome_state") == "resolved" and value is not None:
+            closed.append(float(value))
+    n = len(closed)
+    positives = sum(value > 0 for value in closed)
+    common = {
+        "n": n, "hits": positives,
+        "pending": sum(r.get("outcome_state") == "open" for r in rows),
+        "metric": "absolute_net_return_after_measured_book_costs",
+        "cost_is_real_fill": False,
+        "execution_mode": "paper_orderbook_measurement",
+    }
+    if n < MIN_N:
+        return {**common, "verdict": "不可判", "edge_verdict": "不可判",
+                "note": f"关闭样本 {n}/{MIN_N};订单簿纸面测量不冒充实盘成交"}
+    lo, hi = wilson(positives, n)
+    return {
+        **common, "verdict": "measured", "edge_verdict": "不可判",
+        "positive_rate": round(positives / n, 3),
+        "lo": round(lo, 3), "hi": round(hi, 3),
+        "mean_net_return_pct": round(statistics.mean(closed), 4),
+        "median_net_return_pct": round(statistics.median(closed), 4),
+        "worst_net_return_pct": round(min(closed), 4),
+        "note": "已有纸面成本后分布;仍缺真实双腿成交与样本外实盘验证",
+    }
+
+
 def lane_stats() -> dict:
     """Honest 24h distribution and, only where possible, a control comparison."""
     from src.pipeline.evidence import wilson
@@ -217,6 +253,9 @@ def lane_stats() -> dict:
     out: dict[str, dict] = {}
     for lane in sorted({r["lane"] for r in rows}):
         lane_rows = [r for r in rows if r["lane"] == lane]
+        if lane == "carry":
+            out[lane] = _carry_stats(lane_rows)
+            continue
         measurable = [r for r in lane_rows if _direction(r) and r.get("entry_price")]
         if not measurable:
             note = ("公开结构事件没有方向假设,不把事后涨跌伪装成命中率" if lane == "structure"
