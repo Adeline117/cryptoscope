@@ -113,3 +113,13 @@ def test_board_navigation_and_details_are_keyboard_accessible_and_shareable():
     assert 'location.hash.slice(1)' in html
     assert 'addEventListener("popstate"' in html
     assert "左右滑动查看更多" in html
+
+
+def test_launch_defaults_to_actionable_only_instead_of_burying_decision_in_watch_rows():
+    html = BOARD.read_text()
+
+    assert 'filterState={launch:"actionable"}' in html
+    assert "当前没有通过全部门禁且报价仍有效的机会" in html
+    assert 'label:"观察"' in html
+    assert 'type="search"' in html
+    assert "搜索代币 / 合约" in html
