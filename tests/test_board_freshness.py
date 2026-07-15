@@ -50,3 +50,21 @@ def test_regular_export_can_skip_both_slow_scanners(monkeypatch):
     result = board_export.run(push=False, include_operators=False,
                               include_opportunities=False)
     assert result["views_written"] == 0
+
+
+def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path, monkeypatch):
+    import json
+
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    launch = board_export._envelope({}, view="launch")
+    perps = board_export._envelope({}, view="perps")
+    board_export.write_views(launch=launch)
+    board_export.write_views(perps=perps)
+
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["views"] == ["launch", "perps"]
+    assert meta["view_status"]["launch"]["refresh_cadence_min"] == 3
+    assert meta["view_status"]["perps"]["refresh_cadence_min"] == 5
+    assert not list(tmp_path.glob("*.tmp"))

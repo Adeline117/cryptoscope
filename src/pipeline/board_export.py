@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -43,6 +44,7 @@ VIEW_FRESHNESS = {
     "operators": (60, 30), "stats": (60, 15),
     "traders": (24 * 60, 60), "meta": (60, 15),
 }
+_WRITE_LOCK = threading.Lock()
 
 # v1 endpoint: cross-platform in one call, flat fields, no required platform param
 # (v2 requires platform=). Verified live: max_drawdown and win_rate arrive as PERCENT
@@ -505,20 +507,37 @@ def _envelope(body: dict, *, view: str) -> dict:
             **body}
 
 
+def _atomic_json(path, payload: dict) -> None:
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    temp.replace(path)
+
+
 def write_views(**views: dict) -> list:
-    """views: {view_name: payload} → writes <view_name>.json for each non-None."""
+    """Atomically write views and merge their clocks into a durable manifest."""
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     paths = []
-    for name, payload in views.items():
-        if payload is None:
-            continue
-        p = EXPORT_DIR / f"{name}.json"
-        p.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
-        paths.append(p)
-    meta = _envelope({"views": [n for n, v in views.items() if v is not None]}, view="meta")
-    mp = EXPORT_DIR / "meta.json"
-    mp.write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":")))
-    paths.append(mp)
+    with _WRITE_LOCK:
+        mp = EXPORT_DIR / "meta.json"
+        try:
+            previous = json.loads(mp.read_text()) if mp.exists() else {}
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        manifest = dict(previous.get("view_status") or {})
+        for name, payload in views.items():
+            if payload is None:
+                continue
+            p = EXPORT_DIR / f"{name}.json"
+            _atomic_json(p, payload)
+            paths.append(p)
+            manifest[name] = {
+                key: payload.get(key) for key in (
+                    "generated_at", "next_expected_at", "stale_after_at",
+                    "refresh_cadence_min", "freshness_grace_min")
+            }
+        meta = _envelope({"views": sorted(manifest), "view_status": manifest}, view="meta")
+        _atomic_json(mp, meta)
+        paths.append(mp)
     return paths
 
 
