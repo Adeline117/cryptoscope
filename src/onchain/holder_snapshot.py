@@ -760,7 +760,10 @@ def snapshot_token(
     if chain in ("solana", "sol"):
         holders = fetch_holders_solana(token)
     else:
-        chain_ids = {"ethereum": 1, "eth": 1, "base": 8453, "arbitrum": 42161, "optimism": 10}
+        chain_ids = {
+            "ethereum": 1, "eth": 1, "bsc": 56, "base": 8453,
+            "arbitrum": 42161, "optimism": 10,
+        }
         holders = fetch_holders_evm(token, chain_ids.get(chain, 1))
 
     if not holders:

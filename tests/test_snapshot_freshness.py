@@ -16,6 +16,7 @@ from src.onchain.holder_snapshot import (
     get_holders_history,
     list_tokens,
     save_snapshot,
+    snapshot_token,
     snapshot_freshness,
     find_stale_snapshots,
 )
@@ -183,6 +184,23 @@ def test_solana_mint_identity_remains_case_sensitive(db):
         mint.lower(), "solana", now=now, db_path=db,
     )["reason"] == "no_snapshots"
     assert get_holders_history(mint.lower(), "solana", db_path=db) == []
+
+
+def test_snapshot_token_routes_bsc_to_chain_id_56(db, monkeypatch):
+    calls = []
+
+    def fake_fetch(token, chain_id):
+        calls.append((token, chain_id))
+        return _holders(5000)
+
+    monkeypatch.setattr(
+        "src.onchain.holder_snapshot.fetch_holders_evm", fake_fetch,
+    )
+    result = snapshot_token("0xAbCd", "bsc", source="test", db_path=db)
+
+    assert calls == [("0xAbCd", 56)]
+    assert result is not None
+    assert list_tokens(db_path=db) == [("0xabcd", "bsc")]
 
 
 def test_find_stale_cadence_fallback_needs_min_snapshots(db):
