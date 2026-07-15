@@ -509,19 +509,19 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                 or observation.get("observation_version") != 1):
             continue
         try:
-            edge = float(observation["observed_edge_ann"])
+            paired_diff = float(observation["paired_funding_diff_ann_pct"])
             observed_at = datetime.fromisoformat(str(observation["observed_at"]))
         except (KeyError, TypeError, ValueError):
             continue
         if observed_at.tzinfo is None or observed_at.utcoffset() is None:
             continue
         observation_age_s = (now - observed_at).total_seconds()
-        if (not math.isfinite(edge) or not math.isfinite(observation_age_s)
+        if (not math.isfinite(paired_diff) or not math.isfinite(observation_age_s)
                 or observation_age_s < 0
                 or observation_age_s > CARRY_OBSERVATION_MAX_AGE_S):
             continue
         observed_by_sym[observation["symbol"]] = {**observation,
-                                                   "observed_edge_ann": edge,
+                                                   "paired_funding_diff_ann_pct": paired_diff,
                                                    "_observed_at_dt": observed_at,
                                                    "observation_age_s": observation_age_s}
     c = _conn()
@@ -622,7 +622,7 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                 )
                 continue
             elapsed_h = max((measurement_at - last_dt).total_seconds() / 3600, 0)
-            cur_diff = cur["observed_edge_ann"]
+            cur_diff = cur["paired_funding_diff_ann_pct"]
             # Left-rectangle quote-rate integral, not exchange funding settlements.
             # A recovery observation only re-establishes the measurement clock. The
             # preceding interval remains unknown and must not be filled with last_diff.
@@ -701,7 +701,7 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             # collapsed differential could open below its own natural exit threshold.
             from src.onchain.hyperliquid import _carry_partial_model_proxy_ann
             current_partial_proxy = _carry_partial_model_proxy_ann(
-                observation["observed_edge_ann"])
+                observation["paired_funding_diff_ann_pct"])
             if (not math.isfinite(current_partial_proxy)
                     or current_partial_proxy < OPEN_MIN_PARTIAL_MODEL_PROXY_ANN):
                 continue
@@ -725,9 +725,11 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                       "notional,accrued_pct,last_ts,last_diff,last_attempt_ts,last_valid_ts,"
                       "unmeasured_h,measurement_state,episode_version,cost_complete,"
                       "observation_version) VALUES (?,?,?,?,?,?,0,?,?,?,?,0,'observed',?,0,?)",
-                      (sym, entry_quote_at.isoformat(), observation["observed_edge_ann"],
+                      (sym, entry_quote_at.isoformat(),
+                       observation["paired_funding_diff_ann_pct"],
                        partial_proxy, slip, NOTIONAL, entry_quote_at.isoformat(),
-                       observation["observed_edge_ann"], entry_quote_at.isoformat(),
+                       observation["paired_funding_diff_ann_pct"],
+                       entry_quote_at.isoformat(),
                        observation_at.isoformat(), CURRENT_EPISODE_VERSION,
                        int(observation.get("observation_version") or 0)))
         c.commit()

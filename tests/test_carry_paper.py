@@ -14,7 +14,8 @@ def _run(cp, carries):
     observed_at = datetime.now(timezone.utc).isoformat()
     observations = [{
         "symbol": item["symbol"], "status": "observed", "cross": True,
-        "observation_version": 1, "observed_edge_ann": item["edge_ann"],
+        "observation_version": 1,
+        "paired_funding_diff_ann_pct": item["gross_funding_diff_ann_pct"],
         "observed_at": observed_at,
     } for item in carries if item.get("cross")]
     return cp.run(carries, observations=observations)
@@ -36,11 +37,11 @@ def cp(tmp_path, monkeypatch):
 def test_opens_only_fat_net_cross(cp):
     _run(cp, [
         {"symbol": "FAT", "cross": True, "partial_model_proxy_ann_pct": 40,
-         "edge_ann": 40},
+         "gross_funding_diff_ann_pct": 40},
         {"symbol": "THIN", "cross": True, "partial_model_proxy_ann_pct": 3,
-         "edge_ann": 3},
+         "gross_funding_diff_ann_pct": 3},
         {"symbol": "SINGLE", "cross": False, "partial_model_proxy_ann_pct": 90,
-         "edge_ann": 90},
+         "gross_funding_diff_ann_pct": 90},
     ])
     import sqlite3
     rows = sqlite3.connect(str(cp.DB)).execute("SELECT symbol FROM paper").fetchall()
@@ -51,21 +52,21 @@ def test_entry_requires_fresh_pair_that_clears_current_partial_cost_screen(cp):
     now = datetime.now(timezone.utc)
     candidates = [
         {"symbol": symbol, "cross": True,
-         "partial_model_proxy_ann_pct": 40, "edge_ann": 40}
+         "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}
         for symbol in ("STALE", "FADED", "MISSING_TS", "FRESH")
     ]
     observations = [
         {"symbol": "STALE", "status": "observed", "cross": True,
-         "observation_version": 1, "observed_edge_ann": 40,
+         "observation_version": 1, "paired_funding_diff_ann_pct": 40,
          "observed_at": (now - timedelta(
              seconds=cp.CARRY_OBSERVATION_MAX_AGE_S + 1)).isoformat()},
         {"symbol": "FADED", "status": "observed", "cross": True,
-         "observation_version": 1, "observed_edge_ann": 1,
+         "observation_version": 1, "paired_funding_diff_ann_pct": 1,
          "observed_at": now.isoformat()},
         {"symbol": "MISSING_TS", "status": "observed", "cross": True,
-         "observation_version": 1, "observed_edge_ann": 40},
+         "observation_version": 1, "paired_funding_diff_ann_pct": 40},
         {"symbol": "FRESH", "status": "observed", "cross": True,
-         "observation_version": 1, "observed_edge_ann": 40,
+         "observation_version": 1, "paired_funding_diff_ann_pct": 40,
          "observed_at": now.isoformat()},
     ]
 
@@ -74,6 +75,21 @@ def test_entry_requires_fresh_pair_that_clears_current_partial_cost_screen(cp):
     assert [row["symbol"] for row in stats["open_positions"]] == ["FRESH"]
     assert stats["open_positions"][0]["episode_version"] == cp.CURRENT_EPISODE_VERSION
     assert stats["open_positions"][0]["observation_version"] == 1
+
+
+def test_legacy_edge_observation_alias_is_not_accepted(cp):
+    stats = cp.run(
+        [{"symbol": "OLD", "cross": True,
+          "partial_model_proxy_ann_pct": 40,
+          "gross_funding_diff_ann_pct": 40}],
+        observations=[{
+            "symbol": "OLD", "status": "observed", "cross": True,
+            "observation_version": 1, "observed_edge_ann": 40,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        }],
+    )
+
+    assert stats["n_open"] == 0
 
 
 def test_entry_book_quote_must_finish_inside_observation_sla(cp, monkeypatch):
@@ -92,10 +108,10 @@ def test_entry_book_quote_must_finish_inside_observation_sla(cp, monkeypatch):
     monkeypatch.setattr(cp, "datetime", Clock)
     stats = cp.run(
         [{"symbol": "SLOW", "cross": True,
-          "partial_model_proxy_ann_pct": 40, "edge_ann": 40}],
+          "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}],
         observations=[{
             "symbol": "SLOW", "status": "observed", "cross": True,
-            "observation_version": 1, "observed_edge_ann": 40,
+            "observation_version": 1, "paired_funding_diff_ann_pct": 40,
             "observed_at": observed_at.isoformat(),
         }],
     )
@@ -113,7 +129,7 @@ def test_new_entry_orderbook_quotes_are_bounded_and_deferred_is_reported(
     )
     candidates = [
         {"symbol": f"C{i}", "cross": True,
-         "partial_model_proxy_ann_pct": 40 - i, "edge_ann": 40 - i}
+         "partial_model_proxy_ann_pct": 40 - i, "gross_funding_diff_ann_pct": 40 - i}
         for i in range(5)
     ]
 
@@ -130,7 +146,7 @@ def test_orderbook_network_call_never_holds_sqlite_writer_lock(cp, monkeypatch):
     import sqlite3
 
     _run(cp, [{"symbol": "OPEN", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     probes = []
 
     def quote_without_writer_lock(
@@ -146,7 +162,7 @@ def test_orderbook_network_call_never_holds_sqlite_writer_lock(cp, monkeypatch):
 
     monkeypatch.setattr(cp, "_roundtrip_slip", quote_without_writer_lock)
     stats = _run(cp, [{"symbol": "NEW", "cross": True,
-                      "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+                      "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
 
     # OPEN first receives a source-gap UPDATE.  NEW's network quote must start only
     # after that write is committed, so an independent writer can acquire the DB.
@@ -157,7 +173,7 @@ def test_orderbook_network_call_never_holds_sqlite_writer_lock(cp, monkeypatch):
 def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # open a 40%/yr differential position
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     import sqlite3
     c = sqlite3.connect(str(cp.DB))
     # Build a five-day path from already-observed short intervals, leaving only the
@@ -176,7 +192,7 @@ def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # differential decays below the floor → natural close
     stats = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
-        "observation_version": 1, "observed_edge_ann": 1,
+        "observation_version": 1, "paired_funding_diff_ann_pct": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     assert stats["n_closed"] == 1 and stats["n_open"] == 0
@@ -200,7 +216,7 @@ def test_accrues_and_closes_with_correct_quote_proxy(cp):
 
 def test_stats_honest_when_nothing_closed(cp):
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     s = cp.paper_stats()
     assert s["n_open"] == 1 and s["n_closed"] == 0
     assert "avg_net_proxy_pct" not in s
@@ -222,7 +238,7 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     import sqlite3
 
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     c = sqlite3.connect(str(cp.DB))
     past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
     c.execute(
@@ -253,7 +269,7 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.close()
 
     recovered = _run(cp, [{"symbol": "X", "cross": True,
-                           "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+                           "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     position = recovered["open_positions"][0]
     assert position["measurement_state"] == "observed"
     assert position["unmeasured_h"] == pytest.approx(49, abs=0.1)
@@ -270,7 +286,7 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     c.commit()
     c.close()
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     c = sqlite3.connect(str(cp.DB))
     accrued = c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0]
     c.close()
@@ -281,7 +297,7 @@ def test_scheduler_downtime_is_unknown_and_never_backfilled_as_quote_rate(cp):
     import sqlite3
 
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     past = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
     c = sqlite3.connect(str(cp.DB))
     c.execute(
@@ -293,7 +309,7 @@ def test_scheduler_downtime_is_unknown_and_never_backfilled_as_quote_rate(cp):
     c.close()
 
     recovered = _run(cp, [{"symbol": "X", "cross": True,
-                           "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+                           "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     position = recovered["open_positions"][0]
     assert position["measurement_state"] == "observed"
     assert position["unmeasured_h"] == pytest.approx(3, abs=0.1)
@@ -309,7 +325,7 @@ def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
     import sqlite3
 
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     c = sqlite3.connect(str(cp.DB))
     c.execute(
@@ -321,7 +337,7 @@ def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
 
     stats = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
-        "observation_version": 0, "observed_edge_ann": 1,
+        "observation_version": 0, "paired_funding_diff_ann_pct": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     assert stats["n_open"] == 1 and stats["n_closed_total"] == 0
@@ -334,7 +350,7 @@ def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
 
     no_legacy_open = cp.run(
         [{"symbol": "Y", "cross": True,
-          "partial_model_proxy_ann_pct": 40, "edge_ann": 40}],
+          "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}],
         observations=None,
     )
     assert {row["symbol"] for row in no_legacy_open["open_positions"]} == {"X"}
@@ -350,7 +366,7 @@ def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeyp
 
     monkeypatch.setattr(cp, "_roundtrip_slip", slip)
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     c = sqlite3.connect(str(cp.DB))
     now = datetime.now(timezone.utc)
     past = (now - timedelta(days=1)).isoformat()
@@ -365,7 +381,7 @@ def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeyp
 
     pending = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
-        "observation_version": 1, "observed_edge_ann": 1,
+        "observation_version": 1, "paired_funding_diff_ann_pct": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     assert pending["n_open"] == pending["n_exit_pending"] == 1
@@ -436,7 +452,7 @@ def test_exit_quote_sla_uses_post_request_completion_time(cp, monkeypatch):
     import sqlite3
 
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     signal_at = datetime.now(timezone.utc) - timedelta(seconds=59.5)
     entry_at = signal_at - timedelta(hours=1)
     c = sqlite3.connect(str(cp.DB))
@@ -544,7 +560,7 @@ def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
     assert state[3] == pytest.approx(48, abs=0.1)
 
     stats = _run(cp, [{"symbol": "X", "cross": True,
-                      "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+                      "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     c = sqlite3.connect(str(cp.DB))
     rows = c.execute(
         "SELECT accrued_pct,measurement_state,status,episode_version,observation_version "
@@ -570,7 +586,7 @@ def test_legacy_open_episode_never_accrues_or_closes_from_valid_v1_quote(cp):
     import sqlite3
 
     _run(cp, [{"symbol": "X", "cross": True,
-              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+              "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     c = sqlite3.connect(str(cp.DB))
     c.execute(
@@ -593,7 +609,7 @@ def test_legacy_open_episode_never_accrues_or_closes_from_valid_v1_quote(cp):
 
     stats = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
-        "observation_version": 1, "observed_edge_ann": 1,
+        "observation_version": 1, "paired_funding_diff_ann_pct": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     c = sqlite3.connect(str(cp.DB))
@@ -612,7 +628,7 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     from src.pipeline import opportunity_ledger
 
     opened = _run(cp, [{"symbol": "X", "cross": True,
-                        "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+                        "partial_model_proxy_ann_pct": 40, "gross_funding_diff_ann_pct": 40}])
     assert opened["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 0}
     event = opportunity_ledger.outcome_rows()[0]
     assert event["lane"] == "carry" and event["decision"] == "WATCH"
@@ -651,7 +667,7 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     c.commit()
     c.close()
     closed = _run(cp, [{"symbol": "X", "cross": True,
-                        "partial_model_proxy_ann_pct": 1, "edge_ann": 1}])
+                        "partial_model_proxy_ann_pct": 1, "gross_funding_diff_ann_pct": 1}])
     assert closed["ledger_sync"] == {"status": "ok", "synced": 1, "resolved": 1}
     event = opportunity_ledger.outcome_rows()[0]
     outcome = event["outcome"]

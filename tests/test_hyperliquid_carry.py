@@ -155,7 +155,10 @@ def test_scan_carry_prioritizes_open_symbol_and_uses_current_pair(monkeypatch):
     assert observation["symbol"] == "OPEN" and observation["cross"] is True
     assert observation["hl_ann"] == 1.0
     assert observation["okx_ann"] == 4.0
-    assert observation["edge_ann"] == pytest.approx(-3.0)
+    assert observation["paired_funding_diff_ann_pct"] == pytest.approx(-3.0)
+    assert {"edge_ann", "score_edge_ann", "observed_edge_ann"}.isdisjoint(
+        observation
+    )
     assert observation["observed_at"]
     assert observation["observation_version"] == 1
     assert [row["symbol"] for row in scan["entry_observations"]] == ["ENTRY"]
@@ -203,6 +206,12 @@ def test_carry_proxy_uses_fixed_hold_assumption_not_sparse_coverage(monkeypatch)
     )[0]
 
     expected = hl._carry_partial_model_proxy_ann(30.0)
+    assert first["gross_funding_diff_ann_pct"] == pytest.approx(30.0)
+    assert first["current_paired_funding_diff_ann_pct"] == pytest.approx(30.0)
+    assert first["ranking_metric"] == "gross_funding_diff_ann_pct"
+    assert {
+        "cross_diff", "edge_ann", "score_edge_ann", "observed_edge_ann",
+    }.isdisjoint(first)
     assert first["partial_model_proxy_ann_pct"] == pytest.approx(expected, abs=0.1)
     assert second["partial_model_proxy_ann_pct"] == first["partial_model_proxy_ann_pct"]
     assert first["model_hold_days_assumption"] == 14
@@ -230,6 +239,8 @@ def test_single_venue_candidate_is_separate_from_cross_venue_paper_scope(monkeyp
     )[0]
 
     assert candidate["cross"] is False
+    assert candidate["gross_funding_diff_ann_pct"] == pytest.approx(30.0)
+    assert candidate["current_paired_funding_diff_ann_pct"] is None
     assert candidate["candidate_scope"] == "single_venue_spot_perp"
     assert candidate["paper_measurement_eligible"] is False
 

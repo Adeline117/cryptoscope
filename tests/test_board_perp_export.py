@@ -11,16 +11,20 @@ def test_render_perps_sends_open_observations_to_paper_tracker(monkeypatch):
         "funding_ann": 1.0, "vol24": 1_000, "price_chg_24h": 0.0,
     }]
     signals = [{
-        "symbol": "ENTRY", "cross": True, "edge_ann": 20.0,
+        "symbol": "ENTRY", "cross": True, "gross_funding_diff_ann_pct": 20.0,
         "partial_model_proxy_ann_pct": 10.0,
     }]
     observations = [{
-        "symbol": "OPEN", "cross": True, "hl_ann": 1.0, "okx_ann": 4.0,
-        "edge_ann": -3.0, "observed_at": "2026-07-15T00:00:00+00:00",
+        "symbol": "OPEN", "status": "observed", "cross": True,
+        "observation_version": 1, "hl_ann": 1.0, "okx_ann": 4.0,
+        "paired_funding_diff_ann_pct": -3.0,
+        "observed_at": "2026-07-15T00:00:00+00:00",
     }]
     entry_observation = {
-        "symbol": "ENTRY", "cross": True, "hl_ann": 20.0, "okx_ann": 0.0,
-        "edge_ann": 20.0, "observed_at": "2026-07-15T00:00:00+00:00",
+        "symbol": "ENTRY", "status": "observed", "cross": True,
+        "observation_version": 1, "hl_ann": 20.0, "okx_ann": 0.0,
+        "paired_funding_diff_ann_pct": 20.0,
+        "observed_at": "2026-07-15T00:00:00+00:00",
     }
     seen = {}
 
@@ -83,6 +87,13 @@ def test_render_perps_sends_open_observations_to_paper_tracker(monkeypatch):
     assert seen["paper_carries"] is signals
     assert seen["paper_observations"] == observations + [entry_observation]
     assert payload["carry"] is signals
+    assert {"edge_ann", "score_edge_ann", "observed_edge_ann"}.isdisjoint(
+        payload["carry"][0]
+    )
+    assert all(
+        {"edge_ann", "score_edge_ann", "observed_edge_ann"}.isdisjoint(row)
+        for row in seen["paper_observations"]
+    )
     assert payload["carry_paper"] == {"n_open": 1, "n_closed": 0}
     assert payload["carry_source_health"]["state"] == "ok"
     assert payload["carry_source_health"]["paper"] == {"state": "ok"}
