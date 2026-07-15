@@ -33,7 +33,11 @@ PRIMARY_METRIC = "daily_mean_cost_adjusted_log_growth_utility"
 LOOK_SIZES = (100, 200, 400, 800, 1_600, 3_200)
 FAMILY_ALPHA = 0.05
 LOOK_ALPHA = FAMILY_ALPHA / len(LOOK_SIZES)
-MIN_OUTCOME_COVERAGE = 0.95
+# Crypto outcome attrition is not missing-at-random: rugs, delistings and dead
+# pools are exactly the observations most likely to become "unavailable".  A
+# positive edge verdict therefore requires the complete pre-registered prefix.
+# Anything less remains visible in the arm summary but fails closed.
+MIN_OUTCOME_COVERAGE = 1.0
 MAX_COVERAGE_GAP = 0.05
 MIN_SHARED_DAYS = 14
 MIN_SHARED_EVENT_FRACTION = 0.80
@@ -138,6 +142,7 @@ def _base_result(eligible: dict[str, list[dict]]) -> dict:
         "cohort_version": COHORT_VERSION,
         "primary_horizon": PRIMARY_HORIZON,
         "primary_metric": PRIMARY_METRIC,
+        "required_outcome_coverage": MIN_OUTCOME_COVERAGE,
         "planned_looks": list(LOOK_SIZES),
         "family_alpha": FAMILY_ALPHA,
         "look_alpha": round(LOOK_ALPHA, 8),
@@ -189,7 +194,7 @@ def launch_forward_validation(rows: list[dict]) -> dict:
             or abs(probe_coverage - watch_coverage) > MAX_COVERAGE_GAP):
         result.update({
             "state": "coverage_blocked",
-            "reason": ("固定前缀结果覆盖不足或组间缺失差异过大: "
+            "reason": ("固定前缀主结果必须 100% 可结算，缺失可能是 rug/退市等结局依赖缺失；"
                        f"SMALL_PROBE {probe_coverage:.1%}, WATCH {watch_coverage:.1%}"),
         })
         return result

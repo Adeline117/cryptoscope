@@ -110,6 +110,27 @@ def test_outcome_attrition_and_market_regime_mismatch_fail_closed():
     assert "spa_pvalues" not in got
 
 
+def test_selective_attrition_inside_old_tolerance_cannot_manufacture_pass():
+    """Five missing probe rugs used to pass the old 95% coverage threshold."""
+    from src.pipeline import edge_validation as ev
+
+    rows = _complete_cohort()
+    probe = [row for row in rows if row["decision"] == "SMALL_PROBE"]
+    watch = [row for row in rows if row["decision"] == "WATCH"]
+    for row in probe[:5]:
+        row["outcome"] = {"horizons": {}, "unavailable_horizons": ["24h"]}
+    watch[0]["outcome"] = {"horizons": {}, "unavailable_horizons": ["24h"]}
+
+    got = ev.launch_forward_validation(rows)
+
+    assert got["state"] == "coverage_blocked"
+    assert got["edge_verdict"] == "不可判"
+    assert got["required_outcome_coverage"] == 1.0
+    assert got["arms"]["SMALL_PROBE"]["coverage"] == 0.95
+    assert got["arms"]["WATCH"]["coverage"] == 0.99
+    assert "spa_pvalues" not in got
+
+
 def test_strong_forward_effect_passes_deterministic_conservative_spa():
     from src.pipeline import edge_validation as ev
 
