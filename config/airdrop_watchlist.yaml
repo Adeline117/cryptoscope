@@ -69,6 +69,9 @@ campaigns:
     status: research
     risk_notes:
       - Registration and selection do not guarantee a distribution.
+      - The official page still says opening soon; its registration cutoff is dynamically loaded, so no UTC deadline is recorded here.
+      - Registration requires an X account that passes the campaign's eligibility checks.
+      - The official page describes a selected-user claim flow involving 5 STRK; the exact balance and gas requirement is not yet verified, so estimated cost remains unknown.
       - One claim per user, X account, and wallet; automation and Sybil behavior are prohibited.
       - Jurisdiction and wallet screening apply.
     wallets: []
