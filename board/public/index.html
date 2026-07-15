@@ -436,6 +436,7 @@ const idc=(name,sub,glyph)=>`<div class="idc"><div class="tk">${esc((name||'?').
 // ---------- lane configs ----------
 const CHAIN={solana:"SOL",bsc:"BSC",ethereum:"ETH",base:"BASE",arbitrum:"ARB"};
 function walletName(w,i){return "聪明钱#"+(i+1)}
+const airdropSourceVerified=r=>r?.source_state==="source_verified"&&r?.source_verification?.official_page_verified===true&&r?.source_verification?.evidence_page_verified===true;
 
 const LANES={
   play:{
@@ -486,20 +487,21 @@ const LANES={
     detail:r=>`<span class="so">所以👉</span> ${r.event_type==="legacy_inventory_delta"?`这是由 ${esc(r.legacy_row_count||1)} 条旧 pair 记录折叠的 instruments 库存差分，未独立核验为官方上币公告，不算可行动新上币。`:'这是资产级公开 instruments 差分，不是抢消息指令。'} 先观察成交量、深度和价格反应。<br>交易对: ${esc((r.markets||[]).join(", ")||"—")}<br>${esc(r.message||"")}<br>${(r.reasons||[]).map(esc).join(" · ")}`,
   },
   airdrop:{
-    title:d=>{const e=d?.events||[];const claim=e.filter(x=>effectiveDecision(x)==="CLAIM_CHECK").length;return `<b style="color:var(--accent)">官方空投工作台</b>: ${e.length?`${e.length} 个域名已验证活动，${claim} 个仍在期限内待检查领取资格`:'尚未配置官方活动'}。`},
-    stat:d=>{const e=d?.events||[];return [["官方活动",e.length,"域名白名单"],["待查领取",e.filter(x=>effectiveDecision(x)==="CLAIM_CHECK").length,"有自有钱包且未过期"],["已过期",e.filter(x=>effectiveDecision(x)==="EXPIRED").length,"禁止按旧入口行动"],["资格未知",e.filter(x=>x.evidence_state!=="recorded").length,"需要补证据"]]},
-    readme:"空投是长期低下行期权，不是自动化多号农场。本页只读取 <code>config/airdrop_watchlist.yaml</code> 中的官方项目链接、你控制的钱包、任务和证据；没有钱包/证据会明确显示未知。不会保存私钥，也不会自动提交交易。",
+    title:d=>{const e=d?.events||[],configured=d?.configured??0,accepted=d?.accepted??e.length,verified=d?.source_verified??e.filter(airdropSourceVerified).length,claim=e.filter(x=>effectiveDecision(x)==="CLAIM_CHECK").length;return `<b style="color:var(--accent)">官方空投工作台</b>: 代码审计信任根下配置 ${esc(configured)} 个、接受 ${esc(accepted)} 个、双页验证 ${esc(verified)} 个；当前 ${esc(claim)} 个进入领取资格检查。${d?.scan_error?` <span class="down">本轮扫描失败: ${esc(d.scan_error)}</span>`:""}`},
+    stat:d=>{const e=d?.events||[];return [["配置 / 接受",`${d?.accepted??e.length}/${d?.configured??e.length}`,`拒绝 ${d?.rejected??0}`],["双页源验证",d?.source_verified??e.filter(airdropSourceVerified).length,"活动页 + 独立证据页"],["源未验证",d?.source_unverified??e.filter(x=>!airdropSourceVerified(x)).length,"失败即 WATCH，不提供入口"],["待查领取",e.filter(x=>effectiveDecision(x)==="CLAIM_CHECK").length,"双页验证 + 自有钱包任务证据"],["资格未知",e.filter(x=>x.evidence_state!=="recorded").length,"不能猜测资格"]]},
+    readme:"空投是长期低下行期权，不是自动化多号农场。这里是<b>人工维护且覆盖不完整</b>的官方活动登记，不是全市场发现器；只有代码中审计过的信任根、活动页和不同的证据/条款页都通过 HTTPS 内容校验才算源已验证。源验证不代表有资格或有收益；没有自有钱包与任务证据只会 WATCH。系统不保存私钥、不自动交互、不支持多号或 Sybil。",
     rows:d=>d?.events||[],
     id:r=>r.id||r.token, flash:null,
-    empty:"尚未配置官方空投活动。请在 config/airdrop_watchlist.yaml 添加官方链接、钱包和任务证据；没有配置时不展示猜测名单。",
+    empty:"本轮官方登记没有产出可展示事件：可能是登记为空、条目被严格拒绝或扫描失败。系统不会用传闻名单填空。",
     cols:[
       {k:"project",label:"项目",cell:r=>idc(r.symbol,r.chain||"multi"),sort:r=>r.symbol||""},
       {k:"state",label:"当前状态",c:1,cell:r=>effectiveDecision(r)==="EXPIRED"?'<span class="chip">已过期</span>':r.state==="claimable"?'<span class="chip b-good">待核验资格</span>':r.state==="active"?'<span class="chip b-accent">进行中</span>':'<span class="chip b-warn">研究</span>',sort:r=>effectiveDecision(r)==="EXPIRED"?"expired":r.state||""},
+      {k:"source",label:"官方源",c:1,cell:r=>airdropSourceVerified(r)?'<span class="chip b-good">双页已验证</span>':'<span class="chip b-danger">未验证·不跳转</span>',sort:r=>airdropSourceVerified(r)?1:0},
       {k:"evidence",label:"资格证据",c:1,cell:r=>r.evidence_state==="recorded"?'<span class="chip b-good">已记录</span>':'<span class="chip b-warn">未知</span>',sort:r=>r.evidence_state==="recorded"?1:0},
-      {k:"cost",label:"预估成本",n:1,cell:r=>usd(r.estimated_cost_usd),sort:r=>r.estimated_cost_usd||0},
+      {k:"cost",label:"已知成本 / 占资",n:1,cell:r=>`${r.estimated_cost_usd==null?'<span class="dim">成本未知</span>':esc(usd(r.estimated_cost_usd))}<small class="dim">占用资本 ${r.capital_required_usd==null?'未知':esc(usd(r.capital_required_usd))}</small>`,sort:r=>r.estimated_cost_usd??Number.POSITIVE_INFINITY},
       {k:"deadline",label:"截止日",n:1,cell:r=>esc(r.deadline||"—"),sort:r=>new Date(r.deadline||0).getTime()},
     ],
-    detail:r=>`<span class="so">所以👉</span> ${effectiveDecision(r)==="CLAIM_CHECK"?"只从白名单官方域名打开领取页，使用自己的钱包核验资格；不要签署不明交易。":effectiveDecision(r)==="EXPIRED"?"领取窗口已过期，不要连接旧 claim 页面或签署补领交易。":"先补全自有钱包与任务证据，不能根据项目名称假定有资格。"}<br>官方域名状态: ${esc(r.official_state||"unknown")} · 当前决策 ${esc(effectiveDecision(r))}<br>官方链接: ${esc(r.official_url||"—")}<br>钱包 ${r.wallet_count??0} · 任务 ${r.task_count??0}<br>${(r.tasks||[]).map(t=>esc(t.name)+(t.evidence?" ✓":" · 未证")).join("<br>")}`,
+    detail:r=>{const verified=airdropSourceVerified(r),sv=r.source_verification||{},official=verified?`<a href="${esc(r.official_url||'#')}" target="_blank" rel="noreferrer">${esc(r.official_url||"—")}</a>`:`${esc(r.official_url||"—")} <b class="down">（未验证，不提供跳转）</b>`,evidence=verified?`<a href="${esc(r.source_evidence_url||'#')}" target="_blank" rel="noreferrer">${esc(r.source_evidence_url||"—")}</a>`:esc(r.source_evidence_url||"—"),risks=(r.risk_notes||[]).map(x=>`<li>${esc(x)}</li>`).join("");return `<span class="so">所以👉</span> ${effectiveDecision(r)==="CLAIM_CHECK"?"双页来源和自有钱包任务证据已齐，只能人工核验资格；仍不要签署不明交易。":effectiveDecision(r)==="EXPIRED"?"领取窗口已过期，不要连接旧 claim 页面或签署补领交易。":"仍是 WATCH：来源、钱包、任务或领取状态至少一项不足，不能根据项目名称假定有资格。"}<br>官方源状态: <b>${esc(r.source_state||"unknown")}</b> · 当前决策 ${esc(effectiveDecision(r))}<br>代码信任根: ${esc(r.trust_root||sv.trust_root||"—")} · 检查时间 ${esc(utcClock(sv.checked_at))}<br>活动页: ${official}<br>独立证据/条款页: ${evidence}<br>活动页验证 ${sv.official_page_verified===true?"通过":"失败"} · 证据页验证 ${sv.evidence_page_verified===true?"通过":"失败"}<br>预估花费: ${r.estimated_cost_usd==null?"未知":esc(usd(r.estimated_cost_usd))} · 占用资本: ${r.capital_required_usd==null?"未知":esc(usd(r.capital_required_usd))} · KYC: ${r.kyc_required===true?"需要":"未标记/未知"}<br>钱包 ${r.wallet_count??0} · 任务 ${r.task_count??0}<br>${(r.tasks||[]).map(t=>esc(t.name)+(t.evidence?" ✓":" · 未证")).join("<br>")}${risks?`<br><b>风险与限制</b><ul>${risks}</ul>`:""}`},
   },
   watch:{
     title:d=>`原始钱包活动线索:盯 <b>${d?.watched_wallets||0}</b> 个历史盈利钱包,记录谁<b>刚买了什么</b>——只用于提高调查优先级。`,

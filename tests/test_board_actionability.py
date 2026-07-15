@@ -90,6 +90,26 @@ def test_structure_view_separates_legacy_inventory_deltas_from_new_listings():
     assert "未独立核验为官方上币公告" in html
 
 
+def test_airdrop_view_exposes_source_coverage_cost_and_risk_without_guessing():
+    html = BOARD.read_text()
+
+    assert 'r?.source_state==="source_verified"' in html
+    assert "official_page_verified===true" in html
+    assert "evidence_page_verified===true" in html
+    assert "活动页 + 独立证据页" in html
+    assert "人工维护且覆盖不完整" in html
+    assert "不是全市场发现器" in html
+    assert "未验证·不跳转" in html
+    assert "（未验证，不提供跳转）" in html
+    assert "source_evidence_url" in html
+    assert "代码信任根" in html and "sv.checked_at" in html
+    assert 'r.estimated_cost_usd==null?"未知"' in html
+    assert "r.capital_required_usd" in html
+    assert "r.kyc_required" in html
+    assert "r.risk_notes" in html
+    assert "域名已验证活动" not in html
+
+
 def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
     html = BOARD.read_text()
 
