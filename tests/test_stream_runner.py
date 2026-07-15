@@ -91,6 +91,42 @@ def test_websocket_client_timeout_is_idle_not_disconnect(health_db):
     assert ws.pings == 1 and ws.closed is True
 
 
+def test_peer_closed_transport_is_shutdown_after_close_noop(health_db):
+    from src.pipeline.stream_runner import StreamRunner
+
+    stop = threading.Event()
+
+    class PeerClosedSocket:
+        def __init__(self):
+            self.close_calls = 0
+            self.shutdown_calls = 0
+
+        def recv(self):
+            return ""
+
+        def ping(self):
+            pass
+
+        def close(self):
+            self.close_calls += 1  # mirrors websocket-client's disconnected no-op
+
+        def shutdown(self):
+            self.shutdown_calls += 1
+
+    ws = PeerClosedSocket()
+    runner = StreamRunner(
+        source="base", stream="factory", connect=lambda: ws,
+        subscribe=lambda _sock: None, parse=lambda _raw: None,
+        on_event=lambda _payload: None,
+    )
+
+    with pytest.raises(ConnectionError, match="websocket closed"):
+        runner.run_connection(stop)
+
+    assert ws.close_calls == 1
+    assert ws.shutdown_calls == 1
+
+
 def test_backoff_is_bounded():
     from src.pipeline.stream_runner import StreamRunner
 

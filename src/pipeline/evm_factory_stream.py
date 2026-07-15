@@ -709,6 +709,11 @@ class _EvmSocket:
     def close(self):
         self.socket.close()
 
+    def shutdown(self):
+        shutdown = getattr(self.socket, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+
 
 def build_runner(*, spec: FactorySpec | None = None, rpc: JsonRpc | None = None,
                  socket_factory: Callable[[str], object] | None = None) -> StreamRunner:

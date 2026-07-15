@@ -4,6 +4,7 @@ from __future__ import annotations
 import socket
 import threading
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Protocol
@@ -20,6 +21,7 @@ class SocketLike(Protocol):
     def recv(self): ...
     def ping(self): ...
     def close(self): ...
+    def shutdown(self): ...
 
 
 @dataclass(frozen=True)
@@ -112,10 +114,13 @@ class StreamRunner:
                 processed += 1
             return processed
         finally:
-            try:
+            # websocket-client's close() is a no-op after a peer close has already
+            # set connected=False. The transport still owns a socket in CLOSE_WAIT,
+            # so every wrapper exposes an idempotent shutdown() escape hatch.
+            with suppress(Exception):
                 ws.close()
-            except Exception:
-                pass
+            with suppress(Exception):
+                ws.shutdown()
 
     def run_forever(self, stop: threading.Event | None = None) -> None:
         stop = stop or threading.Event()

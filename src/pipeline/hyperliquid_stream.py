@@ -185,6 +185,11 @@ class _HyperliquidSocket:
     def close(self):
         self.socket.close()
 
+    def shutdown(self):
+        shutdown = getattr(self.socket, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+
 
 def build_runner(coins: tuple[str, ...] | None = None,
                  store: HyperliquidStore | None = None) -> StreamRunner:

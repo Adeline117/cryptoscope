@@ -522,6 +522,11 @@ class _SolanaSocket:
     def close(self):
         self.socket.close()
 
+    def shutdown(self):
+        shutdown = getattr(self.socket, "shutdown", None)
+        if callable(shutdown):
+            shutdown()
+
 
 def build_runner(*, rpc: JsonRpc | None = None,
                  socket_factory: Callable[[], object] | None = None) -> StreamRunner:
