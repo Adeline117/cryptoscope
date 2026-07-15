@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from src.config import load_settings
 
@@ -245,6 +246,12 @@ def create_scheduler() -> AsyncIOScheduler:
         CronTrigger(minute="*/3"),
         id="launch_radar",
         name="Launch Radar (首池/低流通事件账本)",
+    )
+    scheduler.add_job(
+        _run_launch_quotes,
+        IntervalTrigger(seconds=30),
+        id="launch_quote_refresh",
+        name="Launch 最新只读报价刷新 → Blob",
     )
     scheduler.add_job(
         _run_structure_radar,
@@ -699,6 +706,27 @@ async def _run_launch_radar():
                     active=len(res["events"]), pushed=pushed)
     except Exception as e:
         logger.error("launch_radar_failed", error=str(e)[:120])
+
+
+async def _run_launch_quotes():
+    """Refresh at most a tiny bounded quote set and publish its action state."""
+    import asyncio
+
+    logger.info("scheduled_launch_quote_refresh")
+    try:
+        from src.pipeline.launch_radar import refresh_quotes
+        max_candidates = max(1, min(5, int(os.getenv("LAUNCH_QUOTE_REFRESH_MAX", "1"))))
+        result = await asyncio.to_thread(refresh_quotes, max_candidates=max_candidates)
+        if not result["refreshed"]:
+            logger.info("launch_quote_refresh_idle", **result)
+            return
+        from src.pipeline import board_export
+        launch = await asyncio.to_thread(board_export.render_launch)
+        paths = await asyncio.to_thread(board_export.write_views, launch=launch)
+        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("launch_quote_refresh_done", **result, pushed=pushed)
+    except Exception as exc:
+        logger.error("launch_quote_refresh_failed", error=str(exc)[:120])
 
 
 async def _run_structure_radar():

@@ -103,6 +103,27 @@ def test_perps_export_is_independent_from_wallet_watch():
     assert "*/5" in str(jobs["perps_export"].trigger)
 
 
+def test_launch_quote_refresh_has_bounded_independent_fast_job():
+    from src.pipeline.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    assert jobs["launch_quote_refresh"].func is not jobs["launch_radar"].func
+    assert "0:00:30" in str(jobs["launch_quote_refresh"].trigger)
+
+
+@pytest.mark.asyncio
+async def test_idle_launch_quote_refresh_does_not_push(monkeypatch):
+    from src.pipeline import board_export, launch_radar, scheduler
+
+    monkeypatch.setattr(launch_radar, "refresh_quotes", lambda **kwargs: {
+        "eligible": 0, "attempted": 0, "refreshed": 0, "skipped_fresh": 0,
+        "skipped_backoff": 0, "errors": 0})
+    monkeypatch.setattr(board_export, "push_to_blob",
+                        lambda _paths: (_ for _ in ()).throw(AssertionError("idle push")))
+    await scheduler._run_launch_quotes()
+
+
 @pytest.mark.asyncio
 async def test_wallet_watch_job_never_calls_perps_renderer(monkeypatch):
     from src.pipeline import board_export, scheduler

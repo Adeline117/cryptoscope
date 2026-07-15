@@ -415,6 +415,87 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
             "source": "Primary chain launch evidence + DEX Screener pools/profiles"}
 
 
+def refresh_quotes(*, now: datetime | None = None, assessor=None,
+                   max_candidates: int = 1, refresh_before_seconds: int = 30,
+                   retry_after_seconds: int = 60) -> dict:
+    """Refresh a bounded set of v3 probe-candidate quotes without rediscovery.
+
+    Discovery remains a three-minute event job. This fast path only appends current
+    read-only measurements and never changes the frozen cohort, price, or cost.
+    """
+    from src.pipeline import opportunity_ledger as ledger
+
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    rows = [row for row in ledger.outcome_rows(open_only=True)
+            if row.get("lane") == "launch" and row.get("cohort_version") == 3
+            and row.get("decision") == "SMALL_PROBE"]
+    recent = []
+    for row in rows:
+        try:
+            if now - datetime.fromisoformat(row["detected_at"]).astimezone(timezone.utc) \
+                    <= timedelta(hours=3):
+                recent.append(row)
+        except (TypeError, ValueError, KeyError):
+            continue
+    recent.sort(key=lambda row: row["detected_at"], reverse=True)
+    result = {"eligible": len(recent), "attempted": 0, "refreshed": 0,
+              "skipped_fresh": 0, "skipped_backoff": 0, "errors": 0}
+    for row in recent:
+        if result["attempted"] >= max(0, int(max_candidates)):
+            break
+        latest = ledger.latest_execution_assessment(row["id"])
+        if latest:
+            try:
+                assessed_age = (now - datetime.fromisoformat(latest["assessed_at"])
+                                 .astimezone(timezone.utc)).total_seconds()
+            except (TypeError, ValueError):
+                assessed_age = retry_after_seconds + 1
+            try:
+                remaining = (datetime.fromisoformat(latest["expires_at"])
+                             .astimezone(timezone.utc) - now).total_seconds()
+            except (TypeError, ValueError):
+                remaining = None
+            if latest.get("route_state") == "quoted" and remaining is not None \
+                    and remaining > refresh_before_seconds:
+                result["skipped_fresh"] += 1
+                continue
+            if latest.get("route_state") != "quoted" and assessed_age < retry_after_seconds:
+                result["skipped_backoff"] += 1
+                continue
+        event = dict(row.get("payload") or {})
+        for key in ("lane", "chain", "token", "symbol", "entry_price",
+                    "invalidation_price", "max_notional_usd", "decision",
+                    "cost_pct_est", "cost_model", "cost_contract", "cohort_version"):
+            if row.get(key) is not None:
+                event[key] = row[key]
+        event.setdefault("reasons", [])
+        current_assessor = assessor
+        if current_assessor is None:
+            from src.pipeline.launch_execution import gate, route_probe, security_probe
+
+            cached_security = ((latest or {}).get("payload") or {}).get("security_gate")
+            try:
+                security_age = (now - datetime.fromisoformat(latest["security_at"])
+                                .astimezone(timezone.utc)).total_seconds()
+            except (TypeError, ValueError, KeyError):
+                security_age = 301
+            security = (cached_security if isinstance(cached_security, dict)
+                        and security_age <= 300 else security_probe(event))
+            route = (route_probe(event) if security.get("state") == "pass"
+                     else {"state": "skipped", "reason": "security gate did not pass",
+                           "read_only": True})
+            current_assessor = lambda candidate, s=security, r=route: gate(
+                candidate, s, r, now=now)
+        result["attempted"] += 1
+        try:
+            _append_assessment(row["id"], event, current_assessor, assessed=0,
+                               max_assessments=1, now=now)
+            result["refreshed"] += 1
+        except Exception:
+            result["errors"] += 1
+    return result
+
+
 def view() -> dict:
     """Read-only board payload; scanning belongs to a scheduled ingestion path."""
     try:

@@ -1,5 +1,5 @@
 """Launch Radar must preserve first-observed facts and never turn thin pools into bets."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -205,6 +205,38 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     assert solana["available"] is True
     assert solana["qualification"]["raw_total"] == 1
     assert solana["qualification"]["recent_complete"] == 1
+
+
+def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    event = lr.qualify(_pair(pairCreatedAt=int(now.timestamp() * 1000)), now=now)
+    event["detected_at"] = now.isoformat()
+    ident, _ = ol.record(event)
+    calls = []
+
+    def assessor(candidate):
+        calls.append(candidate["entry_price"])
+        candidate["security_gate"] = {"state": "pass", "checked_at": now.isoformat()}
+        candidate["execution_probe"] = {
+            "state": "quoted", "source": "test", "api_mode": "test",
+            "roundtrip_loss_pct": 2.0, "checked_at": now.isoformat(),
+            "entry_reference_price": 0.00011,
+            "invalidation_reference_price": 0.000077,
+        }
+        candidate["quote_at"] = now.isoformat()
+        candidate["expires_at"] = (now + timedelta(seconds=60)).isoformat()
+        return candidate
+
+    first = lr.refresh_quotes(now=now, assessor=assessor)
+    assert first["refreshed"] == 1 and calls == [event["entry_price"]]
+    assert lr.refresh_quotes(now=now + timedelta(seconds=10), assessor=assessor)[
+        "skipped_fresh"] == 1
+    assert ol.outcome_rows()[0]["entry_price"] == event["entry_price"]
+    assert ol.latest_execution_assessment(ident)["entry_reference_price"] == 0.00011
 
 
 def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, monkeypatch):
