@@ -127,6 +127,83 @@ async def test_operator_hunt_and_auto_promote_run_off_event_loop(monkeypatch):
     assert all(thread != loop_thread for _name, thread in call_threads)
 
 
+@pytest.mark.asyncio
+async def test_anomaly_screen_runs_off_event_loop(monkeypatch):
+    import threading
+
+    from src.distribution import telegram_sender
+    from src.pipeline import anomaly_screener, scheduler
+
+    loop_thread = threading.get_ident()
+    scan_threads = []
+
+    def screen_universe():
+        scan_threads.append(threading.get_ident())
+        return []
+
+    async def send_alert(_message):
+        raise AssertionError("empty screen must not send an alert")
+
+    monkeypatch.setattr(anomaly_screener, "screen_universe", screen_universe)
+    monkeypatch.setattr(telegram_sender, "send_alert", send_alert)
+
+    await scheduler._run_anomaly_screen()
+
+    assert scan_threads and scan_threads[0] != loop_thread
+
+
+@pytest.mark.asyncio
+async def test_early_accumulation_sync_stages_run_off_event_loop(monkeypatch):
+    import threading
+
+    from src.onchain import smart_money
+    from src.pipeline import operator_hunt, operator_sentinel, outcome_tracker, scheduler
+
+    loop_thread = threading.get_ident()
+    call_threads = []
+    suspect = {"candidate": True}
+    candidate = {
+        "address": "0xtoken", "chain": "base", "symbol": "TEST",
+        "price0": 1.0, "liquidity": 100_000, "age_days": 2,
+        "largest_entity_pct": 10.0,
+    }
+
+    def hunt(**kwargs):
+        assert kwargs == {"per_chain": 40, "max_scan": 50}
+        call_threads.append(("hunt", threading.get_ident()))
+        return [suspect]
+
+    def candidates(got):
+        assert got == [suspect]
+        call_threads.append(("candidates", threading.get_ident()))
+        return [candidate]
+
+    def convergence(address, chain, *, max_check):
+        assert (address, chain, max_check) == ("0xtoken", "base", 15)
+        call_threads.append(("convergence", threading.get_ident()))
+        return {"verdict": "none"}
+
+    def log_alert(*args, **kwargs):
+        call_threads.append(("log_alert", threading.get_ident()))
+
+    def alerts_muted():
+        call_threads.append(("alerts_muted", threading.get_ident()))
+        return True
+
+    monkeypatch.setattr(operator_hunt, "hunt", hunt)
+    monkeypatch.setattr(operator_hunt, "early_accumulation_candidates", candidates)
+    monkeypatch.setattr(smart_money, "convergence", convergence)
+    monkeypatch.setattr(outcome_tracker, "log_alert", log_alert)
+    monkeypatch.setattr(operator_sentinel, "alerts_muted", alerts_muted)
+
+    await scheduler._run_early_accumulation()
+
+    assert [name for name, _thread in call_threads] == [
+        "hunt", "candidates", "convergence", "log_alert", "alerts_muted",
+    ]
+    assert all(thread != loop_thread for _name, thread in call_threads)
+
+
 def test_perps_export_is_independent_from_wallet_watch():
     from src.pipeline.scheduler import create_scheduler
 

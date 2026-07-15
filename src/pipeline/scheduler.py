@@ -859,7 +859,7 @@ async def _run_anomaly_screen():
     from src.pipeline.anomaly_screener import screen_universe, format_candidates
     from src.distribution.telegram_sender import send_alert
 
-    cands = screen_universe()
+    cands = await asyncio.to_thread(screen_universe)
     if cands:
         await send_alert(format_candidates(cands))
     logger.info("anomaly_screen_done", candidates=len(cands))
@@ -1065,11 +1065,11 @@ async def _run_early_accumulation():
     from src.pipeline.outcome_tracker import log_alert
 
     try:
-        suspects = hunt(per_chain=40, max_scan=50)
+        suspects = await asyncio.to_thread(hunt, per_chain=40, max_scan=50)
     except Exception as e:
         logger.warning("early_accumulation_hunt_failed", error=str(e)[:80])
         return
-    cands = early_accumulation_candidates(suspects)
+    cands = await asyncio.to_thread(early_accumulation_candidates, suspects)
 
     # SMART-MONEY CONVERGENCE — the second, independent leading signal, on the SAME
     # fresh-token shortlist. Built on realized PnL (unfakeable), so it corroborates the
@@ -1083,20 +1083,24 @@ async def _run_early_accumulation():
             continue
         kind = "早期操盘吸筹"
         try:
-            conv = convergence(c["address"], c["chain"], max_check=15)
+            conv = await asyncio.to_thread(
+                convergence, c["address"], c["chain"], max_check=15,
+            )
             c["smart_money"] = conv.get("verdict")
             if conv.get("verdict") == "convergence":
                 kind = "早期吸筹+聪明钱收敛"     # both signals agree — strongest form
         except Exception:
             pass
         try:
-            log_alert(c["address"], c["chain"], c.get("symbol", "?"),
-                      kind, "long", c["price0"], c.get("liquidity") or 0,
-                      phase="accumulate")
+            await asyncio.to_thread(
+                log_alert, c["address"], c["chain"], c.get("symbol", "?"),
+                kind, "long", c["price0"], c.get("liquidity") or 0,
+                phase="accumulate",
+            )
             logged += 1
         except Exception:
             pass
-    if cands and not alerts_muted():
+    if cands and not await asyncio.to_thread(alerts_muted):
         from src.distribution.telegram_sender import send_alert
         msg = "🟢 <b>早期操盘吸筹候选(前向实验)</b>\n━━━━━━━━━━\n"
         for c in cands[:8]:
