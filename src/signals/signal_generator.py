@@ -1,8 +1,8 @@
-"""Trade signal generator — ONLY strategies with documented edge, ONLY free APIs.
+"""Retired legacy trade-call generator retained only for offline research.
 
 Dead strategies (removed): EMA/RSI momentum (alpha decays in 2-4 weeks, everyone uses it)
 
-Live strategies (kept/added):
+Former strategies:
 1. Token unlock SHORT — 90% of >1% supply unlocks cause drops (Keyrock 16K events)
    - Optimal exit: 30 days pre-unlock
    - Optimal re-entry: 14 days post-unlock
@@ -15,7 +15,9 @@ Live strategies (kept/added):
 3. DexScreener boost detection — newly boosted tokens signal incoming marketing push
    - Buy before trending page pickup, not after
 
-All APIs used are 100% free, no keys required.
+These rules predate the opportunity ledger and do not satisfy its evidence,
+execution, lifecycle or out-of-sample gates.  The public generator is therefore
+parked; current event lanes must flow through the ledger instead.
 """
 
 from __future__ import annotations
@@ -31,6 +33,13 @@ from typing import Any
 import structlog
 
 logger = structlog.get_logger()
+
+
+# Hard fail-closed boundary for the legacy /signals and scheduled pipeline paths.
+# Individual detector functions remain importable for replay research, but may not
+# become user-facing calls until they are migrated to the opportunity ledger and
+# pass the same executable-quote and out-of-sample gates as the five live lanes.
+LEGACY_DIRECTIONAL_SIGNAL_ENABLED = False
 
 
 @dataclass
@@ -464,8 +473,15 @@ def check_dexscreener_boosts() -> list[TradeSignal]:
 # ---------------------------------------------------------------------------
 
 def generate_signals() -> list[TradeSignal]:
-    """Run all signal checks. Returns empty list if nothing — silence is golden."""
+    """Run legacy checks only after an explicit, reviewed migration gate opens."""
     logger.info("signal_generator_started")
+
+    if not LEGACY_DIRECTIONAL_SIGNAL_ENABLED:
+        logger.info(
+            "legacy_directional_signals_parked",
+            reason="missing unified ledger, execution and out-of-sample gates",
+        )
+        return []
 
     all_signals: list[TradeSignal] = []
 
