@@ -466,7 +466,7 @@ function renderPerp(d){
   let html="";
   if(cascadeEvents.length){
     html+=`<div class="play-sec" style="margin-bottom:14px"><div class="ph">⚡ 已入账的级联/点火事件 <span class="pd">首次价已锁定 · 仅强触发</span></div>`+
-      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):''}">${ed==='SMALL_PROBE'?esc(e.side):'已过期·历史方向 '+esc(e.side)}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}</small></div>`}).join("")+`</div>`;
+      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small>${launchLifecycleHtml(e)}</div>`}).join("")+`</div>`;
   }
   // ── CARRY: delta-neutral funding arbitrage — the ONE replicable positive-EV core ──
   if(carry.length){

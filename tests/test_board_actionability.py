@@ -59,3 +59,12 @@ def test_structure_view_discloses_per_source_coverage_failures():
     assert "配置了来源不等于成功扫描" in html
     assert 'x.status!=="ok"' in html
     assert "失败源不会计入覆盖" in html
+
+
+def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
+    html = BOARD.read_text()
+
+    assert "观察·历史方向" in html
+    assert "ed==='EXPIRED'?'已过期·历史方向" in html
+    assert "${launchLifecycleHtml(e)}" in html
+    assert "e.actionability_reason" in html
