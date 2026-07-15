@@ -81,12 +81,12 @@ def event_id(lane: str, chain: str | None, token: str | None) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
-def record(candidate: dict) -> tuple[str, bool]:
+def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool]:
     """Persist the first observation. Returns ``(id, inserted)``.
 
-    Existing rows retain their original entry snapshot; only liveness/state and
-    the latest enriched payload are refreshed.  This prevents repeated scans from
-    quietly moving an entry forward after a token already ran.
+    Existing rows retain their original entry snapshot. By default only liveness
+    and the latest enrichment payload are refreshed. Primary event bridges can set
+    ``refresh_existing=False`` so a later pool cannot alter first-event provenance.
     """
     lane = candidate["lane"]
     chain, token = candidate.get("chain"), candidate.get("token")
@@ -116,19 +116,34 @@ def record(candidate: dict) -> tuple[str, bool]:
     c = _conn()
     try:
         inserted = c.execute("SELECT 1 FROM opportunities WHERE id=?", (ident,)).fetchone() is None
-        c.execute("""INSERT INTO opportunities(
-              id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
-              executable_at,expires_at,source,state,decision,
-              entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
-              cohort_version,payload,updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-              ON CONFLICT(id) DO UPDATE SET
-                state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at
-        """, values)
+        if refresh_existing:
+            c.execute("""INSERT INTO opportunities(
+                  id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
+                  executable_at,expires_at,source,state,decision,
+                  entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
+                  cohort_version,payload,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  ON CONFLICT(id) DO UPDATE SET
+                    state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at
+            """, values)
+        else:
+            inserted = bool(c.execute("""INSERT INTO opportunities(
+                  id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
+                  executable_at,expires_at,source,state,decision,
+                  entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
+                  cohort_version,payload,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  ON CONFLICT(id) DO NOTHING
+            """, values).rowcount)
         c.commit()
         return ident, inserted
     finally:
         c.close()
+
+
+def record_if_absent(candidate: dict) -> tuple[str, bool]:
+    """Atomically preserve the first event and reject provenance refreshes."""
+    return record(candidate, refresh_existing=False)
 
 
 def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[dict]:

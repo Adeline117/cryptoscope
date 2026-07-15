@@ -43,6 +43,23 @@ def test_clocks_are_canonical_and_first_observation_is_immutable(tmp_path, monke
     assert row["expires_at"] == "2026-07-14T12:03:00+00:00"
 
 
+def test_record_if_absent_never_refreshes_first_event_provenance(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, inserted = ledger.record_if_absent(_candidate(
+        source="factory-a", primary_evidence={"pool": "first"}))
+    assert inserted is True
+    duplicate, inserted = ledger.record_if_absent(_candidate(
+        source="factory-b", primary_evidence={"pool": "later"}, decision="WATCH"))
+    assert duplicate == ident and inserted is False
+
+    row = ledger.outcome_rows()[0]
+    assert row["source"] == "factory-a"
+    assert row["decision"] == "SMALL_PROBE"
+    assert row["payload"]["primary_evidence"]["pool"] == "first"
+
+
 def test_clock_requires_timezone_and_preserves_late_discovery(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
 
