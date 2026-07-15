@@ -243,7 +243,7 @@
   }
   @media(max-width:600px){
     body{font-size:14px}.wrap{padding:0 12px 44px}header{padding:12px 2px}.brand{gap:8px}.logo{width:36px;height:36px}.hr{gap:8px}
-    h1{font-size:15px;white-space:nowrap}h1 span{display:none}.live{font-size:10px;letter-spacing:0;white-space:nowrap}.tabs{margin-top:10px;border-radius:12px}.tab{padding:8px 10px}
+    h1{font-size:15px;white-space:nowrap}h1 span{display:none}.live{font-size:10px;letter-spacing:0;white-space:nowrap}.tabs{margin-top:10px;border-radius:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;overflow:visible}.grp{display:contents}.grp+.grp{margin:0;padding:0;border:0}.tab{justify-content:center;padding:8px 5px;min-width:0}
     .lanehead{margin-top:12px;padding:18px 16px;border-radius:14px}.lanetitle{font-size:14px}.stat{display:grid;grid-template-columns:repeat(3,1fr);width:100%}
     .stat>div{min-width:0;padding:6px 10px;border-left:1px solid var(--border)}.stat>div:nth-child(3n+1){border-left:0;padding-left:0}
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
@@ -817,20 +817,24 @@ function wireRows(){
   });
 }
 function staleness(){
-  // The synthesis page has no endpoint of its own.  Its freshness is only as good
-  // as its stalest loaded input, so do not accidentally show "无数据" just because
-  // `data.play` does not exist.
-  const sources=view==="play"
-    ?[data.launch,data.structure,data.airdrop,data.perp,data.op,data.opp,data.watch].filter(Boolean)
-    :[data[view==="avoid"?"opp":view]].filter(Boolean);
-  const d=sources.sort((a,b)=>new Date(a.generated_at)-new Date(b.generated_at))[0], el=$("live");
-  if(!d){el.className="live dead";$("livet").textContent="无数据";return}
-  const gen=new Date(d.generated_at).getTime(), next=new Date(d.next_expected_at).getTime();
-  const staleAfter=new Date(d.stale_after_at||next+15*6e4).getTime(), now=Date.now();
-  $("gen").textContent="数据更新于 "+relMs(gen);
-  if(now<staleAfter){el.className="live";$("livet").textContent="LIVE · "+relMs(gen)}
-  else if(now-gen<864e5){el.className="live stale";$("livet").textContent="陈旧 "+relMs(gen)}
-  else{el.className="live dead";$("livet").textContent="超24h,别信"}
+  // A synthesis page has several independent clocks. Name the stale or missing
+  // lane instead of letting one slow legacy feed impersonate the whole site's age.
+  const all=[["早期",data.launch],["结构",data.structure],["空投",data.airdrop],["永续",data.perp],["操盘",data.op],["旧版线索",data.opp],["钱包",data.watch],["证据",data.stats]];
+  const selected=view==="play"?all:[[view==="avoid"?"风险过滤":view,data[view==="avoid"?"opp":view]]];
+  const missing=selected.filter(([,d])=>!d).map(([name])=>name),now=Date.now(),el=$("live");
+  const available=selected.filter(([,d])=>d&&Number.isFinite(new Date(d.generated_at).getTime())).map(([name,d])=>{
+    const gen=new Date(d.generated_at).getTime(),next=new Date(d.next_expected_at).getTime();
+    const staleAfter=new Date(d.stale_after_at||next+15*6e4).getTime();
+    return{name,d,gen,staleAfter};
+  });
+  if(!available.length){el.className="live dead";$("livet").textContent="无数据";$("gen").textContent=`缺失: ${missing.join("、")||"全部"}`;return}
+  const newest=available.reduce((a,b)=>a.gen>b.gen?a:b),oldest=available.reduce((a,b)=>a.gen<b.gen?a:b);
+  const stale=available.filter(x=>!Number.isFinite(x.staleAfter)||now>=x.staleAfter);
+  $("gen").textContent=`最新 ${newest.name} ${relMs(newest.gen)} · 最老 ${oldest.name} ${relMs(oldest.gen)}${missing.length?` · 缺失 ${missing.join("、")}`:""}`;
+  const bad=[...missing,...stale.map(x=>x.name)];
+  if(!bad.length){el.className="live";$("livet").textContent=`LIVE · ${available.length}/${selected.length}源新鲜`}
+  else if(stale.some(x=>now-x.gen>=864e5)||missing.length){el.className="live dead";$("livet").textContent=`缺失/超期: ${bad.slice(0,2).join("、")}`}
+  else{el.className="live stale";$("livet").textContent=`${bad.length}条陈旧: ${bad.slice(0,2).join("、")}`}
 }
 
 function setView(next,updateHash=true){

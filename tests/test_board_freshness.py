@@ -65,6 +65,18 @@ def test_board_does_not_claim_one_refresh_cadence_for_every_lane():
     assert "每 15 分钟自动刷新" not in board
 
 
+def test_overview_names_stale_inputs_and_mobile_shows_every_tab():
+    board = (Path(__file__).parents[1] / "board" / "public" / "index.html").read_text()
+
+    assert '["旧版线索",data.opp]' in board
+    assert '["证据",data.stats]' in board
+    assert "条陈旧:" in board
+    assert "最新 ${newest.name}" in board
+    assert "最老 ${oldest.name}" in board
+    assert "grid-template-columns:repeat(3,minmax(0,1fr))" in board
+    assert ".grp{display:contents}" in board
+
+
 def test_launch_delivery_cache_and_poll_fit_inside_quote_ttl():
     import json
 
