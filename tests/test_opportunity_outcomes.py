@@ -374,3 +374,13 @@ def test_airdrop_sums_verified_claims_but_refuses_success_only_hit_rate(ledger):
     assert stat["net_reward_usd"] == 120
     assert stat["edge_verdict"] == "不可判"
     assert "rate" not in stat and "命中率" in stat["note"]
+
+
+def test_empty_airdrop_lane_is_explicitly_scored_as_zero_events(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    stat = oo.lane_stats()["airdrop"]
+
+    assert stat["n_events"] == stat["n_claimed"] == stat["pending"] == 0
+    assert stat["verdict"] == stat["edge_verdict"] == "不可判"
+    assert "尚无" in stat["note"]

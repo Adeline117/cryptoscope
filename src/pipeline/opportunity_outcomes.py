@@ -437,7 +437,10 @@ def lane_stats() -> dict:
 
     rows = opportunity_ledger.outcome_rows()
     out: dict[str, dict] = {}
-    for lane in sorted({r["lane"] for r in rows}):
+    # A configured-but-empty workbench is still a measurable state. Always expose
+    # Airdrop's zero-event scorecard so the UI cannot hide missing discovery behind
+    # an absent JSON key.
+    for lane in sorted({r["lane"] for r in rows} | {"airdrop"}):
         lane_rows = [r for r in rows if r["lane"] == lane]
         if lane == "carry":
             out[lane] = _carry_stats(lane_rows)

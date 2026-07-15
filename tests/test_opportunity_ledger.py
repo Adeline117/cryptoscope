@@ -75,6 +75,39 @@ def test_cross_store_ledger_id_requires_exact_unique_readback(tmp_path, monkeypa
         "missing", lane="launch", chain="solana", token="MintAddress")
 
 
+def test_airdrop_read_model_uses_latest_verified_campaign_state(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    base = {
+        "lane": "airdrop", "chain": "starknet", "token": "campaign",
+        "symbol": "Campaign", "detected_at": now.isoformat(),
+        "decision_at": now.isoformat(), "state": "claimable",
+        "expires_at": (now + timedelta(days=2)).isoformat(),
+    }
+    ledger.record({**base, "decision": "CLAIM_CHECK",
+                   "official_state": "source_verified"})
+    ledger.record({**base, "decision": "WATCH", "state": "research",
+                   "decision_at": (now + timedelta(minutes=1)).isoformat(),
+                   "expires_at": None, "official_state": "source_unverified"})
+
+    failed_closed = ledger.active("airdrop", now=now)[0]
+    assert failed_closed["initial_recorded_decision"] == "CLAIM_CHECK"
+    assert failed_closed["recorded_decision"] == "WATCH"
+    assert failed_closed["effective_decision"] == "WATCH"
+    assert failed_closed["official_state"] == "source_unverified"
+    assert failed_closed["expires_at"] is None
+
+    ledger.record({**base, "decision": "CLAIM_CHECK",
+                   "decision_at": (now + timedelta(minutes=2)).isoformat(),
+                   "official_state": "source_verified"})
+    restored = ledger.active("airdrop", now=now)[0]
+    assert restored["initial_recorded_decision"] == "CLAIM_CHECK"
+    assert restored["recorded_decision"] == "CLAIM_CHECK"
+    assert restored["effective_decision"] == "CLAIM_CHECK"
+
+
 def test_carry_refresh_corrects_legacy_measurement_size_without_weakening_other_lanes(
         tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger

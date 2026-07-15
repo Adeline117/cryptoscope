@@ -496,6 +496,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                 "cost_contract_version", "cost_contract", "payload",
                 "outcome_state", "outcome")
         item = dict(zip(keys, row))
+        initial_recorded_decision = item.get("decision") or "WATCH"
         try:
             payload = json.loads(item.pop("payload"))
             # The stored columns are the immutable first-observed execution plan.
@@ -508,6 +509,12 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             if lane == "launch":
                 immutable.update({"security_gate", "execution_probe", "action_level",
                                   "current_assessment"})
+            elif lane == "airdrop":
+                # Campaign verification, claim windows and owned-wallet evidence are
+                # current facts, not a price thesis frozen at first discovery. The SQL
+                # columns retain the initial audit record while the latest validated
+                # payload is allowed to fail closed (or become claim-checkable) here.
+                immutable.difference_update({"decision", "decision_at", "expires_at"})
             for key, value in payload.items():
                 if key not in immutable:
                     item[key] = value
@@ -524,6 +531,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             except (TypeError, json.JSONDecodeError):
                 item["outcome"] = None
         _normalize_carry_read(item)
+        item["initial_recorded_decision"] = initial_recorded_decision
         recorded_decision = item.get("decision") or "WATCH"
         effective_decision = recorded_decision
         expires_at = item.get("expires_at")
