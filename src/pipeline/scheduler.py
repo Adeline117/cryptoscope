@@ -621,7 +621,8 @@ async def _run_launch_radar():
         launch = await asyncio.to_thread(board_export.render_launch)
         paths = await asyncio.to_thread(board_export.write_views, launch=launch)
         pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
-        logger.info("launch_radar_done", scanned=res["scanned"], inserted=res["inserted"],
+        logger.info("launch_radar_done", scanned=res["scanned"], assessed=res.get("assessed", 0),
+                    inserted=res["inserted"],
                     active=len(res["events"]), pushed=pushed)
     except Exception as e:
         logger.error("launch_radar_failed", error=str(e)[:120])

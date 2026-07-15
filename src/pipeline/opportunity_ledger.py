@@ -27,7 +27,7 @@ def _conn() -> sqlite3.Connection:
         symbol TEXT, detected_at TEXT NOT NULL, event_at TEXT, source TEXT,
         state TEXT NOT NULL, decision TEXT NOT NULL, entry_price REAL,
         invalidation_price REAL, max_notional_usd REAL, cost_pct_est REAL,
-        cost_model TEXT, payload TEXT NOT NULL,
+        cost_model TEXT, cohort_version INTEGER, payload TEXT NOT NULL,
         outcome_state TEXT NOT NULL DEFAULT 'open', outcome TEXT,
         updated_at TEXT NOT NULL
     )""")
@@ -37,6 +37,10 @@ def _conn() -> sqlite3.Connection:
         c.execute("ALTER TABLE opportunities ADD COLUMN cost_pct_est REAL")
     if "cost_model" not in cols:
         c.execute("ALTER TABLE opportunities ADD COLUMN cost_model TEXT")
+    if "cohort_version" not in cols:
+        # Deliberately NULL for legacy rows: their decision was mutable before v2,
+        # so they must never be smuggled into the frozen WATCH-vs-PROBE comparison.
+        c.execute("ALTER TABLE opportunities ADD COLUMN cohort_version INTEGER")
     c.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_lane_open "
               "ON opportunities(lane, outcome_state, detected_at DESC)")
     return c
@@ -70,18 +74,18 @@ def record(candidate: dict) -> tuple[str, bool]:
               candidate.get("source", "unknown"), candidate.get("state", "new"),
               candidate.get("decision", "WATCH"), candidate.get("entry_price"),
               candidate.get("invalidation_price"), candidate.get("max_notional_usd"),
-              candidate.get("roundtrip_cost_pct_est"), candidate.get("cost_model"), payload, now)
+              candidate.get("roundtrip_cost_pct_est"), candidate.get("cost_model"), 2,
+              payload, now)
     c = _conn()
     try:
         inserted = c.execute("SELECT 1 FROM opportunities WHERE id=?", (ident,)).fetchone() is None
         c.execute("""INSERT INTO opportunities(
               id,lane,chain,token,symbol,detected_at,event_at,source,state,decision,
               entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
-              payload,updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              cohort_version,payload,updated_at)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO UPDATE SET
-                state=excluded.state, decision=excluded.decision, payload=excluded.payload,
-                updated_at=excluded.updated_at
+                state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at
         """, values)
         c.commit()
         return ident, inserted
@@ -97,8 +101,8 @@ def active(lane: str, limit: int = 50) -> list[dict]:
     try:
         rows = c.execute("""SELECT id, lane, chain, token, symbol, detected_at, event_at,
                                   source, state, decision, entry_price, invalidation_price,
-                                  max_notional_usd, cost_pct_est, cost_model, payload,
-                                  outcome_state, outcome
+                                  max_notional_usd, cost_pct_est, cost_model, cohort_version,
+                                  payload, outcome_state, outcome
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
     finally:
@@ -107,7 +111,7 @@ def active(lane: str, limit: int = 50) -> list[dict]:
     for row in rows:
         keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
                 "source", "state", "decision", "entry_price", "invalidation_price",
-                "max_notional_usd", "cost_pct_est", "cost_model", "payload",
+                "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version", "payload",
                 "outcome_state", "outcome")
         item = dict(zip(keys, row))
         try:
@@ -142,7 +146,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
         where = "WHERE outcome_state='open'" if open_only else ""
         rows = c.execute(f"""SELECT id,lane,chain,token,symbol,detected_at,event_at,
                                     source,state,decision,entry_price,invalidation_price,
-                                    max_notional_usd,cost_pct_est,cost_model,payload,
+                                    max_notional_usd,cost_pct_est,cost_model,cohort_version,payload,
                                     outcome_state,outcome,updated_at
                              FROM opportunities {where}
                              ORDER BY detected_at ASC""").fetchall()
@@ -150,7 +154,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
         c.close()
     keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
             "source", "state", "decision", "entry_price", "invalidation_price",
-            "max_notional_usd", "cost_pct_est", "cost_model", "payload",
+            "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version", "payload",
             "outcome_state", "outcome", "updated_at")
     out = []
     for row in rows:

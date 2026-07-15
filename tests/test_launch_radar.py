@@ -48,7 +48,11 @@ def test_ledger_keeps_first_seen_entry_when_event_is_refreshed(tmp_path, monkeyp
     row = ol.active("launch")[0]
     assert row["entry_price"] == 0.01
     assert row["cost_pct_est"] == 1.2 and row["cost_model"] == "first_snapshot"
+    assert row["cohort_version"] == 2
+    # The live card may refresh to SMALL_PROBE, but the experiment cohort is frozen
+    # at first observation so a later pump cannot relabel an old WATCH as a winner.
     assert row["decision"] == "SMALL_PROBE"
+    assert ol.outcome_rows()[0]["decision"] == "WATCH"
 
 
 def test_cascade_only_records_strong_timed_events(tmp_path, monkeypatch):

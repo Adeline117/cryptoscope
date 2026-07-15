@@ -96,6 +96,19 @@ def test_stats_refuse_rate_below_minimum_sample(ledger):
     assert stat["n"] == 1
 
 
+def test_legacy_mutable_decision_is_excluded_from_cohort(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    ident, _ = ledger.record(_launch(datetime.now(timezone.utc).isoformat()))
+    ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": 20.0}}})
+    c = ledger._conn()
+    c.execute("UPDATE opportunities SET cohort_version=NULL WHERE id=?", (ident,))
+    c.commit(); c.close()
+    rows = ledger.outcome_rows()
+    assert oo._cohort(rows, "SMALL_PROBE")["n"] == 0
+    assert oo.lane_stats()["launch"]["legacy_unfrozen_n"] == 1
+
+
 def test_launch_edge_requires_and_uses_watch_control(ledger):
     from src.pipeline import opportunity_outcomes as oo
 

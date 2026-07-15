@@ -12,7 +12,7 @@
 
 | 线 | 收益结构 | 当前入口 | 下一步缺口 | 不该做的事 |
 |---|---|---|---|---|
-| Launch | 低流通早期定价重估，右尾主引擎 | `launch_radar.py`、`meme_pipeline.py`、GMGN | Solana/Base 流式首池与首批钱包、真实成交回放 | 用热度/单一分数代替时延和可卖性 |
+| Launch | 低流通早期定价重估，右尾主引擎 | `launch_radar.py`、`launch_execution.py`、GMGN | Solana/Base 流式首池与首批钱包、从只读双向报价升级为真实成交回放 | 用热度/单一分数代替时延和可卖性 |
 | Cascade | 杠杆拥挤开始平仓时的流动性真空 | `hyperliquid.py`、`liquidation_monitor.py` | WebSocket、OI/盘口/清算事件状态机、双向结果账本 | 仅因高资金费裸做反向 |
 | Structure | 公开催化剂、上币、解锁、CEX 流、跨所结构价差 | `listing_detector.py`、`cex_flow.py`、`token_unlocks.py`、`carry_paper.py` | 统一日历与可交易窗口、来源可信度 | 漏洞、未公开信息抢跑、攻击或恶意 MEV |
 | Airdrop | 低下行的长期期权/劳务回报 | `airdrop_radar.py`、官方活动清单 | 项目资格、成本、快照证据、领取/卖出追踪 | 多号 Sybil 或违反项目条款的自动化 |
@@ -28,6 +28,15 @@
 - 最大名义仓位为流动性的 0.3%，且限制在 $25–$500；失效价暂定为首次价的 -30%。
 
 这些是执行和存活门槛，不是预测模型。结果以 `opportunity_ledger.py` 的首次观察快照记录，并在网站的 `🚀 Launch` 作战台展示。
+
+原始候选还不能直接成为 `SMALL_PROBE`。`launch_execution.py` 先做 GoPlus
+安全检查，再用拟议仓位进行买入→卖出双向路由报价：Solana 使用 Jupiter，
+EVM 记录 0x 指示价但在 gas 未折算为美元前仍只允许 WATCH。缺 key、缺字段、
+取数失败均为 UNKNOWN；蜜罐、可冻结/改余额/高卖税或无卖出路由为 AVOID。
+报价是只读快照，不是实盘成交；配置项为 `JUPITER_API_KEY`、`ZEROX_API_KEY`。
+修复前的旧账本允许决策随轮询刷新，因此这些事件只保留在总体结果分布中，
+不会进入 `SMALL_PROBE` 对 `WATCH` 的 cohort 比较；只有 `cohort_version=2`
+且首次决策已冻结的新事件可以用于相对 edge 判断。
 
 ## 统一验收指标
 

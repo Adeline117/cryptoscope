@@ -198,7 +198,7 @@ def _percentile(values: list[float], p: float) -> float | None:
 def _cohort(rows: list[dict], decision: str) -> dict:
     vals = []
     for row in rows:
-        if row.get("decision") != decision:
+        if row.get("decision") != decision or (row.get("cohort_version") or 0) < 2:
             continue
         point = ((row.get("outcome") or {}).get("horizons") or {}).get("24h")
         if point and point.get("net_return_pct_est") is not None:
@@ -235,6 +235,9 @@ def lane_stats() -> dict:
         common = {"n": n, "hits": positives, "pending": pending,
                   "unresolvable": unresolvable, "metric": "positive_after_estimated_cost",
                   "cost_is_real_fill": False}
+        if lane == "launch":
+            common["legacy_unfrozen_n"] = sum((r.get("cohort_version") or 0) < 2
+                                                for r in measurable)
         if n < MIN_N:
             out[lane] = {**common, "verdict": "不可判",
                          "edge_verdict": "不可判", "note": f"24h样本 {n}/{MIN_N},继续积累"}

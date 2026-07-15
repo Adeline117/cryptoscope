@@ -18,6 +18,7 @@ PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
 PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
 SUPPORTED_CHAINS = {"solana", "base", "bsc", "ethereum"}
 MAX_CANDIDATES = 30
+MAX_EXECUTION_ASSESSMENTS = 5
 
 
 def _num(value, default=0.0) -> float:
@@ -104,22 +105,47 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     }
 
 
-def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CANDIDATES) -> dict:
-    """Discover profiles, enrich their deepest pool, and persist launch events."""
+def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CANDIDATES,
+         assessor=None, max_assessments: int = MAX_EXECUTION_ASSESSMENTS) -> dict:
+    """Discover pools, then safety/round-trip gate only raw actionable candidates.
+
+    The hard assessment budget bounds GoPlus/router calls. Anything beyond the budget
+    is WATCH, never an unchecked SMALL_PROBE.
+    """
     now = now or datetime.now(timezone.utc)
+    if assessor is None:
+        from src.pipeline.launch_execution import assess as assessor
     profiles = fetch(PROFILES_URL)
     profiles = profiles if isinstance(profiles, list) else []
-    inserted = 0
+    inserted = assessed = 0
     for profile in profiles[:max_profiles]:
         try:
             pair = _pair_for(profile, fetch)
             event = qualify(pair, now=now) if pair else None
             if event:
+                if event.get("decision") == "SMALL_PROBE":
+                    if assessed < max(0, max_assessments):
+                        assessed += 1
+                        try:
+                            event = assessor(event)
+                        except Exception as exc:
+                            event["decision"] = "WATCH"
+                            event["security_gate"] = {"state": "unknown",
+                                                      "reason": f"assessment failed: {str(exc)[:60]}"}
+                            event["execution_probe"] = {"state": "skipped",
+                                                        "reason": "assessment failed"}
+                    else:
+                        event["decision"] = "WATCH"
+                        event["security_gate"] = {"state": "unknown",
+                                                  "reason": "per-scan assessment budget exhausted"}
+                        event["execution_probe"] = {"state": "skipped",
+                                                    "reason": "assessment budget exhausted"}
+                        event["reasons"].append("执行门降级:本轮安全/路由检查预算已用完")
                 _, new = record(event)
                 inserted += int(new)
         except Exception:
             continue
-    return {"scanned": len(profiles[:max_profiles]), "inserted": inserted,
+    return {"scanned": len(profiles[:max_profiles]), "assessed": assessed, "inserted": inserted,
             "events": active("launch"), "source": "DEX Screener profiles + pools"}
 
 
