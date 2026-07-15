@@ -18,6 +18,7 @@ from typing import Callable
 import structlog
 
 from src.config import DATA_DIR
+from src.pipeline import stream_health
 from src.pipeline.stream_runner import StreamEvent, StreamRunner
 
 logger = structlog.get_logger()
@@ -256,12 +257,30 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
     return {"attempted": len(rows), "completed": completed, "failed": failed}
 
 
+def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10) -> dict:
+    gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
+    recovered = failed = 0
+    for gap in gaps:
+        if backfill_slots(gap["from_cursor"], gap["to_cursor"], rpc=rpc):
+            if stream_health.resolve_gap(
+                    gap["id"], details={"backfilled": True, "retry": True,
+                                        "from": gap["from_cursor"],
+                                        "to": gap["to_cursor"]}):
+                recovered += 1
+        else:
+            failed += 1
+    return {"attempted": len(gaps), "recovered": recovered, "failed": failed}
+
+
 def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                     *, interval_seconds: float = 60) -> None:
     while not stop.wait(max(1, interval_seconds)):
         result = rehydrate_pending(rpc, limit=25)
         if result["attempted"]:
             logger.info("solana_launch_rehydrated", **result)
+        gaps = retry_open_gaps(rpc)
+        if gaps["attempted"]:
+            logger.info("solana_launch_gap_retry", **gaps)
 
 
 def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[dict, dict] | None:
@@ -368,6 +387,9 @@ def main() -> None:
     initial = rehydrate_pending(rpc, include_incomplete=True)
     if initial["attempted"]:
         logger.info("solana_launch_initial_rehydration", **initial)
+    recovered = retry_open_gaps(rpc)
+    if recovered["attempted"]:
+        logger.info("solana_launch_initial_gap_retry", **recovered)
     stop = threading.Event()
     worker = threading.Thread(target=_rehydrate_loop, args=(stop, rpc), daemon=True)
     worker.start()

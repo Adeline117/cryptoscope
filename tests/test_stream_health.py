@@ -54,3 +54,13 @@ def test_disconnect_is_not_reported_as_a_quiet_live_market(health):
 def test_stream_clocks_require_timezone(health):
     with pytest.raises(ValueError, match="timezone"):
         health.observe("source", "stream", received_at="2026-07-14T12:00:00")
+
+
+def test_open_gaps_returns_recovery_queue(health):
+    health.observe("solana", "slots", cursor=10, expect_contiguous=True)
+    health.observe("solana", "slots", cursor=12, expect_contiguous=True)
+    gaps = health.open_gaps("solana", "slots")
+    assert len(gaps) == 1
+    assert {key: gaps[0][key] for key in ("id", "from_cursor", "to_cursor")} == {
+        "id": 1, "from_cursor": 11, "to_cursor": 11}
+    assert gaps[0]["details"] == '{"observed_after":12}'

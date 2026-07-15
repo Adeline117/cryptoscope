@@ -9,8 +9,10 @@ import pytest
 @pytest.fixture
 def sol(tmp_path, monkeypatch):
     from src.pipeline import solana_launch_stream
+    from src.pipeline import stream_health
 
     monkeypatch.setattr(solana_launch_stream, "DB", tmp_path / "launches.db")
+    monkeypatch.setattr(stream_health, "DB", tmp_path / "stream-health.db")
     return solana_launch_stream
 
 
@@ -157,6 +159,25 @@ def test_incomplete_identity_is_only_retried_during_startup_audit(sol):
     assert sol.rehydrate_pending(rpc)["attempted"] == 0
     assert sol.rehydrate_pending(rpc, include_incomplete=True)["completed"] == 1
     assert rpc.calls == 1
+
+
+def test_open_slot_gap_is_retried_and_resolved(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            assert method == "getBlock" and params[0] == 11
+            return None
+
+    assert sol.retry_open_gaps(Rpc()) == {
+        "attempted": 1, "recovered": 1, "failed": 0}
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    assert stream_health.snapshot(stale_after_seconds=60)[0]["status"] == "live"
 
 
 def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):

@@ -151,6 +151,21 @@ def resolve_gap(gap_id: int, *, details: dict | None = None,
         c.close()
 
 
+def open_gaps(source: str, stream: str, *, limit: int = 100) -> list[dict]:
+    c = _conn()
+    try:
+        rows = c.execute(
+            """SELECT id,from_cursor,to_cursor,detected_at,details
+               FROM gaps WHERE source=? AND stream=? AND status='open'
+               ORDER BY detected_at,id LIMIT ?""",
+            (source, stream, max(0, int(limit))),
+        ).fetchall()
+    finally:
+        c.close()
+    keys = ("id", "from_cursor", "to_cursor", "detected_at", "details")
+    return [dict(zip(keys, row)) for row in rows]
+
+
 def snapshot(*, now: datetime | str | None = None,
              stale_after_seconds: int = 120) -> list[dict]:
     current = datetime.fromisoformat(_iso(now))
