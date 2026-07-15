@@ -131,10 +131,11 @@ def record(candidate: dict) -> tuple[str, bool]:
         c.close()
 
 
-def active(lane: str, limit: int = 50) -> list[dict]:
-    """Return live event cards with their *first-seen* price/plan intact."""
+def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[dict]:
+    """Return event cards plus a fail-closed current-actionability verdict."""
     if lane not in LANES:
         raise ValueError(f"unknown lane: {lane}")
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     c = _conn()
     try:
         rows = c.execute("""SELECT id, lane, chain, token, symbol, detected_at, event_at,
@@ -170,6 +171,35 @@ def active(lane: str, limit: int = 50) -> list[dict]:
                 item["outcome"] = json.loads(item["outcome"])
             except (TypeError, json.JSONDecodeError):
                 item["outcome"] = None
+        recorded_decision = item.get("decision") or "WATCH"
+        effective_decision = recorded_decision
+        expires_at = item.get("expires_at")
+        seconds_to_expiry = None
+        expired = False
+        if expires_at:
+            try:
+                expiry = datetime.fromisoformat(expires_at).astimezone(timezone.utc)
+                seconds_to_expiry = round((expiry - now).total_seconds())
+                expired = seconds_to_expiry <= 0
+            except (TypeError, ValueError):
+                expired = True
+        # A SMALL_PROBE is a quote-bounded state, never a durable label. Legacy rows
+        # without both clocks are preserved for outcomes but fail closed for display.
+        if recorded_decision == "SMALL_PROBE":
+            if not item.get("quote_at") or not expires_at:
+                effective_decision = "WATCH"
+                item["actionability_reason"] = "missing quote or expiry clock"
+            elif expired:
+                effective_decision = "EXPIRED"
+                item["actionability_reason"] = "read-only quote expired"
+        elif expired and recorded_decision == "CLAIM_CHECK":
+            effective_decision = "EXPIRED"
+            item["actionability_reason"] = "claim window expired"
+        item["recorded_decision"] = recorded_decision
+        item["effective_decision"] = effective_decision
+        item["actionable_now"] = effective_decision in {"SMALL_PROBE", "CLAIM_CHECK"}
+        item["is_expired"] = expired
+        item["seconds_to_expiry"] = seconds_to_expiry
         out.append(item)
     return out
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -80,3 +81,29 @@ def test_legacy_schema_backfills_only_provable_decision_clock(tmp_path, monkeypa
     assert row["quote_at"] is None
     assert row["executable_at"] is None
     assert row["expires_at"] is None
+
+
+def test_active_actionability_fails_closed_on_missing_or_expired_quote(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    now = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    ledger.record(_candidate(token="fresh", detected_at=now.isoformat(),
+                             quote_at=now.isoformat(),
+                             expires_at=(now + timedelta(seconds=60)).isoformat()))
+    ledger.record(_candidate(token="expired", detected_at=now.isoformat(),
+                             quote_at=now.isoformat(),
+                             expires_at=(now - timedelta(seconds=1)).isoformat()))
+    ledger.record(_candidate(token="legacy", detected_at=now.isoformat(),
+                             quote_at=None, expires_at=None))
+
+    rows = {row["token"]: row for row in ledger.active("launch", now=now)}
+    assert rows["fresh"]["effective_decision"] == "SMALL_PROBE"
+    assert rows["fresh"]["actionable_now"] is True
+    assert rows["fresh"]["seconds_to_expiry"] == 60
+    assert rows["expired"]["effective_decision"] == "EXPIRED"
+    assert rows["expired"]["actionable_now"] is False
+    assert rows["legacy"]["effective_decision"] == "WATCH"
+    assert rows["legacy"]["actionability_reason"] == "missing quote or expiry clock"
+    # Historical cohort label remains intact for outcome measurement.
+    assert all(row["decision"] == "SMALL_PROBE" for row in rows.values())
