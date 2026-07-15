@@ -181,6 +181,7 @@
   .evidence-card .es{margin-top:5px;color:var(--dim);font-size:11.5px;line-height:1.5}
   .meter{height:5px;margin-top:11px;border-radius:99px;background:var(--s3);overflow:hidden}.meter>i{display:block;height:100%;background:var(--accent);border-radius:inherit}
   .play>.play-sec{grid-column:span 6}.play>.play-sec:first-child{grid-column:span 8}.play>.play-sec:nth-child(2){grid-column:span 4}
+  .play>.carry-health{grid-column:1/-1;margin-bottom:0}
   .play-sec{border:1px solid var(--border);border-radius:14px;padding:20px 22px;background:var(--s1);box-shadow:var(--shadow)}
   .play-sec .ph{font-size:15px;font-weight:730;color:var(--text);display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
   .play-sec .ph .pd{font-size:11px;font-weight:500;color:var(--dim);letter-spacing:.02em}
@@ -195,6 +196,17 @@
   /* perp: carry section header + heatmap */
   .perp-sec{font-size:12px;font-weight:650;color:var(--text);margin:2px 0 9px;letter-spacing:.02em}
   .perp-sec small{font-weight:500;color:var(--dim);letter-spacing:0}
+  .carry-health{margin:0 0 14px;padding:15px 16px;border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:12px;background:var(--s1)}
+  .carry-health.partial{border-left-color:var(--warn);background:color-mix(in srgb,var(--warn-bg) 38%,var(--s1))}
+  .carry-health.unavailable{border-left-color:var(--danger);background:color-mix(in srgb,var(--danger-bg) 34%,var(--s1))}
+  .carry-health-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .carry-health-title{font-size:13px;font-weight:720;color:var(--text)}
+  .carry-health-copy{margin-top:7px;font-size:12px;line-height:1.55;color:var(--muted)}
+  .carry-health-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+  .health-cell{padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:color-mix(in srgb,var(--s1) 88%,transparent);min-width:0}
+  .health-cell .hk{display:block;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+  .health-cell .hv{display:block;margin-top:3px;font:650 12px/1.35 var(--mono);color:var(--text);overflow-wrap:anywhere}
+  .health-cell .hs{display:block;margin-top:3px;font-size:10px;line-height:1.35;color:var(--dim);overflow-wrap:anywhere}
   .sc-card{display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;padding:10px 14px;margin:0 0 11px;
     background:var(--s1);border:1px solid var(--border);border-radius:10px}
   .sc-card .k{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
@@ -202,6 +214,18 @@
   .sc-card .v .num{font-size:16px;font-weight:650}
   .sc-card .v small{color:var(--dim);font-size:11px}
   .sc-card.muted .v{color:var(--dim);font-size:13px}
+  .evidence-reasons{width:100%;font-size:10.5px;color:var(--dim)}
+  .evidence-reasons summary{cursor:pointer;color:var(--muted)}
+  .carry-life{margin:8px 0;padding:13px 14px;border:1px solid var(--border);border-radius:11px;background:var(--s1)}
+  .carry-life.pending{border-color:var(--warn-b);background:color-mix(in srgb,var(--warn-bg) 32%,var(--s1))}
+  .carry-life.gap{border-style:dashed;border-color:var(--warn-b)}
+  .carry-life-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .carry-life-head b{font-size:14px}
+  .carry-life-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+  .life-cell{min-width:0;padding:8px 9px;border-radius:8px;background:var(--s2)}
+  .life-cell .lk{display:block;font-size:9.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .life-cell .lv{display:block;margin-top:3px;font:600 11.5px/1.4 var(--mono);overflow-wrap:anywhere}
+  .life-rule{margin-top:9px;font-size:11px;line-height:1.55;color:var(--muted)}
   .hm{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
   .cell{border:1px solid var(--border);border-radius:9px;padding:9px 10px;background:var(--s1);display:flex;flex-direction:column;gap:5px;cursor:pointer}
   .cell:hover,.cell:focus-visible{border-color:var(--accent)!important;transform:translateY(-1px)}
@@ -227,6 +251,8 @@
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
     .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}.coverage-strip{grid-template-columns:1fr}
     .swipe-hint{display:block;position:sticky;left:0;width:100%;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;text-align:right}
+    body[data-view="perp"] .stat{grid-template-columns:repeat(2,1fr)}body[data-view="perp"] .stat>div:nth-child(n){border-left:1px solid var(--border);padding-left:10px}body[data-view="perp"] .stat>div:nth-child(2n+1){border-left:0;padding-left:0}
+    .carry-health-grid{grid-template-columns:1fr 1fr}.carry-health-head{align-items:flex-start;flex-direction:column}.sc-card{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sc-card .k,.evidence-reasons{grid-column:1/-1}.sc-card .v{align-items:flex-start;flex-direction:column;gap:1px}.carry-life-grid{grid-template-columns:1fr}.carry-life{padding:12px}
   }
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
 </style>
@@ -519,8 +545,8 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0];const ev=data.stats?.lanes?.carry;return `<b style="color:var(--good)">跨所资金费差(HL vs OKX)</b>:空HL+多OKX是结构假设，不是已证 edge。模型扣成本后 ${pos}/${c.length} 个净>0${top?`，最高模型净额 +${top.net_ann}%(${esc(top.symbol)})`:''}；纸面关闭样本成本后为正 <b>${ev?.hits??"?"}/${ev?.n??"?"}</b>，当前判决 ${esc(ev?.edge_verdict||"不可判")}。`},
-    stat:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry;return[["模型净>0",`${pos}/${c.length}`,"预测·非结果"],["最高模型净额",top?`+${top.net_ann}%`:"—",top?top.symbol:""],["纸面成本后为正",ev?`${ev.hits}/${ev.n}`:"—",ev?.note||"等待统计"],["优势判决",ev?.edge_verdict||"不可判","非实盘"]]},
+    title:d=>{const c=d?.carry||[],health=d?.carry_source_health||{};const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分已建模成本后的代理为正 ${pos}/${c.length}${top?`，最高代理 +${top.net_ann}%(${esc(top.symbol)})`:''}。有效关闭 ${pp.n_closed??ev?.n??"?"} / 总关闭 ${pp.n_closed_total??"?"}，当前判决 ${esc(ev?.edge_verdict||"不可判")}。`},
+    stat:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["模型代理>0",`${pos}/${c.length}`,"部分成本假设·非结果"],["最高模型代理",top?`+${top.net_ann}%`:"—",top?top.symbol:""],["有效/总关闭",`${pp.n_closed??ev?.n??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"}`],["优势判决",ev?.edge_verdict||"不可判","非实盘"]]},
     readme:"💰资金费套利是当前最值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。模型年化必须与纸面关闭样本分开看，费率翻负、双腿滑点、再平衡、ADL、交易所故障和脱锚都可能吞掉毛差。只有成本后样本达到门槛并进一步取得真实双腿成交证据，才可升级结论。下面的拥挤/点火仅作方向防御观察。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -559,7 +585,8 @@ function renderPlay(){
   const launches=data.launch?.events||[];
   const activeLaunch=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE");
   const carry=(data.perp?.carry||[]).filter(x=>x.net_ann>0);
-  const pp=data.perp?.carry_paper;
+  const pp=data.perp?.carry_paper||{};
+  const carryHealth=data.perp?.carry_source_health||{};
   const carryEvidence=data.stats?.lanes?.carry;
   const launchEvidence=data.stats?.lanes?.launch;
   const sourceHealth=data.structure?.source_health||[];
@@ -571,34 +598,39 @@ function renderPlay(){
   const verdict=actionCount?`${actionCount} 个小额试探窗口仍有效`:'等待 · 当前不入场';
   const verdictCopy=actionCount
     ?'这些候选同时通过安全、双向路由、报价时钟与证据门。仍只能按逐行仓位上限试错，价格失效或时钟到期立即停止使用旧报价。'
-    :'没有任何候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 虽有模型净额为正的候选，但纸面样本尚未证明成本后优势。';
+    :carry.length
+      ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有模型代理为正的纸面候选，尚未证明真实成本后优势。'
+      :'当前没有通过完整门禁的 Launch 或 Carry 候选；数据缺失时保持不可判，不把抓取失败说成没有机会。';
   h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
     <div><div class="decision-kicker">当前决策 · ${actionCount?'可小额验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
       <p class="decision-copy">${verdictCopy}</p>
       <div class="command-actions"><button class="jump primary" data-jump="launch">查看入场门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
     <div class="decision-facts">
       <div class="fact ${actionCount?'good':'warn'}"><span class="fk">A3 人工验证窗</span><span class="fv">${actionCount}</span><span class="fs">新鲜报价+完整成本+证据门+送达SLA</span></div>
-      <div class="fact"><span class="fk">纸面候选</span><span class="fv">${carry.length}</span><span class="fs">模型净额为正，不等于已获证</span></div>
+      <div class="fact"><span class="fk">纸面候选</span><span class="fv">${carry.length}</span><span class="fs">模型代理为正，成本组件仍不全</span></div>
       <div class="fact danger"><span class="fk">应避开</span><span class="fv">${dep.length+avoid.length}</span><span class="fs">派发、高接盘风险或安全红旗</span></div>
       <div class="fact warn"><span class="fk">数据覆盖</span><span class="fv">${sourceOk}/${sourceHealth.length||'?'}</span><span class="fs">仅为上币来源健康，不代表全市场覆盖</span></div>
     </div></section>`;
   if(activeLaunch.length){
     h+=`<section class="play-sec" style="grid-column:1/-1"><div class="ph">A3 人工小额验证窗 <span class="pd">只读报价到期即失效 · 永不自动交易</span></div>${activeLaunch.slice(0,4).map(r=>{const ca=r.current_assessment||{};return `<div class="prow"><span class="chip b-good">${esc(expiryText(ca))}</span> <b>${esc(r.symbol)}</b> 当前只读报价参考 <span class="num">${ca.entry_reference_price!=null?'$'+esc(ca.entry_reference_price):'不可得'}</span> · 当前失效参考 ≤ <span class="num">${ca.invalidation_reference_price!=null?'$'+esc(ca.invalidation_reference_price):'不可得'}</span> · 最大 <span class="num">${usd(ca.notional_usd||r.max_notional_usd)}</span><button class="jump" data-jump="launch">看完整证据</button></div>`}).join('')}</section>`;
   }
+  h+=carryHealthHtml(carryHealth);
+  const carryValid=Number.isFinite(pp.n_closed)?pp.n_closed:(carryEvidence?.n??0);
+  const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
+  const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:Math.max(0,carryTotal-carryValid);
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
     <div class="evidence-card"><div class="ek"><span>早期机会证据</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEvidence?.probe?.n??0}/20 <small class="dim">试验</small></div><div class="es">同期 WATCH 对照 ${launchEvidence?.control?.n??0}/20；必须比较成本后 24h 结果。</div><div class="meter"><i style="width:${Math.min(100,(launchEvidence?.probe?.n||0)/20*100)}%"></i></div></div>
-    <div class="evidence-card"><div class="ek"><span>Carry 证据</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryEvidence?.n??0}/20 <small class="dim">已关闭</small></div><div class="es">成本后为正 ${carryEvidence?.hits??0} 个；订单簿纸面测量，不冒充实盘成交。</div><div class="meter"><i style="width:${Math.min(100,(carryEvidence?.n||0)/20*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>Carry 证据</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid}/20 <small class="dim">有效关闭</small></div><div class="es">总关闭 ${carryTotal} · 排除 ${carryExcluded}；排除样本不进入优势判决。已知组件后代理为正 ${carryEvidence?.hits??0} 个。</div><div class="meter"><i style="width:${Math.min(100,carryValid/20*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
   </section>`;
   // 1) EDGE
   h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
   if(carry.length){
-    h+=`<div class="pnote">当前最值得验证的假设是<b>跨所资金费差</b>：空HL + 多OKX 两永续，delta 中性不赌方向。模型净额不等于已实现收益；当前纸面成本后为正 <b>${carryEvidence?.hits??"?"}/${carryEvidence?.n??"?"}</b>，判决 <b>${esc(carryEvidence?.edge_verdict||"不可判")}</b>。</div>`;
-    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 净 <span class="num" style="color:var(--good)">+${c.net_ann}%/年</span> <small class="dim">毛${c.edge_ann} · ${c.hold_measured?c.hold_days+'d实测':'持仓未测(14d假设)'} · 尾部ADL</small></div>`).join('');
-    if(pp&&(pp.n_open||pp.n_closed)) h+=`<div class="pnote">📊 纸面验证:${pp.n_closed&&pp.avg_net_return_pct!=null?`已平仓 ${pp.n_closed} 个,<b>绝对净收益 ${pp.avg_net_return_pct>0?'+':''}${pp.avg_net_return_pct}%</b>(累计资金费 ${pp.avg_funding_accrued_pct}%,成本 ${pp.avg_cost_pct}%,持仓 ${pp.avg_hold_days}d${pp.avg_annualized_net_pct!=null?`,合格长样本年化 ${pp.avg_annualized_net_pct}%`:`,${esc(pp.annualized_note||'年化样本不足')}`})`:`${pp.n_open} 仓运行中,等差价衰减自然平仓→给实测数字。<b>在此之前净额是模型估,别当已证</b>`}。</div>`;
-    if(pp?.open_positions?.length) h+=pp.open_positions.slice(0,3).map(p=>`<div class="prow"><span class="chip">纸面运行中</span> <b>${esc(p.symbol)}</b> 入场 <span class="num">${esc(utcClock(p.entry_at))}</span> · 最近测量 <span class="num">${esc(utcClock(p.last_measured_at))}</span> · 当前差价 <span class="num">${p.last_diff_ann_pct==null?'—':esc(p.last_diff_ann_pct)+'%/年'}</span><small class="dim">退出:差价&lt;${esc(p.exit_diff_floor_ann_pct)}%/年或市场缺失 · 非实盘</small></div>`).join('');
-  } else h+='<div class="pnote dim">此刻无净&gt;0 的跨所 carry 机会。没有就没有,不硬凑一个给你。</div>';
+    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出仍是报价率与已知成本组件的模型代理，不是实际结算或完整 PnL；有效关闭 <b>${carryValid}</b> / 总关闭 ${carryTotal}，排除 ${carryExcluded}，判决 <b>${esc(carryEvidence?.edge_verdict||"不可判")}</b>。</div>`;
+    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 模型代理 <span class="num" style="color:var(--accent-t)">+${c.net_ann}%/年</span> <small class="dim">毛差 ${c.edge_ann} · ${c.hold_measured?c.hold_days+'d历史覆盖':'14d持仓假设'} · 非仓位建议</small></div>`).join('');
+  } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
   h+='</div>';
+  h+=carryLifecycleHtml(pp,3);
   // 2) DEFENSE
   h+='<div class="play-sec"><div class="ph">🛡️ 防守:别当接盘侠 <span class="pd">散户最持久的 edge 在这</span></div>';
   let any=false;
@@ -609,90 +641,125 @@ function renderPlay(){
   // 3) DON'T
   h+='<div class="play-sec"><div class="ph">🚫 别做:顶刊实证的散户负EV陷阱</div><div class="pnote">跟 🐋 聪明钱买入去接盘 · 追 💎 早期扫描的币做多 · 买 💰 庄吸筹跟庄 · 裸做空高资金费。这些标签是让你<b>看清结构、别当接盘侠</b>,不是让你照着买。跟买吸筹:pump 后 ~18 秒见顶、跟随者胜率 48%&lt;50%、非 insider 负回报。</div></div>';
   // VERDICT
-  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个模型净额为正的跨所 carry 纸面候选`:'进攻端无模型净额为正的候选'}，但<b>当前没有通过证据门的真 edge</b>。这个看板最大的价值是帮你不亏、不当接盘，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
+  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个模型净额代理为正的跨所 carry 纸面候选`:'进攻端无模型代理为正的候选'}，但<b>当前没有通过证据门的真 edge</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
   return h+'</div>';
 }
 
-// perp: carry screener (the real edge, on top) + crowding/ignition heatmap (defense, below)
-function renderPerp(d){
-  const carry=d?.carry||[], s=d?.perps||[];
-  const cascadeEvents=d?.cascade_events||[];
-  const carryEvidence=data.stats?.lanes?.carry;
-  if(!carry.length && !s.length && !cascadeEvents.length) return `<div class="scroll"><div class="empty">当前无正资金费机会,市场杠杆也不拥挤 —— 这本身是个信息。</div></div>`;
-  let html="";
-  if(cascadeEvents.length){
-    html+=`<div class="play-sec" style="margin-bottom:14px"><div class="ph">⚡ 已入账的级联/点火事件 <span class="pd">首次价已锁定 · 仅强触发</span></div>`+
-      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small>${launchLifecycleHtml(e)}</div>`}).join("")+`</div>`;
+function carryHealthHtml(health){
+  const state=["ok","partial","unavailable"].includes(health?.state)?health.state:"unavailable";
+  const cfg=state==="ok"
+    ?["数据源正常","b-good","本轮 HL 与 OKX 扫描正常；没有候选只代表本轮未过门槛，不代表全市场没有机会。"]
+    :state==="partial"
+      ?["数据源部分缺失","b-warn","缺失不会触发平仓，未知区间不累计资金费；本轮候选与证据只能作部分判断。"]
+      :["数据源不可用","b-danger","本轮无法判断是否存在 Carry 候选；已有纸面仓位保持开启，未知区间不累计资金费。"];
+  const hl=health?.hl||{}, okx=health?.okx||{}, paper=health?.paper||{};
+  const okxCounts=`观测 ${okx.observed??0}/${okx.requested??0} · 不支持 ${okx.unsupported??0} · 失败 ${okx.request_failed??0}`;
+  const okxGaps=`过期 ${okx.rate_stale??0} · 无效 ${okx.rate_invalid??0} · 超限 ${okx.request_cap??0}`;
+  const storage=[health?.snapshot_store,health?.scorecard].filter(x=>x&&x.state!=="ok").map(x=>x.error_kind).filter(Boolean).join(" · ");
+  return `<section class="carry-health ${state}" aria-label="Carry 数据源健康">
+    <div class="carry-health-head"><span class="carry-health-title">Carry 可判定性</span><span class="chip ${cfg[1]}">${cfg[0]}</span></div>
+    <div class="carry-health-copy">${cfg[2]}</div>
+    <div class="carry-health-grid">
+      <div class="health-cell"><span class="hk">Hyperliquid</span><span class="hv">${esc(hl.state||"未知")} · ${esc(hl.rows??0)} 行</span><span class="hs">${esc(hl.error_kind||"本轮市场快照")}</span></div>
+      <div class="health-cell"><span class="hk">OKX 资金费</span><span class="hv">${esc(okx.state||"未知")} · ${esc(okxCounts)}</span><span class="hs">${esc(okxGaps)}</span></div>
+      <div class="health-cell"><span class="hk">已有纸面仓观测</span><span class="hv">${esc(health?.open_observed??0)}/${esc(health?.open_requested??0)}</span><span class="hs">未观测仓位保持开启，不补算收益</span></div>
+      <div class="health-cell"><span class="hk">纸面账本</span><span class="hv">${esc(paper.state||"未知")}</span><span class="hs">${esc(paper.error_kind||storage||"生命周期同步正常")}</span></div>
+    </div></section>`;
+}
+
+function carryEvidenceHtml(pp,evidence,scorecard){
+  const valid=Number.isFinite(pp?.n_closed)?pp.n_closed:(Number.isFinite(evidence?.n)?evidence.n:null);
+  const total=Number.isFinite(pp?.n_closed_total)?pp.n_closed_total:valid;
+  const excluded=Number.isFinite(pp?.n_closed_excluded)?pp.n_closed_excluded:(valid!=null&&total!=null?Math.max(0,total-valid):null);
+  const reasons=Object.entries(pp?.excluded_by_reason||{});
+  const reasonLabels={legacy_episode:"旧版本",market_missing_close:"市场缺失关闭",incomplete_cost:"盘口成本不全",incomplete_funding_path:"报价率路径不全",exit_quote_delayed:"退出报价超时",proxy_observation:"旧观测接口"};
+  const reasonText=reasons.map(([k,v])=>`${reasonLabels[k]||k} ${v}`).join(" · ");
+  let html=`<div class="sc-card muted"><span class="k">Carry 优势证据</span>
+    <span class="v"><span class="num">${valid??"?"}/20</span><small>有效关闭样本</small></span>
+    <span class="v"><span class="num">${total??"?"}</span><small>总关闭</small></span>
+    <span class="v"><span class="num">${excluded??"?"}</span><small>排除，不进入优势判决</small></span>
+    <span class="v"><span class="num">${esc(evidence?.edge_verdict||"不可判")}</span><small>已知组件后代理为正 ${evidence?.hits??"?"}/${valid??"?"}</small></span>
+    ${reasonText?`<details class="evidence-reasons"><summary>查看排除原因</summary>${esc(reasonText)}</details>`:""}</div>`;
+  if(scorecard?.verdict==="measured"){
+    const proxy=scorecard.quoted_hl_funding_rate_proxy_ann??scorecard.realized_ann;
+    html+=`<div class="sc-card muted"><span class="k">HL 报价费率快照代理 · 近${esc(scorecard.span_h)}h</span>
+      <span class="v"><span class="num">${proxy>0?"+":""}${esc(proxy)}%</span><small>报价费率年化代理</small></span>
+      <span class="v"><span class="num">${esc((scorecard.pos_frac*100).toFixed(0))}%</span><small>快照为正占比</small></span>
+      <span class="v"><span class="num">${esc(scorecard.worst_ann)}%</span><small>最差瞬时报价率</small></span>
+      <span class="v"><small>不是双腿持仓收益、交易所结算或实盘 PnL</small></span></div>`;
+  }else if(scorecard){
+    html+=`<div class="sc-card muted"><span class="k">HL 报价费率快照代理</span><span class="v">不可判 <small>${esc(scorecard.note||scorecard.error_kind||"")}</small></span></div>`;
   }
-  // ── CARRY: delta-neutral funding arbitrage — the ONE replicable positive-EV core ──
+  if(pp&&(pp.n_open||pp.n_closed_total||pp.n_exit_pending)){
+    html+=`<div class="sc-card muted"><span class="k">纸面报价代理账本</span>
+      <span class="v"><span class="num">${esc(pp.n_open??0)}</span><small>开启，含待报价 ${esc(pp.n_exit_pending??0)}</small></span>
+      <span class="v"><span class="num">${pp.avg_net_return_pct==null?"—":`${pp.avg_net_return_pct>0?"+":""}${esc(pp.avg_net_return_pct)}%`}</span><small>已知组件后模型净额代理</small></span>
+      <span class="v"><span class="num">${pp.avg_funding_accrued_pct==null?"—":`${esc(pp.avg_funding_accrued_pct)}%`}</span><small>报价率积分代理，非实际结算</small></span>
+      <span class="v"><span class="num">${pp.avg_cost_pct==null?"—":`${esc(pp.avg_cost_pct)}%`}</span><small>盘口与费率假设，非全量成本</small></span></div>`;
+  }
+  return html;
+}
+
+function carryLifecycleHtml(pp,limit=5){
+  const rank=p=>p.status==="exit_pending"?0:["source_gap","migration_gap"].includes(p.measurement_state)?1:2;
+  const openRows=[...(pp?.open_positions||[])].sort((a,b)=>rank(a)-rank(b)).slice(0,limit).map(p=>{
+    const pending=p.status==="exit_pending";
+    const gap=["source_gap","migration_gap"].includes(p.measurement_state);
+    const label=pending?"退出待报价":gap?"数据缺口·保持开启":"纸面观测中";
+    const cls=pending?"pending":gap?"gap":"";
+    const chip=pending||gap?"b-warn":"b-accent";
+    const lastValid=p.last_valid_at||p.last_measured_at;
+    const rule=pending
+      ?`有效配对差价已于 ${utcClock(p.exit_signal_at)} 触发退出（${p.exit_signal_diff_ann_pct==null?"—":esc(p.exit_signal_diff_ann_pct)+"%/年"}），但出口盘口缺失；保持开启，不伪造平仓、成本或净额。最近尝试 ${utcClock(p.last_attempt_at)}。`
+      :gap
+        ?`缺失不是退出；最近有效观测 ${utcClock(lastValid)}，最近尝试 ${utcClock(p.last_attempt_at)}，未知 ${esc(p.unmeasured_h??0)}h 不累计资金费。`
+        :`只有有效 HL/OKX 配对差价低于 ${esc(p.exit_diff_floor_ann_pct)}%/年才触发退出；若出口盘口缺失则进入待报价。`;
+    return `<article class="carry-life ${cls}"><div class="carry-life-head"><span class="chip ${chip}">${label}</span><b>${esc(p.symbol)}</b><span class="dim">${esc(p.measurement_state||"unknown")}</span></div>
+      <div class="carry-life-grid">
+        <div class="life-cell"><span class="lk">时间 UTC</span><span class="lv">入场 ${esc(utcClock(p.entry_at))}<br>最后有效 ${esc(utcClock(lastValid))}</span></div>
+        <div class="life-cell"><span class="lk">配对差价</span><span class="lv">${p.entry_diff_ann_pct==null?"—":esc(p.entry_diff_ann_pct)} → ${p.last_diff_ann_pct==null?"—":esc(p.last_diff_ann_pct)} %/年</span></div>
+        <div class="life-cell"><span class="lk">盘口测量规模</span><span class="lv">每腿 ${usd(p.notional_usd_per_leg)}<br><small class="dim">不是仓位建议或可成交上限</small></span></div>
+      </div><div class="life-rule">${rule}</div></article>`;
+  }).join("");
+  const closed=(pp?.recent||[]).slice(-limit).reverse().map(p=>`<article class="carry-life"><div class="carry-life-head"><span class="chip">有效纸面关闭</span><b>${esc(p.symbol)}</b></div>
+    <div class="carry-life-grid"><div class="life-cell"><span class="lk">时间 UTC</span><span class="lv">${esc(utcClock(p.entry_at))} → ${esc(utcClock(p.closed_at))}</span></div><div class="life-cell"><span class="lk">模型净额代理</span><span class="lv">${p.net_return_pct==null?"—":`${p.net_return_pct>0?"+":""}${esc(p.net_return_pct)}%`}</span></div><div class="life-cell"><span class="lk">关闭原因</span><span class="lv">${esc(p.close_reason||"unknown")}</span></div></div><div class="life-rule">订单簿纸面报价代理，非实盘成交、实际资金费结算或完整收益。</div></article>`).join("");
+  if(!openRows&&!closed)return "";
+  return `<section class="play-sec" style="margin:11px 0 14px"><div class="ph">⏱ Carry 进入 / 离开生命周期 <span class="pd">UTC · 缺失不平仓 · 非实盘</span></div>${openRows}${closed}</section>`;
+}
+
+// perp: source health → open lifecycle → evidence → candidates → defensive structure
+function renderPerp(d){
+  const carry=d?.carry||[], s=d?.perps||[], cascadeEvents=d?.cascade_events||[];
+  const carryEvidence=data.stats?.lanes?.carry, pp=d?.carry_paper||{}, health=d?.carry_source_health||{};
+  const healthState=["ok","partial","unavailable"].includes(health.state)?health.state:"unavailable";
+  let html=carryHealthHtml(health);
+  html+=carryLifecycleHtml(pp);
+  html+=carryEvidenceHtml(pp,carryEvidence,d?.carry_scorecard);
+
   if(carry.length){
     const rows=carry.slice(0,20).map(c=>{
-      const pf=c.pos_frac;
-      const flags=c.flags.filter(f=>!f.includes("ADL")).map(f=>`<span class="chip b-warn">${esc(f.split(":")[0].split("(")[0])}</span>`).join(" ")||'<span class="chip b-good">干净</span>';
-      // structure: cross-venue two-perp (HL vs OKX) or single-venue spot hedge
+      const flags=(c.flags||[]).filter(f=>!f.includes("ADL")).map(f=>`<span class="chip b-warn">${esc(f.split(":")[0].split("(")[0])}</span>`).join(" ")||'<span class="chip">无额外标签</span>';
       const struct=c.cross
-        ?`<span class="num">HL <span style="color:var(--good)">+${c.sustained_ann}</span> · OKX <span style="color:${c.okx_ann>0?'var(--good)':'var(--danger)'}">${c.okx_ann>0?'+':''}${c.okx_ann}</span></span>`
-        :`<span class="num" style="color:var(--good)">HL +${c.sustained_ann}%</span>`;
-      const trade=c.cross?'<span class="chip b-accent">空HL·多OKX</span>':`<span class="chip b-good">${esc(c.hedge.includes("HL")?"HL现货":"CEX现货")}</span>`;
-      // NET is the honest headline (gross − amortized costs − rebalance). Gross secondary.
-      const netcol=c.net_ann>0
-        ?`<span class="num" style="color:var(--good);font-weight:650">+${c.net_ann}%</span>`
-        :`<span class="num" style="color:var(--danger)">${c.net_ann}%</span>`;
-      const hold=c.cross?(c.hold_measured?`<span class="num">${c.hold_days}d</span><small class="dim"> 实测</small>`:`<small class="dim">14d假设·未测</small>`):'<small class="dim">—</small>';
-      return `<tr title="${esc(c.note)}">
-        <td>${idc(c.symbol,c.tier)}</td>
-        <td class="n">${netcol}<small class="dim"> 毛${c.edge_ann}</small></td>
-        <td class="n">${struct}</td>
-        <td>${trade}</td>
-        <td class="n">${hold}</td>
-        <td>${flags}</td></tr>`}).join("");
-    const sc=d?.carry_scorecard;
-    let scBanner=`<div class="sc-card muted"><span class="k">Carry 优势证据</span><span class="v">${esc(carryEvidence?.edge_verdict||"不可判")} <small>成本后纸面为正 ${carryEvidence?.hits??"?"}/${carryEvidence?.n??"?"} · 最小样本20 · 非实盘</small></span></div>`;
-    if(sc){ if(sc.verdict==="measured"){
-        scBanner+=`<div class="sc-card"><span class="k">主流carry费率历史·近${sc.span_h}h</span>
-          <span class="v"><span class="num" style="color:var(--good)">+${sc.realized_ann}%</span><small>已实现年化(毛)</small></span>
-          <span class="v"><span class="num">${(sc.pos_frac*100).toFixed(0)}%</span><small>时间正费</small></span>
-          <span class="v"><span class="num" style="color:var(--danger)">${sc.worst_ann}%</span><small>最差瞬时</small></span></div>`;
-      } else scBanner+=`<div class="sc-card muted"><span class="k">主流carry费率历史</span><span class="v">不可判 <small>${esc(sc.note||'')}</small></span></div>`; }
-    // paper-trade tracker: MEASURED hold_days + real slippage + realized-vs-predicted net
-    const pp=d?.carry_paper; let ppBanner="";
-    if(pp&&(pp.n_open||pp.n_closed)){
-      if(pp.n_closed&&pp.avg_net_return_pct!=null){
-        ppBanner=`<div class="sc-card"><span class="k">纸面实测·${pp.n_closed}个已平仓</span>
-          <span class="v"><span class="num" style="color:${pp.avg_net_return_pct>0?'var(--good)':'var(--danger)'}">${pp.avg_net_return_pct>0?'+':''}${pp.avg_net_return_pct}%</span><small>绝对净收益</small></span>
-          <span class="v"><span class="num">${pp.avg_funding_accrued_pct}%</span><small>累计资金费</small></span>
-          <span class="v"><span class="num" style="color:var(--danger)">${pp.avg_cost_pct}%</span><small>测得纸面成本·非成交</small></span>
-          <span class="v"><span class="num">${pp.avg_hold_days}d</span><small>实测持仓</small></span>
-          <span class="v"><span class="num dim">${pp.avg_annualized_net_pct!=null?pp.avg_annualized_net_pct+'%':'隐藏'}</span><small>${pp.avg_annualized_net_pct!=null?'长样本年化':esc(pp.annualized_note||'年化样本不足')}</small></span>
-          <span class="v"><span class="num dim">${pp.n_open}</span><small>运行中</small></span></div>`;
-      } else ppBanner=`<div class="sc-card muted"><span class="k">纸面追踪(实测持仓/滑点/净额)</span><span class="v">${pp.n_open}仓运行中·0平仓 <small>等差价衰减自然平仓→给真实持仓天数和净额,替掉假设</small></span></div>`;
-    }
-    let lifecycle="";
-    if(pp?.open_positions?.length||pp?.recent?.length){
-      const opens=(pp.open_positions||[]).slice(0,5).map(p=>`<div class="prow"><span class="chip b-accent">纸面 OPEN</span> <b>${esc(p.symbol)}</b> <span class="num">入场 ${esc(utcClock(p.entry_at))}</span> · <span class="num">最近 ${esc(utcClock(p.last_measured_at))}</span> · 差价 <span class="num">${p.entry_diff_ann_pct==null?'—':esc(p.entry_diff_ann_pct)} → ${p.last_diff_ann_pct==null?'—':esc(p.last_diff_ann_pct)}%/年</span> · 单腿 ${usd(p.notional_usd_per_leg)} <small class="dim">退出条件:差价&lt;${esc(p.exit_diff_floor_ann_pct)}%/年或市场缺失 · 只读盘口纸面测量</small></div>`).join("");
-      const closed=(pp.recent||[]).slice(-5).reverse().map(p=>`<div class="prow"><span class="chip">纸面 CLOSED</span> <b>${esc(p.symbol)}</b> <span class="num">入场 ${esc(utcClock(p.entry_at))}</span> · <span class="num">离场 ${esc(utcClock(p.closed_at))}</span> · 净 <span class="num ${p.net_return_pct>0?'up':'down'}">${p.net_return_pct>0?'+':''}${esc(p.net_return_pct)}%</span> <small class="dim">${esc(p.close_reason||'unknown')} · 非实盘成交</small></div>`).join("");
-      lifecycle=`<div class="play-sec" style="margin:11px 0 14px"><div class="ph">⏱ Carry 进入 / 离开生命周期 <span class="pd">UTC · 纸面盘口测量 · 非实盘</span></div>${opens}${closed}</div>`;
-    }
-    html+=`<div class="perp-sec">💰 跨所资金费套利 · delta中性 <small>空HL+多OKX两永续吃差价,不需现货 · <b>净额=毛差 − 往返成本(~0.35%按持仓天数摊)− 再平衡~1.5%/年</b>,这才是真数 · 扣完成本多数机会薄甚至负 · 尾部=ADL级联(为崩盘sizing)</small></div>
-      ${scBanner}${ppBanner}${lifecycle}
-      <div class="scroll"><table class="tbl"><thead><tr>
-        <th>代币</th><th class="n">模型净额/年</th><th class="n">构成(HL/OKX)</th><th>纸面结构</th><th class="n">持仓/摊销</th><th>风险</th>
-      </tr></thead><tbody>${rows}</tbody></table></div>`;
+        ?`<span class="num">HL ${c.sustained_ann>0?"+":""}${esc(c.sustained_ann)} · OKX ${c.okx_ann>0?"+":""}${esc(c.okx_ann)}</span>`
+        :`<span class="num">HL ${c.sustained_ann>0?"+":""}${esc(c.sustained_ann)}%</span>`;
+      const trade=c.cross?'<span class="chip b-accent">空HL·多OKX</span>':`<span class="chip">${esc((c.hedge||"").includes("HL")?"HL现货":"CEX现货")}</span>`;
+      const netcol=c.net_ann>0?`<span class="num" style="color:var(--accent-t);font-weight:650">+${esc(c.net_ann)}%</span>`:`<span class="num" style="color:var(--danger)">${esc(c.net_ann)}%</span>`;
+      const hold=c.cross?(c.hold_measured?`<span class="num">${esc(c.hold_days)}d</span><small class="dim"> 历史覆盖跨度</small>`:`<small class="dim">14d模型假设·未验证</small>`):'<small class="dim">—</small>';
+      return `<tr title="${esc(c.note)}"><td>${idc(c.symbol,c.tier)}</td><td class="n">${netcol}<small class="dim"> 毛差 ${esc(c.edge_ann)}</small></td><td class="n">${struct}</td><td>${trade}</td><td class="n">${hold}</td><td>${flags}</td></tr>`;
+    }).join("");
+    html+=`<div class="perp-sec">💰 Carry 候选 · 仅作纸面验证 <small>模型代理只扣当前已建模的盘口与费率假设；basis、账户费率、抵押资金成本和调仓仍不完整，不能当作 all-in 净收益或仓位建议。</small></div>
+      <div class="scroll"><div class="swipe-hint" aria-hidden="true">左右滑动查看更多 →</div><table class="tbl"><thead><tr><th>代币</th><th class="n">模型净额代理/年</th><th class="n">报价构成(HL/OKX)</th><th>纸面结构</th><th class="n">持仓假设/覆盖</th><th>风险</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }else{
+    html+=`<div class="empty">${healthState==="ok"?"本轮没有候选通过 Carry 入场门槛；这不代表全市场没有机会。":"本轮数据不完整，不能判断是否存在 Carry 候选。"}</div>`;
   }
-  // ── CROWDING / IGNITION: directional observation — defensive, not a trade button ──
+
+  if(cascadeEvents.length){
+    html+=`<div class="play-sec" style="margin:14px 0"><div class="ph">⚡ 已入账的级联/点火事件 <span class="pd">首次价已锁定 · 仅强触发</span></div>`+
+      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small>${launchLifecycleHtml(e)}</div>`}).join("")+`</div>`;
+  }
   if(s.length){
-    const col=p=>{const fa=p.funding_ann;const a=Math.min(Math.abs(fa)/300,1);
-      if(p.signal==="ignition")return{bg:`color-mix(in srgb,var(--good) ${20+a*30}%,var(--s1))`,b:"var(--good-b)"};
-      return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
-    html+=`<div class="perp-sec" style="margin-top:16px">🌡️ 拥挤 / 点火 <small>方向观测 · 判断你是不是站在被清算那侧 · 防御用,非买卖指令</small></div>
-      <div class="hm">`+s.map(p=>{const c=col(p);const lab=p.signal==="ignition"?(p.direction==="up"?"🔥点火↑":"🔥点火↓"):(p.direction==="longs_crowded"?"多头拥挤":"空头拥挤");
-      const why=Array.isArray(p.why)?p.why.join(" · "):(p.why||"暂无更多解释");
-      return `<div class="cell" style="background:${c.bg};border-color:${c.b}" tabindex="0" role="button" aria-expanded="false" aria-label="展开 ${esc(p.symbol)} 信号原因">
-        <div class="sy">${esc(p.symbol)} <span class="chip">${lab}</span></div>
-        <div class="fu ${p.funding_ann>0?'down':'up'}">${p.funding_ann>0?'+':''}${p.funding_ann}%<small style="color:var(--dim)">/年</small></div>
-        <div class="mt">OI ${usd(p.oi_usd)} · 24h ${p.price_chg_24h!=null?(p.price_chg_24h>0?'+':'')+(+p.price_chg_24h).toFixed(1)+'%':'—'}</div>
-        <div class="cell-why" hidden>${esc(why)}</div>
-      </div>`}).join("")+`</div>`;
+    const col=p=>{const fa=p.funding_ann;const a=Math.min(Math.abs(fa)/300,1);if(p.signal==="ignition")return{bg:`color-mix(in srgb,var(--good) ${20+a*30}%,var(--s1))`,b:"var(--good-b)"};return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
+    html+=`<div class="perp-sec" style="margin-top:16px">🌡️ 拥挤 / 点火 <small>方向观测 · 判断你是不是站在被清算那侧 · 防御用，非买卖指令</small></div><div class="hm">`+s.map(p=>{const c=col(p);const lab=p.signal==="ignition"?(p.direction==="up"?"🔥点火↑":"🔥点火↓"):(p.direction==="longs_crowded"?"多头拥挤":"空头拥挤");const why=Array.isArray(p.why)?p.why.join(" · "):(p.why||"暂无更多解释");return `<div class="cell" style="background:${c.bg};border-color:${c.b}" tabindex="0" role="button" aria-expanded="false" aria-label="展开 ${esc(p.symbol)} 信号原因"><div class="sy">${esc(p.symbol)} <span class="chip">${lab}</span></div><div class="fu ${p.funding_ann>0?'down':'up'}">${p.funding_ann>0?'+':''}${p.funding_ann}%<small style="color:var(--dim)">/年</small></div><div class="mt">OI ${usd(p.oi_usd)} · 24h ${p.price_chg_24h!=null?(p.price_chg_24h>0?'+':'')+(+p.price_chg_24h).toFixed(1)+'%':'—'}</div><div class="cell-why" hidden>${esc(why)}</div></div>`}).join("")+`</div>`;
   }
   return html;
 }

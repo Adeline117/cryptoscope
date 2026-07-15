@@ -2,6 +2,7 @@ from pathlib import Path
 
 
 BOARD = Path(__file__).parents[1] / "board" / "public" / "index.html"
+BOARD_EXPORT = Path(__file__).parents[1] / "src" / "pipeline" / "board_export.py"
 
 
 def test_board_uses_effective_decision_and_client_side_expiry():
@@ -23,8 +24,9 @@ def test_board_exposes_carry_entry_exit_clocks_without_calling_them_fills():
     assert "Carry 进入 / 离开生命周期" in html
     assert "p.entry_at" in html and "p.last_measured_at" in html
     assert "p.closed_at" in html and "p.close_reason" in html
-    assert "测得纸面成本·非成交" in html
-    assert "只读盘口纸面测量" in html
+    assert "盘口与费率假设，非全量成本" in html
+    assert "订单簿纸面报价代理" in html
+    assert "非实盘成交、实际资金费结算或完整收益" in html
 
 
 def test_board_exposes_launch_quote_invalidation_and_measurement_clocks_honestly():
@@ -86,9 +88,86 @@ def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
     assert "它尚不是已证明的正 EV" in html
     assert "Carry 优势证据" in html
     assert "当前没有通过证据门的真 edge" in html
-    assert "模型净额/年" in html and "纸面结构" in html
+    assert "模型净额代理/年" in html and "纸面结构" in html
     assert "唯一「个人真能做出正EV」" not in html
     assert "唯一有结构 edge 的" not in html
+
+
+def test_carry_health_precedes_empty_state_and_distinguishes_unknown_from_empty():
+    html = BOARD.read_text()
+    render = html.split("function renderPerp(d){", 1)[1].split("// ---------- paint", 1)[0]
+
+    assert "carryHealthHtml(health)" in render
+    assert render.index("carryHealthHtml(health)") < render.index("if(carry.length)")
+    for phrase in (
+        "数据源正常",
+        "数据源部分缺失",
+        "数据源不可用",
+        "缺失不会触发平仓，未知区间不累计资金费",
+        "本轮无法判断是否存在 Carry 候选",
+        "不代表全市场没有机会",
+    ):
+        assert phrase in html
+    assert "当前无正资金费机会,市场杠杆也不拥挤" not in html
+
+
+def test_carry_lifecycle_exposes_exit_pending_and_source_gaps_fail_closed():
+    html = BOARD.read_text()
+
+    for token in (
+        'p.status==="exit_pending"',
+        "p.measurement_state",
+        '"source_gap","migration_gap"',
+        "p.last_valid_at",
+        "p.last_attempt_at",
+        "p.unmeasured_h",
+        "p.exit_signal_at",
+        "p.exit_signal_diff_ann_pct",
+        "退出待报价",
+        "数据缺口·保持开启",
+        "缺失不是退出",
+        "不伪造平仓、成本或净额",
+    ):
+        assert token in html
+
+
+def test_carry_evidence_separates_valid_total_and_quarantined_samples():
+    html = BOARD.read_text()
+
+    assert "n_closed_total" in html
+    assert "n_closed_excluded" in html
+    assert "excluded_by_reason" in html
+    assert "有效关闭样本" in html
+    assert "排除，不进入优势判决" in html
+    assert "总关闭" in html
+
+
+def test_carry_ui_forbids_realized_or_complete_cost_claims():
+    combined = BOARD.read_text() + BOARD_EXPORT.read_text()
+
+    for forbidden in (
+        "或市场缺失",
+        "已实现年化(毛)",
+        "这才是真数",
+        "给真实持仓天数和净额",
+        "绝对净收益",
+        "唯一对个人可复制的正EV核",
+        "ONE replicable positive-EV core",
+    ):
+        assert forbidden not in combined
+    assert "报价费率年化代理" in combined
+    assert "不是仓位建议或可成交上限" in combined
+    assert "不能当作 all-in 净收益或仓位建议" in combined
+
+
+def test_carry_mobile_layout_prioritizes_health_and_lifecycle():
+    html = BOARD.read_text()
+
+    assert 'body[data-view="perp"] .stat{grid-template-columns:repeat(2,1fr)}' in html
+    assert ".carry-health-grid{grid-template-columns:1fr 1fr}" in html
+    assert ".carry-life-grid{grid-template-columns:1fr}" in html
+    assert ".sc-card .k,.evidence-reasons{grid-column:1/-1}" in html
+    assert "左右滑动查看更多 →" in html
 
 
 def test_decision_overview_separates_actionable_windows_from_paper_candidates():
@@ -97,7 +176,7 @@ def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     assert 'aria-label="当前决策"' in html
     assert "等待 · 当前不入场" in html
     assert "新鲜报价+完整成本+证据门+送达SLA" in html
-    assert "模型净额为正，不等于已获证" in html
+    assert "模型代理为正，成本组件仍不全" in html
     assert "不代表全市场覆盖" in html
     assert 'data-jump="launch"' in html
     assert 'data-jump="perp"' in html

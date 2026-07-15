@@ -416,9 +416,10 @@ def render_perps() -> dict:
                           "carry_open_status": carry_scan["open_status"],
                           "carry_source_health": carry_health,
                           "source": "Hyperliquid + OKX (keyless)",
-                          "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
-                                   "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
-                                   "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")},
+                          "note": ("Carry 是待验证假设：优先观测空 HL、多 OKX 的两永续配对差价，"
+                                   "当前只形成报价率与已知成本组件的纸面代理，不代表已证明正 EV、完整成本或实盘收益。"
+                                   "费率翻负、basis 扩张、保证金与 ADL 都可能吞掉代理优势。拥挤/点火仅作方向防御观测，"
+                                   "不是买卖指令。")},
                          view="perps")
     except Exception as e:
         attempted_at = datetime.now(timezone.utc).isoformat()
