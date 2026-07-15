@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -208,3 +209,48 @@ def test_subscription_error_fails_visible(sol):
     with pytest.raises(PermissionError, match="rejected"):
         sol.parse_message({"jsonrpc": "2.0", "id": 1,
                            "error": {"code": -32600, "message": "denied"}})
+
+
+def test_qualification_batch_only_returns_recent_due_complete_rows(sol):
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+    c = sol._conn()
+    try:
+        c.execute("UPDATE raw_launches SET detected_at=?", ((now - timedelta(minutes=5)).isoformat(),))
+        c.commit()
+    finally:
+        c.close()
+
+    due = sol.qualification_batch(now=now, retry_after_seconds=300)
+    assert [row["mint"] for row in due] == ["mint"]
+    sol.set_qualification("sig-1", "market_pending", error="pair not indexed", at=now)
+    assert sol.qualification_batch(now=now + timedelta(seconds=299)) == []
+    assert len(sol.qualification_batch(now=now + timedelta(seconds=301))) == 1
+
+
+def test_qualification_state_keeps_raw_evidence_and_ledger_link(sol):
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+
+    assert sol.set_qualification(
+        "sig-1", "qualified_recorded", ledger_event_id="ledger-1", at=now)
+    c = sol._conn()
+    try:
+        row = c.execute(
+            "SELECT evidence_state,qualification_state,qualified_at,ledger_event_id "
+            "FROM raw_launches WHERE signature='sig-1'"
+        ).fetchone()
+    finally:
+        c.close()
+    assert row == ("complete", "qualified_recorded", now.isoformat(), "ledger-1")
+    summary = sol.qualification_summary(now=now)
+    assert summary["raw_total"] == 1
+    assert summary["evidence"] == {"complete": 1}
+    assert summary["qualification"] == {"qualified_recorded": 1}
+
+
+def test_unknown_qualification_state_is_rejected(sol):
+    with pytest.raises(ValueError, match="unknown qualification state"):
+        sol.set_qualification("sig-1", "pretend_success")

@@ -12,7 +12,7 @@ import os
 import sqlite3
 import threading
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 import structlog
@@ -44,7 +44,124 @@ def _conn() -> sqlite3.Connection:
         evidence_state TEXT NOT NULL DEFAULT 'raw_only', hydration_error TEXT,
         qualification_state TEXT NOT NULL DEFAULT 'raw_unqualified')""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_slot ON raw_launches(slot)")
+    columns = {row[1] for row in c.execute("PRAGMA table_info(raw_launches)")}
+    for name, kind in (
+        ("qualification_attempted_at", "TEXT"),
+        ("qualification_error", "TEXT"),
+        ("qualified_at", "TEXT"),
+        ("ledger_event_id", "TEXT"),
+    ):
+        if name not in columns:
+            c.execute(f"ALTER TABLE raw_launches ADD COLUMN {name} {kind}")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_qualification "
+              "ON raw_launches(evidence_state,qualification_state,detected_at DESC)")
     return c
+
+
+QUALIFICATION_STATES = {
+    "raw_unqualified", "market_pending", "market_error",
+    "screened_out", "qualified_recorded",
+}
+RETRYABLE_QUALIFICATION_STATES = {
+    "raw_unqualified", "market_pending", "market_error",
+}
+
+
+def qualification_batch(*, now: datetime | None = None, limit: int = 20,
+                        max_age_hours: float = 24,
+                        retry_after_seconds: float = 300) -> list[dict]:
+    """Return recent, identity-proven launches due for market qualification.
+
+    Reading a row never consumes it. The caller must explicitly record an attempt,
+    so a crash between selection and hydration cannot silently lose evidence.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = now - timedelta(hours=max(0, float(max_age_hours)))
+    retry_cutoff = now - timedelta(seconds=max(0, float(retry_after_seconds)))
+    c = _conn()
+    try:
+        rows = c.execute(
+            """SELECT signature,slot,event_type,creator,mint,detected_at,
+                      qualification_state,qualification_attempted_at
+               FROM raw_launches
+               WHERE evidence_state='complete' AND mint IS NOT NULL
+                 AND qualification_state IN ('raw_unqualified','market_pending','market_error')
+               ORDER BY detected_at DESC LIMIT ?""",
+            (max(0, int(limit)) * 5,),
+        ).fetchall()
+    finally:
+        c.close()
+    keys = ("signature", "slot", "event_type", "creator", "mint", "detected_at",
+            "qualification_state", "qualification_attempted_at")
+    due = []
+    for row in rows:
+        item = dict(zip(keys, row))
+        try:
+            detected = datetime.fromisoformat(item["detected_at"]).astimezone(timezone.utc)
+            attempted = (datetime.fromisoformat(item["qualification_attempted_at"])
+                         .astimezone(timezone.utc)
+                         if item.get("qualification_attempted_at") else None)
+        except (TypeError, ValueError):
+            continue
+        if detected < cutoff or (attempted is not None and attempted > retry_cutoff):
+            continue
+        due.append(item)
+        if len(due) >= max(0, int(limit)):
+            break
+    return due
+
+
+def set_qualification(signature: str, state: str, *, error: str | None = None,
+                      ledger_event_id: str | None = None,
+                      at: datetime | None = None) -> bool:
+    """Persist one explicit qualification result without deleting raw evidence."""
+    if state not in QUALIFICATION_STATES:
+        raise ValueError(f"unknown qualification state: {state}")
+    now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    qualified_at = now if state == "qualified_recorded" else None
+    c = _conn()
+    try:
+        changed = c.execute(
+            """UPDATE raw_launches SET qualification_state=?,
+                      qualification_attempted_at=?,qualification_error=?,
+                      qualified_at=COALESCE(?,qualified_at),
+                      ledger_event_id=COALESCE(?,ledger_event_id)
+               WHERE signature=?""",
+            (state, now, str(error)[:240] if error else None,
+             qualified_at, ledger_event_id, signature),
+        ).rowcount
+        c.commit()
+        return bool(changed)
+    finally:
+        c.close()
+
+
+def qualification_summary(*, now: datetime | None = None,
+                          recent_hours: float = 24) -> dict:
+    """Expose evidence and qualification coverage without claiming completeness."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = (now - timedelta(hours=max(0, float(recent_hours)))).isoformat()
+    c = _conn()
+    try:
+        evidence = dict(c.execute(
+            "SELECT evidence_state,COUNT(*) FROM raw_launches GROUP BY evidence_state"
+        ).fetchall())
+        qualification = dict(c.execute(
+            "SELECT qualification_state,COUNT(*) FROM raw_launches GROUP BY qualification_state"
+        ).fetchall())
+        recent_complete = c.execute(
+            "SELECT COUNT(*) FROM raw_launches WHERE evidence_state='complete' "
+            "AND detected_at>=?", (cutoff,),
+        ).fetchone()[0]
+    finally:
+        c.close()
+    return {
+        "raw_total": sum(evidence.values()),
+        "evidence": evidence,
+        "qualification": qualification,
+        "recent_hours": recent_hours,
+        "recent_complete": recent_complete,
+    }
 
 
 def subscribe_requests() -> list[dict]:
