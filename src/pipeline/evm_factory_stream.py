@@ -41,9 +41,9 @@ _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                "AppleWebKit/537.36 Chrome/120 Safari/537.36 CryptoScope/1.0")
 QUALIFICATION_STATES = {
     "raw_unqualified", "market_pending", "market_error", "below_threshold",
-    "qualified_recorded", "duplicate_token_existing", "unsupported_quote_pair",
-    "ambiguous_target", "expired_unqualified", "reorg_removed",
-    "historical_raw_only",
+    "qualified_recorded", "ledger_orphan", "duplicate_token_existing",
+    "unsupported_quote_pair", "ambiguous_target", "expired_unqualified",
+    "reorg_removed", "historical_raw_only",
 }
 RETRYABLE_QUALIFICATION_STATES = {
     "raw_unqualified", "market_pending", "market_error", "below_threshold",
@@ -288,8 +288,17 @@ def set_qualification(row: dict, state: str, *, reason: str | None = None,
         c.close()
 
 
-def qualification_summary() -> dict:
-    """Report forward and historical coverage across both factory schemas."""
+def qualification_summary(
+    *, ledger_readback: Callable[[str, str, str], bool] | None = None,
+) -> dict:
+    """Report coverage without trusting cross-database IDs by presence alone.
+
+    The stream database cannot enforce a foreign key into the opportunity
+    ledger.  Historical rows marked ``qualified_recorded`` therefore count as
+    recorded only when an injected reader confirms the exact ledger ID, chain,
+    and target token.  Failed read-backs are exposed as orphans; an unavailable
+    reader is reported separately instead of silently accepting the claim.
+    """
     c = _conn()
     try:
         rows = c.execute("""SELECT evidence_state,qualification_state,COUNT(*) FROM raw_pools
@@ -300,14 +309,83 @@ def qualification_summary() -> dict:
         started = c.execute(
             "SELECT value FROM bridge_meta WHERE key='launch_bridge_started_at'"
         ).fetchone()
+        marked_recorded = c.execute("""SELECT ledger_event_id,chain,target_token
+            FROM raw_pools WHERE qualification_state='qualified_recorded'
+            UNION ALL SELECT ledger_event_id,chain,target_token
+            FROM raw_v3_pools WHERE qualification_state='qualified_recorded'""").fetchall()
+        quarantined_ids = c.execute("""SELECT ledger_event_id FROM raw_pools
+            WHERE qualification_state='ledger_orphan'
+            UNION ALL SELECT ledger_event_id FROM raw_v3_pools
+            WHERE qualification_state='ledger_orphan'""").fetchall()
     finally:
         c.close()
-    evidence, qualification = {}, {}
+    evidence, raw_qualification = {}, {}
     for evidence_state, qualification_state, count in rows:
         evidence[evidence_state] = evidence.get(evidence_state, 0) + count
-        qualification[qualification_state] = qualification.get(qualification_state, 0) + count
+        raw_qualification[qualification_state] = (
+            raw_qualification.get(qualification_state, 0) + count)
+
+    traceable_ids: set[str] = set()
+    orphan_ids = {str(row[0]) for row in quarantined_ids if row[0]}
+    traceable_rows = 0
+    orphan_rows = 0
+    missing_id_rows = 0
+    missing_identity_rows = 0
+    readback_unavailable_rows = 0
+    readback_error_rows = 0
+    for ledger_id, chain, target_token in marked_recorded:
+        if not ledger_id:
+            missing_id_rows += 1
+            orphan_rows += 1
+            continue
+        if not chain or not target_token:
+            missing_identity_rows += 1
+            orphan_rows += 1
+            orphan_ids.add(str(ledger_id))
+            continue
+        if ledger_readback is None:
+            readback_unavailable_rows += 1
+            continue
+        try:
+            valid = bool(ledger_readback(
+                str(ledger_id), str(chain), str(target_token)))
+        except Exception:
+            readback_error_rows += 1
+            continue
+        if valid:
+            traceable_rows += 1
+            traceable_ids.add(str(ledger_id))
+        else:
+            orphan_rows += 1
+            orphan_ids.add(str(ledger_id))
+
+    qualification = dict(raw_qualification)
+    if marked_recorded or "qualified_recorded" in qualification:
+        qualification["qualified_recorded"] = len(traceable_ids)
+    quarantined_state_rows = int(raw_qualification.get("ledger_orphan") or 0)
+    if orphan_rows or quarantined_state_rows:
+        qualification["ledger_orphan"] = orphan_rows + quarantined_state_rows
+    unavailable_rows = readback_unavailable_rows + readback_error_rows
+    if unavailable_rows:
+        qualification["ledger_readback_unavailable"] = unavailable_rows
     return {"raw_total": sum(evidence.values()), "evidence": evidence,
             "qualification": qualification,
+            "raw_qualification_states": raw_qualification,
+            "traceability": {
+                "state": ("unavailable" if unavailable_rows else
+                          "ok" if not orphan_rows and not quarantined_state_rows else
+                          "partial"),
+                "raw_marked_recorded_rows": len(marked_recorded),
+                "traceable_rows": traceable_rows,
+                "traceable_unique_ledger_events": len(traceable_ids),
+                "orphan_rows": orphan_rows + quarantined_state_rows,
+                "orphan_unique_ledger_ids": len(orphan_ids),
+                "missing_ledger_id_rows": missing_id_rows,
+                "missing_identity_rows": missing_identity_rows,
+                "quarantined_state_rows": quarantined_state_rows,
+                "readback_unavailable_rows": readback_unavailable_rows,
+                "readback_error_rows": readback_error_rows,
+            },
             "bridge_started_at": started[0] if started else None}
 
 

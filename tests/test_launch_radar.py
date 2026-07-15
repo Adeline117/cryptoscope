@@ -306,16 +306,14 @@ def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):
     assert ol.latest_execution_assessment(ident)["entry_reference_price"] == 0.00011
 
 
-def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, monkeypatch):
+def _raw_evm_launch(tmp_path, monkeypatch, *, now):
     from src.pipeline import evm_factory_stream as stream
-    from src.pipeline import launch_radar as lr
     import src.pipeline.opportunity_ledger as ol
 
-    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
     monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
     monkeypatch.setattr(stream, "DB", tmp_path / "evm.db")
     stream.ensure_bridge_started_at(at=datetime(2026, 7, 15, 11, tzinfo=timezone.utc))
-    token = "0x1111111111111111111111111111111111111111"
+    token = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"
     quote = "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c"
     pool = "0x3333333333333333333333333333333333333333"
     c = stream._conn()
@@ -334,8 +332,19 @@ def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, mon
         c.close()
     pair = _pair(chainId="bsc", pairAddress=pool, pairCreatedAt=int(
         now.replace(second=0).timestamp() * 1000),
-        baseToken={"address": token, "symbol": "EVM", "name": "EVM"},
+        baseToken={"address": "0x" + token[2:].upper(),
+                   "symbol": "EVM", "name": "EVM"},
         quoteToken={"address": quote, "symbol": "WBNB"})
+    return stream, token, pool, pair
+
+
+def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream, token, pool, pair = _raw_evm_launch(
+        tmp_path, monkeypatch, now=now)
 
     def fetch(url):
         return [] if url == lr.PROFILES_URL else [pair]
@@ -345,6 +354,7 @@ def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, mon
     assert result["primary_evm"]["inserted"] == 1
     row = ol.active("launch", now=now)[0]
     assert row["decision"] == "SMALL_PROBE" and row["primary_evidence"]["pool"] == pool
+    assert row["chain"] == "bsc" and row["token"] == token
     assert row["action_level"] == "A1_WATCH"
     assert row["current_assessment"]["route_state"] == "unknown"
     assert row["event_at"] == now.replace(second=0).isoformat()
@@ -354,3 +364,128 @@ def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, mon
             == ("qualified_recorded", token)
     finally:
         c.close()
+
+
+def test_launch_view_revalidates_evm_links_against_exact_ledger_identity(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    from src.pipeline import solana_launch_stream, stream_health
+    import src.pipeline.opportunity_ledger as ol
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream, token, _pool, pair = _raw_evm_launch(
+        tmp_path, monkeypatch, now=now)
+    monkeypatch.setattr(solana_launch_stream, "DB", tmp_path / "solana.db")
+    monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
+    event = lr.qualify(pair, now=now, source="exact EVM pool")
+    event["chain"], event["token"] = "bsc", token
+    event["detected_at"] = now.isoformat()
+    ident, inserted = ol.record_if_absent(event)
+    assert inserted
+    c = stream._conn()
+    try:
+        c.execute("UPDATE raw_pools SET qualification_state='qualified_recorded',"
+                  "ledger_event_id=?,target_token=?", (ident, token))
+        c.commit()
+    finally:
+        c.close()
+
+    trace = lr.view()["primary_sources"]["evm"]["qualification"]
+    assert trace["qualification"]["qualified_recorded"] == 1
+    assert trace["traceability"]["traceable_unique_ledger_events"] == 1
+    assert trace["traceability"]["state"] == "ok"
+
+    c = stream._conn()
+    try:
+        c.execute("UPDATE raw_pools SET target_token=?",
+                  ("0x9999999999999999999999999999999999999999",))
+        c.commit()
+    finally:
+        c.close()
+    mismatch = lr.view()["primary_sources"]["evm"]["qualification"]
+    assert mismatch["qualification"]["qualified_recorded"] == 0
+    assert mismatch["qualification"]["ledger_orphan"] == 1
+    assert mismatch["traceability"]["state"] == "partial"
+
+
+@pytest.mark.parametrize("readback_mode", ["mismatch", "unavailable"])
+def test_forward_evm_factory_pool_quarantines_failed_exact_ledger_readback(
+        tmp_path, monkeypatch, readback_mode):
+    from src.pipeline import launch_radar as lr
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream, token, _pool, pair = _raw_evm_launch(
+        tmp_path, monkeypatch, now=now)
+    calls = []
+
+    def reject(ident, **identity):
+        calls.append((ident, identity))
+        if readback_mode == "unavailable":
+            raise RuntimeError("ledger database unavailable")
+        return False
+
+    monkeypatch.setattr(lr, "event_id_readback_matches", reject)
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
+        now=now, max_profiles=0, max_primary=0, max_evm=1,
+        assessor=lambda event: event,
+    )
+
+    assert result["primary_evm"]["recorded"] == 0
+    assert result["primary_evm"]["inserted"] == 0
+    assert result["primary_evm"]["orphaned"] == 1
+    assert calls and calls[0][1] == {
+        "lane": "launch", "chain": "bsc", "token": token}
+    c = stream._conn()
+    try:
+        state = c.execute(
+            "SELECT qualification_state,qualification_reason,target_token,"
+            "ledger_event_id FROM raw_pools"
+        ).fetchone()
+    finally:
+        c.close()
+    assert state[0] == "ledger_orphan"
+    expected = ("failed exact read-back" if readback_mode == "mismatch"
+                else "exact read-back unavailable")
+    assert expected in state[1]
+    assert state[2] == token and state[3]
+
+
+def test_forward_evm_duplicate_token_stays_separate_without_readback_or_assessment(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    stream, token, _pool, pair = _raw_evm_launch(
+        tmp_path, monkeypatch, now=now)
+    existing = lr.qualify(pair, now=now, source="existing first launch")
+    existing["detected_at"] = (now - timedelta(minutes=1)).isoformat()
+    ident, inserted = ol.record_if_absent(existing)
+    assert inserted
+    monkeypatch.setattr(
+        lr, "event_id_readback_matches",
+        lambda *_args, **_kwargs: pytest.fail("duplicates must not claim new readback"),
+    )
+
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
+        now=now, max_profiles=0, max_primary=0, max_evm=1,
+        assessor=lambda event: pytest.fail("duplicates must not be reassessed"),
+    )
+
+    assert result["primary_evm"]["duplicates"] == 1
+    assert result["primary_evm"]["inserted"] == 0
+    assert result["primary_evm"]["orphaned"] == 0
+    assert ol.latest_execution_assessment(ident) is None
+    c = stream._conn()
+    try:
+        state = c.execute(
+            "SELECT qualification_state,qualification_reason,target_token,"
+            "ledger_event_id FROM raw_pools"
+        ).fetchone()
+    finally:
+        c.close()
+    assert state[:3] == (
+        "duplicate_token_existing", "token already has a first launch event", token)
+    assert state[3] is None

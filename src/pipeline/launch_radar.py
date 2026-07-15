@@ -297,7 +297,8 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
 
     rows = stream.qualification_batch(now=now, limit=max_candidates)
     result = {"available": True, "attempted": 0, "recorded": 0, "inserted": 0,
-              "pending": 0, "errors": 0, "screened_out": 0, "duplicates": 0}
+              "pending": 0, "errors": 0, "screened_out": 0, "duplicates": 0,
+              "orphaned": 0}
     backoffs = (180, 360, 900, 1800)
     for raw in rows:
         result["attempted"] += 1
@@ -352,6 +353,11 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
                                      retry_after_seconds=retry_after, at=now)
             result["pending"] += 1
             continue
+        # The factory row is the identity authority. DEX APIs may return a
+        # checksum-cased address; store the canonical raw chain/token so the
+        # cross-database read-back is exact rather than merely case-insensitive.
+        event["chain"] = raw["chain"]
+        event["token"] = target
         # The factory clock is the primary event time. The market decision is made
         # now; never backdate it to the raw socket receipt.
         event["event_at"] = chain_time.isoformat()
@@ -371,17 +377,36 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
                              f"https://etherscan.io/tx/{raw['transaction_hash']}"),
         }
         ident, new = record_if_absent(event)
+        if not new:
+            stream.set_qualification(
+                raw, "duplicate_token_existing",
+                reason="token already has a first launch event",
+                target_token=target, at=now,
+            )
+            result["duplicates"] += 1
+            continue
+        try:
+            ledger_verified = event_id_readback_matches(
+                ident, lane="launch", chain=raw["chain"], token=target)
+            orphan_reason = "opportunity ledger ID failed exact read-back"
+        except Exception as exc:
+            ledger_verified = False
+            orphan_reason = f"opportunity ledger exact read-back unavailable: {exc}"
+        if not ledger_verified:
+            stream.set_qualification(
+                raw, "ledger_orphan",
+                reason=orphan_reason,
+                target_token=target, ledger_event_id=ident, at=now,
+            )
+            result["orphaned"] += 1
+            continue
         _, assessed = _append_assessment(
             ident, event, assessor, assessed=assessed,
             max_assessments=max_assessments, now=now)
-        state = "qualified_recorded" if new else "duplicate_token_existing"
-        stream.set_qualification(raw, state,
-                                 reason=None if new else "token already has a first launch event",
-                                 target_token=target,
-                                 ledger_event_id=ident if new else None, at=now)
-        result["recorded"] += int(new)
-        result["inserted"] += int(new)
-        result["duplicates"] += int(not new)
+        stream.set_qualification(raw, "qualified_recorded", target_token=target,
+                                 ledger_event_id=ident, at=now)
+        result["recorded"] += 1
+        result["inserted"] += 1
     return result, assessed
 
 
@@ -537,7 +562,10 @@ def view() -> dict:
         from src.pipeline import evm_factory_stream
         from src.pipeline.evm_launch_bridge import configured_stream_health
         evm_primary = {"available": True,
-                       "qualification": evm_factory_stream.qualification_summary(),
+                       "qualification": evm_factory_stream.qualification_summary(
+                           ledger_readback=lambda ident, chain, token:
+                           event_id_readback_matches(
+                               ident, lane="launch", chain=chain, token=token)),
                        "streams": configured_stream_health()}
     except Exception as exc:
         evm_primary = {"available": False, "reason": str(exc)[:120], "streams": []}

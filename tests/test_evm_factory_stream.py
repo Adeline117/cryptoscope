@@ -330,6 +330,124 @@ def test_forward_factory_row_has_retryable_qualification_clock(evm):
     assert retry["qualification_attempts"] == 1
 
 
+def test_ledger_orphan_is_terminal_and_retains_cross_database_trace(evm):
+    now = datetime.now(timezone.utc)
+    evm.ensure_bridge_started_at(at=now - timedelta(minutes=1))
+    _persist_complete(evm)
+    c = evm._conn()
+    try:
+        c.execute("UPDATE raw_pools SET block_at=?,detected_at=?",
+                  ((now - timedelta(seconds=10)).isoformat(),
+                   (now - timedelta(seconds=9)).isoformat()))
+        c.commit()
+    finally:
+        c.close()
+    row = evm.qualification_batch(now=now, limit=1)[0]
+    target = "0x1111111111111111111111111111111111111111"
+    assert evm.set_qualification(
+        row, "ledger_orphan", reason="opportunity ledger ID failed exact read-back",
+        target_token=target, ledger_event_id="ledger-mismatch", at=now,
+    )
+
+    assert evm.qualification_batch(now=now + timedelta(hours=1)) == []
+    c = evm._conn()
+    try:
+        stored = c.execute(
+            "SELECT qualification_state,qualification_reason,target_token,"
+            "ledger_event_id,qualified_at FROM raw_pools"
+        ).fetchone()
+    finally:
+        c.close()
+    assert stored == (
+        "ledger_orphan", "opportunity ledger ID failed exact read-back",
+        target, "ledger-mismatch", None,
+    )
+
+
+def test_qualification_summary_revalidates_exact_unique_ledger_links(evm):
+    token_a = "0x1111111111111111111111111111111111111111"
+    token_b = "0x2222222222222222222222222222222222222222"
+    token_c = "0x3333333333333333333333333333333333333333"
+    token_d = "0x4444444444444444444444444444444444444444"
+    now = datetime.now(timezone.utc).isoformat()
+    c = evm._conn()
+    try:
+        def insert_v2(index, state, ledger_id, target):
+            c.execute("""INSERT INTO raw_pools(
+                chain,venue,factory,transaction_hash,log_index,block_number,
+                token0,token1,pool,pair_index,detected_at,updated_at,
+                raw_payload_hash,evidence_state,qualification_state,
+                ledger_event_id,target_token
+            ) VALUES ('bsc','pancakeswap_v2',?,?,?,?,?,?,?,?,?,?,?,
+                      'complete',?,?,?)""",
+                      (evm.PANCAKE_V2_FACTORY, "0x" + f"{index:064x}", index,
+                       100 + index, token_a, token_b,
+                       "0x" + f"{1000 + index:040x}", index, now, now,
+                       f"{index:064x}", state, ledger_id, target))
+
+        def insert_v3(index, state, ledger_id, target):
+            c.execute("""INSERT INTO raw_v3_pools(
+                chain,venue,factory,transaction_hash,log_index,block_number,
+                token0,token1,pool,fee,tick_spacing,detected_at,updated_at,
+                raw_payload_hash,evidence_state,qualification_state,
+                ledger_event_id,target_token
+            ) VALUES ('bsc','pancakeswap_v3',?,?,?,?,?,?,?,?,?,?,?, ?,
+                      'complete',?,?,?)""",
+                      (evm.PANCAKE_V3_FACTORY, "0x" + f"{index:064x}", index,
+                       200 + index, token_a, token_b,
+                       "0x" + f"{2000 + index:040x}", 500, 10, now, now,
+                       f"{index + 10:064x}", state, ledger_id, target))
+
+        insert_v2(1, "qualified_recorded", "ledger-good", token_a)
+        insert_v2(2, "qualified_recorded", "ledger-good", token_a)
+        insert_v3(3, "qualified_recorded", "ledger-bad", token_b)
+        insert_v2(4, "qualified_recorded", None, token_c)
+        insert_v3(5, "ledger_orphan", "ledger-terminal", token_d)
+        c.commit()
+    finally:
+        c.close()
+
+    calls = []
+
+    def readback(ident, chain, token):
+        calls.append((ident, chain, token))
+        return ident == "ledger-good" and chain == "bsc" and token == token_a
+
+    summary = evm.qualification_summary(ledger_readback=readback)
+    assert summary["raw_total"] == 5
+    assert summary["raw_qualification_states"] == {
+        "ledger_orphan": 1, "qualified_recorded": 4}
+    assert summary["qualification"] == {
+        "ledger_orphan": 3, "qualified_recorded": 1}
+    assert calls == [
+        ("ledger-good", "bsc", token_a),
+        ("ledger-good", "bsc", token_a),
+        ("ledger-bad", "bsc", token_b),
+    ]
+    assert summary["traceability"] == {
+        "state": "partial",
+        "raw_marked_recorded_rows": 4,
+        "traceable_rows": 2,
+        "traceable_unique_ledger_events": 1,
+        "orphan_rows": 3,
+        "orphan_unique_ledger_ids": 2,
+        "missing_ledger_id_rows": 1,
+        "missing_identity_rows": 0,
+        "quarantined_state_rows": 1,
+        "readback_unavailable_rows": 0,
+        "readback_error_rows": 0,
+    }
+
+    unavailable = evm.qualification_summary()
+    assert unavailable["qualification"] == {
+        "ledger_orphan": 2,
+        "qualified_recorded": 0,
+        "ledger_readback_unavailable": 3,
+    }
+    assert unavailable["traceability"]["state"] == "unavailable"
+    assert unavailable["traceability"]["readback_unavailable_rows"] == 3
+
+
 def test_factory_qualification_migrates_both_raw_tables(evm):
     c = evm._conn()
     try:
