@@ -66,6 +66,13 @@ def test_stats_honest_when_nothing_closed(cp):
     s = cp.paper_stats()
     assert s["n_open"] == 1 and s["n_closed"] == 0
     assert "avg_net_return_pct" not in s         # never a number before a real close
+    position = s["open_positions"][0]
+    assert position["symbol"] == "X"
+    assert position["entry_at"] and position["last_measured_at"]
+    assert position["entry_diff_ann_pct"] == 40
+    assert position["predicted_net_ann_pct"] == 40
+    assert position["exit_diff_floor_ann_pct"] == cp.CLOSE_DIFF_FLOOR
+    assert position["execution_mode"] == "paper_orderbook_measurement"
 
 
 def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
@@ -95,6 +102,11 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     assert outcome["net_return_pct"] == pytest.approx(
         outcome["funding_accrued_pct"] - outcome["realized_cost_pct"])
     assert outcome["cost_is_real_fill"] is False
+    stats = cp.paper_stats()
+    assert stats["open_positions"] == []
+    assert stats["recent"][0]["entry_at"] == past
+    assert stats["recent"][0]["closed_at"]
+    assert stats["recent"][0]["close_reason"] == "diff_below_floor"
 
 
 def test_annualized_summary_requires_long_enough_cohort(cp):

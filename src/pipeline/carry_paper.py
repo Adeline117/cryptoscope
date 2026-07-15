@@ -276,12 +276,29 @@ def paper_stats() -> dict:
     c = _conn()
     try:
         closed = c.execute("SELECT symbol,hold_h,entry_slip,exit_slip,realized_net,pred_net,"
-                           "accrued_pct "
+                           "accrued_pct,entry_ts,exit_ts,close_reason "
                            "FROM paper WHERE status='closed'").fetchall()
-        n_open = c.execute("SELECT COUNT(*) FROM paper WHERE status='open'").fetchone()[0]
+        opened = c.execute(
+            "SELECT symbol,entry_ts,last_ts,entry_diff,last_diff,pred_net,entry_slip,notional "
+            "FROM paper WHERE status='open' ORDER BY entry_ts DESC"
+        ).fetchall()
     finally:
         c.close()
-    out = {"n_open": n_open, "n_closed": len(closed)}
+    out = {
+        "n_open": len(opened), "n_closed": len(closed),
+        "exit_rule": f"cross-venue funding differential < {CLOSE_DIFF_FLOOR}% ann or market missing",
+        "open_positions": [
+            {
+                "symbol": row[0], "entry_at": row[1], "last_measured_at": row[2],
+                "entry_diff_ann_pct": row[3], "last_diff_ann_pct": row[4],
+                "predicted_net_ann_pct": row[5], "entry_slip_pct": row[6],
+                "notional_usd_per_leg": row[7],
+                "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
+                "execution_mode": "paper_orderbook_measurement",
+            }
+            for row in opened
+        ],
+    }
     if closed:
         holds = [r[1] / 24 for r in closed if r[1] is not None]
         costs = [(r[2] or 0) + (r[3] or 0) + 2 * FEE_PCT_ONEWAY_BOTHLEGS
@@ -300,6 +317,8 @@ def paper_stats() -> dict:
             "annualized_n": len(annualized),
             "annualized_min_hold_days": MIN_ANNUALIZED_HOLD_H // 24,
             "recent": [{"symbol": r[0], "hold_days": round((r[1] or 0) / 24, 1),
+                        "entry_at": r[7], "closed_at": r[8],
+                        "close_reason": r[9] or "legacy_unknown",
                         "funding_accrued_pct": round(r[6] or 0, 4),
                         "cost_pct": round((r[2] or 0) + (r[3] or 0)
                                           + 2 * FEE_PCT_ONEWAY_BOTHLEGS, 4),
