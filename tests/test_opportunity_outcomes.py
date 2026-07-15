@@ -28,6 +28,38 @@ def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE
     return item
 
 
+def _carry_proxy_outcome(*, net_proxy: float | None = 0.25,
+                         exit_book_impact: float | None = 0.05) -> dict:
+    from src.pipeline.carry_paper import (
+        CURRENT_EPISODE_VERSION,
+        MODELED_ROUNDTRIP_FEE_PCT,
+    )
+    from src.pipeline.execution_cost import carry_paper_contract
+
+    contract = carry_paper_contract(
+        notional_usd_per_leg=10_000,
+        entry_book_impact_pct=0.05,
+        exit_book_impact_pct=exit_book_impact,
+        modeled_fee_pct=MODELED_ROUNDTRIP_FEE_PCT,
+    )
+    quoted_integral = (net_proxy + contract["modeled_proxy_total_pct"]
+                       if net_proxy is not None
+                       and contract["modeled_proxy_total_pct"] is not None else 0.54)
+    return {
+        "kind": "delta_neutral_carry_paper",
+        "episode_version": CURRENT_EPISODE_VERSION,
+        "net_proxy_after_book_quotes_and_modeled_fee_pct": net_proxy,
+        "close_reason": "diff_below_floor",
+        "book_quote_cost_complete": exit_book_impact is not None,
+        "entry_book_impact_pct": 0.05, "exit_book_impact_pct": exit_book_impact,
+        "cost_contract": contract,
+        "unmeasured_h": 0, "hold_h": 48,
+        "quoted_rate_integral_pct": quoted_integral,
+        "observation_version": 1, "exit_quote_delay_s": 0,
+        "cost_is_real_fill": False, "real_edge_eligible": False,
+    }
+
+
 def test_resolver_settles_one_horizon_per_event_and_preserves_entry(ledger):
     from src.pipeline import opportunity_outcomes as oo
 
@@ -260,7 +292,7 @@ def test_watch_only_structure_never_gets_directional_hit_rate(ledger):
     assert "不把事后涨跌" in stat["note"]
 
 
-def test_carry_uses_absolute_non_directional_outcomes_without_claiming_real_edge(ledger):
+def test_carry_uses_descriptive_quote_proxies_without_claiming_real_edge(ledger):
     from src.pipeline import opportunity_outcomes as oo
 
     ts = datetime.now(timezone.utc).isoformat()
@@ -268,49 +300,41 @@ def test_carry_uses_absolute_non_directional_outcomes_without_claiming_real_edge
         ident, _ = ledger.record({
             "lane": "carry", "chain": "hyperliquid+okx", "token": f"C{i}",
             "event_key": f"paper:{i}", "symbol": f"C{i}", "detected_at": ts,
-            "decision": "PAPER_OPEN", "state": "paper_closed",
+            "decision": "WATCH", "state": "paper_closed",
         })
-        ledger.save_outcome(ident, {
-            "kind": "delta_neutral_carry_paper", "net_return_pct": 0.25,
-            "cost_is_real_fill": False, "episode_version": 2,
-            "close_reason": "diff_below_floor", "cost_complete": True,
-            "entry_slip_pct": 0.05, "exit_slip_pct": 0.05,
-            "unmeasured_h": 0, "hold_h": 48, "funding_accrued_pct": 0.54,
-            "observation_version": 1, "exit_quote_delay_s": 0,
-        }, "resolved")
+        ledger.save_outcome(ident, _carry_proxy_outcome(), "resolved")
 
     stat = oo.lane_stats()["carry"]
     assert stat["verdict"] == "measured"
     assert stat["edge_verdict"] == "不可判"
-    assert stat["metric"] == "absolute_net_return_after_complete_paper_book_costs"
-    assert stat["median_net_return_pct"] == 0.25
+    assert stat["metric"] == "quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy"
+    assert stat["cohort_kind"] == "descriptive_quote_proxy"
+    assert stat["median_net_proxy_pct"] == 0.25
+    assert stat["real_edge_n"] == 0
+    assert stat["real_edge_eligible"] is False
+    assert stat["all_in_total_pct"] is None
+    assert stat["cost_completeness"] == "partial"
     assert stat["cost_is_real_fill"] is False
-    assert "实盘" in stat["note"]
+    assert "不能据此判定正EV" in stat["note"]
 
 
 def test_carry_quarantines_legacy_missing_market_and_incomplete_cost(ledger):
     from src.pipeline import opportunity_outcomes as oo
 
     ts = datetime.now(timezone.utc).isoformat()
-    complete = {"kind": "delta_neutral_carry_paper", "episode_version": 2,
-                "net_return_pct": 0.25, "close_reason": "diff_below_floor",
-                "cost_complete": True, "entry_slip_pct": 0.05,
-                "exit_slip_pct": 0.05, "unmeasured_h": 0, "hold_h": 48,
-                "funding_accrued_pct": 0.54, "observation_version": 1,
-                "exit_quote_delay_s": 0}
+    complete = _carry_proxy_outcome()
     outcomes = [
-        {**complete, "episode_version": None, "net_return_pct": 9},
-        {**complete, "net_return_pct": 8, "close_reason": "market_missing"},
-        {**complete, "net_return_pct": 7, "cost_complete": False,
-         "exit_slip_pct": None},
-        {**complete, "net_return_pct": None},
-        {**complete, "net_return_pct": -0.25},
+        {**_carry_proxy_outcome(net_proxy=9), "episode_version": None},
+        {**_carry_proxy_outcome(net_proxy=8), "close_reason": "market_missing"},
+        _carry_proxy_outcome(net_proxy=7, exit_book_impact=None),
+        _carry_proxy_outcome(net_proxy=None),
+        _carry_proxy_outcome(net_proxy=-0.25),
     ]
     for i, outcome in enumerate(outcomes):
         ident, _ = ledger.record({
             "lane": "carry", "chain": "hyperliquid+okx", "token": f"Q{i}",
             "event_key": f"paper:q{i}", "symbol": f"Q{i}", "detected_at": ts,
-            "decision": "PAPER_OPEN", "state": "paper_closed",
+            "decision": "WATCH", "state": "paper_closed",
         })
         ledger.save_outcome(ident, outcome, "resolved")
 
@@ -321,9 +345,10 @@ def test_carry_quarantines_legacy_missing_market_and_incomplete_cost(ledger):
     assert stat["excluded_by_reason"] == {
         "legacy_episode": 1,
         "market_missing_close": 1,
-        "incomplete_cost": 1,
+        "incomplete_book_quote_cost": 1,
         "missing_result": 1,
     }
+    assert stat["real_edge_n"] == 0
 
 
 def test_airdrop_sums_verified_claims_but_refuses_success_only_hit_rate(ledger):

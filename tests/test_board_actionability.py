@@ -4,6 +4,10 @@ from pathlib import Path
 BOARD = Path(__file__).parents[1] / "board" / "public" / "index.html"
 BOARD_EXPORT = Path(__file__).parents[1] / "src" / "pipeline" / "board_export.py"
 HYPERLIQUID = Path(__file__).parents[1] / "src" / "onchain" / "hyperliquid.py"
+CARRY_PAPER = Path(__file__).parents[1] / "src" / "pipeline" / "carry_paper.py"
+OPPORTUNITY_OUTCOMES = (
+    Path(__file__).parents[1] / "src" / "pipeline" / "opportunity_outcomes.py"
+)
 
 
 def test_board_uses_effective_decision_and_client_side_expiry():
@@ -25,7 +29,7 @@ def test_board_exposes_carry_entry_exit_clocks_without_calling_them_fills():
     assert "Carry 进入 / 离开生命周期" in html
     assert "p.entry_at" in html and "p.last_measured_at" in html
     assert "p.closed_at" in html and "p.close_reason" in html
-    assert "盘口与费率假设，非全量成本" in html
+    assert "盘口与费用假设，非全量成本" in html
     assert "订单簿纸面报价代理" in html
     assert "非实盘成交、实际资金费结算或完整收益" in html
 
@@ -139,9 +143,13 @@ def test_carry_evidence_separates_valid_total_and_quarantined_samples():
     assert "n_closed_total" in html
     assert "n_closed_excluded" in html
     assert "excluded_by_reason" in html
-    assert "有效关闭样本" in html
+    assert "有效报价代理关闭" in html
     assert "排除，不进入优势判决" in html
     assert "总关闭" in html
+    assert "真实优势样本" in html
+    assert "real_edge_n" in html
+    assert "inconsistent_proxy_math" in html
+    assert "代理数学不一致" in html
 
 
 def test_carry_ui_forbids_realized_or_complete_cost_claims():
@@ -157,11 +165,24 @@ def test_carry_ui_forbids_realized_or_complete_cost_claims():
         "ONE replicable positive-EV core",
         '"realized_ann"',
         "已实现carry",
+        "pp.avg_net_return_pct",
+        "pp.avg_funding_accrued_pct",
+        "pp.avg_cost_pct",
     ):
         assert forbidden not in combined
     assert "报价费率年化代理" in combined
     assert "不是仓位建议或可成交上限" in combined
     assert "不能当作 all-in 净收益或仓位建议" in combined
+
+
+def test_carry_public_contract_forbids_legacy_profit_metric_names():
+    tracker = CARRY_PAPER.read_text()
+    outcomes = OPPORTUNITY_OUTCOMES.read_text()
+
+    assert '"funding_accrued_pct"' not in tracker
+    assert '"net_return_pct"' not in tracker
+    assert "absolute_net_return_after_complete_paper_book_costs" not in outcomes
+    assert "quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy" in outcomes
 
 
 def test_carry_mobile_layout_prioritizes_health_and_lifecycle():

@@ -181,6 +181,22 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                     max_notional_usd=CASE WHEN opportunities.lane='carry'
                                           THEN excluded.max_notional_usd
                                           ELSE opportunities.max_notional_usd END,
+                    cost_pct_est=CASE WHEN opportunities.lane='carry'
+                                           AND opportunities.cost_contract IS NULL
+                                      THEN excluded.cost_pct_est
+                                      ELSE opportunities.cost_pct_est END,
+                    cost_model=CASE WHEN opportunities.lane='carry'
+                                         AND opportunities.cost_contract IS NULL
+                                    THEN excluded.cost_model
+                                    ELSE opportunities.cost_model END,
+                    cost_contract_version=CASE
+                        WHEN opportunities.lane='carry'
+                             AND opportunities.cost_contract_version IS NULL
+                        THEN excluded.cost_contract_version
+                        ELSE opportunities.cost_contract_version END,
+                    cost_contract=CASE
+                        WHEN opportunities.lane='carry' AND opportunities.cost_contract IS NULL
+                        THEN excluded.cost_contract ELSE opportunities.cost_contract END,
                     payload=excluded.payload, updated_at=excluded.updated_at
             """, values)
         else:

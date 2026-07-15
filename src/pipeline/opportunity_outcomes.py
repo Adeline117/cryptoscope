@@ -285,9 +285,9 @@ def _cohort(rows: list[dict], decision: str) -> dict:
 
 
 def _carry_stats(rows: list[dict]) -> dict:
-    """Measure only complete v2 carry episodes; retain but quarantine old evidence."""
+    """Describe valid v3 quote proxies while keeping real-edge evidence at zero."""
     from src.pipeline.evidence import wilson
-    from src.pipeline.carry_paper import edge_exclusion_reasons
+    from src.pipeline.carry_paper import proxy_exclusion_reasons
 
     closed = []
     total_closed = 0
@@ -299,38 +299,43 @@ def _carry_stats(rows: list[dict]) -> dict:
         if row.get("outcome_state") != "resolved":
             continue
         total_closed += 1
-        reasons = edge_exclusion_reasons(outcome)
+        reasons = proxy_exclusion_reasons(outcome)
         if reasons:
             for reason in reasons:
                 excluded[reason] = excluded.get(reason, 0) + 1
             continue
-        value = outcome.get("net_return_pct")
+        value = outcome.get("net_proxy_after_book_quotes_and_modeled_fee_pct")
         closed.append(float(value))
     n = len(closed)
     positives = sum(value > 0 for value in closed)
     common = {
-        "n": n, "hits": positives,
+        "n": n, "n_proxy": n, "hits": positives, "real_edge_n": 0,
         "total_closed": total_closed,
         "excluded_closed": total_closed - n,
         "excluded_by_reason": excluded,
         "pending": sum(r.get("outcome_state") == "open" for r in rows),
-        "metric": "absolute_net_return_after_complete_paper_book_costs",
+        "metric": "quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy",
+        "cohort_kind": "descriptive_quote_proxy",
+        "cost_completeness": "partial", "all_in_total_pct": None,
         "cost_is_real_fill": False,
         "execution_mode": "paper_orderbook_measurement",
+        "real_edge_eligible": False,
     }
     if n < MIN_N:
         return {**common, "verdict": "不可判", "edge_verdict": "不可判",
-                "note": (f"有效v2关闭样本 {n}/{MIN_N};另隔离 {total_closed - n} 个"
-                         "旧版/错误退出/成本不全样本;纸面测量不冒充实盘成交")}
+                "note": (f"有效v3报价代理关闭样本 {n}/{MIN_N};另隔离 "
+                         f"{total_closed - n} 个旧版/错误退出/盘口不全样本。"
+                         "真实优势样本仍为0")}
     lo, hi = wilson(positives, n)
     return {
         **common, "verdict": "measured", "edge_verdict": "不可判",
         "positive_rate": round(positives / n, 3),
         "lo": round(lo, 3), "hi": round(hi, 3),
-        "mean_net_return_pct": round(statistics.mean(closed), 4),
-        "median_net_return_pct": round(statistics.median(closed), 4),
-        "worst_net_return_pct": round(min(closed), 4),
-        "note": "已有纸面成本后分布;仍缺真实双腿成交与样本外实盘验证",
+        "mean_net_proxy_pct": round(statistics.mean(closed), 4),
+        "median_net_proxy_pct": round(statistics.median(closed), 4),
+        "worst_net_proxy_pct": round(min(closed), 4),
+        "note": ("已有描述性报价代理分布；仍缺实际资金费结算、basis、完整成本、"
+                 "真实双腿成交与样本外验证，不能据此判定正EV"),
     }
 
 

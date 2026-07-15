@@ -1,7 +1,8 @@
-"""Carry paper-tracker math — hermetic (no network). Locks the accrual + realized-net
-formula so the numbers it reports in a few days are trustworthy, not a fluent-looking lie.
-The whole point of the tracker is to REPLACE assumptions with measurement; if its own
-math is wrong, it launders a bug into 'measured truth'. So we pin it."""
+"""Carry quote-proxy tracker math — hermetic (no network).
+
+The tests pin what is observed, modeled and unknown so paper quotes cannot be laundered
+into realized profit or an all-in edge claim.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -41,7 +42,7 @@ def test_opens_only_fat_net_cross(cp):
     assert {r[0] for r in rows} == {"FAT"}          # only the fat-net cross carry opens
 
 
-def test_accrues_and_closes_with_correct_realized_net(cp):
+def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # open a 40%/yr differential position
     _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     import sqlite3
@@ -64,26 +65,34 @@ def test_accrues_and_closes_with_correct_realized_net(cp):
     #   cost = entry_slip .05 + exit_slip .05 + fees(2*0.095=.19) = 0.29 ; /hold_yr = 21.17
     #   absolute net ≈ 0.5479 − 0.29 = 0.2579%
     assert stats["avg_hold_days"] == pytest.approx(5.0, abs=0.1)
-    assert stats["avg_funding_accrued_pct"] == pytest.approx(0.548, abs=0.01)
-    assert stats["avg_cost_pct"] == pytest.approx(0.29, abs=0.001)
-    assert stats["avg_net_return_pct"] == pytest.approx(0.258, abs=0.01)
-    assert stats["avg_predicted_ann_pct"] == 40
-    assert stats["annualized_n"] == 0
-    assert "avg_annualized_net_pct" not in stats
+    assert stats["avg_quoted_rate_integral_pct"] == pytest.approx(0.548, abs=0.01)
+    assert stats["avg_book_and_modeled_fee_proxy_pct"] == pytest.approx(0.29, abs=0.001)
+    assert stats["avg_net_proxy_pct"] == pytest.approx(0.258, abs=0.01)
+    assert stats["avg_predicted_partial_model_ann_pct"] == 40
+    assert stats["annualized_proxy_n"] == 0
+    assert "avg_annualized_net_proxy_pct" not in stats
+    assert stats["all_in_total_pct"] is None
+    assert stats["real_edge_n"] == 0
+    assert stats["real_edge_eligible"] is False
 
 
 def test_stats_honest_when_nothing_closed(cp):
     _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
     s = cp.paper_stats()
     assert s["n_open"] == 1 and s["n_closed"] == 0
-    assert "avg_net_return_pct" not in s         # never a number before a real close
+    assert "avg_net_proxy_pct" not in s
     position = s["open_positions"][0]
     assert position["symbol"] == "X"
     assert position["entry_at"] and position["last_measured_at"]
     assert position["entry_diff_ann_pct"] == 40
-    assert position["predicted_net_ann_pct"] == 40
+    assert position["predicted_partial_model_net_ann_pct"] == 40
     assert position["exit_diff_floor_ann_pct"] == cp.CLOSE_DIFF_FLOOR
     assert position["execution_mode"] == "paper_orderbook_measurement"
+    assert position["cost_contract"]["completeness"] == "partial"
+    assert position["cost_contract"]["all_in_total_pct"] is None
+    assert position["settled_funding_pct"] is None
+    assert position["basis_pnl_pct"] is None
+    assert position["realized_net_return_pct"] is None
 
 
 def test_missing_observation_pauses_without_closing_or_accruing(cp):
@@ -138,6 +147,38 @@ def test_missing_observation_pauses_without_closing_or_accruing(cp):
     accrued = c.execute("SELECT accrued_pct FROM paper WHERE symbol='X'").fetchone()[0]
     c.close()
     assert accrued == pytest.approx(40 / 8760, rel=0.02)
+
+
+def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
+    import sqlite3
+
+    _run(cp, [{"symbol": "X", "cross": True, "net_ann": 40, "edge_ann": 40}])
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    c = sqlite3.connect(str(cp.DB))
+    c.execute(
+        "UPDATE paper SET entry_ts=?,last_ts=?,last_valid_ts=?,last_diff=40,accrued_pct=0 "
+        "WHERE symbol='X'", (past, past, past),
+    )
+    c.commit()
+    c.close()
+
+    stats = cp.run([], observations=[{
+        "symbol": "X", "status": "observed", "cross": True,
+        "observation_version": 0, "observed_edge_ann": 1,
+    }])
+    assert stats["n_open"] == 1 and stats["n_closed_total"] == 0
+    assert stats["open_positions"][0]["measurement_state"] == "source_gap"
+    c = sqlite3.connect(str(cp.DB))
+    assert c.execute(
+        "SELECT accrued_pct,status FROM paper WHERE symbol='X'"
+    ).fetchone() == (0.0, "open")
+    c.close()
+
+    no_legacy_open = cp.run(
+        [{"symbol": "Y", "cross": True, "net_ann": 40, "edge_ann": 40}],
+        observations=None,
+    )
+    assert {row["symbol"] for row in no_legacy_open["open_positions"]} == {"X"}
 
 
 def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeypatch):
@@ -208,15 +249,59 @@ def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeyp
 
 
 def test_delayed_exit_quote_is_retained_but_excluded_from_edge_sample(cp):
+    from src.pipeline.execution_cost import carry_paper_contract
+
     sample = {
-        "episode_version": 2, "observation_version": 1,
-        "close_reason": "diff_below_floor", "cost_complete": True,
-        "entry_slip_pct": 0.05, "exit_slip_pct": 0.05,
+        "episode_version": cp.CURRENT_EPISODE_VERSION, "observation_version": 1,
+        "close_reason": "diff_below_floor", "book_quote_cost_complete": True,
+        "entry_book_impact_pct": 0.05, "exit_book_impact_pct": 0.05,
+        "cost_contract": carry_paper_contract(
+            notional_usd_per_leg=10_000, entry_book_impact_pct=0.05,
+            exit_book_impact_pct=0.05,
+            modeled_fee_pct=cp.MODELED_ROUNDTRIP_FEE_PCT),
         "exit_quote_delay_s": cp.CARRY_EXIT_QUOTE_SLA_S + 1,
-        "unmeasured_h": 0, "hold_h": 24, "funding_accrued_pct": 0.1,
-        "net_return_pct": -0.19,
+        "unmeasured_h": 0, "hold_h": 24, "quoted_rate_integral_pct": 0.1,
+        "net_proxy_after_book_quotes_and_modeled_fee_pct": -0.19,
     }
-    assert cp.edge_exclusion_reasons(sample) == ["exit_quote_outside_sla"]
+    assert cp.proxy_exclusion_reasons(sample) == ["exit_quote_outside_sla"]
+
+
+def test_proxy_cohort_rejects_cost_contract_or_proxy_math_mismatch(cp):
+    from src.pipeline.execution_cost import carry_paper_contract
+
+    contract = carry_paper_contract(
+        notional_usd_per_leg=10_000, entry_book_impact_pct=0.05,
+        exit_book_impact_pct=0.05,
+        modeled_fee_pct=cp.MODELED_ROUNDTRIP_FEE_PCT,
+    )
+    sample = {
+        "episode_version": cp.CURRENT_EPISODE_VERSION, "observation_version": 1,
+        "close_reason": "diff_below_floor", "book_quote_cost_complete": True,
+        "entry_book_impact_pct": 0.05, "exit_book_impact_pct": 0.05,
+        "cost_contract": contract, "exit_quote_delay_s": 0, "unmeasured_h": 0,
+        "hold_h": 24, "quoted_rate_integral_pct": 0.54,
+        "net_proxy_after_book_quotes_and_modeled_fee_pct": 9,
+    }
+    assert cp.proxy_exclusion_reasons(sample) == ["inconsistent_proxy_math"]
+
+    malformed = {**sample, "net_proxy_after_book_quotes_and_modeled_fee_pct": 0.25,
+                 "cost_contract": {**contract, "known_total_pct": 99}}
+    assert cp.proxy_exclusion_reasons(malformed) == [
+        "invalid_partial_cost_contract",
+    ]
+
+    non_finite_delay = {**sample,
+                        "net_proxy_after_book_quotes_and_modeled_fee_pct": 0.25,
+                        "exit_quote_delay_s": float("nan")}
+    assert cp.proxy_exclusion_reasons(non_finite_delay) == ["exit_quote_outside_sla"]
+    non_finite_gap = {**sample,
+                      "net_proxy_after_book_quotes_and_modeled_fee_pct": 0.25,
+                      "unmeasured_h": float("nan")}
+    assert cp.proxy_exclusion_reasons(non_finite_gap) == ["incomplete_quote_rate_path"]
+    non_finite_hold = {**sample,
+                       "net_proxy_after_book_quotes_and_modeled_fee_pct": 0.25,
+                       "hold_h": float("nan")}
+    assert cp.proxy_exclusion_reasons(non_finite_hold) == ["invalid_hold_period"]
 
 
 def test_legacy_open_episode_migrates_without_backfilling_unknown_time(cp):
@@ -275,6 +360,12 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     assert event["action_level"] == "A1_WATCH"
     assert event["actionable_now"] is False
     assert event["auto_execution_allowed"] is False
+    entry_contract = event["cost_contract"]
+    assert entry_contract["purpose"] == "paper_measurement"
+    assert entry_contract["completeness"] == "partial"
+    assert entry_contract["all_in_total_pct"] is None
+    assert entry_contract["book_quote_cost_complete"] is False
+    assert entry_contract["is_real_fill"] is False
     active = opportunity_ledger.active("carry")[0]
     assert active["max_notional_usd"] is None
     assert active["measurement_notional_usd_per_leg"] == cp.NOTIONAL
@@ -293,14 +384,39 @@ def test_open_and_close_share_one_carry_ledger_lifecycle(cp):
     outcome = event["outcome"]
     assert event["outcome_state"] == "resolved"
     assert outcome["close_reason"] == "diff_below_floor"
-    assert outcome["net_return_pct"] == pytest.approx(
-        outcome["funding_accrued_pct"] - outcome["realized_cost_pct"])
+    assert outcome["net_proxy_after_book_quotes_and_modeled_fee_pct"] == pytest.approx(
+        outcome["quoted_rate_integral_pct"]
+        - outcome["book_and_modeled_fee_proxy_pct"])
+    assert outcome["settled_funding_pct"] is None
+    assert outcome["basis_pnl_pct"] is None
+    assert outcome["realized_net_return_pct"] is None
+    assert outcome["cost_contract"]["all_in_total_pct"] is None
+    assert outcome["cost_contract"]["completeness"] == "partial"
+    assert outcome["cost_contract"]["book_quote_cost_complete"] is True
+    # The top-level event contract is the entry-time snapshot.  The mutable
+    # outcome contract may add the later exit quote without rewriting history.
+    assert event["cost_contract"] == entry_contract
+    assert event["cost_contract"]["book_quote_cost_complete"] is False
+    assert outcome["proxy_sample_eligible"] is True
+    assert outcome["edge_sample_eligible"] is False
+    assert outcome["real_edge_eligible"] is False
+    assert outcome["annualized_proxy_eligible"] is False
+    assert outcome["annualized_net_proxy_pct"] is None
     assert outcome["cost_is_real_fill"] is False
     stats = cp.paper_stats()
     assert stats["open_positions"] == []
     assert stats["recent"][0]["entry_at"] == past
     assert stats["recent"][0]["closed_at"]
     assert stats["recent"][0]["close_reason"] == "diff_below_floor"
+    assert stats["recent"][0]["realized_net_return_pct"] is None
+
+    # Rebuilding an empty opportunity ledger from a closed paper DB must not
+    # backfill the later exit quote into the immutable entry-time contract.
+    opportunity_ledger.DB = cp.DB.parent / "rebuilt_opportunities.db"
+    assert cp._sync_opportunity_ledger() == {"status": "ok", "synced": 1, "resolved": 1}
+    rebuilt = opportunity_ledger.outcome_rows()[0]
+    assert rebuilt["cost_contract"]["book_quote_cost_complete"] is False
+    assert rebuilt["outcome"]["cost_contract"]["book_quote_cost_complete"] is True
 
 
 def test_annualized_summary_requires_long_enough_cohort(cp):
@@ -320,8 +436,8 @@ def test_annualized_summary_requires_long_enough_cohort(cp):
     c.commit()
     c.close()
     stats = cp.paper_stats()
-    assert stats["annualized_n"] == cp.MIN_ANNUALIZED_SAMPLES
-    assert stats["avg_annualized_net_pct"] == 30
+    assert stats["annualized_proxy_n"] == cp.MIN_ANNUALIZED_SAMPLES
+    assert stats["avg_annualized_net_proxy_pct"] == 30
 
 
 def test_stats_quarantine_legacy_bad_exit_cost_and_funding_gaps(cp):
@@ -330,11 +446,12 @@ def test_stats_quarantine_legacy_bad_exit_cost_and_funding_gaps(cp):
             "2026-01-03T00:00:00+00:00", 1,
             "2026-01-03T00:00:00+00:00", 0.05, 48, 30)
     rows = [
-        ("VALID", *base, "diff_below_floor", 2, 1, 0, 1, 0),
+        ("VALID", *base, "diff_below_floor", cp.CURRENT_EPISODE_VERSION, 1, 0, 1, 0),
         ("LEGACY", *base, "diff_below_floor", None, 1, 0, 1, 0),
-        ("MISSING", *base, "market_missing", 2, 1, 0, 1, 0),
-        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor", 2, 0, 0, 1, 0),
-        ("GAP", *base, "diff_below_floor", 2, 1, 5, 1, 0),
+        ("MISSING", *base, "market_missing", cp.CURRENT_EPISODE_VERSION, 1, 0, 1, 0),
+        ("NOEXIT", *base[:-3], None, 48, None, "diff_below_floor",
+         cp.CURRENT_EPISODE_VERSION, 0, 0, 1, 0),
+        ("GAP", *base, "diff_below_floor", cp.CURRENT_EPISODE_VERSION, 1, 5, 1, 0),
     ]
     c.executemany("""INSERT INTO paper(
         symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,accrued_pct,last_ts,
@@ -350,8 +467,9 @@ def test_stats_quarantine_legacy_bad_exit_cost_and_funding_gaps(cp):
     assert stats["recent"][0]["symbol"] == "VALID"
     assert stats["excluded_by_reason"]["legacy_episode"] == 1
     assert stats["excluded_by_reason"]["market_missing_close"] == 1
-    assert stats["excluded_by_reason"]["incomplete_cost"] == 1
-    assert stats["excluded_by_reason"]["incomplete_funding_path"] == 1
+    assert stats["excluded_by_reason"]["incomplete_book_quote_cost"] == 1
+    assert stats["excluded_by_reason"]["incomplete_quote_rate_path"] == 1
+    assert stats["real_edge_n"] == 0
 
 
 def test_carry_slippage_uses_real_leg_direction_for_entry_and_exit(monkeypatch):

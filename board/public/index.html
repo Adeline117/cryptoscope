@@ -545,9 +545,9 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>{const c=d?.carry||[],health=d?.carry_source_health||{};const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分已建模成本后的代理为正 ${pos}/${c.length}${top?`，最高代理 +${top.net_ann}%(${esc(top.symbol)})`:''}。有效关闭 ${pp.n_closed??ev?.n??"?"} / 总关闭 ${pp.n_closed_total??"?"}，当前判决 ${esc(ev?.edge_verdict||"不可判")}。`},
-    stat:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["模型代理>0",`${pos}/${c.length}`,"部分成本假设·非结果"],["最高模型代理",top?`+${top.net_ann}%`:"—",top?top.symbol:""],["有效/总关闭",`${pp.n_closed??ev?.n??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"}`],["优势判决",ev?.edge_verdict||"不可判","非实盘"]]},
-    readme:"💰资金费套利是当前最值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。模型年化必须与纸面关闭样本分开看，费率翻负、双腿滑点、再平衡、ADL、交易所故障和脱锚都可能吞掉毛差。只有成本后样本达到门槛并进一步取得真实双腿成交证据，才可升级结论。下面的拥挤/点火仅作方向防御观察。",
+    title:d=>{const c=d?.carry||[],health=d?.carry_source_health||{};const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos}/${c.length}${top?`，最高代理 +${top.net_ann}%(${esc(top.symbol)})`:''}。有效报价代理关闭 ${pp.n_proxy_closed??ev?.n_proxy??"?"} / 总关闭 ${pp.n_closed_total??"?"}；真实优势样本 ${pp.real_edge_n??ev?.real_edge_n??0}。`},
+    stat:d=>{const c=d?.carry||[];const pos=c.filter(x=>x.net_ann>0).length;const top=c.filter(x=>x.net_ann>0)[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["模型代理>0",`${pos}/${c.length}`,"部分成本假设·非结果"],["最高模型代理",top?`+${top.net_ann}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"}`],["真实优势样本",pp.real_edge_n??ev?.real_edge_n??0,"仍不可判"]]},
+    readme:"💰资金费 Carry 是当前值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。当前关闭样本也只是报价率积分减盘口报价和费用假设的描述性代理；basis、账户费率、抵押成本、调仓和实际结算都缺失，因此真实优势样本仍为 0。下面的拥挤/点火仅作方向防御观察。",
     rows:d=>d?.perps||[],
     custom:true,
   },
@@ -615,18 +615,18 @@ function renderPlay(){
     h+=`<section class="play-sec" style="grid-column:1/-1"><div class="ph">A3 人工小额验证窗 <span class="pd">只读报价到期即失效 · 永不自动交易</span></div>${activeLaunch.slice(0,4).map(r=>{const ca=r.current_assessment||{};return `<div class="prow"><span class="chip b-good">${esc(expiryText(ca))}</span> <b>${esc(r.symbol)}</b> 当前只读报价参考 <span class="num">${ca.entry_reference_price!=null?'$'+esc(ca.entry_reference_price):'不可得'}</span> · 当前失效参考 ≤ <span class="num">${ca.invalidation_reference_price!=null?'$'+esc(ca.invalidation_reference_price):'不可得'}</span> · 最大 <span class="num">${usd(ca.notional_usd||r.max_notional_usd)}</span><button class="jump" data-jump="launch">看完整证据</button></div>`}).join('')}</section>`;
   }
   h+=carryHealthHtml(carryHealth);
-  const carryValid=Number.isFinite(pp.n_closed)?pp.n_closed:(carryEvidence?.n??0);
+  const carryValid=Number.isFinite(pp.n_proxy_closed)?pp.n_proxy_closed:(carryEvidence?.n_proxy??0);
   const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
   const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:Math.max(0,carryTotal-carryValid);
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
     <div class="evidence-card"><div class="ek"><span>早期机会证据</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEvidence?.probe?.n??0}/20 <small class="dim">试验</small></div><div class="es">同期 WATCH 对照 ${launchEvidence?.control?.n??0}/20；必须比较成本后 24h 结果。</div><div class="meter"><i style="width:${Math.min(100,(launchEvidence?.probe?.n||0)/20*100)}%"></i></div></div>
-    <div class="evidence-card"><div class="ek"><span>Carry 证据</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid}/20 <small class="dim">有效关闭</small></div><div class="es">总关闭 ${carryTotal} · 排除 ${carryExcluded}；排除样本不进入优势判决。已知组件后代理为正 ${carryEvidence?.hits??0} 个。</div><div class="meter"><i style="width:${Math.min(100,carryValid/20*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal} · 排除 ${carryExcluded}；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,carryValid/20*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
   </section>`;
   // 1) EDGE
   h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
   if(carry.length){
-    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出仍是报价率与已知成本组件的模型代理，不是实际结算或完整 PnL；有效关闭 <b>${carryValid}</b> / 总关闭 ${carryTotal}，排除 ${carryExcluded}，判决 <b>${esc(carryEvidence?.edge_verdict||"不可判")}</b>。</div>`;
+    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出是报价率积分减盘口报价与费用假设的描述性代理，不是实际结算或完整 PnL；有效代理关闭 <b>${carryValid}</b> / 总关闭 ${carryTotal}，真实优势样本 <b>${pp.real_edge_n??carryEvidence?.real_edge_n??0}</b>。</div>`;
     h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 模型代理 <span class="num" style="color:var(--accent-t)">+${c.net_ann}%/年</span> <small class="dim">毛差 ${c.edge_ann} · ${c.hold_measured?c.hold_days+'d历史覆盖':'14d持仓假设'} · 非仓位建议</small></div>`).join('');
   } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
   h+='</div>';
@@ -668,17 +668,17 @@ function carryHealthHtml(health){
 }
 
 function carryEvidenceHtml(pp,evidence,scorecard){
-  const valid=Number.isFinite(pp?.n_closed)?pp.n_closed:(Number.isFinite(evidence?.n)?evidence.n:null);
+  const valid=Number.isFinite(pp?.n_proxy_closed)?pp.n_proxy_closed:(Number.isFinite(evidence?.n_proxy)?evidence.n_proxy:null);
   const total=Number.isFinite(pp?.n_closed_total)?pp.n_closed_total:valid;
   const excluded=Number.isFinite(pp?.n_closed_excluded)?pp.n_closed_excluded:(valid!=null&&total!=null?Math.max(0,total-valid):null);
   const reasons=Object.entries(pp?.excluded_by_reason||{});
-  const reasonLabels={legacy_episode:"旧版本",market_missing_close:"市场缺失关闭",incomplete_cost:"盘口成本不全",incomplete_funding_path:"报价率路径不全",exit_quote_delayed:"退出报价超时",proxy_observation:"旧观测接口"};
+  const reasonLabels={legacy_episode:"旧版本",market_missing_close:"市场缺失关闭",invalid_close_reason:"无效关闭原因",incomplete_book_quote_cost:"盘口报价不全",invalid_partial_cost_contract:"部分成本合同无效",incomplete_quote_rate_path:"报价率路径不全",exit_quote_outside_sla:"退出报价超时",unverified_observation_method:"旧观测接口",inconsistent_proxy_math:"代理数学不一致",invalid_hold_period:"持有跨度无效",missing_result:"结果缺失"};
   const reasonText=reasons.map(([k,v])=>`${reasonLabels[k]||k} ${v}`).join(" · ");
   let html=`<div class="sc-card muted"><span class="k">Carry 优势证据</span>
-    <span class="v"><span class="num">${valid??"?"}/20</span><small>有效关闭样本</small></span>
+    <span class="v"><span class="num">${valid??"?"}/20</span><small>有效报价代理关闭</small></span>
     <span class="v"><span class="num">${total??"?"}</span><small>总关闭</small></span>
     <span class="v"><span class="num">${excluded??"?"}</span><small>排除，不进入优势判决</small></span>
-    <span class="v"><span class="num">${esc(evidence?.edge_verdict||"不可判")}</span><small>已知组件后代理为正 ${evidence?.hits??"?"}/${valid??"?"}</small></span>
+    <span class="v"><span class="num">${pp?.real_edge_n??evidence?.real_edge_n??0}</span><small>真实优势样本 · 判决 ${esc(evidence?.edge_verdict||"不可判")}</small></span>
     ${reasonText?`<details class="evidence-reasons"><summary>查看排除原因</summary>${esc(reasonText)}</details>`:""}</div>`;
   if(scorecard?.verdict==="measured"){
     const proxy=scorecard.quoted_hl_funding_rate_proxy_ann;
@@ -694,9 +694,9 @@ function carryEvidenceHtml(pp,evidence,scorecard){
   if(pp&&(pp.n_open||pp.n_closed_total||pp.n_exit_pending)){
     html+=`<div class="sc-card muted"><span class="k">纸面报价代理账本</span>
       <span class="v"><span class="num">${esc(pp.n_open??0)}</span><small>开启，含待报价 ${esc(pp.n_exit_pending??0)}</small></span>
-      <span class="v"><span class="num">${pp.avg_net_return_pct==null?"—":`${pp.avg_net_return_pct>0?"+":""}${esc(pp.avg_net_return_pct)}%`}</span><small>已知组件后模型净额代理</small></span>
-      <span class="v"><span class="num">${pp.avg_funding_accrued_pct==null?"—":`${esc(pp.avg_funding_accrued_pct)}%`}</span><small>报价率积分代理，非实际结算</small></span>
-      <span class="v"><span class="num">${pp.avg_cost_pct==null?"—":`${esc(pp.avg_cost_pct)}%`}</span><small>盘口与费率假设，非全量成本</small></span></div>`;
+      <span class="v"><span class="num">${pp.avg_net_proxy_pct==null?"—":`${pp.avg_net_proxy_pct>0?"+":""}${esc(pp.avg_net_proxy_pct)}%`}</span><small>盘口+费用假设后的净代理</small></span>
+      <span class="v"><span class="num">${pp.avg_quoted_rate_integral_pct==null?"—":`${esc(pp.avg_quoted_rate_integral_pct)}%`}</span><small>报价率积分代理，非实际结算</small></span>
+      <span class="v"><span class="num">${pp.avg_book_and_modeled_fee_proxy_pct==null?"—":`${esc(pp.avg_book_and_modeled_fee_proxy_pct)}%`}</span><small>盘口与费用假设，非全量成本</small></span></div>`;
   }
   return html;
 }
@@ -722,8 +722,8 @@ function carryLifecycleHtml(pp,limit=5){
         <div class="life-cell"><span class="lk">盘口测量规模</span><span class="lv">每腿 ${usd(p.notional_usd_per_leg)}<br><small class="dim">不是仓位建议或可成交上限</small></span></div>
       </div><div class="life-rule">${rule}</div></article>`;
   }).join("");
-  const closed=(pp?.recent||[]).slice(-limit).reverse().map(p=>`<article class="carry-life"><div class="carry-life-head"><span class="chip">有效纸面关闭</span><b>${esc(p.symbol)}</b></div>
-    <div class="carry-life-grid"><div class="life-cell"><span class="lk">时间 UTC</span><span class="lv">${esc(utcClock(p.entry_at))} → ${esc(utcClock(p.closed_at))}</span></div><div class="life-cell"><span class="lk">模型净额代理</span><span class="lv">${p.net_return_pct==null?"—":`${p.net_return_pct>0?"+":""}${esc(p.net_return_pct)}%`}</span></div><div class="life-cell"><span class="lk">关闭原因</span><span class="lv">${esc(p.close_reason||"unknown")}</span></div></div><div class="life-rule">订单簿纸面报价代理，非实盘成交、实际资金费结算或完整收益。</div></article>`).join("");
+  const closed=(pp?.recent||[]).slice(-limit).reverse().map(p=>`<article class="carry-life"><div class="carry-life-head"><span class="chip">有效报价代理关闭</span><b>${esc(p.symbol)}</b></div>
+    <div class="carry-life-grid"><div class="life-cell"><span class="lk">时间 UTC</span><span class="lv">${esc(utcClock(p.entry_at))} → ${esc(utcClock(p.closed_at))}</span></div><div class="life-cell"><span class="lk">净报价代理</span><span class="lv">${p.net_proxy_pct==null?"—":`${p.net_proxy_pct>0?"+":""}${esc(p.net_proxy_pct)}%`}</span></div><div class="life-cell"><span class="lk">关闭原因</span><span class="lv">${esc(p.close_reason||"unknown")}</span></div></div><div class="life-rule">订单簿纸面报价代理，非实盘成交、实际资金费结算或完整收益。</div></article>`).join("");
   if(!openRows&&!closed)return "";
   return `<section class="play-sec" style="margin:11px 0 14px"><div class="ph">⏱ Carry 进入 / 离开生命周期 <span class="pd">UTC · 缺失不平仓 · 非实盘</span></div>${openRows}${closed}</section>`;
 }
