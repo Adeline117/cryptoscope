@@ -36,7 +36,13 @@ output/threads/
 
 # Cache
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 .cache/
+
+# Generated board payloads (published from runtime state, never source-controlled)
+data/board_export/
 
 # OS
 .DS_Store
