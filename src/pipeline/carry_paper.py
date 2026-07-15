@@ -41,6 +41,11 @@ CURRENT_EPISODE_VERSION = 3
 CARRY_EXIT_QUOTE_SLA_S = 60
 CARRY_OBSERVATION_MAX_AGE_S = 60
 CARRY_MAX_VALID_INTERVAL_S = 10 * 60
+# Each candidate needs two public order-book reads, one per venue. Keep that
+# fan-out deliberately tiny so one exciting scan cannot monopolize the scheduler
+# or exhaust HTTP descriptors. Candidates arrive in descending quality order;
+# excess candidates remain visible but are not paper-opened.
+MAX_NEW_ENTRY_QUOTES_PER_RUN = 3
 MIN_ANNUALIZED_HOLD_H = 30 * 24
 MIN_ANNUALIZED_SAMPLES = 5
 _OKX_CTVAL: dict[str, float] = {}
@@ -520,6 +525,8 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                                                    "_observed_at_dt": observed_at,
                                                    "observation_age_s": observation_age_s}
     c = _conn()
+    entry_quote_attempted = 0
+    entry_candidates_deferred = 0
     try:
         # A historical open row cannot be upgraded in place: its entry snapshot and
         # already-integrated path were produced under an unknown protocol. Preserve it
@@ -542,12 +549,17 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             "AND observation_version=1",
             (CURRENT_EPISODE_VERSION,),
         ).fetchall()}
+        # Never hold a SQLite write transaction across public HTTP requests.  The
+        # quarantine update above may acquire the writer lock even when it matches
+        # zero rows; release it before any order-book quote begins.
+        c.commit()
         # 1) ACCRUE + maybe CLOSE existing open positions
         for sym, row in open_rows.items():
             (pid, _, _, _, pred_net, entry_slip, notional, accrued, last_ts, last_diff,
              _last_attempt_ts, _last_valid_ts, unmeasured_h, measurement_state, status,
              exit_signal_ts, exit_signal_diff) = row
             if status == "exit_pending":
+                c.commit()
                 measured_exit_slip = _roundtrip_slip(sym, phase="exit")
                 quote_at = datetime.now(timezone.utc)
                 if measured_exit_slip is None:
@@ -622,6 +634,7 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             accrued = (accrued or 0) + interval_diff * (elapsed_h / 8760.0)
             if cur_diff < CLOSE_DIFF_FLOOR:
                 signal_dt = measurement_at
+                c.commit()
                 measured_exit_slip = _roundtrip_slip(sym, phase="exit")
                 quote_at = datetime.now(timezone.utc)
                 try:
@@ -692,6 +705,13 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             if (not math.isfinite(current_partial_proxy)
                     or current_partial_proxy < OPEN_MIN_PARTIAL_MODEL_PROXY_ANN):
                 continue
+            if entry_quote_attempted >= MAX_NEW_ENTRY_QUOTES_PER_RUN:
+                entry_candidates_deferred += 1
+                continue
+            entry_quote_attempted += 1
+            # Earlier lifecycle updates in this loop must be durable and must not
+            # block another reader/writer while these network calls are in flight.
+            c.commit()
             slip = _roundtrip_slip(sym, phase="entry")
             entry_quote_at = datetime.now(timezone.utc)
             if slip is None:
@@ -714,6 +734,11 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
     finally:
         c.close()
     stats = paper_stats()
+    stats.update({
+        "new_entry_quote_cap": MAX_NEW_ENTRY_QUOTES_PER_RUN,
+        "new_entry_quote_attempted": entry_quote_attempted,
+        "new_entry_candidates_deferred": entry_candidates_deferred,
+    })
     try:
         stats["ledger_sync"] = _sync_opportunity_ledger()
     except Exception as exc:

@@ -103,6 +103,57 @@ def test_entry_book_quote_must_finish_inside_observation_sla(cp, monkeypatch):
     assert stats["n_open"] == 0
 
 
+def test_new_entry_orderbook_quotes_are_bounded_and_deferred_is_reported(
+        cp, monkeypatch):
+    monkeypatch.setattr(cp, "MAX_NEW_ENTRY_QUOTES_PER_RUN", 2)
+    quoted = []
+    monkeypatch.setattr(
+        cp, "_roundtrip_slip",
+        lambda sym, notional=cp.NOTIONAL, phase="entry": quoted.append(sym) or 0.05,
+    )
+    candidates = [
+        {"symbol": f"C{i}", "cross": True,
+         "partial_model_proxy_ann_pct": 40 - i, "edge_ann": 40 - i}
+        for i in range(5)
+    ]
+
+    stats = _run(cp, candidates)
+
+    assert quoted == ["C0", "C1"]
+    assert {row["symbol"] for row in stats["open_positions"]} == {"C0", "C1"}
+    assert stats["new_entry_quote_cap"] == 2
+    assert stats["new_entry_quote_attempted"] == 2
+    assert stats["new_entry_candidates_deferred"] == 3
+
+
+def test_orderbook_network_call_never_holds_sqlite_writer_lock(cp, monkeypatch):
+    import sqlite3
+
+    _run(cp, [{"symbol": "OPEN", "cross": True,
+              "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+    probes = []
+
+    def quote_without_writer_lock(
+            sym, notional=cp.NOTIONAL, phase="entry"):
+        other = sqlite3.connect(str(cp.DB), timeout=0.05)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            probes.append((sym, phase))
+            other.rollback()
+        finally:
+            other.close()
+        return 0.05
+
+    monkeypatch.setattr(cp, "_roundtrip_slip", quote_without_writer_lock)
+    stats = _run(cp, [{"symbol": "NEW", "cross": True,
+                      "partial_model_proxy_ann_pct": 40, "edge_ann": 40}])
+
+    # OPEN first receives a source-gap UPDATE.  NEW's network quote must start only
+    # after that write is committed, so an independent writer can acquire the DB.
+    assert probes == [("NEW", "entry")]
+    assert {row["symbol"] for row in stats["open_positions"]} == {"OPEN", "NEW"}
+
+
 def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # open a 40%/yr differential position
     _run(cp, [{"symbol": "X", "cross": True,
