@@ -10,7 +10,7 @@ ways this kind of system lies to you:
 
 A "sample" is one token's decision-time snapshot plus its realized outcome:
     {
-      "token": str, "timestamp": ISO8601 str,
+      "token": str, "chain": str, "timestamp": ISO8601 str,
       "features": dict,            # market_data passed to the signal predicate
       "max_return": float,         # realized max multiple after the decision (e.g. 3.0 = 3x)
     }
@@ -53,9 +53,11 @@ def default_signal_predicate(features: dict) -> bool:
 
     gap = features.get("gap_series") or []
     eff = features.get("effective_series") or []
+    if features.get("dynamic_evidence_eligible") is not True:
+        return False
     if len(gap) < A.MIN_POINTS or len(eff) < A.MIN_POINTS:
         return False
-    if features.get("security_passed") is False:
+    if features.get("security_passed") is not True:
         return False
     cond_div = _slope(gap) >= A.MIN_GAP_SLOPE
     cond_sat = is_decelerating(eff) and eff[-1] >= A.MIN_EFFECTIVE_LEVEL
@@ -64,7 +66,7 @@ def default_signal_predicate(features: dict) -> bool:
 
 
 def build_samples_from_snapshots(
-    outcomes: dict[str, float],
+    outcomes: dict[Any, float],
     chain: str | None = None,
     db_path=None,
 ) -> list[dict]:
@@ -72,40 +74,82 @@ def build_samples_from_snapshots(
 
     For each snapshotted token, rebuilds the effective/nominal concentration
     series (the same features the live signal sees) and pairs it with a realized
-    outcome from `outcomes` (token_address -> max_return multiple). Tokens absent
-    from `outcomes` are skipped — the caller is responsible for supplying the
-    FULL outcome set including fizzled setups (to avoid survivorship bias).
+    outcome from `outcomes` ((chain, token_address) -> max_return multiple).
+    Legacy token-only keys are accepted only when `chain` explicitly limits the
+    build to one chain; accepting them across all chains would silently apply one
+    token outcome to the same address on another EVM network. Tokens absent from
+    `outcomes` are skipped — the caller is responsible for supplying the FULL
+    outcome set including fizzled setups (to avoid survivorship bias).
 
     `outcomes` must include the dead setups, not just the winners.
     """
     from src.onchain import holder_snapshot as hs
+    from src.onchain.chain_identity import canonical_chain
     from src.onchain.entity_clustering import effective_concentration
 
     kwargs = {"db_path": db_path} if db_path is not None else {}
-    # EVM snapshot ids are stored canonically lowercase, while a supplied outcome
-    # ledger may retain checksum casing. Match those identities case-insensitively
-    # but preserve the outcome ledger's spelling in the emitted sample. Solana
-    # identifiers remain exact-case and never enter this alias map.
-    evm_outcomes = {
-        str(token).lower(): (str(token), max_return)
-        for token, max_return in outcomes.items()
+    requested_chain = canonical_chain(chain) if chain is not None else None
+    if chain is not None and requested_chain is None:
+        logger.warning("backtest_unsupported_chain", chain=chain)
+        return []
+    keyed_outcomes: dict[tuple[str, str], tuple[str, float]] = {}
+    legacy_outcomes: dict[str, tuple[str, float]] = {}
+    for raw_key, max_return in outcomes.items():
+        if isinstance(raw_key, tuple) and len(raw_key) == 2:
+            outcome_chain, outcome_token = map(str, raw_key)
+            outcome_chain = canonical_chain(outcome_chain)
+            if outcome_chain is None:
+                logger.warning("outcome_unsupported_chain", chain=raw_key[0])
+                continue
+            keyed_outcomes[
+                (outcome_chain, hs._canonical_token(outcome_token, outcome_chain))
+            ] = (outcome_token, max_return)
+        else:
+            outcome_token = str(raw_key)
+            legacy_outcomes[outcome_token] = (outcome_token, max_return)
+    legacy_evm_outcomes = {
+        token.lower(): value for token, value in legacy_outcomes.items()
     }
+    if legacy_outcomes and chain is None:
+        logger.warning(
+            "ambiguous_token_only_outcomes_rejected",
+            count=len(legacy_outcomes),
+            hint="key outcomes by (chain, token), or pass an explicit single chain",
+        )
+
     samples: list[dict] = []
     for token, ch in hs.list_tokens(**kwargs):
-        if chain and ch != chain:
+        if requested_chain and ch != requested_chain:
             continue
-        if token in outcomes:
-            outcome_token, max_return = token, outcomes[token]
-        elif hs._is_evm_chain(ch):
-            matched = evm_outcomes.get(token.lower())
-            if matched is None:
-                continue
-            outcome_token, max_return = matched
-        else:
+        matched = keyed_outcomes.get(
+            (ch, hs._canonical_token(token, ch))
+        )
+        if matched is None and chain is not None:
+            matched = (
+                legacy_evm_outcomes.get(token.lower())
+                if hs._is_evm_chain(ch)
+                else legacy_outcomes.get(token)
+            )
+        if matched is None:
             continue
-        history = hs.get_holders_history(token, ch, **kwargs)
-        if not history:
+        outcome_token, max_return = matched
+        raw_history = hs.get_holders_history(token, ch, **kwargs)
+        if not raw_history:
             continue
+        # A duplicated latest response has unknown currentness without provider
+        # block/etag provenance. Do not turn it into either a decision-time sample
+        # or an artificial zero final delta. Earlier cached copies are collapsed as
+        # well, so they never count as independent walk-forward observations.
+        if len(raw_history) < 2 or not hs.holder_state_changed(
+            raw_history[-2][1], raw_history[-1][1], ch,
+        ):
+            logger.info(
+                "backtest_sample_skipped_static_holder_state",
+                token=token,
+                chain=ch,
+            )
+            continue
+        history = hs.deduplicate_holder_history(raw_history, ch)
         eff_series, gap_series = [], []
         for _ts, holders in history:
             m = effective_concentration(holders, top_n=10)
@@ -114,12 +158,17 @@ def build_samples_from_snapshots(
         eff_top = eff_series[-1] if eff_series else 0
         samples.append({
             "token": outcome_token,
+            "chain": ch,
             "timestamp": history[-1][0],  # latest snapshot time
             "features": {
                 "gap_series": gap_series,
                 "effective_series": eff_series,
+                "dynamic_evidence_eligible": True,
                 "float_active": max(0.0, min(1.0, 1 - eff_top / 100)),
-                "security_passed": True,
+                # The holder snapshot schema has no decision-time contract-security
+                # attestation. Unknown must stay unknown; callers may enrich it
+                # only from a timestamped evidence ledger before evaluation.
+                "security_passed": None,
             },
             "max_return": float(max_return),
         })
@@ -136,9 +185,11 @@ def make_predicate(min_gap_slope: float, min_eff_level: float, min_float: float)
     def predicate(features: dict) -> bool:
         gap = features.get("gap_series") or []
         eff = features.get("effective_series") or []
+        if features.get("dynamic_evidence_eligible") is not True:
+            return False
         if len(gap) < MIN_POINTS or len(eff) < MIN_POINTS:
             return False
-        if features.get("security_passed") is False:
+        if features.get("security_passed") is not True:
             return False
         return (
             _slope(gap) >= min_gap_slope

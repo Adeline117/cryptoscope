@@ -286,7 +286,8 @@ def get_max_return(token: str, chain: str, timeout: int = 15) -> float | None:
 
 
 def build_historical_sample(token: str, chain: str, symbol: str = "",
-                            n_points: int = 8, observe_fraction: float = 0.6) -> dict | None:
+                            n_points: int = 8, observe_fraction: float = 0.6,
+                            security_passed: bool | None = None) -> dict | None:
     """Assemble one backtest sample (features + outcome) for a token.
 
     Features come from the first `observe_fraction` of the token's life; the
@@ -308,9 +309,15 @@ def build_historical_sample(token: str, chain: str, symbol: str = "",
         "features": {
             "gap_series": series["gap_series"],
             "effective_series": series["effective_series"],
+            # Reconstructed from distinct historical chain checkpoints, not
+            # repeated current-provider snapshots.
+            "dynamic_evidence_eligible": True,
             "float_active": max(0.0, min(1.0, 1 - (series["effective_series"][-1] / 100)
                                          if series["effective_series"] else 0)),
-            "security_passed": True,
+            # Only a decision-time security attestation supplied by the caller can
+            # pass this gate. Historical holder/transfer reconstruction alone says
+            # nothing about honeypot or contract-control risk.
+            "security_passed": security_passed,
         },
         "max_return": mret,
         "n_transfers": series["n_transfers"],

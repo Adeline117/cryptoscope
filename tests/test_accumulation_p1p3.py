@@ -126,13 +126,19 @@ def _fired_features():
     return {
         "gap_series": [2, 5, 9, 12, 14],
         "effective_series": [20, 28, 34, 38, 40],
+        "dynamic_evidence_eligible": True,
         "float_active": 0.6, "security_passed": True,
     }
 
 
 def _quiet_features():
-    return {"gap_series": [5, 5, 5, 5, 5], "effective_series": [10, 10, 10, 10, 10],
-            "float_active": 0.6, "security_passed": True}
+    return {
+        "gap_series": [5, 5, 5, 5, 5],
+        "effective_series": [10, 10, 10, 10, 10],
+        "dynamic_evidence_eligible": True,
+        "float_active": 0.6,
+        "security_passed": True,
+    }
 
 
 def test_evaluate_out_of_sample():
@@ -151,6 +157,33 @@ def test_evaluate_out_of_sample():
     assert m.survivorship_warning is False  # only 1/3 launched → healthy denominator
 
 
+def test_walk_forward_predicates_fail_closed_without_dynamic_provenance():
+    cached_shape = _fired_features()
+    cached_shape["dynamic_evidence_eligible"] = False
+
+    assert wf.default_signal_predicate(cached_shape) is False
+    assert wf.make_predicate(0.3, 25.0, 0.35)(cached_shape) is False
+    cached_shape.pop("dynamic_evidence_eligible")
+    assert wf.default_signal_predicate(cached_shape) is False
+
+
+@pytest.mark.parametrize("security_passed", [False, None])
+def test_walk_forward_predicates_require_affirmative_security(security_passed):
+    features = _fired_features()
+    features["security_passed"] = security_passed
+
+    assert wf.default_signal_predicate(features) is False
+    assert wf.make_predicate(0.3, 25.0, 0.35)(features) is False
+
+
+def test_walk_forward_predicates_reject_missing_security_evidence():
+    features = _fired_features()
+    features.pop("security_passed")
+
+    assert wf.default_signal_predicate(features) is False
+    assert wf.make_predicate(0.3, 25.0, 0.35)(features) is False
+
+
 def test_build_outcomes_from_scorecard(tmp_path, monkeypatch):
     import src.trading.signal_scorecard as sc
     from src.backtest import outcomes as oc
@@ -166,13 +199,15 @@ def test_build_outcomes_from_scorecard(tmp_path, monkeypatch):
     outs = oc.build_outcomes_from_scorecard(
         "accumulation_divergence", fetch_price=lambda t, c: prices.get(t)
     )
-    assert outs["0xwin"] == 3.0          # 3.0 / 1.0
-    assert outs["0xdud"] == 0.5          # 1.0 / 2.0 — loser kept in denominator
+    assert outs[("ethereum", "0xwin")] == 3.0  # 3.0 / 1.0
+    # 1.0 / 2.0 — loser kept in denominator.
+    assert outs[("ethereum", "0xdud")] == 0.5
 
 
 def test_sweep_thresholds():
     def feat(gap, eff):
         return {"gap_series": gap, "effective_series": eff,
+                "dynamic_evidence_eligible": True,
                 "float_active": 0.6, "security_passed": True}
     samples = [
         {"timestamp": "2026-05-01", "features": feat([2, 5, 9, 12, 14], [20, 28, 34, 38, 40]), "max_return": 5.0},
@@ -219,6 +254,86 @@ def test_build_samples_from_snapshots(tmp_path):
     s = samples[0]
     assert s["token"] == "TKN" and s["max_return"] == 3.0
     assert len(s["features"]["effective_series"]) == 2
+    assert s["features"]["dynamic_evidence_eligible"] is True
+    assert s["features"]["security_passed"] is None
+    assert wf.default_signal_predicate(s["features"]) is False
+
+
+def test_build_samples_rejects_cached_identical_latest_state(tmp_path):
+    from src.onchain import holder_snapshot as hs
+
+    db = tmp_path / "snap.db"
+    states = [
+        [{"address": "0x1", "balance": 20}, {"address": "0x2", "balance": 80}],
+        [{"address": "0x1", "balance": 30}, {"address": "0x2", "balance": 70}],
+        [{"address": "0x1", "balance": 35}, {"address": "0x2", "balance": 65}],
+    ]
+    for i, holders in enumerate([*states, states[-1]]):
+        hs.save_snapshot(
+            "0xCached", "ethereum", holders,
+            snapshot_at=f"2026-06-01T0{i}:00:00+00:00", db_path=db,
+        )
+
+    # The fourth row is only a cached copy. It is neither a decision-time sample
+    # nor an independent point that can manufacture a decelerating final delta.
+    assert wf.build_samples_from_snapshots(
+        {"0xCached": 4.0}, chain="ethereum", db_path=db,
+    ) == []
+
+
+def test_build_samples_keeps_changing_latest_state_control(tmp_path):
+    from src.onchain import holder_snapshot as hs
+
+    db = tmp_path / "snap.db"
+    for i, balance in enumerate((20, 30, 35, 38)):
+        hs.save_snapshot(
+            "0xChanging", "ethereum",
+            [{"address": "0x1", "balance": balance},
+             {"address": "0x2", "balance": 100 - balance}],
+            snapshot_at=f"2026-06-01T0{i}:00:00+00:00", db_path=db,
+        )
+
+    samples = wf.build_samples_from_snapshots(
+        {"0xChanging": 4.0}, chain="ethereum", db_path=db,
+    )
+    assert len(samples) == 1
+    assert len(samples[0]["features"]["effective_series"]) == 4
+    assert samples[0]["features"]["dynamic_evidence_eligible"] is True
+
+
+def test_build_samples_keys_same_evm_address_by_chain(tmp_path):
+    from src.onchain import holder_snapshot as hs
+
+    db = tmp_path / "snap.db"
+    token = "0xSameAddress"
+    for chain in ("ethereum", "bsc"):
+        hs.save_snapshot(
+            token, chain,
+            [{"address": "0x1", "balance": 20}, {"address": "0x2", "balance": 80}],
+            snapshot_at="2026-06-01T00:00:00+00:00", db_path=db,
+        )
+        hs.save_snapshot(
+            token, chain,
+            [{"address": "0x1", "balance": 30}, {"address": "0x2", "balance": 70}],
+            snapshot_at="2026-06-01T01:00:00+00:00", db_path=db,
+        )
+
+    keyed = wf.build_samples_from_snapshots(
+        {("ethereum", token): 3.0, ("bsc", token): 0.5}, db_path=db,
+    )
+    assert {(sample["chain"], sample["max_return"]) for sample in keyed} == {
+        ("ethereum", 3.0),
+        ("bsc", 0.5),
+    }
+
+    # A token-only outcome is ambiguous across networks and must be rejected
+    # unless the caller explicitly constrains construction to one chain.
+    assert wf.build_samples_from_snapshots({token: 3.0}, db_path=db) == []
+    ethereum_only = wf.build_samples_from_snapshots(
+        {token: 3.0}, chain="ethereum", db_path=db,
+    )
+    assert len(ethereum_only) == 1
+    assert ethereum_only[0]["chain"] == "ethereum"
 
 
 def test_build_samples_keeps_solana_outcome_keys_case_sensitive(tmp_path):

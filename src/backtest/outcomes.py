@@ -42,11 +42,13 @@ def _dexscreener_price(token: str, chain: str, timeout: int = 12) -> float | Non
 def build_outcomes_from_scorecard(
     signal_type: str = "accumulation_divergence",
     fetch_price=_dexscreener_price,
-) -> dict[str, float]:
-    """Return {token_address: return_multiple} from recorded signals.
+) -> dict[tuple[str, str], float]:
+    """Return {(chain, token_address): return_multiple} from recorded signals.
 
     return_multiple = current_price / entry_price (1.0 = flat, 2.0 = 2x). Signals
-    whose entry price is unknown (0) are skipped. Includes losers, by design.
+    whose entry price is unknown (0) are skipped. Chain is part of the identity so
+    the same EVM address on two networks cannot share an outcome. Includes losers,
+    by design.
     """
     from src.trading.signal_scorecard import DB_PATH
 
@@ -62,7 +64,10 @@ def build_outcomes_from_scorecard(
     finally:
         conn.close()
 
-    outcomes: dict[str, float] = {}
+    from src.onchain.chain_identity import canonical_chain
+    from src.onchain.holder_snapshot import _canonical_token
+
+    outcomes: dict[tuple[str, str], float] = {}
     for asset, chain, entry_price, meta_json in rows:
         try:
             meta = json.loads(meta_json) if meta_json else {}
@@ -74,7 +79,17 @@ def build_outcomes_from_scorecard(
         current = fetch_price(token, chain)
         if current is None:
             continue
-        outcomes[token] = round(current / entry_price, 4)
+        outcome_chain = canonical_chain(chain)
+        if outcome_chain is None:
+            logger.warning(
+                "outcome_unsupported_chain",
+                chain=chain,
+                token=token,
+            )
+            continue
+        outcomes[(outcome_chain, _canonical_token(token, outcome_chain))] = round(
+            current / entry_price, 4
+        )
     logger.info("outcomes_built", signal_type=signal_type, count=len(outcomes))
     return outcomes
 
