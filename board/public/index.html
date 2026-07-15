@@ -552,7 +552,7 @@ const LANES={
   },
   perp:{
     title:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),single=c.filter(x=>x.cross!==true),health=d?.carry_source_health||{};const pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0);const top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos.length}/${cross.length}${top?`，最高代理 +${top.partial_model_proxy_ann_pct}%(${esc(top.symbol)})`:''}。另有单所现货对冲候选 ${single.length} 个，不进入双腿纸面账本。真实优势样本 ${pp.real_edge_n??ev?.real_edge_n??0}。`},
-    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["跨所代理>0",`${pos.length}/${cross.length}`,`14天部分情景 · 本轮新入场盘口 ${pp.new_entry_quote_attempted??0}/${pp.new_entry_quote_cap??"?"} · 容量延后 ${pp.new_entry_candidates_deferred??0}`],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"} · 旧open隔离 ${pp.n_quarantined_total??0}`],["真实优势样本",pp.real_edge_n??ev?.real_edge_n??0,"仍不可判"]]},
+    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["跨所代理>0",`${pos.length}/${cross.length}`,`14天部分情景 · 本轮新入场盘口 ${pp.new_entry_quote_attempted??"?"}/${pp.new_entry_quote_cap??"?"} · 容量延后 ${pp.new_entry_candidates_deferred??"?"}`],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"} · 旧open隔离 ${pp.n_quarantined_total??0}`],["真实优势样本",pp.real_edge_n??ev?.real_edge_n??0,"仍不可判"]]},
     readme:"💰资金费 Carry 是当前值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。当前关闭样本也只是报价率积分减盘口报价和费用假设的描述性代理；basis、账户费率、抵押成本、调仓和实际结算都缺失，因此真实优势样本仍为 0。下面的拥挤/点火仅作方向防御观察。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -702,7 +702,7 @@ function carryEvidenceHtml(pp,evidence,scorecard){
   if(pp&&(pp.n_open||pp.n_closed_total||pp.n_exit_pending)){
     html+=`<div class="sc-card muted"><span class="k">纸面报价代理账本</span>
       <span class="v"><span class="num">${esc(pp.n_open??0)}</span><small>开启，含待报价 ${esc(pp.n_exit_pending??0)}</small></span>
-      <span class="v"><span class="num">${esc(pp.new_entry_quote_attempted??0)}/${esc(pp.new_entry_quote_cap??"?")}</span><small>本轮新入场盘口尝试 · 容量延后 ${esc(pp.new_entry_candidates_deferred??0)}</small></span>
+      <span class="v"><span class="num">${esc(pp.new_entry_quote_attempted??"?")}/${esc(pp.new_entry_quote_cap??"?")}</span><small>本轮新入场盘口尝试 · 容量延后 ${esc(pp.new_entry_candidates_deferred??"?")}</small></span>
       <span class="v"><span class="num">${pp.avg_net_proxy_pct==null?"—":`${pp.avg_net_proxy_pct>0?"+":""}${esc(pp.avg_net_proxy_pct)}%`}</span><small>盘口+费用假设后的净代理</small></span>
       <span class="v"><span class="num">${pp.avg_quoted_rate_integral_pct==null?"—":`${esc(pp.avg_quoted_rate_integral_pct)}%`}</span><small>报价率积分代理，非实际结算</small></span>
       <span class="v"><span class="num">${pp.avg_book_and_modeled_fee_proxy_pct==null?"—":`${esc(pp.avg_book_and_modeled_fee_proxy_pct)}%`}</span><small>盘口与费用假设，非全量成本</small></span></div>`;

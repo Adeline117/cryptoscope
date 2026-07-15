@@ -257,6 +257,8 @@ def test_carry_ui_discloses_bounded_entry_quote_capacity():
     assert "new_entry_quote_cap" in html
     assert "new_entry_candidates_deferred" in html
     assert "容量延后" in html
+    assert 'new_entry_quote_attempted??"?"' in html
+    assert 'new_entry_candidates_deferred??"?"' in html
 
 
 def test_decision_overview_separates_actionable_windows_from_paper_candidates():
