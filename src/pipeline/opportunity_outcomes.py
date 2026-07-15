@@ -245,6 +245,35 @@ def _carry_stats(rows: list[dict]) -> dict:
     }
 
 
+def _airdrop_stats(rows: list[dict]) -> dict:
+    """Sum verified claims while refusing a success-only hit rate."""
+    claims = []
+    for row in rows:
+        outcome = row.get("outcome") or {}
+        if (row.get("outcome_state") == "resolved"
+                and outcome.get("kind") == "airdrop_claim"
+                and outcome.get("reward_is_claimed") is True
+                and outcome.get("cost_is_actual") is True):
+            claims.append(outcome)
+    common = {
+        "n_events": len(rows), "n_claimed": len(claims),
+        "pending": sum(r.get("outcome_state") == "open" for r in rows),
+        "metric": "verified_claim_net_usd", "edge_verdict": "不可判",
+    }
+    if not claims:
+        return {**common, "verdict": "不可判",
+                "note": "尚无带交易证据、实际奖励和实际成本的领取结果"}
+    nets = [float(c["net_reward_usd"]) for c in claims]
+    return {
+        **common, "verdict": "realized_claims",
+        "gross_reward_usd": round(sum(float(c["gross_reward_usd"]) for c in claims), 2),
+        "actual_cost_usd": round(sum(float(c["actual_cost_usd"]) for c in claims), 2),
+        "net_reward_usd": round(sum(nets), 2),
+        "median_net_reward_usd": round(statistics.median(nets), 2),
+        "note": "仅汇总已核验领取;缺参与失败/资格未命中分母,不计算命中率或edge",
+    }
+
+
 def lane_stats() -> dict:
     """Honest 24h distribution and, only where possible, a control comparison."""
     from src.pipeline.evidence import wilson
@@ -255,6 +284,9 @@ def lane_stats() -> dict:
         lane_rows = [r for r in rows if r["lane"] == lane]
         if lane == "carry":
             out[lane] = _carry_stats(lane_rows)
+            continue
+        if lane == "airdrop":
+            out[lane] = _airdrop_stats(lane_rows)
             continue
         measurable = [r for r in lane_rows if _direction(r) and r.get("entry_price")]
         if not measurable:

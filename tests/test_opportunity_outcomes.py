@@ -162,3 +162,28 @@ def test_carry_uses_absolute_non_directional_outcomes_without_claiming_real_edge
     assert stat["median_net_return_pct"] == 0.25
     assert stat["cost_is_real_fill"] is False
     assert "实盘" in stat["note"]
+
+
+def test_airdrop_sums_verified_claims_but_refuses_success_only_hit_rate(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    ident, _ = ledger.record({
+        "lane": "airdrop", "chain": "ethereum", "token": "campaign",
+        "symbol": "Campaign", "decision": "CLAIMED", "state": "claimed",
+    })
+    ledger.save_outcome(ident, {
+        "kind": "airdrop_claim", "gross_reward_usd": 125,
+        "actual_cost_usd": 5, "net_reward_usd": 120,
+        "reward_is_claimed": True, "cost_is_actual": True,
+    }, "resolved")
+    ledger.record({
+        "lane": "airdrop", "chain": "base", "token": "watching",
+        "symbol": "Watching", "decision": "WATCH", "state": "active",
+    })
+
+    stat = oo.lane_stats()["airdrop"]
+    assert stat["verdict"] == "realized_claims"
+    assert stat["n_events"] == 2 and stat["n_claimed"] == 1 and stat["pending"] == 1
+    assert stat["net_reward_usd"] == 120
+    assert stat["edge_verdict"] == "不可判"
+    assert "rate" not in stat and "命中率" in stat["note"]
