@@ -21,6 +21,28 @@ def _get_chat_id() -> str | None:
     return os.environ.get("TG_REVIEW_CHANNEL")
 
 
+async def _open_bot(token: str):
+    """Initialize one Telegram client, cleaning up even if initialization fails."""
+    from telegram import Bot
+
+    bot = Bot(token=token)
+    try:
+        await bot.initialize()
+    except Exception:
+        await _close_bot(bot)
+        raise
+    return bot
+
+
+async def _close_bot(bot) -> None:
+    if bot is None:
+        return
+    try:
+        await bot.shutdown()
+    except Exception as exc:
+        logger.warning("telegram_shutdown_failed", error=str(exc))
+
+
 async def send_thread_for_review(
     topic: str,
     priority_score: float,
@@ -49,10 +71,9 @@ async def send_thread_for_review(
         logger.warning("telegram_not_configured")
         return False
 
+    bot = None
     try:
-        from telegram import Bot
-
-        bot = Bot(token=bot_token)
+        bot = await _open_bot(bot_token)
         any_sent = False
 
         # 1. Header
@@ -137,6 +158,8 @@ async def send_thread_for_review(
     except Exception as e:
         logger.error("telegram_send_failed", error=str(e))
         return False
+    finally:
+        await _close_bot(bot)
 
 
 async def _send_long_text(bot, chat_id: str, text: str) -> None:
@@ -183,10 +206,9 @@ async def send_daily_digest(
     if not bot_token or not chat_id:
         return False
 
+    bot = None
     try:
-        from telegram import Bot
-
-        bot = Bot(token=bot_token)
+        bot = await _open_bot(bot_token)
         topics_text = "\n".join(f"  • {t}" for t in top_topics[:10])
         await bot.send_message(
             chat_id=chat_id,
@@ -202,6 +224,8 @@ async def send_daily_digest(
     except Exception as e:
         logger.error("digest_send_failed", error=str(e))
         return False
+    finally:
+        await _close_bot(bot)
 
 
 async def send_alert(message: str) -> bool:
@@ -218,24 +242,25 @@ async def send_alert(message: str) -> bool:
     if not bot_token or not chat_id:
         return False
 
+    bot = None
     try:
-        from telegram import Bot
-
         # ``Bot`` owns two HTTPX clients.  The realtime watcher/WebSocket workers
         # each run this coroutine in a short-lived event loop; leaving the Bot
         # unclosed strands its Telegram socket in CLOSE_WAIT after that loop exits.
-        async with Bot(token=bot_token) as bot:
-            for i, chunk in enumerate(_split_text(message, 4000)):
-                if i > 0:
-                    await asyncio.sleep(0.3)
-                await bot.send_message(
-                    chat_id=chat_id, text=chunk, parse_mode="HTML",
-                    disable_web_page_preview=True,
-                )
+        bot = await _open_bot(bot_token)
+        for i, chunk in enumerate(_split_text(message, 4000)):
+            if i > 0:
+                await asyncio.sleep(0.3)
+            await bot.send_message(
+                chat_id=chat_id, text=chunk, parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
         return True
     except Exception as e:
         logger.error("alert_send_failed", error=str(e))
         return False
+    finally:
+        await _close_bot(bot)
 
 
 async def send_meme_alert(message: str, reply_markup=None) -> bool:
@@ -252,10 +277,9 @@ async def send_meme_alert(message: str, reply_markup=None) -> bool:
         logger.warning("telegram_not_configured")
         return False
 
+    bot = None
     try:
-        from telegram import Bot
-
-        bot = Bot(token=bot_token)
+        bot = await _open_bot(bot_token)
         chunks = _split_text(message, 4000)
         for i, chunk in enumerate(chunks):
             if i > 0:
@@ -271,6 +295,8 @@ async def send_meme_alert(message: str, reply_markup=None) -> bool:
     except Exception as e:
         logger.error("meme_alert_send_failed", error=str(e))
         return False
+    finally:
+        await _close_bot(bot)
 
 
 async def send_critical_alert(message: str) -> bool:
@@ -286,10 +312,9 @@ async def send_critical_alert(message: str) -> bool:
         logger.warning("telegram_not_configured")
         return False
 
+    bot = None
     try:
-        from telegram import Bot
-
-        bot = Bot(token=bot_token)
+        bot = await _open_bot(bot_token)
         for i, chunk in enumerate(_split_text(message, 4000)):
             if i > 0:
                 await asyncio.sleep(0.3)
@@ -302,6 +327,8 @@ async def send_critical_alert(message: str) -> bool:
     except Exception as e:
         logger.error("critical_alert_send_failed", error=str(e))
         return False
+    finally:
+        await _close_bot(bot)
 
 
 def _esc(text: str) -> str:

@@ -56,17 +56,16 @@ async def test_realtime_telegram_bot_closes_on_success_and_failure(monkeypatch, 
 
         def __init__(self, token):
             self.token = token
-            self.entered = False
-            self.exited = False
+            self.initialized = False
+            self.shutdown_called = False
             self.sent = 0
             self.__class__.instances.append(self)
 
-        async def __aenter__(self):
-            self.entered = True
-            return self
+        async def initialize(self):
+            self.initialized = True
 
-        async def __aexit__(self, *_args):
-            self.exited = True
+        async def shutdown(self):
+            self.shutdown_called = True
 
         async def send_message(self, **_kwargs):
             self.sent += 1
@@ -79,5 +78,83 @@ async def test_realtime_telegram_bot_closes_on_success_and_failure(monkeypatch, 
 
     assert await telegram_sender.send_alert("test") is (not send_fails)
     bot = Bot.instances[-1]
-    assert bot.entered and bot.exited
+    assert bot.initialized and bot.shutdown_called
     assert bot.sent == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sender", "expected_messages"),
+    [
+        (lambda module: module.send_daily_digest("summary", 1, ["topic"]), 1),
+        (lambda module: module.send_meme_alert("meme"), 1),
+        (lambda module: module.send_critical_alert("critical"), 1),
+        (lambda module: module.send_thread_for_review(
+            "topic", 80, ["source"], "english", "中文"), 3),
+    ],
+)
+async def test_every_telegram_sender_owns_and_shuts_down_its_client(
+        monkeypatch, sender, expected_messages):
+    import telegram
+
+    from src.distribution import telegram_sender
+
+    class Bot:
+        instances = []
+
+        def __init__(self, token):
+            self.token = token
+            self.initialized = False
+            self.shutdown_called = False
+            self.sent = 0
+            self.__class__.instances.append(self)
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def shutdown(self):
+            self.shutdown_called = True
+
+        async def send_message(self, **_kwargs):
+            self.sent += 1
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(telegram, "Bot", Bot)
+    monkeypatch.setattr(telegram_sender.asyncio, "sleep", no_sleep)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TG_REVIEW_CHANNEL", "123")
+
+    assert await sender(telegram_sender) is True
+    bot = Bot.instances[-1]
+    assert bot.initialized and bot.shutdown_called
+    assert bot.sent == expected_messages
+
+
+@pytest.mark.asyncio
+async def test_telegram_initialization_failure_still_shuts_down_client(monkeypatch):
+    import telegram
+
+    from src.distribution import telegram_sender
+
+    class Bot:
+        instance = None
+
+        def __init__(self, token):
+            self.token = token
+            self.shutdown_called = False
+            self.__class__.instance = self
+
+        async def initialize(self):
+            raise RuntimeError("initialization rejected")
+
+        async def shutdown(self):
+            self.shutdown_called = True
+
+    monkeypatch.setattr(telegram, "Bot", Bot)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TG_REVIEW_CHANNEL", "123")
+
+    assert await telegram_sender.send_critical_alert("critical") is False
+    assert Bot.instance.shutdown_called
