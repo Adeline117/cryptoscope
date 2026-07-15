@@ -100,6 +100,41 @@ def test_listing_detector_uses_only_configured_official_fallback(tmp_path, monke
     assert result["symbol_count"] == 1
 
 
+def test_coinbase_parser_keeps_only_online_tradable_products():
+    from src.collectors.listing_detector import _parse_coinbase
+
+    assert _parse_coinbase([
+        {"id": "BTC-USD", "status": "online", "trading_disabled": False},
+        {"id": "NEW-USD", "status": "online"},
+        {"id": "PAUSED-USD", "status": "online", "trading_disabled": True},
+        {"id": "OLD-USD", "status": "delisted", "trading_disabled": False},
+        {"status": "online"},
+    ]) == {"BTC-USD", "NEW-USD"}
+
+
+def test_coinbase_is_an_official_fail_closed_listing_source(tmp_path, monkeypatch):
+    import src.collectors.listing_detector as ld
+
+    monkeypatch.setattr(ld, "SNAPSHOT_DIR", tmp_path)
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"id": "BTC-USD", "status": "online",
+                     "trading_disabled": False}]
+
+    monkeypatch.setattr(ld.httpx, "get", lambda *_args, **_kwargs: Response())
+    result = ld.check_exchange_result("coinbase")
+
+    assert result["status"] == "ok"
+    assert result["endpoint"] == "https://api.exchange.coinbase.com/products"
+    assert result["symbol_count"] == 1
+    assert result["baseline_ready"] is False
+    assert result["alerts"] == []
+
+
 def test_listing_source_failure_is_warned_hourly_without_hiding_health(monkeypatch):
     import src.collectors.listing_detector as ld
 

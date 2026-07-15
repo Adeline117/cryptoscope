@@ -1,6 +1,6 @@
 """Exchange new-listing detector.
 
-Polls Binance, OKX, and Bybit instrument endpoints every cycle, compares
+Polls official Binance, OKX, Bybit, and Coinbase instrument endpoints every cycle, compares
 against the previous snapshot, and emits alerts for newly listed trading pairs.
 """
 
@@ -36,6 +36,13 @@ EXCHANGES: dict[str, dict[str, Any]] = {
     "bybit": {
         "urls": ["https://api.bybit.com/v5/market/instruments-info?category=spot"],
         "parser": "_parse_bybit",
+    },
+    "coinbase": {
+        # Coinbase Exchange market-data endpoints are public and the product status
+        # is explicit. Keep disabled/offline/delisted products out of the baseline so
+        # a re-enabled market is observable as a fresh structure event.
+        "urls": ["https://api.exchange.coinbase.com/products"],
+        "parser": "_parse_coinbase",
     },
 }
 
@@ -87,10 +94,24 @@ def _parse_bybit(data: dict) -> set[str]:
     return symbols
 
 
+def _parse_coinbase(data: object) -> set[str]:
+    """Extract currently tradable Coinbase Exchange product IDs."""
+    if not isinstance(data, list):
+        return set()
+    return {
+        str(item["id"])
+        for item in data
+        if (isinstance(item, dict) and item.get("id")
+            and item.get("status") == "online"
+            and item.get("trading_disabled") is not True)
+    }
+
+
 _PARSERS = {
     "_parse_binance": _parse_binance,
     "_parse_okx": _parse_okx,
     "_parse_bybit": _parse_bybit,
+    "_parse_coinbase": _parse_coinbase,
 }
 
 
