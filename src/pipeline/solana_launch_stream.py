@@ -34,9 +34,20 @@ PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 PUBLIC_SOLANA_WS = "wss://api.mainnet-beta.solana.com/"
 MAX_BACKFILL_SLOTS = 16
 GAP_RETRY_SLOT_BUDGET = 1
+GAP_RETRY_MAX_SLOT_BUDGET = 4
+GAP_RETRY_RAMP_CLEAN_CYCLES = 2
 SKIPPED_SLOT_PROOF_LOOKAHEAD = 512
 HYDRATION_RETRY_BASE_SECONDS = 60
 HYDRATION_RETRY_MAX_SECONDS = 3600
+HYDRATION_BATCH_LIMIT = 5
+HYDRATION_MAX_BATCH_LIMIT = 20
+HYDRATION_BATCH_STEP = 5
+HYDRATION_RAMP_CLEAN_CYCLES = 2
+# Soft wall-clock budgets: no new RPC starts after its deadline and production
+# socket timeouts are clamped to remaining time. Synchronous JSON decoding cannot
+# be pre-empted safely, so these are not advertised as hard real-time limits.
+MAINTENANCE_WORK_BUDGET_SECONDS = 20.0
+GAP_WORK_BUDGET_SECONDS = 10.0
 RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS = 60
 RPC_PRESSURE_MAX_COOLDOWN_SECONDS = 3600
 MAINTENANCE_STREAM = "pump_fun_maintenance"
@@ -57,6 +68,14 @@ class TransactionUnavailableError(RuntimeError):
     """One confirmed transaction is unavailable; this is not capacity pressure."""
 
 
+class MaintenanceDeadlineExceeded(TimeoutError):
+    """The bounded maintenance cycle cannot start another RPC call."""
+
+    def __init__(self, message: str, *, work_started: bool = False):
+        super().__init__(message)
+        self.work_started = work_started
+
+
 def _retry_after_seconds(value: object, *, now: datetime | None = None) -> int | None:
     if value is None:
         return None
@@ -75,6 +94,8 @@ def _retry_after_seconds(value: object, *, now: datetime | None = None) -> int |
 
 
 def _as_rpc_pressure(error: Exception) -> RpcPressureError | None:
+    if isinstance(error, MaintenanceDeadlineExceeded):
+        return None
     if isinstance(error, RpcPressureError):
         return error
     if isinstance(error, urllib.error.HTTPError):
@@ -109,6 +130,88 @@ def _circuit_cooldown_seconds(retry_after_seconds: int | None,
     )
 
 
+def _adjust_gap_budget(current: int, clean_cycles: int,
+                       result: dict) -> tuple[int, int]:
+    current = min(GAP_RETRY_MAX_SLOT_BUDGET,
+                  max(GAP_RETRY_SLOT_BUDGET, int(current)))
+    if result.get("pressure_kind") or result.get("deadline_exhausted") \
+            or int(result.get("failed") or 0):
+        return GAP_RETRY_SLOT_BUDGET, 0
+    attempted = int(result.get("attempted") or 0)
+    completed = int(result.get("recovered") or 0) + int(
+        result.get("progressed") or 0)
+    if attempted == 0 or attempted < current:
+        return current, clean_cycles
+    if completed != attempted:
+        return GAP_RETRY_SLOT_BUDGET, 0
+    clean_cycles = max(0, int(clean_cycles)) + 1
+    if (clean_cycles >= GAP_RETRY_RAMP_CLEAN_CYCLES
+            and current < GAP_RETRY_MAX_SLOT_BUDGET):
+        return min(GAP_RETRY_MAX_SLOT_BUDGET, current * 2), 0
+    return current, clean_cycles
+
+
+def _adjust_hydration_limit(current: int, clean_cycles: int,
+                            result: dict | None) -> tuple[int, int]:
+    current = min(HYDRATION_MAX_BATCH_LIMIT,
+                  max(HYDRATION_BATCH_LIMIT, int(current)))
+    if result is None:
+        return current, clean_cycles
+    if (result.get("pressure_kind") or result.get("deadline_exhausted")
+            or int(result.get("rpc_failed") or 0)
+            or int(result.get("persistence_failed") or 0)):
+        return HYDRATION_BATCH_LIMIT, 0
+    attempted = int(result.get("attempted") or 0)
+    if attempted == 0 or attempted < current:
+        return current, clean_cycles
+    classified = sum(int(result.get(key) or 0) for key in (
+        "completed", "incomplete", "unavailable", "rpc_failed", "pressure_failed",
+    ))
+    if classified != attempted:
+        return HYDRATION_BATCH_LIMIT, 0
+    clean_cycles = max(0, int(clean_cycles)) + 1
+    if (clean_cycles >= HYDRATION_RAMP_CLEAN_CYCLES
+            and current < HYDRATION_MAX_BATCH_LIMIT):
+        return min(HYDRATION_MAX_BATCH_LIMIT,
+                   current + HYDRATION_BATCH_STEP), 0
+    return current, clean_cycles
+
+
+def _gap_probe_succeeded(result: dict) -> bool:
+    """A half-open gap probe succeeds only with closed, persisted evidence."""
+    attempted = int(result.get("attempted") or 0)
+    completed = int(result.get("recovered") or 0) + int(
+        result.get("progressed") or 0)
+    return bool(
+        attempted > 0
+        and result.get("pressure_kind") is None
+        and not result.get("deadline_exhausted")
+        and not int(result.get("deadline_stopped") or 0)
+        and not int(result.get("failed") or 0)
+        and completed == attempted
+    )
+
+
+def _hydration_probe_succeeded(result: dict | None) -> bool:
+    """A half-open hydration probe succeeds only with one classified outcome."""
+    if result is None:
+        return False
+    attempted = int(result.get("attempted") or 0)
+    classified = sum(int(result.get(key) or 0) for key in (
+        "completed", "incomplete", "unavailable",
+    ))
+    return bool(
+        attempted > 0
+        and result.get("pressure_kind") is None
+        and not result.get("deadline_exhausted")
+        and not int(result.get("deadline_stopped") or 0)
+        and not int(result.get("rpc_failed") or 0)
+        and not int(result.get("pressure_failed") or 0)
+        and not int(result.get("persistence_failed") or 0)
+        and classified == attempted
+    )
+
+
 def _report_maintenance(status: str, error: str | None = None) -> None:
     """Health reporting is fail-visible but can never kill the worker it reports."""
     try:
@@ -119,6 +222,33 @@ def _report_maintenance(status: str, error: str | None = None) -> None:
         logger.exception(
             "solana_launch_maintenance_health_failed", error=str(exc)[:240],
         )
+
+
+def _rpc_call(rpc: object, method: str, params: list, *,
+              deadline: float | None = None,
+              monotonic: Callable[[], float] = time.monotonic) -> object:
+    if deadline is None:
+        return rpc.call(method, params)
+    remaining = float(deadline) - monotonic()
+    if remaining <= 0:
+        raise MaintenanceDeadlineExceeded(
+            f"maintenance deadline reached before Solana RPC {method}",
+            work_started=False,
+        )
+    if isinstance(rpc, JsonRpc):
+        try:
+            return rpc.call(method, params, timeout=remaining)
+        except RpcPressureError as exc:
+            if exc.kind == "timeout" and monotonic() >= deadline:
+                raise MaintenanceDeadlineExceeded(
+                    f"maintenance deadline expired during Solana RPC {method}",
+                    work_started=True,
+                ) from exc
+            raise
+    # Test/custom clients retain their established two-argument contract. The
+    # deadline is still checked before every call; production network timeouts
+    # are additionally clamped by JsonRpc above.
+    return rpc.call(method, params)
 
 
 def _enable_wal(c: sqlite3.Connection) -> None:
@@ -738,11 +868,13 @@ class JsonRpc:
         return result.get("result")
 
 
-def _transaction(rpc: JsonRpc, signature: str) -> dict:
-    result = rpc.call("getTransaction", [signature, {
+def _transaction(rpc: JsonRpc, signature: str, *,
+                 deadline: float | None = None,
+                 monotonic: Callable[[], float] = time.monotonic) -> dict:
+    result = _rpc_call(rpc, "getTransaction", [signature, {
         "commitment": "confirmed", "encoding": "jsonParsed",
         "maxSupportedTransactionVersion": 0,
-    }])
+    }], deadline=deadline, monotonic=monotonic)
     if not isinstance(result, dict):
         raise TransactionUnavailableError("confirmed transaction is not available")
     signatures = ((result.get("transaction") or {}).get("signatures") or [])
@@ -779,7 +911,9 @@ def persist(payload: object, *, rpc: JsonRpc | None = None,
 
 def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
                       include_incomplete: bool = False,
-                      now: datetime | None = None) -> dict:
+                      now: datetime | None = None,
+                      deadline: float | None = None,
+                      monotonic: Callable[[], float] = time.monotonic) -> dict:
     """Retry due evidence oldest-first without repeatedly guessing ambiguous rows."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     states = ["raw_only", "rpc_unavailable"]
@@ -797,91 +931,194 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
     finally:
         c.close()
     attempted = completed = incomplete = unavailable = rpc_failed = pressure_failed = 0
+    persistence_failed = 0
+    persistence_error = None
+    deadline_stopped = 0
     pressure_kind = None
     retry_after = None
+    deadline_exhausted = False
     for (signature,) in rows:
+        if deadline is not None and monotonic() >= deadline:
+            deadline_exhausted = True
+            break
         attempted += 1
         try:
-            tx = _transaction(rpc, signature)
+            tx = _transaction(
+                rpc, signature, deadline=deadline, monotonic=monotonic,
+            )
+        except MaintenanceDeadlineExceeded as exc:
+            if not exc.work_started:
+                attempted -= 1
+            else:
+                deadline_stopped += 1
+            deadline_exhausted = True
+            break
         except TransactionUnavailableError as exc:
-            _set_hydration(signature, None, str(exc), at=now)
+            try:
+                _set_hydration(signature, None, str(exc), at=now)
+            except Exception as persist_exc:
+                persistence_failed += 1
+                persistence_error = str(persist_exc)[:240]
+                logger.exception(
+                    "solana_launch_hydration_persist_failed",
+                    signature=signature[:12], error=persistence_error,
+                    original_error=str(exc)[:120],
+                )
+                break
             unavailable += 1
-            continue
         except Exception as exc:
             pressure = _as_rpc_pressure(exc)
-            _set_hydration(
-                signature, None, str(exc), at=now,
-                retry_after_seconds=(pressure.retry_after_seconds if pressure else None),
-            )
+            try:
+                _set_hydration(
+                    signature, None, str(exc), at=now,
+                    retry_after_seconds=(
+                        pressure.retry_after_seconds if pressure else None
+                    ),
+                )
+            except Exception as persist_exc:
+                persistence_failed += 1
+                persistence_error = str(persist_exc)[:240]
+                logger.exception(
+                    "solana_launch_hydration_persist_failed",
+                    signature=signature[:12], error=persistence_error,
+                    original_error=str(exc)[:120],
+                    pressure_kind=pressure.kind if pressure else None,
+                )
             if pressure is not None:
                 pressure_failed += 1
                 pressure_kind = pressure.kind
                 retry_after = pressure.retry_after_seconds
                 break
             rpc_failed += 1
-            continue
-        state = _set_hydration(signature, tx, None, at=now)
-        if state == "complete":
-            completed += 1
+            if persistence_failed:
+                break
         else:
-            incomplete += 1
+            try:
+                state = _set_hydration(signature, tx, None, at=now)
+            except Exception as persist_exc:
+                persistence_failed += 1
+                persistence_error = str(persist_exc)[:240]
+                logger.exception(
+                    "solana_launch_hydration_persist_failed",
+                    signature=signature[:12], error=persistence_error,
+                )
+                break
+            if state == "complete":
+                completed += 1
+            else:
+                incomplete += 1
+        if deadline is not None and monotonic() >= deadline:
+            deadline_exhausted = True
+            break
     return {
         "attempted": attempted, "completed": completed,
         "incomplete": incomplete, "unavailable": unavailable,
         "rpc_failed": rpc_failed, "pressure_failed": pressure_failed,
+        "persistence_failed": persistence_failed,
+        "persistence_error": persistence_error,
         "pressure_kind": pressure_kind,
         "retry_after_seconds": retry_after,
+        "deadline_stopped": deadline_stopped,
+        "deadline_exhausted": deadline_exhausted,
     }
 
 
 def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
-                    slot_budget: int = GAP_RETRY_SLOT_BUDGET) -> dict:
+                    slot_budget: int = GAP_RETRY_SLOT_BUDGET,
+                    deadline: float | None = None,
+                    monotonic: Callable[[], float] = time.monotonic) -> dict:
     gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
     attempted = recovered = progressed = failed = 0
     pressure_kind = None
     retry_after = None
-    # A public Solana block can be several MB.  Verify and checkpoint at most one
-    # slot per maintenance tick so historical recovery cannot starve live data.
-    remaining_budget = min(GAP_RETRY_SLOT_BUDGET, max(0, int(slot_budget)))
+    deadline_stopped = 0
+    deadline_exhausted = False
+    # Blocks can be several MB. Recovery stays sequential, checkpoints each slot,
+    # and never starts more than four units in one bounded maintenance cycle.
+    remaining_budget = min(
+        GAP_RETRY_MAX_SLOT_BUDGET, max(0, int(slot_budget)),
+    )
+    stop_lane = False
     for gap in gaps:
-        if remaining_budget <= 0:
+        if remaining_budget <= 0 or stop_lane:
             break
-        start = int(gap["from_cursor"])
-        attempted += 1
-        remaining_budget -= 1
-        try:
-            _backfill_finalized_slot(start, rpc=rpc)
-            state = stream_health.advance_gap(
-                gap["id"], start,
-                details={"backfilled": True, "retry": True,
-                         "slot": start,
-                         "gap_to": gap["to_cursor"]},
-            )
-            if state == "resolved":
-                recovered += 1
-            elif state == "advanced":
+        cursor = int(gap["from_cursor"])
+        end = int(gap["to_cursor"])
+        while cursor <= end and remaining_budget > 0:
+            if deadline is not None and monotonic() >= deadline:
+                deadline_exhausted = True
+                stop_lane = True
+                break
+            attempted += 1
+            remaining_budget -= 1
+            try:
+                evidence = _backfill_finalized_slot(
+                    cursor, rpc=rpc, deadline=deadline, monotonic=monotonic,
+                )
+                state = stream_health.advance_gap(
+                    gap["id"], cursor,
+                    details={
+                        "backfilled": True, "retry": True,
+                        "slot": cursor, "gap_to": end, **evidence,
+                    },
+                )
+                if state == "resolved":
+                    recovered += 1
+                    break
+                if state != "advanced":
+                    raise RuntimeError(
+                        "verified Solana gap checkpoint was not persisted")
                 progressed += 1
-        except Exception as exc:
-            failed += 1
-            pressure = _as_rpc_pressure(exc)
-            pressure_kind = pressure.kind if pressure else None
-            retry_after = pressure.retry_after_seconds if pressure else None
-            deferred = stream_health.defer_gap(
-                gap["id"], str(exc),
-                base_delay_seconds=max(
-                    60, int(math.ceil(retry_after or 0)),
-                ),
-            )
-            logger.warning(
-                "solana_launch_backfill_failed", slot=start,
-                error=str(exc)[:120],
-                next_retry_at=(deferred or {}).get("next_retry_at"),
-            )
+                cursor += 1
+                if deadline is not None and monotonic() >= deadline:
+                    deadline_exhausted = True
+                    stop_lane = True
+                    break
+            except MaintenanceDeadlineExceeded:
+                # The outer pre-check guarantees this slot was selected within
+                # budget. A slot proof spans several RPCs, so work_started only
+                # describes the final call; earlier calls may already have run.
+                # Keep the slot classified as an attempted, unfinished probe.
+                deadline_stopped += 1
+                deadline_exhausted = True
+                stop_lane = True
+                break
+            except Exception as exc:
+                failed += 1
+                pressure = _as_rpc_pressure(exc)
+                pressure_kind = pressure.kind if pressure else None
+                retry_after = pressure.retry_after_seconds if pressure else None
+                try:
+                    deferred = stream_health.defer_gap(
+                        gap["id"], str(exc),
+                        base_delay_seconds=max(
+                            60, int(math.ceil(retry_after or 0)),
+                        ),
+                    )
+                except Exception as defer_exc:
+                    # Preserve the original provider-pressure classification even
+                    # when the independent health store cannot persist backoff.
+                    deferred = None
+                    logger.exception(
+                        "solana_launch_gap_defer_failed",
+                        slot=cursor, error=str(defer_exc)[:120],
+                        original_error=str(exc)[:120],
+                        pressure_kind=pressure_kind,
+                    )
+                logger.warning(
+                    "solana_launch_backfill_failed", slot=cursor,
+                    error=str(exc)[:120],
+                    next_retry_at=(deferred or {}).get("next_retry_at"),
+                )
+                stop_lane = True
+                break
     return {
         "attempted": attempted, "recovered": recovered,
         "progressed": progressed, "failed": failed,
         "pressure_kind": pressure_kind,
         "retry_after_seconds": retry_after,
+        "deadline_stopped": deadline_stopped,
+        "deadline_exhausted": deadline_exhausted,
     }
 
 
@@ -891,8 +1128,16 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
     circuit_open_until = 0.0
     circuit_kind = None
     pressure_count = 0
+    gap_budget = GAP_RETRY_SLOT_BUDGET
+    gap_clean_cycles = 0
+    hydration_limit = HYDRATION_BATCH_LIMIT
+    hydration_clean_cycles = 0
     while not stop.is_set():
         cycle_started = monotonic()
+        total_deadline = cycle_started + MAINTENANCE_WORK_BUDGET_SECONDS
+        gap_deadline = min(
+            total_deadline, cycle_started + GAP_WORK_BUDGET_SECONDS,
+        )
         maintenance_status = "live"
         maintenance_error = None
         try:
@@ -910,20 +1155,59 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                 )
             else:
                 half_open = circuit_open_until > 0
-                # Recover the oldest missing chain evidence before spending RPC
-                # budget on transactions already durably present as raw evidence.
-                gaps = retry_open_gaps(rpc)
+                gap_lane_error = None
+                # A local gap-store failure must be fail-visible without starving
+                # hydration work in the independent launch-evidence database.
+                try:
+                    gaps = retry_open_gaps(
+                        rpc, slot_budget=(GAP_RETRY_SLOT_BUDGET
+                                          if half_open else gap_budget),
+                        deadline=gap_deadline, monotonic=monotonic,
+                    )
+                except Exception as exc:
+                    pressure = _as_rpc_pressure(exc)
+                    gap_lane_error = str(exc)[:160]
+                    gaps = {
+                        "attempted": 0, "recovered": 0, "progressed": 0,
+                        "failed": 1,
+                        "pressure_kind": pressure.kind if pressure else None,
+                        "retry_after_seconds": (
+                            pressure.retry_after_seconds if pressure else None
+                        ),
+                        "deadline_stopped": 0,
+                        "deadline_exhausted": False,
+                    }
+                    logger.exception(
+                        "solana_launch_gap_lane_failed", error=gap_lane_error,
+                    )
                 if gaps["attempted"]:
                     logger.info("solana_launch_gap_retry", **gaps)
+                gap_deadline_hit = bool(gaps["deadline_exhausted"])
+                total_deadline_hit = monotonic() >= total_deadline
                 result = None
-                if gaps["pressure_kind"] is None and not (
-                    half_open and gaps["attempted"]
-                ):
-                    result = rehydrate_pending(rpc, limit=1 if half_open else 5)
+                if (gaps["pressure_kind"] is None
+                        and not total_deadline_hit
+                        and not (half_open and gaps["attempted"])):
+                    result = rehydrate_pending(
+                        rpc, limit=1 if half_open else hydration_limit,
+                        deadline=total_deadline, monotonic=monotonic,
+                    )
                     if result["attempted"]:
                         logger.info("solana_launch_rehydrated", **result)
+                    total_deadline_hit = bool(
+                        result["deadline_exhausted"]
+                        or monotonic() >= total_deadline
+                    )
 
                 pressure_lane = None
+                hydration_persist_failed = bool(
+                    result is not None
+                    and int(result.get("persistence_failed") or 0)
+                )
+                hydration_persist_error = (
+                    str(result.get("persistence_error") or "unknown error")[:120]
+                    if result is not None else "unknown error"
+                )
                 pressure_kind = gaps["pressure_kind"]
                 retry_after = gaps["retry_after_seconds"]
                 if pressure_kind is not None:
@@ -940,6 +1224,10 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                     )
                     circuit_open_until = monotonic() + cooldown
                     circuit_kind = pressure_kind
+                    gap_budget = GAP_RETRY_SLOT_BUDGET
+                    gap_clean_cycles = 0
+                    hydration_limit = HYDRATION_BATCH_LIMIT
+                    hydration_clean_cycles = 0
                     maintenance_status = "degraded"
                     maintenance_error = (
                         f"{pressure_lane} RPC pressure: {pressure_kind}; "
@@ -951,21 +1239,81 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                         retry_after_seconds=retry_after,
                         circuit_seconds=cooldown,
                     )
+                elif total_deadline_hit:
+                    gap_budget = GAP_RETRY_SLOT_BUDGET
+                    gap_clean_cycles = 0
+                    hydration_limit = HYDRATION_BATCH_LIMIT
+                    hydration_clean_cycles = 0
+                    maintenance_status = "degraded"
+                    maintenance_error = "maintenance work budget exhausted"
+                    if hydration_persist_failed:
+                        maintenance_error += "; hydration persistence failed"
                 elif half_open:
-                    if (gaps["attempted"]
-                            or (result is not None and result["attempted"])):
+                    gap_probe_attempted = int(gaps["attempted"] or 0) > 0
+                    hydration_probe_attempted = bool(
+                        result is not None and int(result["attempted"] or 0) > 0
+                    )
+                    probe_succeeded = (
+                        _gap_probe_succeeded(gaps) if gap_probe_attempted
+                        else _hydration_probe_succeeded(result)
+                    )
+                    if probe_succeeded:
                         circuit_open_until = 0.0
                         circuit_kind = None
                         pressure_count = 0
                         logger.info("solana_launch_rpc_circuit_recovered")
+                        if gap_lane_error is not None:
+                            maintenance_status = "degraded"
+                            maintenance_error = (
+                                f"gap lane local failure: {gap_lane_error}"
+                            )
+                    elif gap_probe_attempted or hydration_probe_attempted:
+                        maintenance_status = "degraded"
+                        maintenance_error = "RPC circuit half-open; probe failed"
                     else:
                         maintenance_status = "degraded"
                         maintenance_error = "RPC circuit half-open; no due probe"
+                elif gap_deadline_hit:
+                    maintenance_status = "degraded"
+                    maintenance_error = "gap lane work budget exhausted"
+                    if result is not None and result["rpc_failed"]:
+                        maintenance_error += "; hydration recovery failed"
+                    if hydration_persist_failed:
+                        maintenance_error += "; hydration persistence failed"
+                elif gap_lane_error is not None:
+                    maintenance_status = "degraded"
+                    maintenance_error = f"gap lane local failure: {gap_lane_error}"
+                    if hydration_persist_failed:
+                        maintenance_error += "; hydration persistence failed"
+                elif hydration_persist_failed:
+                    maintenance_status = "degraded"
+                    maintenance_error = (
+                        f"hydration persistence failed: {hydration_persist_error}"
+                    )
                 elif gaps["failed"] or (
                     result is not None and result["rpc_failed"]
                 ):
                     maintenance_status = "degraded"
                     maintenance_error = "maintenance evidence recovery failed"
+
+                if (pressure_lane is None and not total_deadline_hit
+                        and not half_open):
+                    previous_gap_budget = gap_budget
+                    previous_hydration_limit = hydration_limit
+                    gap_budget, gap_clean_cycles = _adjust_gap_budget(
+                        gap_budget, gap_clean_cycles, gaps,
+                    )
+                    hydration_limit, hydration_clean_cycles = \
+                        _adjust_hydration_limit(
+                            hydration_limit, hydration_clean_cycles, result,
+                        )
+                    if (gap_budget != previous_gap_budget
+                            or hydration_limit != previous_hydration_limit):
+                        logger.info(
+                            "solana_launch_maintenance_budget_adjusted",
+                            gap_budget=gap_budget,
+                            hydration_limit=hydration_limit,
+                        )
         except Exception as exc:
             # One transient database/provider defect must never silently kill the
             # only maintenance thread.
@@ -1001,20 +1349,29 @@ def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[d
     return payload, normalized
 
 
-def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
+def _backfill_finalized_slot(
+    slot: int, *, rpc: JsonRpc, deadline: float | None = None,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> dict:
     """Verify one finalized produced/skipped slot, raising on partial evidence."""
     slot = int(slot)
-    finalized = int(rpc.call("getSlot", [{"commitment": "finalized"}]))
+    finalized = int(_rpc_call(
+        rpc, "getSlot", [{"commitment": "finalized"}],
+        deadline=deadline, monotonic=monotonic,
+    ))
     if finalized < slot:
         raise RuntimeError(f"slot {slot} is not finalized (tip {finalized})")
-    first_available = int(rpc.call("getFirstAvailableBlock", []))
+    first_available = int(_rpc_call(
+        rpc, "getFirstAvailableBlock", [],
+        deadline=deadline, monotonic=monotonic,
+    ))
     if slot < first_available:
         raise RuntimeError(
             f"slot {slot} predates first available block {first_available}")
     proof_end = min(finalized, slot + SKIPPED_SLOT_PROOF_LOOKAHEAD)
-    produced = rpc.call("getBlocks", [
+    produced = _rpc_call(rpc, "getBlocks", [
         slot, proof_end, {"commitment": "finalized"},
-    ])
+    ], deadline=deadline, monotonic=monotonic)
     if not isinstance(produced, list):
         raise RuntimeError("getBlocks returned a non-list result")
     if any(isinstance(value, bool) or not isinstance(value, int) for value in produced):
@@ -1028,11 +1385,11 @@ def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
             f"slot {slot} has no bounded finalized skipped-slot proof")
     first_produced = produced_slots[0]
     if first_produced > slot:
-        successor = rpc.call("getBlock", [first_produced, {
+        successor = _rpc_call(rpc, "getBlock", [first_produced, {
             "commitment": "finalized", "encoding": "json",
             "transactionDetails": "none", "rewards": False,
             "maxSupportedTransactionVersion": 0,
-        }])
+        }], deadline=deadline, monotonic=monotonic)
         if not isinstance(successor, dict):
             raise RuntimeError(
                 f"finalized successor block {first_produced} is unavailable")
@@ -1042,19 +1399,24 @@ def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
             raise RuntimeError(
                 f"finalized successor block {first_produced} lacks parentSlot")
         if int(parent) < slot:
-            return
+            return {
+                "state": "skipped_proven", "slot": slot,
+                "proof_next_slot": first_produced,
+                "proof_parent_slot": int(parent),
+            }
         raise RuntimeError(
             f"provider omitted produced slot {slot}; successor parent is {parent}")
-    block = rpc.call("getBlock", [slot, {
+    block = _rpc_call(rpc, "getBlock", [slot, {
         "commitment": "finalized", "encoding": "json",
         "transactionDetails": "full", "rewards": False,
         "maxSupportedTransactionVersion": 0,
-    }])
+    }], deadline=deadline, monotonic=monotonic)
     if not isinstance(block, dict):
         raise RuntimeError(f"finalized block {slot} is unavailable")
     transactions = block.get("transactions")
     if not isinstance(transactions, list):
         raise RuntimeError(f"finalized block {slot} has no transaction list")
+    launches = 0
     for index, item in enumerate(transactions):
         if not isinstance(item, dict):
             raise RuntimeError(f"slot {slot} transaction {index} is malformed")
@@ -1066,6 +1428,8 @@ def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
         # Identity qualification is a separate, retriable evidence state; a new
         # Pump account layout must not permanently pin the entire stream gap.
         persist(payload, transaction=tx)
+        launches += 1
+    return {"state": "produced", "slot": slot, "launches": launches}
 
 
 def backfill_slots(from_slot: int, to_slot: int, *, rpc: JsonRpc) -> bool:

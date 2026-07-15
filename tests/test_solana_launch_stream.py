@@ -1,6 +1,7 @@
 """Solana launch evidence remains distinct from a qualified opportunity."""
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
 import threading
@@ -112,26 +113,38 @@ def _pump_swap_with_ata_create():
 
 def _gap_stats(attempted: int, *, recovered: int = 0, progressed: int = 0,
                failed: int = 0, pressure_kind: str | None = None,
-               retry_after_seconds: int | None = None) -> dict:
+               retry_after_seconds: int | None = None,
+               deadline_stopped: int = 0,
+               deadline_exhausted: bool = False) -> dict:
     return {
         "attempted": attempted, "recovered": recovered,
         "progressed": progressed, "failed": failed,
         "pressure_kind": pressure_kind,
         "retry_after_seconds": retry_after_seconds,
+        "deadline_stopped": deadline_stopped,
+        "deadline_exhausted": deadline_exhausted,
     }
 
 
 def _hydration_stats(attempted: int, *, completed: int = 0,
                      incomplete: int = 0, unavailable: int = 0,
                      rpc_failed: int = 0, pressure_failed: int = 0,
+                     persistence_failed: int = 0,
+                     persistence_error: str | None = None,
                      pressure_kind: str | None = None,
-                     retry_after_seconds: int | None = None) -> dict:
+                     retry_after_seconds: int | None = None,
+                     deadline_stopped: int = 0,
+                     deadline_exhausted: bool = False) -> dict:
     return {
         "attempted": attempted, "completed": completed,
         "incomplete": incomplete, "unavailable": unavailable,
         "rpc_failed": rpc_failed, "pressure_failed": pressure_failed,
+        "persistence_failed": persistence_failed,
+        "persistence_error": persistence_error,
         "pressure_kind": pressure_kind,
         "retry_after_seconds": retry_after_seconds,
+        "deadline_stopped": deadline_stopped,
+        "deadline_exhausted": deadline_exhausted,
     }
 
 
@@ -533,6 +546,71 @@ def test_hydration_pressure_stops_batch_and_honors_retry_after(sol):
     ]
 
 
+def test_hydration_pressure_survives_persistence_failure_and_opens_circuit(
+        sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    sol.persist(sol.parse_message(_notification()).payload)
+    captured = []
+    persistence_logs = []
+    original_rehydrate = sol.rehydrate_pending
+
+    def hydrate(*args, **kwargs):
+        result = original_rehydrate(*args, **kwargs)
+        captured.append(result)
+        return result
+
+    monkeypatch.setattr(
+        sol, "retry_open_gaps", lambda _rpc, **kwargs: _gap_stats(0),
+    )
+    monkeypatch.setattr(sol, "rehydrate_pending", hydrate)
+    monkeypatch.setattr(
+        sol, "_set_hydration",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("launch DB locked")
+        ),
+    )
+    monkeypatch.setattr(
+        sol.logger, "exception",
+        lambda event, **kwargs: persistence_logs.append((event, kwargs)),
+    )
+
+    class Rpc:
+        calls = 0
+
+        def call(self, method, params):
+            self.calls += 1
+            raise sol.RpcPressureError(
+                "HTTP 429", kind="rate_limited", retry_after_seconds=180,
+            )
+
+    class StopAfterOneTick:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            return True
+
+    rpc = Rpc()
+    sol._rehydrate_loop(StopAfterOneTick(), rpc, interval_seconds=1)
+
+    assert rpc.calls == 1
+    assert captured == [_hydration_stats(
+        1, pressure_failed=1, persistence_failed=1,
+        persistence_error="launch DB locked", pressure_kind="rate_limited",
+        retry_after_seconds=180,
+    )]
+    assert persistence_logs[0][0] == "solana_launch_hydration_persist_failed"
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert maintenance["last_error"] == (
+        "hydration RPC pressure: rate_limited; cooldown 180s"
+    )
+
+
 def test_unavailable_transaction_does_not_trip_pressure_or_stop_batch(sol):
     base = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
     for signature in ("a-missing", "b-complete"):
@@ -566,6 +644,78 @@ def test_unavailable_transaction_does_not_trip_pressure_or_stop_batch(sol):
     assert rpc.calls == ["a-missing", "b-complete"]
 
 
+def test_hydration_deadline_stops_before_starting_more_rows(sol):
+    base = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    for signature in ("a-first", "b-second", "c-not-started"):
+        raw = _notification()
+        raw["params"]["result"]["value"]["signature"] = signature
+        sol.persist(sol.parse_message(raw).payload)
+    c = sol._conn()
+    try:
+        c.execute("UPDATE raw_launches SET detected_at=?", (base.isoformat(),))
+        c.commit()
+    finally:
+        c.close()
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class Rpc:
+        def __init__(self):
+            self.calls = []
+
+        def call(self, method, params):
+            signature = params[0]
+            self.calls.append(signature)
+            clock.value += 11
+            tx = _transaction()
+            tx["transaction"]["signatures"] = [signature]
+            return tx
+
+    rpc = Rpc()
+    result = sol.rehydrate_pending(
+        rpc, limit=3, now=base, deadline=20, monotonic=clock,
+    )
+    assert result == _hydration_stats(
+        2, completed=2, deadline_exhausted=True,
+    )
+    assert rpc.calls == ["a-first", "b-second"]
+
+
+@pytest.mark.parametrize("outcome", ["unavailable", "rpc_failed"])
+def test_hydration_failure_crossing_deadline_is_reported(sol, outcome):
+    base = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    sol.persist(sol.parse_message(_notification()).payload)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class Rpc:
+        def call(self, method, params):
+            assert method == "getTransaction"
+            clock.value = 21
+            if outcome == "unavailable":
+                return None
+            raise RuntimeError("temporary transport failure")
+
+    expected = {outcome: 1}
+    assert sol.rehydrate_pending(
+        Rpc(), limit=1, now=base, deadline=20, monotonic=clock,
+    ) == _hydration_stats(
+        1, deadline_exhausted=True, **expected,
+    )
+
+
 def test_rpc_pressure_classification_is_narrow_and_retry_after_is_bounded(sol):
     now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
     assert sol._retry_after_seconds("17", now=now) == 17
@@ -586,6 +736,77 @@ def test_rpc_pressure_classification_is_narrow_and_retry_after_is_bounded(sol):
     assert sol._circuit_cooldown_seconds(None, 1) == 60
     assert sol._circuit_cooldown_seconds(None, 2) == 120
     assert sol._circuit_cooldown_seconds(180, 1) == 180
+
+
+def test_deadline_rpc_clamps_production_network_timeout(sol, monkeypatch):
+    timeouts = []
+
+    def response(_request, timeout):
+        timeouts.append(timeout)
+        return io.BytesIO(b'{"jsonrpc":"2.0","result":42}')
+
+    monkeypatch.setattr(sol.urllib.request, "urlopen", response)
+    rpc = sol.JsonRpc("https://solana.invalid", timeout=15)
+    assert sol._rpc_call(
+        rpc, "getSlot", [], deadline=10, monotonic=lambda: 7,
+    ) == 42
+    assert timeouts == [3]
+    with pytest.raises(sol.MaintenanceDeadlineExceeded):
+        sol._rpc_call(
+            rpc, "getSlot", [], deadline=10, monotonic=lambda: 10,
+        )
+    assert timeouts == [3]
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    def expires_during_call(method, params, *, timeout=None):
+        clock.value = 20
+        raise sol.RpcPressureError("socket timeout", kind="timeout")
+
+    monkeypatch.setattr(rpc, "call", expires_during_call)
+    with pytest.raises(sol.MaintenanceDeadlineExceeded) as expired:
+        sol._rpc_call(
+            rpc, "getBlock", [], deadline=20, monotonic=clock,
+        )
+    assert expired.value.work_started is True
+
+
+def test_adaptive_budgets_ramp_only_after_full_clean_cycles_and_reset(sol):
+    gap_budget = 1
+    gap_streak = 0
+    used_gap_budgets = []
+    for _ in range(4):
+        used_gap_budgets.append(gap_budget)
+        gap_budget, gap_streak = sol._adjust_gap_budget(
+            gap_budget, gap_streak,
+            _gap_stats(gap_budget, progressed=gap_budget),
+        )
+    used_gap_budgets.append(gap_budget)
+    assert used_gap_budgets == [1, 1, 2, 2, 4]
+    assert sol._adjust_gap_budget(
+        4, 1, _gap_stats(1, failed=1),
+    ) == (1, 0)
+
+    hydration_limit = 5
+    hydration_streak = 0
+    used_hydration_limits = []
+    for _ in range(6):
+        used_hydration_limits.append(hydration_limit)
+        hydration_limit, hydration_streak = sol._adjust_hydration_limit(
+            hydration_limit, hydration_streak,
+            _hydration_stats(hydration_limit, completed=hydration_limit),
+        )
+    used_hydration_limits.append(hydration_limit)
+    assert used_hydration_limits == [5, 5, 10, 10, 15, 15, 20]
+    assert sol._adjust_hydration_limit(
+        20, 1, _hydration_stats(1, rpc_failed=1),
+    ) == (5, 0)
 
 
 def test_hydration_outcome_does_not_count_ambiguous_identity_as_complete(sol):
@@ -784,7 +1005,7 @@ def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
     assert sol.backfill_slots(1, sol.MAX_BACKFILL_SLOTS + 1, rpc=rpc) is False
 
 
-def test_long_slot_gap_checkpoints_one_verified_slot_per_tick(sol):
+def test_long_slot_gap_checkpoints_each_verified_slot_within_budget(sol):
     from src.pipeline import stream_health
 
     stream_health.observe("solana", "pump_fun_launches", cursor=10,
@@ -809,16 +1030,121 @@ def test_long_slot_gap_checkpoints_one_verified_slot_per_tick(sol):
 
     rpc = Rpc()
     first = sol.retry_open_gaps(rpc, slot_budget=sol.MAX_BACKFILL_SLOTS)
-    assert first == _gap_stats(1, progressed=1)
+    assert first == _gap_stats(4, progressed=4)
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
-    assert (gap["from_cursor"], gap["to_cursor"]) == (12, 29)
-    assert rpc.blocks == [11]
+    assert (gap["from_cursor"], gap["to_cursor"]) == (15, 29)
+    assert rpc.blocks == [11, 12, 13, 14]
 
     second = sol.retry_open_gaps(rpc, slot_budget=sol.MAX_BACKFILL_SLOTS)
-    assert second == _gap_stats(1, progressed=1)
+    assert second == _gap_stats(4, progressed=4)
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
-    assert (gap["from_cursor"], gap["to_cursor"]) == (13, 29)
-    assert rpc.blocks == [11, 12]
+    assert (gap["from_cursor"], gap["to_cursor"]) == (19, 29)
+    assert rpc.blocks == [11, 12, 13, 14, 15, 16, 17, 18]
+
+
+def test_gap_budget_stops_after_first_failure_without_touching_later_slots(
+        sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=30,
+                          expect_contiguous=True)
+    calls = []
+
+    def recover(slot, **kwargs):
+        calls.append(slot)
+        if slot == 12:
+            raise RuntimeError("provider omitted block")
+        return {"state": "produced", "slot": slot, "launches": 0}
+
+    monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
+    result = sol.retry_open_gaps(object(), slot_budget=4)
+
+    assert result == _gap_stats(2, progressed=1, failed=1)
+    assert calls == [11, 12]
+    c = stream_health._conn()
+    try:
+        gap = c.execute(
+            "SELECT from_cursor,to_cursor,status,last_error FROM gaps"
+        ).fetchone()
+    finally:
+        c.close()
+    assert gap[:3] == (12, 29, "open")
+    assert "provider omitted" in gap[3]
+
+
+def test_gap_deadline_checkpoints_completed_slot_then_stops(sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=30,
+                          expect_contiguous=True)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+    calls = []
+
+    def recover(slot, **kwargs):
+        calls.append(slot)
+        clock.value = 21
+        return {"state": "produced", "slot": slot, "launches": 0}
+
+    monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
+    result = sol.retry_open_gaps(
+        object(), slot_budget=4, deadline=20, monotonic=clock,
+    )
+
+    assert result == _gap_stats(
+        1, progressed=1, deadline_exhausted=True,
+    )
+    assert calls == [11]
+    assert stream_health.open_gaps(
+        "solana", "pump_fun_launches",
+    )[0]["from_cursor"] == 12
+
+
+def test_gap_deadline_after_partial_slot_proof_remains_an_attempted_probe(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class Rpc:
+        calls = []
+
+        def call(self, method, params):
+            self.calls.append(method)
+            assert method == "getSlot"
+            clock.value = 20
+            return 12
+
+    rpc = Rpc()
+    assert sol.retry_open_gaps(
+        rpc, deadline=20, monotonic=clock,
+    ) == _gap_stats(
+        1, deadline_stopped=1, deadline_exhausted=True,
+    )
+    assert rpc.calls == ["getSlot"]
+    assert stream_health.open_gaps(
+        "solana", "pump_fun_launches",
+    )[0]["from_cursor"] == 11
 
 
 def test_default_gap_retry_budget_caps_block_rpc_load(sol):
@@ -871,6 +1197,39 @@ def test_failed_gap_recovery_is_deferred_but_remains_fail_visible(sol):
     assert health["open_gaps"] == 1
     assert health["deferred_gaps"] == 1
     assert health["next_gap_retry_at"] is not None
+
+
+def test_gap_defer_failure_preserves_original_rpc_pressure(sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+    defer_errors = []
+    monkeypatch.setattr(
+        stream_health, "defer_gap",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("health store locked")
+        ),
+    )
+    monkeypatch.setattr(
+        sol.logger, "exception",
+        lambda event, **kwargs: defer_errors.append((event, kwargs)),
+    )
+
+    class Rpc:
+        def call(self, method, params):
+            raise sol.RpcPressureError(
+                "HTTP 429", kind="rate_limited", retry_after_seconds=180,
+            )
+
+    assert sol.retry_open_gaps(Rpc()) == _gap_stats(
+        1, failed=1, pressure_kind="rate_limited",
+        retry_after_seconds=180,
+    )
+    assert defer_errors[0][0] == "solana_launch_gap_defer_failed"
+    assert defer_errors[0][1]["pressure_kind"] == "rate_limited"
 
 
 def test_unresolved_raw_create_is_retained_and_does_not_block_the_gap(sol):
@@ -953,10 +1312,10 @@ def test_maintenance_recovers_gap_before_bounded_hydration(sol, monkeypatch):
     order = []
     monkeypatch.setattr(
         sol, "retry_open_gaps",
-        lambda rpc: order.append("gap") or _gap_stats(0),
+        lambda rpc, **kwargs: order.append("gap") or _gap_stats(0),
     )
 
-    def rehydrate(rpc, *, limit):
+    def rehydrate(rpc, *, limit, **kwargs):
         order.append(("hydrate", limit))
         return _hydration_stats(0)
 
@@ -973,12 +1332,138 @@ def test_maintenance_recovers_gap_before_bounded_hydration(sol, monkeypatch):
     assert order == ["gap", ("hydrate", 5)]
 
 
+def test_gap_lane_deadline_reserves_hydration_and_marks_degraded(sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    hydration_calls = []
+
+    def retry(_rpc, **kwargs):
+        assert kwargs["deadline"] == sol.GAP_WORK_BUDGET_SECONDS
+        return _gap_stats(1, progressed=1, deadline_exhausted=True)
+
+    def hydrate(_rpc, *, limit, **kwargs):
+        hydration_calls.append((limit, kwargs["deadline"]))
+        return _hydration_stats(1, completed=1)
+
+    monkeypatch.setattr(sol, "retry_open_gaps", retry)
+    monkeypatch.setattr(
+        sol, "rehydrate_pending", hydrate,
+    )
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class StopAfterOneTick:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            return True
+
+    sol._rehydrate_loop(
+        StopAfterOneTick(), object(), interval_seconds=1, monotonic=clock,
+    )
+    assert hydration_calls == [(5, sol.MAINTENANCE_WORK_BUDGET_SECONDS)]
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert "gap lane work budget exhausted" in maintenance["last_error"]
+
+
+def test_total_deadline_exhaustion_skips_hydration_and_marks_degraded(
+        sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    hydration_calls = []
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    def retry(_rpc, **kwargs):
+        clock.value = sol.MAINTENANCE_WORK_BUDGET_SECONDS + 1
+        return _gap_stats(1, progressed=1, deadline_exhausted=True)
+
+    monkeypatch.setattr(sol, "retry_open_gaps", retry)
+    monkeypatch.setattr(
+        sol, "rehydrate_pending",
+        lambda *args, **kwargs: hydration_calls.append(True),
+    )
+
+    class StopAfterOneTick:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            return True
+
+    sol._rehydrate_loop(
+        StopAfterOneTick(), object(), interval_seconds=1, monotonic=clock,
+    )
+    assert hydration_calls == []
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert maintenance["last_error"] == "maintenance work budget exhausted"
+
+
+def test_maintenance_hydration_limit_ramps_to_backlog_capacity(sol, monkeypatch):
+    limits = []
+    monkeypatch.setattr(
+        sol, "retry_open_gaps",
+        lambda rpc, **kwargs: _gap_stats(0),
+    )
+
+    def hydrate(_rpc, *, limit, **kwargs):
+        limits.append(limit)
+        return _hydration_stats(limit, completed=limit)
+
+    monkeypatch.setattr(sol, "rehydrate_pending", hydrate)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class StopAfterSevenTicks:
+        waits = 0
+
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            clock.value += timeout
+            self.waits += 1
+            return self.waits >= 7
+
+    sol._rehydrate_loop(
+        StopAfterSevenTicks(), object(), interval_seconds=60, monotonic=clock,
+    )
+    assert limits == [5, 5, 10, 10, 15, 15, 20]
+
+
 def test_gap_pressure_skips_hydration_in_same_maintenance_cycle(sol, monkeypatch):
     from src.pipeline import stream_health
 
     hydration_calls = []
     monkeypatch.setattr(
-        sol, "retry_open_gaps", lambda rpc: _gap_stats(
+        sol, "retry_open_gaps", lambda rpc, **kwargs: _gap_stats(
             1, failed=1, pressure_kind="rate_limited", retry_after_seconds=120,
         ),
     )
@@ -1004,11 +1489,45 @@ def test_gap_pressure_skips_hydration_in_same_maintenance_cycle(sol, monkeypatch
     assert "gap RPC pressure" in maintenance["last_error"]
 
 
-def test_provider_circuit_spans_cycles_and_half_open_uses_one_probe(sol, monkeypatch):
+def test_escaped_gap_pressure_still_skips_hydration_and_opens_circuit(
+        sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    hydration_calls = []
+
+    def retry(_rpc, **kwargs):
+        raise sol.RpcPressureError(
+            "HTTP 429", kind="rate_limited", retry_after_seconds=120,
+        )
+
+    monkeypatch.setattr(sol, "retry_open_gaps", retry)
+    monkeypatch.setattr(
+        sol, "rehydrate_pending",
+        lambda *args, **kwargs: hydration_calls.append(True),
+    )
+
+    class StopAfterOneTick:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            return True
+
+    sol._rehydrate_loop(StopAfterOneTick(), object(), interval_seconds=1)
+    assert hydration_calls == []
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert "gap RPC pressure: rate_limited" in maintenance["last_error"]
+
+
+def test_provider_circuit_half_open_uses_one_logical_work_unit(sol, monkeypatch):
     gap_calls = 0
     hydration_limits = []
 
-    def retry(_rpc):
+    def retry(_rpc, **kwargs):
         nonlocal gap_calls
         gap_calls += 1
         if gap_calls == 1:
@@ -1018,7 +1537,7 @@ def test_provider_circuit_spans_cycles_and_half_open_uses_one_probe(sol, monkeyp
             )
         return _gap_stats(0)
 
-    def hydrate(_rpc, *, limit):
+    def hydrate(_rpc, *, limit, **kwargs):
         hydration_limits.append(limit)
         return _hydration_stats(1, completed=1)
 
@@ -1052,21 +1571,85 @@ def test_provider_circuit_spans_cycles_and_half_open_uses_one_probe(sol, monkeyp
     assert hydration_limits == [1]
 
 
-def test_maintenance_worker_continues_after_unexpected_exception(sol, monkeypatch):
+@pytest.mark.parametrize("failed_lane", ["gap", "gap_deadline", "hydration"])
+def test_half_open_requires_a_valid_probe_before_reporting_recovery(
+        sol, monkeypatch, failed_lane):
+    from src.pipeline import stream_health
+
+    gap_calls = 0
+    hydration_calls = 0
+
+    def retry(_rpc, **kwargs):
+        nonlocal gap_calls
+        gap_calls += 1
+        if gap_calls == 1:
+            return _gap_stats(
+                1, failed=1, pressure_kind="rate_limited",
+                retry_after_seconds=120,
+            )
+        if failed_lane == "gap":
+            return _gap_stats(1, failed=1)
+        if failed_lane == "gap_deadline":
+            return _gap_stats(
+                1, deadline_stopped=1, deadline_exhausted=True,
+            )
+        return _gap_stats(0)
+
+    def hydrate(_rpc, *, limit, **kwargs):
+        nonlocal hydration_calls
+        hydration_calls += 1
+        assert limit == 1
+        return _hydration_stats(1, rpc_failed=1)
+
+    monkeypatch.setattr(sol, "retry_open_gaps", retry)
+    monkeypatch.setattr(sol, "rehydrate_pending", hydrate)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class StopAfterThreeTicks:
+        waits = 0
+
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            clock.value += timeout
+            self.waits += 1
+            return self.waits >= 3
+
+    sol._rehydrate_loop(
+        StopAfterThreeTicks(), object(), interval_seconds=60, monotonic=clock,
+    )
+
+    assert gap_calls == 2
+    assert hydration_calls == (1 if failed_lane == "hydration" else 0)
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert maintenance["last_error"] == "RPC circuit half-open; probe failed"
+
+
+def test_persistent_gap_lane_exception_never_starves_hydration(sol, monkeypatch):
     from src.pipeline import stream_health
 
     gap_calls = 0
     hydration_calls = 0
     errors = []
 
-    def retry(_rpc):
+    def retry(_rpc, **kwargs):
         nonlocal gap_calls
         gap_calls += 1
-        if gap_calls == 1:
-            raise RuntimeError("temporary sqlite lock")
-        return _gap_stats(0)
+        raise RuntimeError("persistent gap sqlite lock")
 
-    def hydrate(_rpc, *, limit):
+    def hydrate(_rpc, *, limit, **kwargs):
         nonlocal hydration_calls
         hydration_calls += 1
         return _hydration_stats(0)
@@ -1089,7 +1672,53 @@ def test_maintenance_worker_continues_after_unexpected_exception(sol, monkeypatc
             return self.waits >= 2
 
     sol._rehydrate_loop(StopAfterTwoTicks(), object(), interval_seconds=1)
-    assert gap_calls == 2 and hydration_calls == 1
+    assert gap_calls == 2 and hydration_calls == 2
+    assert [event for event, _kwargs in errors] == [
+        "solana_launch_gap_lane_failed", "solana_launch_gap_lane_failed",
+    ]
+    maintenance = next(
+        item for item in stream_health.snapshot()
+        if item["stream"] == sol.MAINTENANCE_STREAM
+    )
+    assert maintenance["status"] == "degraded"
+    assert "persistent gap sqlite lock" in maintenance["last_error"]
+
+
+def test_maintenance_worker_continues_after_unexpected_hydration_exception(
+        sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    hydration_calls = 0
+    errors = []
+    monkeypatch.setattr(
+        sol, "retry_open_gaps", lambda _rpc, **kwargs: _gap_stats(0),
+    )
+
+    def hydrate(_rpc, *, limit, **kwargs):
+        nonlocal hydration_calls
+        hydration_calls += 1
+        if hydration_calls == 1:
+            raise RuntimeError("temporary launch DB lock")
+        return _hydration_stats(0)
+
+    monkeypatch.setattr(sol, "rehydrate_pending", hydrate)
+    monkeypatch.setattr(
+        sol.logger, "exception",
+        lambda event, **kwargs: errors.append((event, kwargs)),
+    )
+
+    class StopAfterTwoTicks:
+        waits = 0
+
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            self.waits += 1
+            return self.waits >= 2
+
+    sol._rehydrate_loop(StopAfterTwoTicks(), object(), interval_seconds=1)
+    assert hydration_calls == 2
     assert errors[0][0] == "solana_launch_maintenance_failed"
     maintenance = next(
         item for item in stream_health.snapshot()
@@ -1100,9 +1729,12 @@ def test_maintenance_worker_continues_after_unexpected_exception(sol, monkeypatc
 
 def test_health_reporting_failure_cannot_kill_maintenance_worker(sol, monkeypatch):
     events = []
-    monkeypatch.setattr(sol, "retry_open_gaps", lambda rpc: _gap_stats(0))
     monkeypatch.setattr(
-        sol, "rehydrate_pending", lambda rpc, limit: _hydration_stats(0),
+        sol, "retry_open_gaps", lambda rpc, **kwargs: _gap_stats(0),
+    )
+    monkeypatch.setattr(
+        sol, "rehydrate_pending",
+        lambda rpc, limit, **kwargs: _hydration_stats(0),
     )
     monkeypatch.setattr(
         sol.stream_health, "report_worker",
