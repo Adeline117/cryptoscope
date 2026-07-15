@@ -159,6 +159,9 @@ def test_scan_carry_prioritizes_open_symbol_and_uses_current_pair(monkeypatch):
     assert observation["observed_at"]
     assert observation["observation_version"] == 1
     assert [row["symbol"] for row in scan["entry_observations"]] == ["ENTRY"]
+    assert scan["entry_observations"][0][
+        "current_partial_model_proxy_ann_pct"] == pytest.approx(
+            hl._carry_partial_model_proxy_ann(20.0))
     assert [row["symbol"] for row in scan["paper_observations"]] == ["OPEN", "ENTRY"]
     assert scan["source_health"]["entry_observed"] == 1
     assert _open_status(scan, "OPEN")["status"] == "observed"

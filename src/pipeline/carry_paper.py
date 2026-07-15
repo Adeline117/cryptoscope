@@ -39,6 +39,7 @@ MODELED_FEE_PCT_ONEWAY_BOTH_LEGS = 0.095
 MODELED_ROUNDTRIP_FEE_PCT = 2 * MODELED_FEE_PCT_ONEWAY_BOTH_LEGS
 CURRENT_EPISODE_VERSION = 3
 CARRY_EXIT_QUOTE_SLA_S = 60
+CARRY_OBSERVATION_MAX_AGE_S = 60
 MIN_ANNUALIZED_HOLD_H = 30 * 24
 MIN_ANNUALIZED_SAMPLES = 5
 _OKX_CTVAL: dict[str, float] = {}
@@ -503,12 +504,19 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
             continue
         try:
             edge = float(observation["observed_edge_ann"])
+            observed_at = datetime.fromisoformat(str(observation["observed_at"]))
         except (KeyError, TypeError, ValueError):
             continue
-        if not math.isfinite(edge):
+        if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+            continue
+        observation_age_s = (now - observed_at).total_seconds()
+        if (not math.isfinite(edge) or not math.isfinite(observation_age_s)
+                or observation_age_s < 0
+                or observation_age_s > CARRY_OBSERVATION_MAX_AGE_S):
             continue
         observed_by_sym[observation["symbol"]] = {**observation,
-                                                   "observed_edge_ann": edge}
+                                                   "observed_edge_ann": edge,
+                                                   "observation_age_s": observation_age_s}
     c = _conn()
     try:
         # A historical open row cannot be upgraded in place: its entry snapshot and
@@ -650,6 +658,15 @@ def run(carries: list[dict], *, observations: list[dict] | None = None) -> dict:
                 continue
             observation = observed_by_sym.get(sym)
             if observation is None:
+                continue
+            # Persistence can rank a candidate, but a new episode must also clear the
+            # exact same partial-cost screen on the fresh paired quote. Otherwise a
+            # collapsed differential could open below its own natural exit threshold.
+            from src.onchain.hyperliquid import _carry_partial_model_proxy_ann
+            current_partial_proxy = _carry_partial_model_proxy_ann(
+                observation["observed_edge_ann"])
+            if (not math.isfinite(current_partial_proxy)
+                    or current_partial_proxy < OPEN_MIN_PARTIAL_MODEL_PROXY_ANN):
                 continue
             slip = _roundtrip_slip(sym, phase="entry")
             if slip is None:

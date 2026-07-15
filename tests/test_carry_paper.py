@@ -11,9 +11,11 @@ import pytest
 
 
 def _run(cp, carries):
+    observed_at = datetime.now(timezone.utc).isoformat()
     observations = [{
         "symbol": item["symbol"], "status": "observed", "cross": True,
         "observation_version": 1, "observed_edge_ann": item["edge_ann"],
+        "observed_at": observed_at,
     } for item in carries if item.get("cross")]
     return cp.run(carries, observations=observations)
 
@@ -45,6 +47,35 @@ def test_opens_only_fat_net_cross(cp):
     assert {r[0] for r in rows} == {"FAT"}          # only the fat-net cross carry opens
 
 
+def test_entry_requires_fresh_pair_that_clears_current_partial_cost_screen(cp):
+    now = datetime.now(timezone.utc)
+    candidates = [
+        {"symbol": symbol, "cross": True,
+         "partial_model_proxy_ann_pct": 40, "edge_ann": 40}
+        for symbol in ("STALE", "FADED", "MISSING_TS", "FRESH")
+    ]
+    observations = [
+        {"symbol": "STALE", "status": "observed", "cross": True,
+         "observation_version": 1, "observed_edge_ann": 40,
+         "observed_at": (now - timedelta(
+             seconds=cp.CARRY_OBSERVATION_MAX_AGE_S + 1)).isoformat()},
+        {"symbol": "FADED", "status": "observed", "cross": True,
+         "observation_version": 1, "observed_edge_ann": 1,
+         "observed_at": now.isoformat()},
+        {"symbol": "MISSING_TS", "status": "observed", "cross": True,
+         "observation_version": 1, "observed_edge_ann": 40},
+        {"symbol": "FRESH", "status": "observed", "cross": True,
+         "observation_version": 1, "observed_edge_ann": 40,
+         "observed_at": now.isoformat()},
+    ]
+
+    stats = cp.run(candidates, observations=observations)
+
+    assert [row["symbol"] for row in stats["open_positions"]] == ["FRESH"]
+    assert stats["open_positions"][0]["episode_version"] == cp.CURRENT_EPISODE_VERSION
+    assert stats["open_positions"][0]["observation_version"] == 1
+
+
 def test_accrues_and_closes_with_correct_quote_proxy(cp):
     # open a 40%/yr differential position
     _run(cp, [{"symbol": "X", "cross": True,
@@ -60,6 +91,7 @@ def test_accrues_and_closes_with_correct_quote_proxy(cp):
     stats = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
         "observation_version": 1, "observed_edge_ann": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     assert stats["n_closed"] == 1 and stats["n_open"] == 0
     # Internal raw annualization remains available for long-lived cohorts, but the
@@ -173,6 +205,7 @@ def test_legacy_observation_protocol_cannot_accrue_close_or_open_v3_episode(cp):
     stats = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
         "observation_version": 0, "observed_edge_ann": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     assert stats["n_open"] == 1 and stats["n_closed_total"] == 0
     assert stats["open_positions"][0]["measurement_state"] == "source_gap"
@@ -211,6 +244,7 @@ def test_exit_quote_gap_freezes_episode_until_real_book_cost_arrives(cp, monkeyp
     pending = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
         "observation_version": 1, "observed_edge_ann": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     assert pending["n_open"] == pending["n_exit_pending"] == 1
     assert pending["n_closed_total"] == 0
@@ -393,6 +427,7 @@ def test_legacy_open_episode_never_accrues_or_closes_from_valid_v1_quote(cp):
     stats = cp.run([], observations=[{
         "symbol": "X", "status": "observed", "cross": True,
         "observation_version": 1, "observed_edge_ann": 1,
+        "observed_at": datetime.now(timezone.utc).isoformat(),
     }])
     c = sqlite3.connect(str(cp.DB))
     row = c.execute(

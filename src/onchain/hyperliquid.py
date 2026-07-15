@@ -763,6 +763,8 @@ def scan_carry(rows: list[dict] | None = None, *,
             "observation_version": 1, "observed_at": scan_at,
             "hl_ann": float(row["funding_ann"]), "okx_ann": float(okx[symbol]),
             "observed_edge_ann": observed_edge, "edge_ann": observed_edge,
+            "current_partial_model_proxy_ann_pct":
+                _carry_partial_model_proxy_ann(observed_edge),
         }
 
     open_observations = []
