@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+import re
 
 import yaml
 
@@ -18,6 +19,12 @@ from src.pipeline.opportunity_ledger import active, record, save_outcome
 
 WATCHLIST = CONFIG_DIR / "airdrop_watchlist.yaml"
 VALID_STATUS = {"research", "active", "claimable", "claimed", "expired"}
+EXPLORER_HOSTS = {
+    "ethereum": {"etherscan.io"},
+    "base": {"basescan.org"},
+    "bsc": {"bscscan.com"},
+    "solana": {"solscan.io"},
+}
 
 
 def _load(path: Path = WATCHLIST) -> list[dict]:
@@ -28,10 +35,42 @@ def _load(path: Path = WATCHLIST) -> list[dict]:
     return raw.get("campaigns", []) if isinstance(raw, dict) else []
 
 
-def _official_url(value: object) -> str | None:
+def _https_url(value: object) -> tuple[str, str] | None:
     url = str(value or "")
     parsed = urlparse(url)
-    return url if parsed.scheme == "https" and parsed.netloc else None
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if (parsed.scheme != "https" or not host or parsed.username is not None
+            or parsed.password is not None):
+        return None
+    return url, host
+
+
+def _host_allowed(host: str, domains: set[str]) -> bool:
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
+def _official_url(value: object, domains: object) -> str | None:
+    parsed = _https_url(value)
+    allowed = {
+        str(domain).strip().lower().rstrip(".")
+        for domain in (domains if isinstance(domains, list) else [])
+        if str(domain).strip()
+    }
+    if not parsed or not allowed or not _host_allowed(parsed[1], allowed):
+        return None
+    return parsed[0]
+
+
+def _transaction_url(value: object, chain: str) -> str | None:
+    parsed = _https_url(value)
+    allowed = EXPLORER_HOSTS.get(chain, set())
+    if not parsed or parsed[1] not in allowed:
+        return None
+    path = urlparse(parsed[0]).path.rstrip("/")
+    tx_id = path.rsplit("/", 1)[-1] if "/tx/" in path else ""
+    valid = (bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_id))
+             if chain != "solana" else bool(re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{64,88}", tx_id)))
+    return parsed[0] if valid else None
 
 
 def _timestamp(value: object) -> str | None:
@@ -52,7 +91,8 @@ def _claim_outcome(campaign: dict) -> dict | None:
     if not isinstance(raw, dict):
         return None
     claimed_at = _timestamp(raw.get("claimed_at"))
-    tx_url = _official_url(raw.get("tx_url"))
+    chain = str(raw.get("chain") or campaign.get("chain") or "")
+    tx_url = _transaction_url(raw.get("tx_url"), chain)
     try:
         reward_usd = float(raw["reward_usd"])
         actual_cost_usd = float(raw["actual_cost_usd"])
@@ -63,6 +103,7 @@ def _claim_outcome(campaign: dict) -> dict | None:
     return {
         "version": 1, "kind": "airdrop_claim", "claimed_at": claimed_at,
         "tx_url": tx_url, "gross_reward_usd": reward_usd,
+        "chain": chain,
         "actual_cost_usd": actual_cost_usd,
         "net_reward_usd": reward_usd - actual_cost_usd,
         "reward_is_claimed": True, "cost_is_actual": True,
@@ -73,7 +114,8 @@ def normalize(campaign: dict, now: datetime | None = None) -> dict | None:
     """Validate a manually curated campaign without asserting eligibility."""
     now = now or datetime.now(timezone.utc)
     ident, project = str(campaign.get("id") or ""), str(campaign.get("project") or "")
-    url, status = _official_url(campaign.get("official_url")), campaign.get("status", "research")
+    url = _official_url(campaign.get("official_url"), campaign.get("official_domains"))
+    status = campaign.get("status", "research")
     if not ident or not project or not url or status not in VALID_STATUS:
         return None
     deadline = campaign.get("deadline")
@@ -104,6 +146,7 @@ def normalize(campaign: dict, now: datetime | None = None) -> dict | None:
         "decision_at": now.isoformat(), "expires_at": deadline,
         "deadline": deadline, "estimated_cost_usd": float(campaign.get("estimated_cost_usd") or 0),
         "wallet_count": len(wallets), "task_count": len(tasks), "evidence_state": evidence_state,
+        "official_state": "domain_allowlisted",
         "tasks": tasks, "claim_outcome": claim_outcome,
         "reasons": ["仅官方链接", f"资格证据: {evidence_state}"],
     }

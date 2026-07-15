@@ -6,6 +6,7 @@
 #     project: Example Protocol
 #     chain: ethereum
 #     official_url: https://example.org/airdrop
+#     official_domains: [example.org]  # exact domain or its subdomains only
 #     status: research            # research | active | claimable | expired
 #     deadline: "2026-12-31T00:00:00+00:00"
 #     estimated_cost_usd: 20
@@ -14,4 +15,10 @@
 #     tasks:
 #       - name: "Provide liquidity"
 #         evidence: "tx hash / dashboard screenshot / manual check"
+#     claim:                         # only after an actual claim
+#       chain: ethereum
+#       tx_url: https://etherscan.io/tx/0x<64-hex-characters>
+#       claimed_at: "2026-12-01T00:00:00+00:00"
+#       reward_usd: 100
+#       actual_cost_usd: 5
 campaigns: []
