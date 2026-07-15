@@ -25,28 +25,39 @@ to compute concentration and feed clustering on the significant holders.
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import structlog
 
 from src.config import DATA_DIR
+from src.onchain.chain_identity import (
+    EVM_CHAIN_IDS,
+    MORALIS_CHAIN_SLUGS,
+    canonical_chain,
+    evm_chain_id,
+    storage_chain_aliases,
+)
 
 logger = structlog.get_logger()
 
 DB_PATH = DATA_DIR / "holder_snapshots.db"
 
-_EVM_CHAINS = frozenset({
-    "ethereum", "eth", "bsc", "base", "arbitrum", "optimism", "polygon",
-})
+def _canonical_chain(chain: str) -> str:
+    """Compatibility wrapper that rejects unsupported storage identities."""
+    canonical = canonical_chain(chain)
+    if canonical is None:
+        raise ValueError(f"unsupported chain identity: {chain!r}")
+    return canonical
 
 
 def _is_evm_chain(chain: str) -> bool:
-    return str(chain or "").lower() in _EVM_CHAINS
+    return evm_chain_id(chain) is not None
 
 
 def _canonical_token(token: str, chain: str) -> str:
@@ -62,6 +73,14 @@ def _canonical_token(token: str, chain: str) -> str:
 def _token_match_sql(chain: str) -> str:
     """SQL predicate used to merge legacy checksum/lowercase EVM rows."""
     return "lower(token) = ?" if _is_evm_chain(chain) else "token = ?"
+
+
+def _chain_match_sql(chain: str) -> tuple[str, tuple[str, ...]]:
+    aliases = storage_chain_aliases(chain)
+    if not aliases:
+        raise ValueError(f"unsupported chain identity: {chain!r}")
+    placeholders = ",".join("?" for _ in aliases)
+    return f"lower(chain) IN ({placeholders})", aliases
 
 
 # --------------------------------------------------------------------------
@@ -111,6 +130,30 @@ def concentration_metrics(holders: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _valid_holder_payload(holders: object) -> bool:
+    """Semantic gate shared by persistence, freshness, and history reads."""
+    if not isinstance(holders, list) or not holders:
+        return False
+    saw_positive = False
+    for holder in holders:
+        if not isinstance(holder, dict):
+            return False
+        address = holder.get("address")
+        if not isinstance(address, str) or not address.strip():
+            return False
+        raw_balance = holder.get("balance")
+        if isinstance(raw_balance, bool):
+            return False
+        try:
+            balance = float(raw_balance)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(balance) or balance < 0:
+            return False
+        saw_positive = saw_positive or balance > 0
+    return saw_positive
+
+
 # --------------------------------------------------------------------------
 # Storage
 # --------------------------------------------------------------------------
@@ -154,6 +197,7 @@ def record_token_birth(
     token: str, chain: str, source: str = "", db_path: Path = DB_PATH
 ) -> None:
     """Record the first time a token enters the universe (idempotent)."""
+    chain = _canonical_chain(chain)
     token = _canonical_token(token, chain)
     conn = _connect(db_path)
     try:
@@ -175,9 +219,17 @@ def save_snapshot(
     db_path: Path = DB_PATH,
 ) -> dict[str, Any]:
     """Persist a holder snapshot and return the computed metrics."""
+    if not _valid_holder_payload(holders):
+        raise ValueError("invalid holder snapshot payload")
+    chain = _canonical_chain(chain)
     token = _canonical_token(token, chain)
     metrics = concentration_metrics(holders)
     ts = snapshot_at or datetime.now(timezone.utc).isoformat()
+    snapshot_dt = _parse_iso(ts)
+    if snapshot_dt is None:
+        raise ValueError("invalid holder snapshot timestamp")
+    if snapshot_dt > datetime.now(timezone.utc) + MAX_FUTURE_CLOCK_SKEW:
+        raise ValueError("future holder snapshot timestamp")
     conn = _connect(db_path)
     try:
         conn.execute(
@@ -188,7 +240,7 @@ def save_snapshot(
             (
                 token, chain, ts, metrics["holder_count"], metrics["top10_pct"],
                 metrics["top25_pct"], metrics["gini"],
-                metrics["total_supply_observed"], json.dumps(holders),
+                metrics["total_supply_observed"], json.dumps(holders, allow_nan=False),
             ),
         )
         conn.commit()
@@ -202,29 +254,59 @@ def get_snapshots(
     token: str, chain: str, limit: int = 100, db_path: Path = DB_PATH
 ) -> list[dict[str, Any]]:
     """Return snapshots for a token, oldest first (time series)."""
+    chain = canonical_chain(chain)
+    if chain is None:
+        return []
     token = _canonical_token(token, chain)
+    chain_match, chain_aliases = _chain_match_sql(chain)
     conn = _connect(db_path)
     try:
         rows = conn.execute(
             """SELECT snapshot_at, holder_count, top10_pct, top25_pct, gini,
-                      total_supply_observed
-               FROM holder_snapshots WHERE """ + _token_match_sql(chain) + """ AND chain = ?
-               ORDER BY snapshot_at ASC LIMIT ?""",
-            (token, chain, limit),
+                      total_supply_observed, holders_json FROM (
+                   SELECT snapshot_at, holder_count, top10_pct, top25_pct, gini,
+                          total_supply_observed, holders_json
+                   FROM holder_snapshots WHERE """ + _token_match_sql(chain)
+                   + """ AND """ + chain_match + """
+                   ORDER BY snapshot_at DESC LIMIT ?
+               ) ORDER BY snapshot_at ASC""",
+            (token, *chain_aliases, limit),
         ).fetchall()
     finally:
         conn.close()
     cols = ["snapshot_at", "holder_count", "top10_pct", "top25_pct", "gini",
             "total_supply_observed"]
-    return [dict(zip(cols, r)) for r in rows]
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        observed_at = _parse_iso(row[0])
+        valid_state, _signature = _decode_holder_state(row[6], chain)
+        if (
+            observed_at is None
+            or observed_at > now + MAX_FUTURE_CLOCK_SKEW
+            or not valid_state
+        ):
+            logger.warning(
+                "holder_metrics_history_invalid",
+                token=token,
+                chain=chain,
+                snapshot_at=row[0],
+            )
+            return []
+    return [dict(zip(cols, row[:6])) for row in rows]
 
 
 # --------------------------------------------------------------------------
 # Freshness guard — catch a holder-data source that has silently STALLED (stops
 # producing new rows). A successful fetch can legitimately return an unchanged
-# holder set for an inactive token, so identical rows are reported as static state,
-# not treated as proof that the provider is serving a frozen cache. Pure read +
-# clock injection keeps the distinction unit-testable.
+# holder set for an inactive token, so source health and dynamic-signal eligibility
+# are deliberately separate verdicts:
+#
+# * a recent identical row proves the fetch path is alive (`source_healthy=True`);
+# * without block/etag provenance it does NOT prove a new on-chain observation, so
+#   it cannot be another point in an accumulation slope
+#   (`dynamic_evidence_eligible=False`).
+#
+# Pure reads + clock injection keep the distinction unit-testable.
 # --------------------------------------------------------------------------
 
 # Opportunistic accumulation candidates normally refresh many times per day; 18h
@@ -234,7 +316,10 @@ STALE_AFTER_H = 18.0
 DAILY_SNAPSHOT_CADENCE_H = 24.0
 DAILY_STALE_GRACE_H = 6.0
 DAILY_STALE_AFTER_H = DAILY_SNAPSHOT_CADENCE_H + DAILY_STALE_GRACE_H
-# N consecutive byte-identical metric rows = an unchanged on-chain state. The
+# Allow only minor host/provider clock skew. A materially future observation can
+# manufacture recency and must never become dynamic evidence.
+MAX_FUTURE_CLOCK_SKEW = timedelta(minutes=5)
+# N consecutive semantically identical holder rows = an unchanged on-chain state. The
 # legacy name remains part of the function signature for compatibility.
 FROZEN_RUNS = 3
 
@@ -245,6 +330,69 @@ def _parse_iso(ts: str) -> datetime | None:
         return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
+
+def _holder_state_signature(
+    holders: list[dict[str, Any]], chain: str,
+) -> tuple[tuple[str, float], ...]:
+    """Order-independent identity for one observed holder state.
+
+    Providers may reorder an otherwise identical ranked response, and EVM
+    checksum casing is presentation-only.  Neither difference may manufacture a
+    new time-series point.  Solana addresses remain exact-case.
+    """
+    state: dict[str, float] = {}
+    for holder in holders or []:
+        address = str(holder.get("address") or "").strip()
+        if _is_evm_chain(chain):
+            address = address.lower()
+        try:
+            balance = float(holder.get("balance", 0) or 0)
+        except (TypeError, ValueError):
+            balance = 0.0
+        state[address] = state.get(address, 0.0) + balance
+    return tuple(sorted(state.items()))
+
+
+def _decode_holder_state(
+    raw: str | None, chain: str,
+) -> tuple[bool, tuple[tuple[str, float], ...]]:
+    """Decode a stored state without turning corruption into an empty snapshot."""
+    try:
+        holders = json.loads(raw) if raw is not None else None
+    except (json.JSONDecodeError, TypeError):
+        return False, ()
+    if not _valid_holder_payload(holders):
+        return False, ()
+    return True, _holder_state_signature(holders, chain)
+
+
+def holder_state_changed(
+    previous: list[dict[str, Any]], current: list[dict[str, Any]], chain: str,
+) -> bool:
+    """Whether two holder responses contain independently changed state."""
+    if not _valid_holder_payload(previous) or not _valid_holder_payload(current):
+        return False
+    return (
+        _holder_state_signature(previous, chain)
+        != _holder_state_signature(current, chain)
+    )
+
+
+def deduplicate_holder_history(
+    history: list[tuple[str, list[dict[str, Any]]]], chain: str,
+) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Drop consecutive cached/static copies from a dynamic time series."""
+    if any(not _valid_holder_payload(holders) for _ts, holders in history):
+        return []
+    out: list[tuple[str, list[dict[str, Any]]]] = []
+    previous: tuple[tuple[str, float], ...] | None = None
+    for timestamp, holders in history:
+        signature = _holder_state_signature(holders, chain)
+        if previous is None or signature != previous:
+            out.append((timestamp, holders))
+        previous = signature
+    return out
 
 
 def snapshot_freshness(
@@ -258,51 +406,116 @@ def snapshot_freshness(
 ) -> dict[str, Any]:
     """Verdict on whether a token's holder snapshots can be trusted as CURRENT.
 
-    Returns {stale, reason, age_hours, latest, identical_run, n}. `stale=True`
-    means do NOT trust the latest snapshot's holder list / concentration because
-    the feed produced no current observation. The last `frozen_runs` rows being
-    identical is exposed as `reason="static"` but remains trustworthy: unchanged
-    token state alone cannot prove a provider cache is frozen. Never raises.
+    `stale` / `source_healthy` describe the fetch path.  `currentness` /
+    `dynamic_evidence_eligible` answer the stricter question needed by a slope
+    signal: did the newest response contain changed state?  A recent static row is
+    healthy source evidence but dynamically ineligible because this schema has no
+    provider block/etag provenance. Never raises.
     """
     now = now or datetime.now(timezone.utc)
+    chain = canonical_chain(chain)
+    if chain is None:
+        return {
+            "stale": True, "source_healthy": False,
+            "reason": "unsupported_chain", "currentness": "unknown_unsupported_chain",
+            "dynamic_evidence_eligible": False, "age_hours": None,
+            "latest": None, "identical_run": 0, "n": 0,
+        }
     token = _canonical_token(token, chain)
+    chain_match, chain_aliases = _chain_match_sql(chain)
     conn = _connect(db_path)
     try:
         rows = conn.execute(
             """SELECT snapshot_at, holder_count, top10_pct, top25_pct, gini,
-                      total_supply_observed
-               FROM holder_snapshots WHERE """ + _token_match_sql(chain) + """ AND chain = ?
+                      total_supply_observed, holders_json
+               FROM holder_snapshots WHERE """ + _token_match_sql(chain) + """ AND """
+               + chain_match + """
                ORDER BY snapshot_at DESC LIMIT ?""",
-            (token, chain, max(frozen_runs, 1)),
+            (token, *chain_aliases, max(frozen_runs, 2)),
         ).fetchall()
     finally:
         conn.close()
 
     if not rows:
-        return {"stale": True, "reason": "no_snapshots", "age_hours": None,
-                "latest": None, "identical_run": 0, "n": 0}
+        return {
+            "stale": True, "source_healthy": False,
+            "reason": "no_snapshots", "currentness": "unknown_no_snapshot",
+            "dynamic_evidence_eligible": False, "age_hours": None,
+            "latest": None, "identical_run": 0, "n": 0,
+        }
 
     latest_ts = rows[0][0]
     latest_dt = _parse_iso(latest_ts)
-    age_h = (now - latest_dt).total_seconds() / 3600.0 if latest_dt else None
+    if latest_dt is None:
+        return {
+            "stale": True, "source_healthy": False,
+            "reason": "invalid_snapshot_timestamp",
+            "currentness": "unknown_invalid_timestamp",
+            "dynamic_evidence_eligible": False, "age_hours": None,
+            "latest": latest_ts, "identical_run": 0, "n": len(rows),
+        }
+    if latest_dt > now + MAX_FUTURE_CLOCK_SKEW:
+        return {
+            "stale": True, "source_healthy": False,
+            "reason": "future_snapshot_timestamp",
+            "currentness": "unknown_future_timestamp",
+            "dynamic_evidence_eligible": False, "age_hours": None,
+            "latest": latest_ts, "identical_run": 0, "n": len(rows),
+        }
+    age_h = (now - latest_dt).total_seconds() / 3600.0
 
-    # Count leading run of byte-identical metric rows (newest-first).
-    sig0 = tuple(rows[0][1:])
+    # Count the newest run of semantically identical holder states. Exact cached
+    # responses stay identical even if a provider changes array ordering/casing.
+    decoded_states = [_decode_holder_state(row[6], chain) for row in rows]
+    latest_valid, sig0 = decoded_states[0]
+    if not latest_valid:
+        return {
+            "stale": True, "source_healthy": False,
+            "reason": "invalid_snapshot", "currentness": "unknown_invalid_snapshot",
+            "dynamic_evidence_eligible": False,
+            "age_hours": round(age_h, 1) if age_h is not None else None,
+            "latest": latest_ts, "identical_run": 0, "n": len(rows),
+        }
+
     identical_run = 1
-    for r in rows[1:]:
-        if tuple(r[1:]) == sig0:
+    for valid, signature in decoded_states[1:]:
+        if not valid:
+            break
+        if signature == sig0:
             identical_run += 1
         else:
             break
 
     if age_h is not None and age_h > stale_after_h:
-        return {"stale": True, "reason": "stalled", "age_hours": round(age_h, 1),
-                "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
+        return {
+            "stale": True, "source_healthy": False,
+            "reason": "stalled", "currentness": "unknown_stalled",
+            "dynamic_evidence_eligible": False, "age_hours": round(age_h, 1),
+            "latest": latest_ts, "identical_run": identical_run, "n": len(rows),
+        }
+    previous_valid = len(decoded_states) >= 2 and decoded_states[1][0]
+    dynamic_eligible = previous_valid and identical_run == 1
+    currentness = (
+        "observed_change" if dynamic_eligible
+        else "unknown_static" if identical_run >= 2
+        else "unknown_previous_snapshot" if len(rows) >= 2
+        else "unknown_single_snapshot"
+    )
     if identical_run >= frozen_runs:
-        return {"stale": False, "reason": "static", "age_hours": round(age_h, 1) if age_h is not None else None,
-                "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
-    return {"stale": False, "reason": "fresh", "age_hours": round(age_h, 1) if age_h is not None else None,
-            "latest": latest_ts, "identical_run": identical_run, "n": len(rows)}
+        return {
+            "stale": False, "source_healthy": True,
+            "reason": "static", "currentness": currentness,
+            "dynamic_evidence_eligible": dynamic_eligible,
+            "age_hours": round(age_h, 1) if age_h is not None else None,
+            "latest": latest_ts, "identical_run": identical_run, "n": len(rows),
+        }
+    return {
+        "stale": False, "source_healthy": True,
+        "reason": "fresh", "currentness": currentness,
+        "dynamic_evidence_eligible": dynamic_eligible,
+        "age_hours": round(age_h, 1) if age_h is not None else None,
+        "latest": latest_ts, "identical_run": identical_run, "n": len(rows),
+    }
 
 
 # A token snapshotted only a handful of times is a one-shot screener candidate
@@ -341,6 +554,13 @@ def find_stale_snapshots(
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for token, chain in all_pairs:
+        chain = canonical_chain(chain)
+        if chain is None:
+            logger.warning(
+                "holder_snapshot_unsupported_stored_chain",
+                token=token,
+            )
+            continue
         pair = (_canonical_token(token, chain), chain)
         if pair not in seen:
             seen.add(pair)
@@ -372,8 +592,17 @@ def list_tokens(db_path: Path = DB_PATH) -> list[tuple[str, str]]:
         ).fetchall()
     finally:
         conn.close()
-    # Preserve first-seen order while merging legacy EVM casing aliases.
-    return list(dict.fromkeys((_canonical_token(t, c), c) for t, c in rows))
+    # Preserve first-seen order while merging aliases. Unsupported legacy rows
+    # cannot participate in cross-chain evidence and are omitted fail-closed.
+    out: list[tuple[str, str]] = []
+    for token, chain in rows:
+        canonical = canonical_chain(chain)
+        if canonical is None:
+            continue
+        pair = (_canonical_token(token, canonical), canonical)
+        if pair not in out:
+            out.append(pair)
+    return out
 
 
 def get_holders_history(
@@ -387,31 +616,62 @@ def get_holders_history(
     let a 3-month-old item leak into the 2h highlight. Pass it to keep the
     accumulation slope reflecting recent activity only.
     """
+    requested_chain = chain
+    chain = canonical_chain(chain)
+    if chain is None:
+        logger.warning("holder_history_unsupported_chain", chain=requested_chain)
+        return []
     token = _canonical_token(token, chain)
     match = _token_match_sql(chain)
+    chain_match, chain_aliases = _chain_match_sql(chain)
     conn = _connect(db_path)
     try:
         if since is not None:
             rows = conn.execute(
-                """SELECT snapshot_at, holders_json FROM holder_snapshots
-                   WHERE """ + match + """ AND chain = ? AND snapshot_at >= ?
-                   ORDER BY snapshot_at ASC LIMIT ?""",
-                (token, chain, since, limit),
+                """SELECT snapshot_at, holders_json FROM (
+                       SELECT snapshot_at, holders_json FROM holder_snapshots
+                       WHERE """ + match + """ AND """ + chain_match
+                       + """ AND snapshot_at >= ?
+                       ORDER BY snapshot_at DESC LIMIT ?
+                   ) ORDER BY snapshot_at ASC""",
+                (token, *chain_aliases, since, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                """SELECT snapshot_at, holders_json FROM holder_snapshots
-                   WHERE """ + match + """ AND chain = ? ORDER BY snapshot_at ASC LIMIT ?""",
-                (token, chain, limit),
+                """SELECT snapshot_at, holders_json FROM (
+                       SELECT snapshot_at, holders_json FROM holder_snapshots
+                       WHERE """ + match + """ AND """ + chain_match + """
+                       ORDER BY snapshot_at DESC LIMIT ?
+                   ) ORDER BY snapshot_at ASC""",
+                (token, *chain_aliases, limit),
             ).fetchall()
     finally:
         conn.close()
     out: list[tuple[str, list[dict[str, Any]]]] = []
+    now = datetime.now(timezone.utc)
     for ts, hj in rows:
+        observed_at = _parse_iso(ts)
+        if observed_at is None or observed_at > now + MAX_FUTURE_CLOCK_SKEW:
+            logger.warning(
+                "holder_history_invalid_timestamp",
+                token=token,
+                chain=chain,
+                snapshot_at=ts,
+            )
+            return []
         try:
-            out.append((ts, json.loads(hj) if hj else []))
+            holders = json.loads(hj) if hj is not None else None
         except (json.JSONDecodeError, TypeError):
-            out.append((ts, []))
+            holders = None
+        if not _valid_holder_payload(holders):
+            logger.warning(
+                "holder_history_invalid_json",
+                token=token,
+                chain=chain,
+                snapshot_at=ts,
+            )
+            return []
+        out.append((ts, holders))
     return out
 
 
@@ -498,8 +758,9 @@ _ALCHEMY_NET = {
 }
 
 
-_MORALIS_CHAINS = {1: "eth", 56: "bsc", 8453: "base", 42161: "arbitrum",
-                   10: "optimism", 137: "polygon"}
+_MORALIS_CHAINS = {
+    EVM_CHAIN_IDS[name]: slug for name, slug in MORALIS_CHAIN_SLUGS.items()
+}
 _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
@@ -755,16 +1016,32 @@ def snapshot_token(
 
     Returns the snapshot metrics, or None if no holders could be fetched.
     """
-    record_token_birth(token, chain, source, db_path)
-
-    if chain in ("solana", "sol"):
+    requested_chain = chain
+    chain = canonical_chain(chain)
+    if chain is None:
+        logger.warning(
+            "holder_snapshot_unsupported_chain",
+            token=token,
+            chain=requested_chain,
+            note="unknown chain is never routed to Ethereum",
+        )
+        return None
+    if chain == "solana":
         holders = fetch_holders_solana(token)
     else:
-        chain_ids = {
-            "ethereum": 1, "eth": 1, "bsc": 56, "base": 8453,
-            "arbitrum": 42161, "optimism": 10,
-        }
-        holders = fetch_holders_evm(token, chain_ids.get(chain, 1))
+        chain_id = evm_chain_id(chain)
+        if chain_id is None:
+            logger.warning(
+                "holder_snapshot_unsupported_chain",
+                token=token,
+                chain=chain,
+                note="unknown chain is never routed to Ethereum",
+            )
+            return None
+        holders = fetch_holders_evm(token, chain_id)
+
+    # Unsupported/typo chains return above and never create even a birth row.
+    record_token_birth(token, chain, source, db_path)
 
     if not holders:
         # Fetch produced nothing → no new row. That silently AGES the latest

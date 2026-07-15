@@ -14,6 +14,7 @@ import pytest
 from src.onchain.holder_snapshot import (
     _connect,
     get_holders_history,
+    get_snapshots,
     list_tokens,
     save_snapshot,
     snapshot_token,
@@ -69,7 +70,19 @@ def _save_legacy_exact_case(db, token, chain, holders, dt):
 def test_no_snapshots_is_stale(db):
     v = snapshot_freshness("0xtok", "bsc", db_path=db)
     assert v["stale"] is True
+    assert v["source_healthy"] is False
+    assert v["dynamic_evidence_eligible"] is False
     assert v["reason"] == "no_snapshots"
+
+
+def test_unsupported_chain_freshness_fails_closed_without_raising(db):
+    verdict = snapshot_freshness("0xtok", "etheruem", db_path=db)
+
+    assert verdict["stale"] is True
+    assert verdict["source_healthy"] is False
+    assert verdict["reason"] == "unsupported_chain"
+    assert verdict["dynamic_evidence_eligible"] is False
+    assert get_holders_history("0xtok", "etheruem", db_path=db) == []
 
 
 def test_recent_distinct_snapshot_is_fresh(db):
@@ -78,7 +91,10 @@ def test_recent_distinct_snapshot_is_fresh(db):
     _save_at(db, "0xtok", "bsc", _holders(4000), now - timedelta(hours=6))
     v = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
     assert v["stale"] is False
+    assert v["source_healthy"] is True
     assert v["reason"] == "fresh"
+    assert v["currentness"] == "observed_change"
+    assert v["dynamic_evidence_eligible"] is True
     assert v["age_hours"] == 6.0
 
 
@@ -88,6 +104,8 @@ def test_stalled_feed_flagged(db):
     _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=31))
     v = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
     assert v["stale"] is True
+    assert v["source_healthy"] is False
+    assert v["dynamic_evidence_eligible"] is False
     assert v["reason"] == "stalled"
     assert v["age_hours"] == 31.0
 
@@ -99,8 +117,166 @@ def test_identical_fresh_rows_are_static_not_source_failure(db):
         _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=h))
     v = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
     assert v["stale"] is False
+    assert v["source_healthy"] is True
     assert v["reason"] == "static"
+    assert v["currentness"] == "unknown_static"
+    assert v["dynamic_evidence_eligible"] is False
     assert v["identical_run"] >= 3
+
+
+def test_one_repeated_latest_row_is_not_dynamic_evidence(db):
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    _save_at(db, "0xtok", "bsc", _holders(4000), now - timedelta(hours=6))
+    _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=4))
+    _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=2))
+
+    verdict = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
+
+    # The fetch path is recent/healthy, but the newest state has no independent
+    # provenance and cannot create the zero final delta used by a slope signal.
+    assert verdict["stale"] is False
+    assert verdict["source_healthy"] is True
+    assert verdict["reason"] == "fresh"
+    assert verdict["currentness"] == "unknown_static"
+    assert verdict["dynamic_evidence_eligible"] is False
+
+
+@pytest.mark.parametrize(
+    "broken_json",
+    [
+        "{broken",
+        "{}",
+        "[]",
+        '[{"address":"   ","balance":1}]',
+        '[{"balance":1}]',
+        '[{"address":"0x1","balance":NaN}]',
+        '[{"address":"0x1","balance":Infinity}]',
+        '[{"address":"0x1","balance":-1}]',
+        '[{"address":"0x1","balance":0}]',
+    ],
+)
+def test_invalid_latest_holder_json_fails_closed(db, broken_json):
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    _save_at(db, "0xtok", "bsc", _holders(4000), now - timedelta(hours=4))
+    _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=2))
+    conn = _connect(db)
+    try:
+        conn.execute(
+            "UPDATE holder_snapshots SET holders_json = ? WHERE id = "
+            "(SELECT MAX(id) FROM holder_snapshots)",
+            (broken_json,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    verdict = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
+
+    assert verdict["stale"] is True
+    assert verdict["source_healthy"] is False
+    assert verdict["reason"] == "invalid_snapshot"
+    assert verdict["currentness"] == "unknown_invalid_snapshot"
+    assert verdict["dynamic_evidence_eligible"] is False
+    assert get_holders_history("0xtok", "bsc", db_path=db) == []
+    assert get_snapshots("0xtok", "bsc", db_path=db) == []
+
+
+@pytest.mark.parametrize(
+    "holders",
+    [
+        [],
+        [{"address": "   ", "balance": 1}],
+        [{"balance": 1}],
+        [{"address": "0x1", "balance": float("nan")}],
+        [{"address": "0x1", "balance": float("inf")}],
+        [{"address": "0x1", "balance": -1}],
+        [{"address": "0x1", "balance": 0}],
+    ],
+)
+def test_save_snapshot_rejects_semantically_invalid_holder_payload(db, holders):
+    with pytest.raises(ValueError, match="invalid holder snapshot payload"):
+        save_snapshot("0xtok", "bsc", holders, db_path=db)
+
+    conn = _connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM holder_snapshots").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_save_snapshot_rejects_invalid_timestamp(db):
+    with pytest.raises(ValueError, match="invalid holder snapshot timestamp"):
+        save_snapshot(
+            "0xtok", "bsc", _holders(5000), snapshot_at="not-a-time", db_path=db,
+        )
+
+    conn = _connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM holder_snapshots").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_save_snapshot_rejects_materially_future_timestamp(db):
+    future = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    with pytest.raises(ValueError, match="future holder snapshot timestamp"):
+        save_snapshot(
+            "0xtok", "bsc", _holders(5000),
+            snapshot_at=future.isoformat(), db_path=db,
+        )
+
+    conn = _connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM holder_snapshots").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_future_changed_snapshot_fails_closed_on_every_read_path(db):
+    now = datetime.now(timezone.utc)
+    _save_legacy_exact_case(
+        db, "0xtok", "bsc", _holders(4000), now - timedelta(hours=1),
+    )
+    # Bypass the write guard to reproduce a legacy/corrupt future DB row whose
+    # changed state would otherwise look like fresh dynamic evidence.
+    _save_legacy_exact_case(
+        db, "0xtok", "bsc", _holders(5000), now + timedelta(minutes=10),
+    )
+
+    verdict = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
+
+    assert verdict["stale"] is True
+    assert verdict["source_healthy"] is False
+    assert verdict["reason"] == "future_snapshot_timestamp"
+    assert verdict["currentness"] == "unknown_future_timestamp"
+    assert verdict["dynamic_evidence_eligible"] is False
+    assert get_holders_history("0xtok", "bsc", db_path=db) == []
+    assert get_snapshots("0xtok", "bsc", db_path=db) == []
+
+
+def test_invalid_latest_snapshot_timestamp_fails_closed(db):
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    _save_at(db, "0xtok", "bsc", _holders(4000), now - timedelta(hours=4))
+    _save_at(db, "0xtok", "bsc", _holders(5000), now - timedelta(hours=2))
+    conn = _connect(db)
+    try:
+        conn.execute(
+            "UPDATE holder_snapshots SET snapshot_at = 'not-a-timestamp' WHERE id = "
+            "(SELECT MAX(id) FROM holder_snapshots)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    verdict = snapshot_freshness("0xtok", "bsc", now=now, db_path=db)
+
+    assert verdict["stale"] is True
+    assert verdict["source_healthy"] is False
+    assert verdict["reason"] == "invalid_snapshot_timestamp"
+    assert verdict["currentness"] == "unknown_invalid_timestamp"
+    assert verdict["dynamic_evidence_eligible"] is False
+    assert get_holders_history("0xtok", "bsc", db_path=db) == []
 
 
 def test_stalled_feed_remains_failure_when_old_rows_are_identical(db):
@@ -174,6 +350,43 @@ def test_evm_checksum_aliases_merge_without_stale_false_positive(db):
     assert len(get_holders_history(checksum, "bsc", db_path=db)) == 2
 
 
+def test_avalanche_checksum_aliases_are_canonical_evm_identity(db):
+    now = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    checksum = "0xAbCdEf1234567890"
+    lower = checksum.lower()
+    _save_legacy_exact_case(
+        db, checksum, "avax", _holders(5000), now - timedelta(hours=8),
+    )
+    _save_at(
+        db, lower, "avalanche", _holders(4000), now - timedelta(hours=2),
+    )
+
+    verdict = snapshot_freshness(checksum, "avax", now=now, db_path=db)
+
+    assert verdict["dynamic_evidence_eligible"] is True
+    assert list_tokens(db_path=db) == [(lower, "avalanche")]
+    assert len(get_holders_history(checksum, "avax", db_path=db)) == 2
+    assert len(get_holders_history(checksum, "avalanche", db_path=db)) == 2
+
+
+def test_legacy_eth_storage_alias_reads_through_canonical_chain(db):
+    now = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    checksum = "0xAbCdEf1234567890"
+    _save_legacy_exact_case(
+        db, checksum, "eth", _holders(5000), now - timedelta(hours=8),
+    )
+    _save_at(
+        db, checksum.lower(), "ethereum", _holders(4000), now - timedelta(hours=2),
+    )
+
+    verdict = snapshot_freshness(checksum, "ethereum", now=now, db_path=db)
+
+    assert verdict["dynamic_evidence_eligible"] is True
+    assert list_tokens(db_path=db) == [(checksum.lower(), "ethereum")]
+    assert len(get_holders_history(checksum, "eth", db_path=db)) == 2
+    assert len(get_holders_history(checksum, "ethereum", db_path=db)) == 2
+
+
 def test_solana_mint_identity_remains_case_sensitive(db):
     now = datetime(2026, 7, 15, tzinfo=timezone.utc)
     mint = "AbCdEfSolanaMint"
@@ -201,6 +414,71 @@ def test_snapshot_token_routes_bsc_to_chain_id_56(db, monkeypatch):
     assert calls == [("0xAbCd", 56)]
     assert result is not None
     assert list_tokens(db_path=db) == [("0xabcd", "bsc")]
+
+
+def test_snapshot_token_routes_avalanche_alias_to_43114(db, monkeypatch):
+    calls = []
+
+    def fake_fetch(token, chain_id):
+        calls.append((token, chain_id))
+        return _holders(5000)
+
+    monkeypatch.setattr(
+        "src.onchain.holder_snapshot.fetch_holders_evm", fake_fetch,
+    )
+    result = snapshot_token("0xAbCd", "avax", source="test", db_path=db)
+
+    assert calls == [("0xAbCd", 43114)]
+    assert result is not None
+    assert list_tokens(db_path=db) == [("0xabcd", "avalanche")]
+
+
+def test_snapshot_token_unknown_chain_never_falls_back_to_ethereum(db, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "src.onchain.holder_snapshot.fetch_holders_evm",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    assert snapshot_token("0xAbCd", "avalanch-typo", db_path=db) is None
+    assert calls == []
+    conn = _connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM token_birth").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM holder_snapshots").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_holder_history_limit_keeps_most_recent_rows(db):
+    start = datetime(2026, 7, 10, tzinfo=timezone.utc)
+    for i in range(105):
+        _save_at(
+            db,
+            "0xtok",
+            "bsc",
+            _holders(4000 + i),
+            start + timedelta(minutes=i),
+        )
+
+    for since in (None, (start - timedelta(minutes=1)).isoformat()):
+        history = get_holders_history(
+            "0xtok", "bsc", limit=100, since=since, db_path=db,
+        )
+
+        assert len(history) == 100
+        assert history[0][0] == (start + timedelta(minutes=5)).isoformat()
+        assert history[-1][0] == (start + timedelta(minutes=104)).isoformat()
+        assert history[-1][1] == _holders(4104)
+
+    metric_history = get_snapshots("0xtok", "bsc", limit=100, db_path=db)
+    assert len(metric_history) == 100
+    assert metric_history[0]["snapshot_at"] == (
+        start + timedelta(minutes=5)
+    ).isoformat()
+    assert metric_history[-1]["snapshot_at"] == (
+        start + timedelta(minutes=104)
+    ).isoformat()
 
 
 def test_find_stale_cadence_fallback_needs_min_snapshots(db):
