@@ -1,7 +1,7 @@
 """Launch candidates fail closed unless safety and round-trip routing are verified."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 def _event(**overrides):
@@ -175,7 +175,7 @@ def test_jupiter_transport_failure_is_unknown_not_a_fake_no_route():
     assert "quote unavailable" in got["reason"]
 
 
-def test_scan_assessment_failure_persists_watch_not_probe(tmp_path, monkeypatch):
+def test_scan_assessment_failure_appends_unknown_without_relabeling_discovery(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
     from src.pipeline import opportunity_ledger as ol
 
@@ -191,9 +191,49 @@ def test_scan_assessment_failure_persists_watch_not_probe(tmp_path, monkeypatch)
     def fetch(url):
         return [profile] if url == lr.PROFILES_URL else [pair]
 
-    got = lr.scan(fetch=fetch, now=now, assessor=lambda event: (_ for _ in ()).throw(
-        RuntimeError("security down")))
+    got = lr.scan(fetch=fetch, now=now, max_primary=0, max_evm=0,
+                  assessor=lambda event: (_ for _ in ()).throw(
+                      RuntimeError("security down")))
     assert got["assessed"] == 1
-    row = ol.active("launch")[0]
-    assert row["decision"] == "WATCH"
-    assert row["security_gate"]["state"] == "unknown"
+    row = ol.active("launch", now=now)[0]
+    assert row["decision"] == "SMALL_PROBE"
+    assert row["action_level"] == "A1_WATCH"
+    assert row["current_assessment"]["security_state"] == "unknown"
+
+
+def test_current_route_quote_cannot_rewrite_discovery_price_or_cost(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    from src.pipeline import opportunity_ledger as ol
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    now = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    profile = {"chainId": "solana", "tokenAddress": "Mint"}
+    pair = {"chainId": "solana", "pairAddress": "pool", "priceUsd": "0.001",
+            "pairCreatedAt": int(now.timestamp() * 1000), "fdv": 100_000,
+            "liquidity": {"usd": 20_000}, "volume": {"m5": 1_000},
+            "txns": {"m5": {"buys": 10, "sells": 2}},
+            "baseToken": {"address": "Mint", "symbol": "T"}}
+
+    def fetch(url):
+        return [profile] if url == lr.PROFILES_URL else [pair]
+
+    def assessor(event):
+        event["entry_price"] = 99
+        event["roundtrip_cost_pct_est"] = 2.5
+        event["security_gate"] = {"state": "pass", "checked_at": now.isoformat()}
+        event["execution_probe"] = {
+            "state": "quoted", "source": "test router", "api_mode": "test",
+            "roundtrip_loss_pct": 2.5, "roundtrip_back_usd": 58.5,
+            "checked_at": now.isoformat(), "is_real_fill": False,
+        }
+        event["quote_at"] = now.isoformat()
+        event["expires_at"] = (now + timedelta(seconds=60)).isoformat()
+        return event
+
+    lr.scan(fetch=fetch, now=now, max_primary=0, max_evm=0, assessor=assessor)
+    discovery = ol.outcome_rows()[0]
+    latest = ol.latest_execution_assessment(discovery["id"])
+    assert discovery["entry_price"] == 0.001
+    assert discovery["cost_contract"]["method"].endswith("buffer_v1")
+    assert latest["cost_contract"]["known_total_pct"] == 2.5
+    assert latest["entry_reference_price"] is None

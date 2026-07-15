@@ -14,11 +14,18 @@ def ledger(tmp_path, monkeypatch):
     return ol
 
 
-def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE") -> dict:
-    return {"lane": "launch", "chain": "solana", "token": token, "symbol": token,
+def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE",
+            *, v3: bool = False) -> dict:
+    item = {"lane": "launch", "chain": "solana", "token": token, "symbol": token,
             "detected_at": detected_at, "entry_price": 100.0, "decision": decision,
             "state": "live", "max_notional_usd": 50,
             "roundtrip_cost_pct_est": 1.0, "cost_model": "test_frozen_cost"}
+    if v3:
+        from src.pipeline.execution_cost import discovery_contract
+        item.update({"cohort_version": 3, "cost_contract": discovery_contract(
+            notional_usd=50, modeled_roundtrip_pct=1.0,
+            method="constant_product_roundtrip_plus_0.60pct_buffer_v1")})
+    return item
 
 
 def test_resolver_settles_one_horizon_per_event_and_preserves_entry(ledger):
@@ -194,10 +201,10 @@ def test_stats_refuse_rate_below_minimum_sample(ledger):
     assert stat["verdict"] == "不可判"
     assert "rate" not in stat
     assert stat["n"] == 1
-    assert stat["probe"]["n"] == 1 and stat["control"]["n"] == 0
+    assert stat["probe"]["n"] == 0 and stat["control"]["n"] == 0
     gate = oo.actionability_gate("launch")
     assert gate["state"] == "collecting"
-    assert gate["probe_n"] == 1 and gate["control_n"] == 0
+    assert gate["probe_n"] == 0 and gate["control_n"] == 0
 
 
 def test_legacy_mutable_decision_is_excluded_from_cohort(ledger):
@@ -218,11 +225,11 @@ def test_launch_edge_requires_and_uses_watch_control(ledger):
 
     ts = datetime.now(timezone.utc).isoformat()
     for i in range(oo.MIN_N):
-        ident, _ = ledger.record(_launch(ts, f"probe-{i}", "SMALL_PROBE"))
+        ident, _ = ledger.record(_launch(ts, f"probe-{i}", "SMALL_PROBE", v3=True))
         ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": 8.0}}},
                             "resolved")
     for i in range(oo.MIN_N):
-        ident, _ = ledger.record(_launch(ts, f"watch-{i}", "WATCH"))
+        ident, _ = ledger.record(_launch(ts, f"watch-{i}", "WATCH", v3=True))
         ledger.save_outcome(ident, {"horizons": {"24h": {"net_return_pct_est": -2.0}}},
                             "resolved")
 

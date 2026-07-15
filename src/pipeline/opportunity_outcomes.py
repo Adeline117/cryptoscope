@@ -32,6 +32,7 @@ MIN_N = 20
 MAX_PRICE_LOOKUPS = 20       # hard network/resource budget per hourly resolver run
 UNRESOLVABLE_DAYS = 21       # 7d horizon plus a generous historical-data grace period
 SUPPORTED_LANES = {"launch", "cascade"}
+LAUNCH_V3_COST_METHOD = "constant_product_roundtrip_plus_0.60pct_buffer_v1"
 
 PriceAt = Callable[[dict, datetime], float | None]
 
@@ -268,7 +269,11 @@ def _percentile(values: list[float], p: float) -> float | None:
 def _cohort(rows: list[dict], decision: str) -> dict:
     vals = []
     for row in rows:
-        if row.get("decision") != decision or (row.get("cohort_version") or 0) < 2:
+        contract = row.get("cost_contract") or {}
+        if (row.get("decision") != decision or row.get("cohort_version") != 3
+                or row.get("cost_contract_version") != 1
+                or contract.get("purpose") != "discovery_outcome"
+                or contract.get("method") != LAUNCH_V3_COST_METHOD):
             continue
         point = ((row.get("outcome") or {}).get("horizons") or {}).get("24h")
         if point and point.get("net_return_pct_est") is not None:
@@ -443,6 +448,9 @@ def lane_stats() -> dict:
         if lane == "launch":
             common["legacy_unfrozen_n"] = sum((r.get("cohort_version") or 0) < 2
                                                 for r in measurable)
+            common["legacy_v2_descriptive_n"] = sum(r.get("cohort_version") == 2
+                                                     for r in measurable)
+            common["v3_cost_method"] = LAUNCH_V3_COST_METHOD
             common["probe"] = _cohort(measurable, "SMALL_PROBE")
             common["control"] = _cohort(measurable, "WATCH")
         if n < MIN_N:

@@ -49,3 +49,12 @@ def test_cost_contract_rejects_mismatched_totals_and_filled_unknowns():
                   "completeness": "partial",
                   "components": [{"name": "network", "pct": 0.0,
                                   "status": "unknown"}]})
+
+
+def test_unknown_route_contract_invents_no_zero_cost_fill():
+    from src.pipeline.execution_cost import unknown_route_contract
+
+    contract = unknown_route_contract(notional_usd=25, method="route_unavailable")
+    assert contract["known_total_pct"] == 0
+    assert contract["all_in_total_pct"] is None
+    assert all(component["status"] == "unknown" for component in contract["components"])

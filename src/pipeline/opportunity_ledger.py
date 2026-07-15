@@ -299,6 +299,100 @@ def latest_execution_assessment(ident: str) -> dict | None:
     return _assessment_from_row(row)
 
 
+def _latest_assessment_map(c: sqlite3.Connection, identities: list[str]) -> dict[str, dict]:
+    if not identities:
+        return {}
+    placeholders = ",".join("?" for _ in identities)
+    rows = c.execute(f"""SELECT assessment_id,opportunity_id,kind,assessed_at,
+        security_state,security_at,security_expires_at,route_state,quote_source,
+        quote_mode,quote_at,quote_expires_at,expires_at,notional_usd,
+        entry_reference_price,invalidation_reference_price,roundtrip_back_usd,
+        cost_contract_version,cost_contract,is_real_fill,reason_code,payload,created_at
+      FROM execution_assessments WHERE opportunity_id IN ({placeholders})
+      ORDER BY opportunity_id,assessed_at DESC,assessment_id DESC""", identities).fetchall()
+    latest = {}
+    for row in rows:
+        item = _assessment_from_row(row)
+        latest.setdefault(item["opportunity_id"], item)
+    return latest
+
+
+def _current_assessment(item: dict) -> dict:
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    return {**payload, **{key: value for key, value in item.items() if key != "payload"}}
+
+
+def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | None,
+                   now: datetime) -> dict:
+    """Derive A0-A4 at read time; active read-only candidates can never be A4."""
+    common = {"auto_execution_allowed": False, "actionable_now": False,
+              "current_assessment": _current_assessment(assessment) if assessment else None}
+    if item.get("decision") == "AVOID":
+        return {**common, "action_level": "A0_BLOCKED",
+                "action_reason_codes": ["discovery_hard_block"]}
+    if (item.get("cohort_version") or 0) < 3:
+        return {**common, "action_level": "A1_WATCH",
+                "action_reason_codes": ["legacy_without_v3_contract"]}
+    if assessment is None:
+        return {**common, "action_level": "A1_WATCH",
+                "action_reason_codes": ["assessment_missing"]}
+    current = common["current_assessment"]
+    if assessment.get("kind") == "real_fill" and assessment.get("is_real_fill"):
+        if current.get("roundtrip_validated") is True:
+            return {**common, "action_level": "A4_REAL_FILL_VALIDATED",
+                    "action_reason_codes": ["historical_real_roundtrip_validated"]}
+        return {**common, "action_level": "A1_WATCH",
+                "action_reason_codes": ["real_fill_roundtrip_not_validated"]}
+    if assessment.get("security_state") == "avoid" or assessment.get("route_state") == "untradeable":
+        return {**common, "action_level": "A0_BLOCKED",
+                "action_reason_codes": ["security_or_reverse_route_block"]}
+    expiry = assessment.get("expires_at")
+    try:
+        expiry_dt = datetime.fromisoformat(expiry).astimezone(timezone.utc) if expiry else None
+    except (TypeError, ValueError):
+        expiry_dt = None
+    if (assessment.get("security_state") != "pass"
+            or assessment.get("route_state") != "quoted"
+            or not assessment.get("quote_at") or expiry_dt is None or expiry_dt <= now):
+        reasons = []
+        if assessment.get("security_state") != "pass":
+            reasons.append("security_not_pass")
+        if assessment.get("route_state") != "quoted":
+            reasons.append("route_not_quoted")
+        if not assessment.get("quote_at"):
+            reasons.append("quote_clock_missing")
+        if expiry_dt is None or expiry_dt <= now:
+            reasons.append("quote_expired_or_invalid")
+        return {**common, "action_level": "A1_WATCH", "action_reason_codes": reasons}
+    reasons = []
+    contract = assessment.get("cost_contract") or {}
+    if contract.get("completeness") != "complete" or contract.get("all_in_total_pct") is None:
+        reasons.append("all_in_cost_incomplete")
+    if assessment.get("entry_reference_price") is None:
+        reasons.append("entry_reference_price_unknown")
+    if assessment.get("invalidation_reference_price") is None:
+        reasons.append("invalidation_reference_price_unknown")
+    if not evidence_gate or evidence_gate.get("state") != "pass":
+        reasons.append("evidence_gate_not_pass")
+    security_expiry = assessment.get("security_expires_at")
+    try:
+        security_fresh = (security_expiry is not None
+                          and datetime.fromisoformat(security_expiry).astimezone(timezone.utc) > now)
+    except (TypeError, ValueError):
+        security_fresh = False
+    if not security_fresh:
+        reasons.append("security_freshness_unproven")
+    if current.get("delivery_sla_state") != "pass":
+        reasons.append("delivery_sla_unverified")
+    if item.get("decision") != "SMALL_PROBE":
+        reasons.append("discovery_cohort_not_probe")
+    if reasons:
+        return {**common, "action_level": "A2_PAPER_READY",
+                "action_reason_codes": reasons}
+    return {**common, "action_level": "A3_MANUAL_PROBE", "actionable_now": True,
+            "action_reason_codes": ["all_manual_probe_gates_pass"]}
+
+
 def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[dict]:
     """Return event cards plus a fail-closed current-actionability verdict."""
     if lane not in LANES:
@@ -314,6 +408,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                                   payload, outcome_state, outcome
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
+        latest_assessments = _latest_assessment_map(c, [row[0] for row in rows])
     finally:
         c.close()
     evidence_gate = None
@@ -339,10 +434,15 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             # The stored columns are the immutable first-observed execution plan.
             # Enrichment payload may contain newer market values, but it must never
             # rewrite the entry, invalidation, size cap, or discovery timestamp.
+            immutable = {"entry_price", "invalidation_price", "max_notional_usd",
+                         "roundtrip_cost_pct_est", "cost_model", "cost_contract",
+                         "cost_contract_version", "cohort_version", "decision",
+                         *CLOCK_FIELDS}
+            if lane == "launch":
+                immutable.update({"security_gate", "execution_probe", "action_level",
+                                  "current_assessment"})
             for key, value in payload.items():
-                if key not in {"entry_price", "invalidation_price", "max_notional_usd",
-                               "roundtrip_cost_pct_est", "cost_model", "cost_contract",
-                               "cost_contract_version", "cohort_version", *CLOCK_FIELDS}:
+                if key not in immutable:
                     item[key] = value
         except (TypeError, json.JSONDecodeError):
             item.pop("payload", None)
@@ -385,10 +485,26 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             effective_decision = "EXPIRED"
             item["actionability_reason"] = "claim window expired"
         item["recorded_decision"] = recorded_decision
-        item["effective_decision"] = effective_decision
         if evidence_gate is not None:
             item["evidence_gate"] = evidence_gate
-        item["actionable_now"] = effective_decision in {"SMALL_PROBE", "CLAIM_CHECK"}
+        if lane == "launch":
+            action = _launch_action(item, latest_assessments.get(item["id"]),
+                                    evidence_gate, now)
+            item.update(action)
+            effective_decision = ("AVOID" if action["action_level"] == "A0_BLOCKED"
+                                  else "SMALL_PROBE" if action["action_level"] == "A3_MANUAL_PROBE"
+                                  else "WATCH")
+            current_expiry = (action.get("current_assessment") or {}).get("expires_at")
+            if current_expiry:
+                try:
+                    seconds_to_expiry = round((datetime.fromisoformat(current_expiry)
+                                               .astimezone(timezone.utc) - now).total_seconds())
+                except (TypeError, ValueError):
+                    seconds_to_expiry = None
+                expired = seconds_to_expiry is not None and seconds_to_expiry <= 0
+        else:
+            item["actionable_now"] = effective_decision in {"SMALL_PROBE", "CLAIM_CHECK"}
+        item["effective_decision"] = effective_decision
         item["is_expired"] = expired
         item["seconds_to_expiry"] = seconds_to_expiry
         out.append(item)

@@ -23,6 +23,19 @@ def test_qualify_emits_small_probe_only_for_fresh_tradeable_flow():
     assert got["decision"] == "SMALL_PROBE"
     assert got["invalidation_price"] == pytest.approx(0.00007)
     assert got["max_notional_usd"] == 60  # 0.3% of pool, not an unbounded suggestion
+    assert got["cohort_version"] == 3
+    assert got["cost_contract"]["purpose"] == "discovery_outcome"
+
+
+def test_probe_and_watch_freeze_the_same_discovery_cost_method():
+    from src.pipeline.launch_radar import qualify
+
+    now = datetime.fromtimestamp(1_700_000_000_000 / 1000 + 60 * 30, tz=timezone.utc)
+    probe = qualify(_pair(), now=now)
+    watch = qualify(_pair(txns={"m5": {"buys": 1, "sells": 3}}), now=now)
+    assert probe["decision"] == "SMALL_PROBE" and watch["decision"] == "WATCH"
+    assert probe["cost_contract"] == watch["cost_contract"]
+    assert probe["roundtrip_cost_pct_est"] == watch["roundtrip_cost_pct_est"]
 
 
 def test_qualify_rejects_untradeable_or_late_pools():
@@ -49,9 +62,10 @@ def test_ledger_keeps_first_seen_entry_when_event_is_refreshed(tmp_path, monkeyp
     assert row["entry_price"] == 0.01
     assert row["cost_pct_est"] == 1.2 and row["cost_model"] == "first_snapshot"
     assert row["cohort_version"] == 2
-    # The live card may refresh to SMALL_PROBE, but the experiment cohort is frozen
-    # at first observation so a later pump cannot relabel an old WATCH as a winner.
-    assert row["decision"] == "SMALL_PROBE"
+    # Discovery decision is now immutable on both read surfaces; current execution
+    # measurements live in the append-only assessment table instead.
+    assert row["decision"] == "WATCH"
+    assert row["action_level"] == "A1_WATCH"
     assert ol.outcome_rows()[0]["decision"] == "WATCH"
 
 
@@ -193,7 +207,7 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     assert solana["qualification"]["recent_complete"] == 1
 
 
-def test_forward_evm_factory_pool_is_exactly_bridged_as_watch(tmp_path, monkeypatch):
+def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, monkeypatch):
     from src.pipeline import evm_factory_stream as stream
     from src.pipeline import launch_radar as lr
     import src.pipeline.opportunity_ledger as ol
@@ -231,7 +245,9 @@ def test_forward_evm_factory_pool_is_exactly_bridged_as_watch(tmp_path, monkeypa
                      assessor=lambda event: event)
     assert result["primary_evm"]["inserted"] == 1
     row = ol.active("launch", now=now)[0]
-    assert row["decision"] == "WATCH" and row["primary_evidence"]["pool"] == pool
+    assert row["decision"] == "SMALL_PROBE" and row["primary_evidence"]["pool"] == pool
+    assert row["action_level"] == "A1_WATCH"
+    assert row["current_assessment"]["route_state"] == "unknown"
     assert row["event_at"] == now.replace(second=0).isoformat()
     c = stream._conn()
     try:

@@ -9,6 +9,7 @@ rise.
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import urllib.request
 from datetime import datetime, timezone
 
@@ -87,6 +88,10 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     # constant-product impact on entry+exit plus a 0.60% DEX fee/routing buffer.
     from src.pipeline.slippage import price_impact
     roundtrip_cost = round(2 * price_impact(liq, max_notional) + 0.60, 3)
+    from src.pipeline.execution_cost import discovery_contract
+    cost_contract = discovery_contract(
+        notional_usd=max_notional, modeled_roundtrip_pct=roundtrip_cost,
+        method="constant_product_roundtrip_plus_0.60pct_buffer_v1")
     ready = age_min <= 180 and buys >= 3 and flow_ratio >= 1.15 and vol5 >= liq * 0.015
     decision = "SMALL_PROBE" if ready else "WATCH"
     reasons = [f"首池 {age_min:.0f}m", f"FDV ${fdv:,.0f}", f"流动性 ${liq:,.0f}"]
@@ -103,6 +108,7 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
         "max_notional_usd": max_notional, "age_min": round(age_min, 1),
         "roundtrip_cost_pct_est": roundtrip_cost,
         "cost_model": "constant_product_roundtrip_plus_0.60pct_buffer",
+        "cost_contract": cost_contract, "cohort_version": 3,
         "fdv": fdv, "liquidity_usd": liq, "volume_m5": vol5,
         "buys_m5": buys, "sells_m5": sells, "flow_ratio": round(flow_ratio, 2),
         "boost_active": boost, "pair": pair.get("pairAddress"), "url": pair.get("url"),
@@ -132,6 +138,60 @@ def _assess_candidate(event: dict, assessor, *, assessed: int,
     event["execution_probe"] = {"state": "skipped", "reason": "assessment budget exhausted"}
     event["reasons"].append("执行门降级:本轮安全/路由检查预算已用完")
     return event, assessed
+
+
+def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
+    """Convert a mutable gate result into one append-only current measurement."""
+    security, route = event.get("security_gate") or {}, event.get("execution_probe") or {}
+    notional = float(event.get("max_notional_usd") or 0)
+    from src.pipeline.execution_cost import route_contract, unknown_route_contract
+    try:
+        route_loss = float(route["roundtrip_loss_pct"])
+        cost = route_contract(
+            notional_usd=notional, route_loss_pct=max(0, route_loss),
+            method=str(route.get("api_mode") or route.get("source") or "read_only_route"))
+    except (KeyError, TypeError, ValueError):
+        cost = unknown_route_contract(
+            notional_usd=notional, method=str(route.get("source") or "route_unavailable"))
+    quote_at = route.get("checked_at") or event.get("quote_at")
+    expires_at = event.get("expires_at")
+    sec_state, route_state = security.get("state") or "unknown", route.get("state") or "unknown"
+    reasons = []
+    if sec_state != "pass":
+        reasons.append(f"security_{sec_state}")
+    if route_state != "quoted":
+        reasons.append(f"route_{route_state}")
+    if cost["completeness"] != "complete":
+        reasons.append("cost_incomplete")
+    reasons.extend(("entry_reference_price_unknown", "delivery_sla_unverified"))
+    return {
+        "kind": "read_only_quote", "assessed_at": assessed_at.isoformat(),
+        "security_state": sec_state,
+        "security_at": security.get("checked_at") or assessed_at.isoformat(),
+        "security_expires_at": None,
+        "route_state": route_state, "quote_source": route.get("source"),
+        "quote_mode": route.get("api_mode"), "quote_at": quote_at,
+        "quote_expires_at": expires_at, "expires_at": expires_at,
+        "notional_usd": notional, "entry_reference_price": None,
+        "invalidation_reference_price": None,
+        "roundtrip_back_usd": route.get("roundtrip_back_usd"),
+        "cost_contract": cost, "is_real_fill": False,
+        "reason_code": reasons[0] if reasons else None,
+        "action_reason_codes": reasons, "delivery_sla_state": "unverified",
+        "security_gate": security, "execution_probe": route,
+        "auto_execution_allowed": False,
+    }
+
+
+def _append_assessment(ident: str, event: dict, assessor, *, assessed: int,
+                       max_assessments: int, now: datetime) -> tuple[dict, int]:
+    """Assess a copy so current quotes can never mutate the discovery snapshot."""
+    assessed_event, assessed = _assess_candidate(
+        deepcopy(event), assessor, assessed=assessed, max_assessments=max_assessments)
+    if event.get("decision") == "SMALL_PROBE":
+        from src.pipeline.opportunity_ledger import append_execution_assessment
+        append_execution_assessment(ident, _execution_assessment(assessed_event, assessed_at=now))
+    return assessed_event, assessed
 
 
 def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
@@ -184,9 +244,10 @@ def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
             "evidence_state": "complete",
             "explorer_url": f"https://solscan.io/tx/{raw['signature']}",
         }
-        event, assessed = _assess_candidate(
-            event, assessor, assessed=assessed, max_assessments=max_assessments)
-        ident, new = record(event)
+        ident, new = record_if_absent(event)
+        _, assessed = _append_assessment(
+            ident, event, assessor, assessed=assessed,
+            max_assessments=max_assessments, now=now)
         stream.set_qualification(raw["signature"], "qualified_recorded",
                                  ledger_event_id=ident, at=now)
         result["recorded"] += 1
@@ -275,15 +336,10 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
                              if raw["chain"] == "base" else
                              f"https://etherscan.io/tx/{raw['transaction_hash']}"),
         }
-        event, assessed = _assess_candidate(
-            event, assessor, assessed=assessed, max_assessments=max_assessments)
-        # Until gas and a true executable EVM round trip are priced, factory rows
-        # are useful discovery/control evidence but never an action window.
-        if event.get("decision") == "SMALL_PROBE":
-            event["decision"] = "WATCH"
-            event.setdefault("reasons", []).append(
-                "EVM 主链发现仅纸面: gas/双向可执行成本尚不完整")
         ident, new = record_if_absent(event)
+        _, assessed = _append_assessment(
+            ident, event, assessor, assessed=assessed,
+            max_assessments=max_assessments, now=now)
         state = "qualified_recorded" if new else "duplicate_token_existing"
         stream.set_qualification(raw, state,
                                  reason=None if new else "token already has a first launch event",
@@ -333,9 +389,10 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
             pair = _pair_for(profile, fetch)
             event = qualify(pair, now=now) if pair else None
             if event:
-                event, assessed = _assess_candidate(
-                    event, assessor, assessed=assessed, max_assessments=max_assessments)
-                _, new = record(event)
+                ident, new = record(event)
+                _, assessed = _append_assessment(
+                    ident, event, assessor, assessed=assessed,
+                    max_assessments=max_assessments, now=now)
                 inserted += int(new)
         except Exception:
             continue

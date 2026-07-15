@@ -121,3 +121,18 @@ def route_contract(*, notional_usd: float, route_loss_pct: float,
         "all_in_total_pct": all_in, "completeness": completeness,
         "is_real_fill": False,
     })
+
+
+def unknown_route_contract(*, notional_usd: float, method: str) -> dict:
+    """Represent a failed/unknown current quote with zero invented cost."""
+    return validate({
+        "version": CONTRACT_VERSION, "purpose": "current_action",
+        "basis": "round_trip", "currency": "USD", "notional_usd": notional_usd,
+        "method": method,
+        "components": [
+            {"name": "route_loss", "pct": None, "status": "unknown"},
+            {"name": "network_fee", "pct": None, "status": "unknown"},
+        ],
+        "known_total_pct": 0, "all_in_total_pct": None,
+        "completeness": "partial", "is_real_fill": False,
+    })

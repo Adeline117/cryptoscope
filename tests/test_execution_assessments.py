@@ -121,3 +121,76 @@ def test_discovery_cost_contract_is_stored_on_immutable_row(tmp_path, monkeypatc
     assert row["cost_contract_version"] == 1
     assert row["cost_contract"]["purpose"] == "discovery_outcome"
     assert ledger.active("launch")[0]["cost_contract"]["known_total_pct"] == 1.2
+
+
+def test_fresh_partial_quote_resolves_to_paper_ready_not_actionable(tmp_path, monkeypatch):
+    ledger, ident = _setup(tmp_path, monkeypatch)
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    c = ledger._conn()
+    try:
+        c.execute("UPDATE opportunities SET cohort_version=3 WHERE id=?", (ident,))
+        c.commit()
+    finally:
+        c.close()
+    ledger.append_execution_assessment(ident, _assessment(now))
+    row = ledger.active("launch", now=now)[0]
+    assert row["action_level"] == "A2_PAPER_READY"
+    assert row["actionable_now"] is False
+    assert row["auto_execution_allowed"] is False
+    assert "all_in_cost_incomplete" in row["action_reason_codes"]
+    assert row["current_assessment"]["entry_reference_price"] == 1.1
+
+
+def test_expired_v3_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
+    ledger, ident = _setup(tmp_path, monkeypatch)
+    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    c = ledger._conn()
+    try:
+        c.execute("UPDATE opportunities SET cohort_version=3 WHERE id=?", (ident,))
+        c.commit()
+    finally:
+        c.close()
+    ledger.append_execution_assessment(ident, _assessment(at))
+    row = ledger.active("launch", now=at + timedelta(seconds=61))[0]
+    assert row["action_level"] == "A1_WATCH"
+    assert "quote_expired_or_invalid" in row["action_reason_codes"]
+
+
+def test_known_untradeable_reverse_route_is_blocked(tmp_path, monkeypatch):
+    ledger, ident = _setup(tmp_path, monkeypatch)
+    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    c = ledger._conn()
+    try:
+        c.execute("UPDATE opportunities SET cohort_version=3 WHERE id=?", (ident,))
+        c.commit()
+    finally:
+        c.close()
+    ledger.append_execution_assessment(ident, _assessment(at, route_state="untradeable"))
+    row = ledger.active("launch", now=at)[0]
+    assert row["action_level"] == "A0_BLOCKED"
+    assert row["effective_decision"] == "AVOID"
+
+
+def test_a3_requires_every_manual_gate_and_still_disables_auto_trade(tmp_path, monkeypatch):
+    from src.pipeline.execution_cost import route_contract
+    from src.pipeline import opportunity_outcomes
+
+    ledger, ident = _setup(tmp_path, monkeypatch)
+    at = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    c = ledger._conn()
+    try:
+        c.execute("UPDATE opportunities SET cohort_version=3,decision='SMALL_PROBE' WHERE id=?",
+                  (ident,))
+        c.commit()
+    finally:
+        c.close()
+    complete = route_contract(notional_usd=25, route_loss_pct=1.8,
+                              network_fee_pct=0.02, method="complete_test")
+    ledger.append_execution_assessment(ident, _assessment(
+        at, cost_contract=complete, delivery_sla_state="pass"))
+    monkeypatch.setattr(opportunity_outcomes, "actionability_gate",
+                        lambda lane: {"state": "pass", "lane": lane})
+    row = ledger.active("launch", now=at)[0]
+    assert row["action_level"] == "A3_MANUAL_PROBE"
+    assert row["actionable_now"] is True
+    assert row["auto_execution_allowed"] is False
