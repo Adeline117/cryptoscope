@@ -40,6 +40,29 @@ logger = structlog.get_logger()
 
 DB_PATH = DATA_DIR / "holder_snapshots.db"
 
+_EVM_CHAINS = frozenset({
+    "ethereum", "eth", "bsc", "base", "arbitrum", "optimism", "polygon",
+})
+
+
+def _is_evm_chain(chain: str) -> bool:
+    return str(chain or "").lower() in _EVM_CHAINS
+
+
+def _canonical_token(token: str, chain: str) -> str:
+    """Canonical storage key without corrupting case-sensitive chain ids.
+
+    EVM addresses are case-insensitive (checksum casing is presentation only), while
+    Solana mints are base58 identifiers whose casing is part of the identity.
+    """
+    value = str(token or "")
+    return value.lower() if _is_evm_chain(chain) else value
+
+
+def _token_match_sql(chain: str) -> str:
+    """SQL predicate used to merge legacy checksum/lowercase EVM rows."""
+    return "lower(token) = ?" if _is_evm_chain(chain) else "token = ?"
+
 
 # --------------------------------------------------------------------------
 # Pure logic — concentration metrics (unit-tested, no I/O)
@@ -131,6 +154,7 @@ def record_token_birth(
     token: str, chain: str, source: str = "", db_path: Path = DB_PATH
 ) -> None:
     """Record the first time a token enters the universe (idempotent)."""
+    token = _canonical_token(token, chain)
     conn = _connect(db_path)
     try:
         conn.execute(
@@ -151,6 +175,7 @@ def save_snapshot(
     db_path: Path = DB_PATH,
 ) -> dict[str, Any]:
     """Persist a holder snapshot and return the computed metrics."""
+    token = _canonical_token(token, chain)
     metrics = concentration_metrics(holders)
     ts = snapshot_at or datetime.now(timezone.utc).isoformat()
     conn = _connect(db_path)
@@ -177,12 +202,13 @@ def get_snapshots(
     token: str, chain: str, limit: int = 100, db_path: Path = DB_PATH
 ) -> list[dict[str, Any]]:
     """Return snapshots for a token, oldest first (time series)."""
+    token = _canonical_token(token, chain)
     conn = _connect(db_path)
     try:
         rows = conn.execute(
             """SELECT snapshot_at, holder_count, top10_pct, top25_pct, gini,
                       total_supply_observed
-               FROM holder_snapshots WHERE token = ? AND chain = ?
+               FROM holder_snapshots WHERE """ + _token_match_sql(chain) + """ AND chain = ?
                ORDER BY snapshot_at ASC LIMIT ?""",
             (token, chain, limit),
         ).fetchall()
@@ -232,12 +258,13 @@ def snapshot_freshness(
     cache (the last `frozen_runs` rows are byte-identical). Never raises.
     """
     now = now or datetime.now(timezone.utc)
+    token = _canonical_token(token, chain)
     conn = _connect(db_path)
     try:
         rows = conn.execute(
             """SELECT snapshot_at, holder_count, top10_pct, top25_pct, gini,
                       total_supply_observed
-               FROM holder_snapshots WHERE token = ? AND chain = ?
+               FROM holder_snapshots WHERE """ + _token_match_sql(chain) + """ AND chain = ?
                ORDER BY snapshot_at DESC LIMIT ?""",
             (token, chain, max(frozen_runs, 1)),
         ).fetchall()
@@ -302,11 +329,24 @@ def find_stale_snapshots(
         ).fetchall()
     finally:
         conn.close()
+    # Collapse legacy checksum/lowercase aliases for EVM only. Solana mints remain
+    # exact-case identifiers and must never be lowercased or case-folded.
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for token, chain in all_pairs:
+        pair = (_canonical_token(token, chain), chain)
+        if pair not in seen:
+            seen.add(pair)
+            pairs.append(pair)
     if tokens is not None:
-        want = {t.lower() for t in tokens}
-        rows = [(t, c) for t, c in all_pairs if t.lower() in want]
+        want_exact = {str(t) for t in tokens}
+        want_evm = {t.lower() for t in want_exact}
+        rows = [
+            (t, c) for t, c in pairs
+            if (t.lower() in want_evm if _is_evm_chain(c) else t in want_exact)
+        ]
     else:
-        rows = all_pairs
+        rows = pairs
     out = []
     for token, chain in rows:
         v = snapshot_freshness(token, chain, stale_after_h=stale_after_h,
@@ -325,7 +365,8 @@ def list_tokens(db_path: Path = DB_PATH) -> list[tuple[str, str]]:
         ).fetchall()
     finally:
         conn.close()
-    return [(t, c) for t, c in rows]
+    # Preserve first-seen order while merging legacy EVM casing aliases.
+    return list(dict.fromkeys((_canonical_token(t, c), c) for t, c in rows))
 
 
 def get_holders_history(
@@ -339,19 +380,21 @@ def get_holders_history(
     let a 3-month-old item leak into the 2h highlight. Pass it to keep the
     accumulation slope reflecting recent activity only.
     """
+    token = _canonical_token(token, chain)
+    match = _token_match_sql(chain)
     conn = _connect(db_path)
     try:
         if since is not None:
             rows = conn.execute(
                 """SELECT snapshot_at, holders_json FROM holder_snapshots
-                   WHERE token = ? AND chain = ? AND snapshot_at >= ?
+                   WHERE """ + match + """ AND chain = ? AND snapshot_at >= ?
                    ORDER BY snapshot_at ASC LIMIT ?""",
                 (token, chain, since, limit),
             ).fetchall()
         else:
             rows = conn.execute(
                 """SELECT snapshot_at, holders_json FROM holder_snapshots
-                   WHERE token = ? AND chain = ? ORDER BY snapshot_at ASC LIMIT ?""",
+                   WHERE """ + match + """ AND chain = ? ORDER BY snapshot_at ASC LIMIT ?""",
                 (token, chain, limit),
             ).fetchall()
     finally:

@@ -13,6 +13,8 @@ import pytest
 
 from src.onchain.holder_snapshot import (
     _connect,
+    get_holders_history,
+    list_tokens,
     save_snapshot,
     snapshot_freshness,
     find_stale_snapshots,
@@ -32,6 +34,35 @@ def _holders(top_bal: float):
 
 def _save_at(db, token, chain, holders, dt):
     save_snapshot(token, chain, holders, snapshot_at=dt.isoformat(), db_path=db)
+
+
+def _save_legacy_exact_case(db, token, chain, holders, dt):
+    """Insert a pre-canonicalization row exactly as an older DB stored it."""
+    import json
+
+    conn = _connect(db)
+    metrics = {
+        "holder_count": len(holders),
+        "top10_pct": 100.0,
+        "top25_pct": 100.0,
+        "gini": 0.0,
+        "total_supply_observed": sum(h["balance"] for h in holders),
+    }
+    try:
+        conn.execute(
+            """INSERT INTO holder_snapshots
+               (token, chain, snapshot_at, holder_count, top10_pct, top25_pct,
+                gini, total_supply_observed, holders_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                token, chain, dt.isoformat(), metrics["holder_count"],
+                metrics["top10_pct"], metrics["top25_pct"], metrics["gini"],
+                metrics["total_supply_observed"], json.dumps(holders),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def test_no_snapshots_is_stale(db):
@@ -92,9 +123,43 @@ def test_find_stale_allowlist_only_watched_tokens(db):
     # allowlist is case-insensitive
     bad = find_stale_snapshots(tokens=["0xsiren", "0xfresh"], now=now, db_path=db)
     toks = {b["token"] for b in bad}
-    assert "0xSiReN" in toks
+    assert "0xsiren" in toks
     assert "0xfresh" not in toks
     assert "0xdormant" not in toks
+
+
+def test_evm_checksum_aliases_merge_without_stale_false_positive(db):
+    now = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    checksum = "0xAbCdEf1234567890"
+    lower = checksum.lower()
+
+    # Reproduce production: an old checksum-cased row stopped, while the scheduler
+    # continued writing the same EVM contract under its lowercase canonical id.
+    _save_legacy_exact_case(
+        db, checksum, "bsc", _holders(5000), now - timedelta(hours=80),
+    )
+    _save_at(db, checksum, "bsc", _holders(4000), now - timedelta(hours=2))
+
+    verdict = snapshot_freshness(checksum, "bsc", now=now, db_path=db)
+    assert verdict["stale"] is False
+    assert verdict["latest"] == (now - timedelta(hours=2)).isoformat()
+    assert find_stale_snapshots(
+        tokens=[checksum], now=now, db_path=db,
+    ) == []
+    assert list_tokens(db_path=db) == [(lower, "bsc")]
+    assert len(get_holders_history(checksum, "bsc", db_path=db)) == 2
+
+
+def test_solana_mint_identity_remains_case_sensitive(db):
+    now = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    mint = "AbCdEfSolanaMint"
+    _save_at(db, mint, "solana", _holders(5000), now - timedelta(hours=2))
+
+    assert list_tokens(db_path=db) == [(mint, "solana")]
+    assert snapshot_freshness(
+        mint.lower(), "solana", now=now, db_path=db,
+    )["reason"] == "no_snapshots"
+    assert get_holders_history(mint.lower(), "solana", db_path=db) == []
 
 
 def test_find_stale_cadence_fallback_needs_min_snapshots(db):
