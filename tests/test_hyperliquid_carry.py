@@ -280,6 +280,51 @@ def test_scan_carry_reports_source_symbol_okx_and_cap_states(monkeypatch):
     assert capped["source_health"]["open_observed"] == 45
 
 
+def test_scan_carry_cap_prioritizes_open_then_current_right_tail(monkeypatch):
+    """HL universe order must not push a late high-funding pair behind the OKX cap."""
+    lows = [_ctx(f"LOW{i:02d}", funding_ann=10.0, oi_usd=2_000_000 + i)
+            for i in range(50)]
+    rows = [
+        _ctx("OPEN", funding_ann=1.0, oi_usd=10),
+        *lows,
+        _ctx("TAIL_LOW_OI", funding_ann=40.0, oi_usd=2_000_000),
+        _ctx("TAIL_HIGH_OI", funding_ann=40.0, oi_usd=3_000_000),
+        _ctx("HYPE", funding_ann=80.0, oi_usd=100_000_000),
+    ]
+    requested = []
+
+    def capped_rates(coins, cap=45, fetch=None):
+        requested.extend(coins)
+        limited = coins[:cap]
+        return {
+            "rates": {symbol: 0.0 for symbol in limited},
+            "status_by_symbol": {
+                symbol: ("observed" if symbol in limited else "request_cap")
+                for symbol in coins
+            },
+            "summary": {
+                "state": "partial", "requested": len(coins),
+                "observed": len(limited), "unsupported": 0,
+                "request_failed": 0, "request_timeout": 0,
+                "rate_stale": 0, "rate_invalid": 0,
+                "request_cap": len(coins) - len(limited),
+            },
+        }
+
+    monkeypatch.setattr(hl, "okx_funding_scan", capped_rates)
+    monkeypatch.setattr(hl, "carry_signals", lambda *_args, **_kwargs: [])
+
+    scan = hl.scan_carry(rows, priority_symbols=["OPEN"])
+
+    assert requested[:4] == ["OPEN", "HYPE", "TAIL_HIGH_OI", "TAIL_LOW_OI"]
+    assert "HYPE" in requested[:hl.OKX_FUNDING_REQUEST_CAP]
+    assert requested.index("HYPE") < requested.index("LOW00")
+    assert _open_status(scan, "OPEN")["status"] == "observed"
+    assert scan["source_health"]["entry_deferred_by_cap"] == 9
+    assert scan["source_health"]["entry_priority_method"] == \
+        hl.CARRY_ENTRY_PRIORITY_METHOD
+
+
 def test_okx_funding_scan_classifies_every_non_observation():
     valid = _row(interval_h=4)
     stale = _row(interval_h=4, age_ms=hl.OKX_FUNDING_MAX_AGE_MS + 1)

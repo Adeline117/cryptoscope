@@ -255,6 +255,7 @@ CARRY_MODEL_HOLD_DAYS_ASSUMPTION = 14  # disclosed scenario input, never inferre
 OKX_FUNDING_REQUEST_CAP = 45
 OKX_FUNDING_MAX_WORKERS = 8
 OKX_FUNDING_SCAN_TIMEOUT_S = 75.0
+CARRY_ENTRY_PRIORITY_METHOD = "current_hl_funding_desc_then_oi_desc_v1"
 
 
 def _carry_partial_model_proxy_ann(gross_edge_ann: float) -> float:
@@ -715,15 +716,28 @@ def scan_carry(rows: list[dict] | None = None, *,
                 "open_requested": len(priorities), "open_observed": 0,
                 "entry_observed": 0,
                 "entry_deferred_by_cap": 0,
+                "entry_priority_method": CARRY_ENTRY_PRIORITY_METHOD,
                 "fetched_here": fetched_here,
             },
         }
 
     by_symbol = {r.get("name"): r for r in rows if r.get("name")}
-    entry_symbols = [r["name"] for r in rows
-                     if r.get("oi_usd", 0) >= CARRY_MIN_OI_USD
-                     and r.get("funding_ann", 0) >= CARRY_MIN_ANN]
-    requested = list(dict.fromkeys(priorities + entry_symbols))
+    # Existing episodes own the scarce observation budget: losing their paired quote
+    # would manufacture a source gap and can hide a real exit.  For the remaining slots,
+    # rank only by fields already validated in the current HL snapshot.  Current funding
+    # is the observable right-tail upper bound before the OKX leg is fetched; OI breaks
+    # ties in favour of the more measurable book.  The later paired OKX quote still gates
+    # whether a row becomes a cross-venue signal, so this order is not an edge claim.
+    entry_rows = sorted(
+        (r for r in rows
+         if r.get("oi_usd", 0) >= CARRY_MIN_OI_USD
+         and r.get("funding_ann", 0) >= CARRY_MIN_ANN),
+        key=lambda r: (-float(r["funding_ann"]), -float(r["oi_usd"]), str(r["name"])),
+    )
+    entry_symbols = list(dict.fromkeys(r["name"] for r in entry_rows))
+    priority_set = set(priorities)
+    requested = priorities + [symbol for symbol in entry_symbols
+                              if symbol not in priority_set]
     limited = requested[:OKX_FUNDING_REQUEST_CAP]
     okx_result = okx_funding_scan(requested, cap=OKX_FUNDING_REQUEST_CAP)
     okx = okx_result["rates"]
@@ -794,6 +808,7 @@ def scan_carry(rows: list[dict] | None = None, *,
             "open_requested": len(priorities), "open_observed": observed_n,
             "entry_observed": len(entry_observations),
             "entry_deferred_by_cap": sum(s not in limited_set for s in entry_symbols),
+            "entry_priority_method": CARRY_ENTRY_PRIORITY_METHOD,
             "fetched_here": fetched_here,
         },
     }
