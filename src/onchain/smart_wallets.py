@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import structlog
@@ -43,7 +44,9 @@ FILTERS = {
 }
 _DEFAULT_FILTER = {"winrate": 0.5, "realized": 8_000, "min_buys": 6, "max_buys": 800}
 MAX_BUYS_7D = 800             # above this = HFT bot, not copyable
-WATCH_PER_CHAIN = 14          # bounded — each poll is a serial FlareSolverr call
+WATCH_PER_CHAIN = 14          # bounded source list; the poll below also bounds workers
+SMART_WALLET_WORKERS = 4      # bound local/browser resources while avoiding serial lag
+SMART_WALLET_HTTP_TIMEOUT_S = 15
 
 
 def _conn() -> sqlite3.Connection:
@@ -102,10 +105,14 @@ def watchlist(chain_code: str | None = None) -> list[dict]:
             for r in rows]
 
 
-def recent_buys(wallet: str, chain_code: str, window_min: int = 40) -> list[dict]:
+def recent_buys(wallet: str, chain_code: str, window_min: int = 40,
+                request_timeout_s: int = SMART_WALLET_HTTP_TIMEOUT_S) -> list[dict]:
     """A watched wallet's BUY events in the last `window_min` minutes (GMGN activity)."""
     now = datetime.now(timezone.utc).timestamp()
-    d = _fs_get(f"https://gmgn.ai/api/v1/wallet_activity/{chain_code}?wallet={wallet}&limit=20")
+    d = _fs_get(
+        f"https://gmgn.ai/api/v1/wallet_activity/{chain_code}?wallet={wallet}&limit=20",
+        timeout=request_timeout_s,
+    )
     acts = ((d or {}).get("data") or {}).get("activities") or []
     out = []
     for a in acts:
@@ -133,18 +140,45 @@ def fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"),
     if not usable():
         return None
     agg: dict = {}
-    for ch in chain_codes:
-        for w in watchlist(ch):
-            for b in recent_buys(w["wallet"], ch, window_min):
-                if b["cost_usd"] < MIN_BUY_USD:
-                    continue
-                key = (ch, b["token"])
-                e = agg.setdefault(key, {"symbol": b["symbol"], "chain": CHAINS.get(ch, ch),
-                                         "token": b["token"], "buyers": set(),
-                                         "usd": 0.0, "latest_ts": 0})
-                e["buyers"].add(w["wallet"])
-                e["usd"] += b["cost_usd"]
-                e["latest_ts"] = max(e["latest_ts"], b["ts"])
+    wallet_jobs = [
+        (ch, w["wallet"])
+        for ch in chain_codes
+        for w in watchlist(ch)
+    ]
+
+    def fetch(job: tuple[str, str]) -> tuple[str, str, list[dict]]:
+        ch, wallet = job
+        try:
+            buys = recent_buys(
+                wallet,
+                ch,
+                window_min,
+                request_timeout_s=SMART_WALLET_HTTP_TIMEOUT_S,
+            )
+        except Exception as exc:
+            logger.debug("smart_wallet_activity_failed", chain=ch,
+                         wallet=wallet, error=str(exc)[:80])
+            buys = []
+        return ch, wallet, buys
+
+    # A serial sweep can take longer than the 15-minute publication cadence when
+    # Cloudflare is slow. Four workers keep the end-to-end latency bounded without
+    # recreating the unbounded-thread/FD failure that previously hit the scheduler.
+    with ThreadPoolExecutor(max_workers=SMART_WALLET_WORKERS,
+                            thread_name_prefix="smart-wallet") as pool:
+        observations = list(pool.map(fetch, wallet_jobs))
+
+    for ch, wallet, buys in observations:
+        for b in buys:
+            if b["cost_usd"] < MIN_BUY_USD:
+                continue
+            key = (ch, b["token"])
+            e = agg.setdefault(key, {"symbol": b["symbol"], "chain": CHAINS.get(ch, ch),
+                                     "token": b["token"], "buyers": set(),
+                                     "usd": 0.0, "latest_ts": 0})
+            e["buyers"].add(wallet)
+            e["usd"] += b["cost_usd"]
+            e["latest_ts"] = max(e["latest_ts"], b["ts"])
     now = datetime.now(timezone.utc).timestamp()
     out = []
     for e in agg.values():

@@ -32,7 +32,12 @@ def _fs_get(url: str, timeout: int = 75) -> dict | None:
     """Fetch `url` through FlareSolverr, return the parsed JSON body, or None on any
     failure (FlareSolverr down, Cloudflare challenge unsolved, non-JSON)."""
     try:
-        body = json.dumps({"cmd": "request.get", "url": url, "maxTimeout": 60000}).encode()
+        # Keep the server-side browser deadline inside the HTTP client's deadline.
+        # Otherwise a caller that intentionally uses a short timeout disconnects while
+        # FlareSolverr keeps the abandoned browser request alive for a full minute.
+        max_timeout_ms = max(1_000, min(60_000, int(max(1, timeout - 1) * 1_000)))
+        body = json.dumps({"cmd": "request.get", "url": url,
+                           "maxTimeout": max_timeout_ms}).encode()
         req = urllib.request.Request(FLARESOLVERR_URL, data=body,
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as response:
