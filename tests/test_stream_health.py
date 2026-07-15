@@ -1,4 +1,7 @@
 """Real-time health distinguishes quiet markets from gaps and dead connections."""
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -54,6 +57,37 @@ def test_disconnect_is_not_reported_as_a_quiet_live_market(health):
 def test_stream_clocks_require_timezone(health):
     with pytest.raises(ValueError, match="timezone"):
         health.observe("source", "stream", received_at="2026-07-14T12:00:00")
+
+
+def test_concurrent_legacy_gap_migration_is_idempotent(health):
+    legacy = sqlite3.connect(health.DB)
+    legacy.execute("""CREATE TABLE gaps(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, stream TEXT NOT NULL,
+        from_cursor INTEGER NOT NULL, to_cursor INTEGER NOT NULL,
+        detected_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+        resolved_at TEXT, details TEXT,
+        UNIQUE(source,stream,from_cursor,to_cursor))""")
+    legacy.commit()
+    legacy.close()
+
+    workers = 12
+    start = threading.Barrier(workers)
+
+    def connect_and_read_schema() -> tuple[str, ...]:
+        start.wait(timeout=5)
+        connection = health._conn()
+        try:
+            return tuple(
+                row[1] for row in connection.execute("PRAGMA table_info(gaps)")
+            )
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        schemas = list(pool.map(lambda _index: connect_and_read_schema(), range(workers)))
+
+    expected = ("retry_count", "next_retry_at", "last_error")
+    assert all(schema[-3:] == expected for schema in schemas)
 
 
 def test_open_gaps_returns_recovery_queue(health):

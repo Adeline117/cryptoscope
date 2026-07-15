@@ -3,11 +3,31 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 
 from src.config import DATA_DIR
 
 DB = DATA_DIR / "stream_health.db"
+
+
+def _enable_wal(c: sqlite3.Connection) -> None:
+    """Enable WAL without losing a simultaneous multi-process startup race."""
+    deadline = time.monotonic() + 8.0
+    while True:
+        try:
+            current = c.execute("PRAGMA journal_mode").fetchone()
+            if current and str(current[0]).lower() == "wal":
+                return
+            changed = c.execute("PRAGMA journal_mode=WAL").fetchone()
+            if changed and str(changed[0]).lower() == "wal":
+                return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+        if time.monotonic() >= deadline:
+            raise sqlite3.OperationalError("timed out enabling WAL journal mode")
+        time.sleep(0.05)
 
 
 def _iso(value: datetime | str | None) -> str:
@@ -25,33 +45,48 @@ def _iso(value: datetime | str | None) -> str:
 def _conn() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=10)
-    c.execute("PRAGMA busy_timeout=8000")
-    c.execute("PRAGMA journal_mode=WAL")
-    c.execute("PRAGMA synchronous=NORMAL")
-    c.execute("""CREATE TABLE IF NOT EXISTS streams(
-        source TEXT NOT NULL, stream TEXT NOT NULL, cursor INTEGER,
-        last_event_at TEXT, last_received_at TEXT, latency_ms INTEGER,
-        status TEXT NOT NULL, last_error TEXT, updated_at TEXT NOT NULL,
-        PRIMARY KEY(source,stream))""")
-    c.execute("""CREATE TABLE IF NOT EXISTS gaps(
-        id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, stream TEXT NOT NULL,
-        from_cursor INTEGER NOT NULL, to_cursor INTEGER NOT NULL,
-        detected_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
-        resolved_at TEXT, details TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
-        next_retry_at TEXT, last_error TEXT,
-        UNIQUE(source,stream,from_cursor,to_cursor))""")
-    gap_columns = {row[1] for row in c.execute("PRAGMA table_info(gaps)")}
-    for name, kind in (
-        ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
-        ("next_retry_at", "TEXT"),
-        ("last_error", "TEXT"),
-    ):
-        if name not in gap_columns:
-            c.execute(f"ALTER TABLE gaps ADD COLUMN {name} {kind}")
-    c.execute("CREATE INDEX IF NOT EXISTS idx_stream_gaps_open "
-              "ON gaps(source,stream,status,detected_at)")
-    c.commit()
-    return c
+    try:
+        c.execute("PRAGMA busy_timeout=8000")
+        _enable_wal(c)
+        c.execute("PRAGMA synchronous=NORMAL")
+        c.execute("""CREATE TABLE IF NOT EXISTS streams(
+            source TEXT NOT NULL, stream TEXT NOT NULL, cursor INTEGER,
+            last_event_at TEXT, last_received_at TEXT, latency_ms INTEGER,
+            status TEXT NOT NULL, last_error TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY(source,stream))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS gaps(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, stream TEXT NOT NULL,
+            from_cursor INTEGER NOT NULL, to_cursor INTEGER NOT NULL,
+            detected_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+            resolved_at TEXT, details TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+            next_retry_at TEXT, last_error TEXT,
+            UNIQUE(source,stream,from_cursor,to_cursor))""")
+        migrations = (
+            ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("next_retry_at", "TEXT"),
+            ("last_error", "TEXT"),
+        )
+        gap_columns = {row[1] for row in c.execute("PRAGMA table_info(gaps)")}
+        if any(name not in gap_columns for name, _kind in migrations):
+            # Scheduler and both stream workers can open the same legacy DB at
+            # startup. Serialize only the migration, then re-read the schema while
+            # holding the write lock so a second process never acts on a stale
+            # PRAGMA result and attempts the same ALTER TABLE.
+            c.execute("BEGIN IMMEDIATE")
+            gap_columns = {row[1] for row in c.execute("PRAGMA table_info(gaps)")}
+            for name, kind in migrations:
+                if name not in gap_columns:
+                    c.execute(f"ALTER TABLE gaps ADD COLUMN {name} {kind}")
+                    gap_columns.add(name)
+            c.commit()
+        c.execute("CREATE INDEX IF NOT EXISTS idx_stream_gaps_open "
+                  "ON gaps(source,stream,status,detected_at)")
+        c.commit()
+        return c
+    except Exception:
+        c.rollback()
+        c.close()
+        raise
 
 
 def observe(source: str, stream: str, *, cursor: int | None = None,
