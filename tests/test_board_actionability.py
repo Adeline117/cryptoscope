@@ -80,6 +80,16 @@ def test_structure_view_discloses_per_source_coverage_failures():
     assert "失败源不会计入覆盖" in html
 
 
+def test_structure_view_separates_legacy_inventory_deltas_from_new_listings():
+    html = BOARD.read_text()
+
+    assert "legacy_inventory_deltas" in html
+    assert "legacy_inventory_delta" in html
+    assert "旧库存差分" in html
+    assert "不算独立新上币" in html
+    assert "未独立核验为官方上币公告" in html
+
+
 def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
     html = BOARD.read_text()
 

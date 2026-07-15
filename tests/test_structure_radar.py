@@ -192,6 +192,44 @@ def test_same_asset_multi_quote_listing_is_one_structure_event(tmp_path, monkeyp
     assert event["markets"] == ["ABC-EUR", "ABC-USDC", "ABC-USDT"]
 
 
+def test_legacy_pair_rows_are_collapsed_and_never_labeled_as_new_listings():
+    import src.pipeline.structure_radar as sr
+
+    ts = "2026-07-14T00:02:00+00:00"
+    legacy = [
+        {"id": "old-1", "source": "okx", "symbol": "ABC-USDT",
+         "event_at": ts, "detected_at": ts, "event_type": "new_listing"},
+        {"id": "old-2", "source": "okx", "symbol": "ABC-USDC",
+         "event_at": ts, "detected_at": ts, "event_type": "new_listing"},
+        {"id": "old-3", "source": "okx", "symbol": "DEF-USDT",
+         "event_at": ts, "detected_at": ts, "event_type": "new_listing"},
+    ]
+    canonical = {
+        "id": "new-1", "source": "coinbase", "symbol": "XYZ",
+        "event_at": "2026-07-15T00:00:00+00:00",
+        "detected_at": "2026-07-15T00:00:00+00:00",
+        "event_type": "new_listing", "markets": ["XYZ-USD"],
+    }
+
+    events, summary = sr._view_events([canonical, *legacy])
+
+    assert summary == {
+        "canonical_events": 1,
+        "canonical_listings": 1,
+        "legacy_inventory_deltas": 2,
+        "legacy_rows": 3,
+        "legacy_rows_collapsed": 1,
+        "raw_open_rows": 4,
+    }
+    abc = next(row for row in events if row["symbol"] == "ABC")
+    assert abc["event_type"] == "legacy_inventory_delta"
+    assert abc["evidence_state"] == "inventory_delta_only"
+    assert abc["markets"] == ["ABC-USDC", "ABC-USDT"]
+    assert abc["ledger_event_ids"] == ["old-1", "old-2"]
+    assert abc["actionable_now"] is False
+    assert any("未独立核验为官方上币公告" in reason for reason in abc["reasons"])
+
+
 def test_listing_source_failure_is_warned_hourly_without_hiding_health(monkeypatch):
     import src.collectors.listing_detector as ld
 
