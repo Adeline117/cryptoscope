@@ -26,6 +26,10 @@ launchctl load ~/Library/LaunchAgents/com.cryptoscope.hyperliquid.plist
 # Independent read-only standard Solana Pump.fun launch evidence stream
 cp deploy/com.cryptoscope.solana-launches.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/com.cryptoscope.solana-launches.plist
+
+# Independent read-only EVM factory event stream
+cp deploy/com.cryptoscope.evm-factories.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.cryptoscope.evm-factories.plist
 ```
 
 Manage it:
@@ -35,9 +39,11 @@ launchctl list | grep cryptoscope          # status (PID, exit code)
 launchctl unload ~/Library/LaunchAgents/com.cryptoscope.scheduler.plist   # stop
 launchctl unload ~/Library/LaunchAgents/com.cryptoscope.hyperliquid.plist # stop market stream
 launchctl unload ~/Library/LaunchAgents/com.cryptoscope.solana-launches.plist # stop launch stream
+launchctl unload ~/Library/LaunchAgents/com.cryptoscope.evm-factories.plist # stop factory stream
 tail -f logs/scheduler.err.log             # logs
 tail -f logs/hyperliquid.err.log           # stream errors/reconnects
 tail -f logs/solana-launches.err.log        # launch stream errors/reconnects
+tail -f logs/evm-factories.err.log          # EVM factory errors/reconnects
 ```
 
 `KeepAlive` restarts the process on crash; `RunAtLoad` starts it on login/boot.
@@ -54,6 +60,10 @@ public `logsSubscribe`/JSON-RPC endpoints, records only raw Pump.fun creation
 evidence, and never promotes an event to a trade. Set `SOLANA_STREAM_WS_URL` and
 `SOLANA_STREAM_RPC_URL` to dedicated provider endpoints for sustained production
 rate limits; paid Helius `transactionSubscribe` access is not required.
+
+The EVM factory stream starts with the official PancakeSwap V2 BSC factory. It
+records `PairCreated` as raw, reorg-aware evidence and uses `newHeads` plus bounded
+`eth_getLogs` recovery; it never turns a new pool directly into a trade signal.
 
 ## Credentials
 

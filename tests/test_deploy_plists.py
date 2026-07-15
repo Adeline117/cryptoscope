@@ -27,3 +27,16 @@ def test_solana_launch_agent_is_independent_and_resource_bounded():
     assert config["RunAtLoad"] is True and config["KeepAlive"] is True
     assert config["SoftResourceLimits"]["NumberOfFiles"] <= 512
     assert config["StandardErrorPath"].endswith("solana-launches.err.log")
+
+
+def test_evm_factory_agent_is_independent_and_resource_bounded():
+    root = Path(__file__).resolve().parents[1]
+    path = root / "deploy" / "com.cryptoscope.evm-factories.plist"
+    with path.open("rb") as handle:
+        config = plistlib.load(handle)
+    assert config["Label"] == "com.cryptoscope.evm-factories"
+    assert config["ProgramArguments"][-2:] == [
+        "-m", "src.pipeline.evm_factory_stream"]
+    assert config["RunAtLoad"] is True and config["KeepAlive"] is True
+    assert config["SoftResourceLimits"]["NumberOfFiles"] <= 512
+    assert config["StandardErrorPath"].endswith("evm-factories.err.log")

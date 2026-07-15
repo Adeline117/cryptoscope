@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cryptoscope.evm-factories</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/adelinewen/cryptoscope/.venv/bin/python</string>
+        <string>-m</string>
+        <string>src.pipeline.evm_factory_stream</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/adelinewen/cryptoscope</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>512</integer>
+    </dict>
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>1024</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/adelinewen/cryptoscope/logs/evm-factories.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/adelinewen/cryptoscope/logs/evm-factories.err.log</string>
+</dict>
+</plist>
