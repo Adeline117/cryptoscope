@@ -110,6 +110,8 @@
   .tbl tbody tr:last-child td{border-bottom:none}
   .tbl tbody tr:hover td{background:color-mix(in srgb,var(--s3) 76%,var(--accent-bg))}
   .tbl tbody tr{cursor:pointer}
+  .tbl tbody tr[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .tbl tbody tr[aria-expanded="true"] td{background:var(--s3)}
   .up{color:var(--good)} .down{color:var(--danger)} .flat{color:var(--dim)}
   .tbl tr.flash-up td{animation:fu 1s ease-out} .tbl tr.flash-down td{animation:fd 1s ease-out}
   @keyframes fu{from{background:rgba(70,167,88,.20)}to{background:transparent}}
@@ -136,6 +138,7 @@
   .bar{display:inline-block;height:5px;border-radius:3px;background:var(--accent);vertical-align:middle;min-width:2px}
   .exp td{background:var(--s2);padding:12px 14px;white-space:normal;font-size:12.5px;color:var(--muted);line-height:1.6}
   .exp b{color:var(--text)} .exp .so{color:var(--accent-t);font-weight:600}
+  .swipe-hint{display:none}
   .empty{padding:30px 16px;text-align:center;color:var(--dim);font-size:13px}
   .skl{height:var(--row-h);border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--s1) 25%,var(--s3) 50%,var(--s1) 75%);background-size:200% 100%;animation:sk 1.3s infinite}
   @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
@@ -189,9 +192,12 @@
   .sc-card.muted .v{color:var(--dim);font-size:13px}
   .hm{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
   .cell{border:1px solid var(--border);border-radius:9px;padding:9px 10px;background:var(--s1);display:flex;flex-direction:column;gap:5px;cursor:pointer}
+  .cell:hover,.cell:focus-visible{border-color:var(--accent)!important;transform:translateY(-1px)}
+  .cell:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .cell .sy{font-weight:650;font-size:13px}
   .cell .fu{font-family:var(--mono);font-size:15px;font-weight:600}
   .cell .mt{font-size:10.5px;color:var(--muted)}
+  .cell-why{margin-top:4px;padding-top:7px;border-top:1px solid var(--border);font-size:11px;line-height:1.45;color:var(--muted)}
   .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:space-between}
   body[data-view="play"] .lanehead,body[data-view="play"] .readme{display:none}
   body[data-view="play"] #view{margin-top:18px}
@@ -207,6 +213,7 @@
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
     .command{padding:19px 17px;gap:17px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
+    .swipe-hint{display:block;position:sticky;left:0;width:100%;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;text-align:right}
   }
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
 </style>
@@ -248,7 +255,7 @@
     <div class="stat" id="lanestat"></div>
   </div>
   <details class="readme" id="readme"><summary>读我 · 这条线怎么用 / 诚实边界</summary><div class="rd" id="rd"></div></details>
-  <div id="view"></div>
+  <div id="view" role="tabpanel" aria-live="polite" tabindex="0"></div>
 
   <div class="foot"><span id="gen">—</span><span>各赛道按 2–60 分钟采集 · 页面每 60 秒读取最新快照 · 只是雷达不是买卖指令</span></div>
 </div>
@@ -314,18 +321,20 @@ function renderTable(laneId, rows, cols, cfg){
   // sort
   const ss=sortState[laneId];
   if(ss){const c=cols.find(x=>x.k===ss.col); if(c&&c.sort){rows=rows.slice().sort((a,b)=>{const x=c.sort(a),y=c.sort(b);const r=(x>y?1:x<y?-1:0);return ss.dir==="asc"?r:-r})}}
-  const head=cols.map(c=>`<th class="${c.n?'n':c.c?'c':''} ${c.sort?'sortable':''}" data-col="${c.k}" ${ss&&ss.col===c.k?`aria-sort="${ss.dir==='asc'?'ascending':'descending'}"`:''}>${c.label}</th>`).join("");
+  const head=cols.map(c=>`<th class="${c.n?'n':c.c?'c':''} ${c.sort?'sortable':''}" data-col="${c.k}" ${c.sort?'tabindex="0"':''} ${ss&&ss.col===c.k?`aria-sort="${ss.dir==='asc'?'ascending':'descending'}"`:''}>${c.label}</th>`).join("");
   const prev=prevKey[laneId]||{};
   const cur={};
   const body=rows.map((r,i)=>{
     const id=cfg.id(r); const hv=cfg.flash?cfg.flash(r):null; if(hv!=null)cur[id]=hv;
     let fc=""; if(hv!=null&&prev[id]!=null&&prev[id]!==hv)fc=hv>prev[id]?"flash-up":"flash-down";
     const tds=cols.map(c=>`<td class="${c.n?'n':c.c?'c':''}">${c.cell(r)}</td>`).join("");
-    const det=cfg.detail?`<tr class="exp" data-exp="${id}" hidden><td colspan="${cols.length}">${cfg.detail(r)}</td></tr>`:"";
-    return `<tr class="${fc}" data-row="${id}" data-i="${i}">${tds}</tr>${det}`;
+    const detailId=`detail-${laneId}-${i}`;
+    const det=cfg.detail?`<tr class="exp" id="${detailId}" hidden><td colspan="${cols.length}">${cfg.detail(r)}</td></tr>`:"";
+    const interactive=cfg.detail?`tabindex="0" aria-expanded="false" aria-controls="${detailId}" aria-label="展开 ${esc(r.symbol||r.name||'该行')} 详情"`:'';
+    return `<tr class="${fc}" data-row="${esc(id)}" data-i="${i}" ${interactive}>${tds}</tr>${det}`;
   }).join("");
   prevKey[laneId]=cur;
-  return `<div class="scroll"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="scroll"><div class="swipe-hint" aria-hidden="true">左右滑动查看更多 →</div><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 // chip / glyph helpers
@@ -611,10 +620,12 @@ function renderPerp(d){
       return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
     html+=`<div class="perp-sec" style="margin-top:16px">🌡️ 拥挤 / 点火 <small>方向观测 · 判断你是不是站在被清算那侧 · 防御用,非买卖指令</small></div>
       <div class="hm">`+s.map(p=>{const c=col(p);const lab=p.signal==="ignition"?(p.direction==="up"?"🔥点火↑":"🔥点火↓"):(p.direction==="longs_crowded"?"多头拥挤":"空头拥挤");
-      return `<div class="cell" style="background:${c.bg};border-color:${c.b}" data-perp='${esc(JSON.stringify(p.why))}'>
+      const why=Array.isArray(p.why)?p.why.join(" · "):(p.why||"暂无更多解释");
+      return `<div class="cell" style="background:${c.bg};border-color:${c.b}" tabindex="0" role="button" aria-expanded="false" aria-label="展开 ${esc(p.symbol)} 信号原因">
         <div class="sy">${esc(p.symbol)} <span class="chip">${lab}</span></div>
         <div class="fu ${p.funding_ann>0?'down':'up'}">${p.funding_ann>0?'+':''}${p.funding_ann}%<small style="color:var(--dim)">/年</small></div>
         <div class="mt">OI ${usd(p.oi_usd)} · 24h ${p.price_chg_24h!=null?(p.price_chg_24h>0?'+':'')+(+p.price_chg_24h).toFixed(1)+'%':'—'}</div>
+        <div class="cell-why" hidden>${esc(why)}</div>
       </div>`}).join("")+`</div>`;
   }
   return html;
@@ -639,16 +650,24 @@ function paint(){
   $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
   // counts
   for(const [k,l] of Object.entries(LANES)){const dd=data[k==="avoid"?"opp":k];const n=dd?(l.rows?l.rows(dd).length:0):0;const el=$("ct-"+k);if(el)el.textContent=n||""}
-  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.v===view));
+  document.querySelectorAll(".tab").forEach(t=>{const on=t.dataset.v===view;t.classList.toggle("on",on);t.setAttribute("aria-selected",String(on));t.tabIndex=on?0:-1});
   wireRows();
   staleness();
 }
 function wireRows(){
-  document.querySelectorAll("[data-jump]").forEach(btn=>btn.onclick=()=>{view=btn.dataset.jump;paint();document.getElementById("tabs").scrollIntoView({behavior:"smooth",block:"start"})});
-  document.querySelectorAll("tr[data-row]").forEach(tr=>tr.onclick=()=>{
-    const ex=document.querySelector(`tr.exp[data-exp="${tr.dataset.row}"]`); if(ex)ex.hidden=!ex.hidden;});
+  document.querySelectorAll("[data-jump]").forEach(btn=>btn.onclick=()=>{setView(btn.dataset.jump);document.getElementById("tabs").scrollIntoView({behavior:"smooth",block:"start"})});
+  document.querySelectorAll("tr[data-row][aria-controls]").forEach(tr=>{
+    const toggle=()=>{const ex=document.getElementById(tr.getAttribute("aria-controls"));if(!ex)return;ex.hidden=!ex.hidden;tr.setAttribute("aria-expanded",String(!ex.hidden))};
+    tr.onclick=toggle;tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}};
+  });
+  document.querySelectorAll(".cell[aria-expanded]").forEach(cell=>{
+    const toggle=()=>{const why=cell.querySelector(".cell-why");why.hidden=!why.hidden;cell.setAttribute("aria-expanded",String(!why.hidden))};
+    cell.onclick=toggle;cell.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}};
+  });
   document.querySelectorAll("th[data-col]").forEach(th=>{const c=LANES[view].cols?.find(x=>x.k===th.dataset.col);if(!c||!c.sort)return;
-    th.onclick=()=>{const ss=sortState[view]||{};sortState[view]=ss.col===c.k?{col:c.k,dir:ss.dir==="desc"?"asc":"desc"}:{col:c.k,dir:"desc"};paint()}});
+    const sort=()=>{const ss=sortState[view]||{};sortState[view]=ss.col===c.k?{col:c.k,dir:ss.dir==="desc"?"asc":"desc"}:{col:c.k,dir:"desc"};paint()};
+    th.onclick=sort;th.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();sort()}};
+  });
 }
 function staleness(){
   // The synthesis page has no endpoint of its own.  Its freshness is only as good
@@ -667,7 +686,16 @@ function staleness(){
   else{el.className="live dead";$("livet").textContent="超24h,别信"}
 }
 
-document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{view=t.dataset.v;paint()});
+function setView(next,updateHash=true){
+  if(!LANES[next])return;
+  view=next;if(updateHash&&location.hash.slice(1)!==next)history.pushState(null,"","#"+next);paint();
+}
+const initialView=location.hash.slice(1);if(LANES[initialView])view=initialView;
+document.querySelectorAll(".tab").forEach(t=>{
+  t.onclick=()=>setView(t.dataset.v);
+  t.onkeydown=e=>{if(!["ArrowLeft","ArrowRight","Home","End"].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll(".tab")];let i=tabs.indexOf(t);if(e.key==="Home")i=0;else if(e.key==="End")i=tabs.length-1;else i=(i+(e.key==="ArrowRight"?1:-1)+tabs.length)%tabs.length;setView(tabs[i].dataset.v);tabs[i].focus()};
+});
+addEventListener("popstate",()=>setView(location.hash.slice(1)||"play",false));
 $("tgl").onclick=()=>{const c=document.documentElement.getAttribute("data-theme");const n=c==="light"?"dark":c==="dark"?"light":(matchMedia("(prefers-color-scheme:dark)").matches?"light":"dark");document.documentElement.setAttribute("data-theme",n);try{localStorage.setItem("th",n)}catch(e){}};
 try{const t=localStorage.getItem("th");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}
 

@@ -101,3 +101,15 @@ def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     assert 'data-jump="launch"' in html
     assert 'data-jump="perp"' in html
     assert 'data-jump="avoid"' in html
+
+
+def test_board_navigation_and_details_are_keyboard_accessible_and_shareable():
+    html = BOARD.read_text()
+
+    assert 'role="tabpanel"' in html
+    assert 'aria-selected' in html
+    assert 'aria-expanded="false"' in html
+    assert 'e.key==="Enter"||e.key===" "' in html
+    assert 'location.hash.slice(1)' in html
+    assert 'addEventListener("popstate"' in html
+    assert "左右滑动查看更多" in html
