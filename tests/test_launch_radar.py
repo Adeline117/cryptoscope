@@ -63,7 +63,41 @@ def test_cascade_only_records_strong_timed_events(tmp_path, monkeypatch):
     weak = {"symbol": "NOPE", "signal": "cascade", "strength": "中", "mark_price": 10}
     firing = {"symbol": "X", "signal": "cascade", "strength": "强", "direction": "longs_crowded",
               "mark_price": 10, "funding_ann": 200, "oi_usd": 2_000_000, "oi_chg_pct": -4}
-    assert cr.record_signals([weak, firing], now=now) == 1
+    def book(_symbol):
+        return {"coin": "X", "time": int(now.timestamp() * 1000), "levels": [
+            [{"px": "10.00", "sz": "20"}], [{"px": "10.01", "sz": "20"}],
+        ]}
+
+    assert cr.record_signals([weak, firing], now=now, quote_fetch=book) == 1
     row = ol.active("cascade")[0]
     assert row["side"] == "SHORT" and row["entry_price"] == 10
     assert row["invalidation_price"] == pytest.approx(10.3)
+    assert row["decision"] == "SMALL_PROBE"
+    assert row["quote_at"] == now.isoformat()
+    assert row["expires_at"] == "2026-07-13T12:01:00+00:00"
+    assert row["executable_at"] is None
+    assert row["execution_probe"]["is_real_fill"] is False
+
+
+def test_cascade_without_fresh_executable_book_is_watch_only(tmp_path, monkeypatch):
+    import src.pipeline.opportunity_ledger as ol
+    import src.pipeline.cascade_radar as cr
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    now = datetime(2026, 7, 13, 12, tzinfo=timezone.utc)
+    firing = {"symbol": "X", "signal": "ignition", "strength": "强",
+              "direction": "up", "mark_price": 10, "oi_usd": 2_000_000,
+              "oi_chg_pct": 20}
+    stale = now.timestamp() * 1000 - 11_000
+
+    cr.record_signals([firing], now=now, quote_fetch=lambda _: {
+        "coin": "X", "time": stale, "levels": [
+            [{"px": "10.00", "sz": "20"}], [{"px": "10.01", "sz": "20"}],
+        ],
+    })
+
+    row = ol.active("cascade")[0]
+    assert row["decision"] == "WATCH"
+    assert row["quote_at"] is None and row["expires_at"] is None
+    assert row["execution_probe"]["state"] == "unknown"
+    assert "stale book" in row["execution_probe"]["reason"]
