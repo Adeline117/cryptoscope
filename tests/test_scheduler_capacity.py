@@ -281,15 +281,35 @@ def test_launch_quote_refresh_has_bounded_independent_fast_job():
 
 
 @pytest.mark.asyncio
-async def test_idle_launch_quote_refresh_does_not_push(monkeypatch):
+async def test_idle_launch_quote_refresh_publishes_valid_heartbeat_without_event_mutation(
+        tmp_path, monkeypatch):
+    import json
+
     from src.pipeline import board_export, launch_radar, scheduler
 
+    event = {
+        "id": "launch-1", "lane": "launch", "action_level": "A1_WATCH",
+        "actionable_now": False, "auto_execution_allowed": False,
+        "effective_decision": "WATCH", "entry_price": 0.000123,
+    }
+    launch = board_export._envelope({"events": [event]}, view="launch")
+    pushed = []
     monkeypatch.setattr(launch_radar, "refresh_quotes", lambda **kwargs: {
         "eligible": 0, "attempted": 0, "refreshed": 0, "skipped_fresh": 0,
         "skipped_backoff": 0, "errors": 0})
-    monkeypatch.setattr(board_export, "push_to_blob",
-                        lambda _paths: (_ for _ in ()).throw(AssertionError("idle push")))
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    monkeypatch.setattr(board_export, "render_launch", lambda: launch)
+    monkeypatch.setattr(
+        board_export, "push_to_blob",
+        lambda paths: pushed.extend(path.name for path in paths) or len(paths),
+    )
+
     await scheduler._run_launch_quotes()
+
+    written = json.loads((tmp_path / "launch.json").read_text())
+    assert written["events"] == [event]
+    assert written["generated_at"] == launch["generated_at"]
+    assert set(pushed) == {"launch.json", "meta.json"}
 
 
 @pytest.mark.asyncio
