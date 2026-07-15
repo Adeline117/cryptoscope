@@ -203,6 +203,13 @@ def test_carry_mobile_layout_prioritizes_health_and_lifecycle():
     assert "左右滑动查看更多 →" in html
 
 
+def test_carry_ui_discloses_quarantined_legacy_open_episodes():
+    html = BOARD.read_text()
+
+    assert "n_quarantined_total" in html
+    assert "旧协议 open 隔离" in html
+
+
 def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     html = BOARD.read_text()
 
