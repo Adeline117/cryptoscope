@@ -346,9 +346,23 @@ def test_failed_gap_prefix_does_not_advance_or_claim_recovery(evm):
     assert evm.retry_open_gaps(spec, Rpc()) == {
         "attempted": 1, "advanced": 0, "recovered": 0, "failed": 1}
     after = stream_health.open_gaps("base", spec.stream)
-    assert [(gap["from_cursor"], gap["to_cursor"]) for gap in after] == [
-        (before[0]["from_cursor"], before[0]["to_cursor"])]
-    assert stream_health.snapshot()[0]["status"] == "degraded"
+    assert after == []  # persistent backoff keeps the failed prefix out of the due queue
+    health = stream_health.snapshot()[0]
+    assert health["status"] == "degraded"
+    assert health["open_gaps"] == 1
+    assert health["deferred_gaps"] == 1
+    assert health["next_gap_retry_at"] is not None
+    c = stream_health._conn()
+    try:
+        stored = c.execute(
+            "SELECT from_cursor,to_cursor,retry_count,last_error FROM gaps"
+        ).fetchone()
+    finally:
+        c.close()
+    assert stored[:3] == (
+        before[0]["from_cursor"], before[0]["to_cursor"], 1,
+    )
+    assert "temporary RPC failure" in stored[3]
 
 
 def _persist_complete(evm):

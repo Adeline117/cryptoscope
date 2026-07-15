@@ -659,25 +659,30 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
                            f"{payload['transaction_hash']}:{payload['log_index']}"))
 
 
-def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -> bool:
+def _backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -> None:
     if end < start:
-        return True
+        return
     if end - start + 1 > MAX_BACKFILL_BLOCKS:
-        return False
+        raise ValueError("EVM backfill range exceeds bounded block budget")
+    logs = rpc.call("eth_getLogs", [{
+        "address": spec.address, "topics": [spec.topic],
+        "fromBlock": hex(start), "toBlock": hex(end),
+    }])
+    if not isinstance(logs, list):
+        raise RuntimeError("eth_getLogs returned a non-list result")
+    for item in logs:
+        event = parse_message({"method": "eth_subscription",
+                               "params": {"result": item}}, spec=spec)
+        if event:
+            if not start <= event.payload["block_number"] <= end:
+                raise RuntimeError("eth_getLogs returned an event outside requested range")
+            persist(event.payload, rpc=rpc)
+
+
+def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -> bool:
+    """Compatibility wrapper for immediate recovery; maintenance keeps the error."""
     try:
-        logs = rpc.call("eth_getLogs", [{
-            "address": spec.address, "topics": [spec.topic],
-            "fromBlock": hex(start), "toBlock": hex(end),
-        }])
-        if not isinstance(logs, list):
-            raise RuntimeError("eth_getLogs returned a non-list result")
-        for item in logs:
-            event = parse_message({"method": "eth_subscription",
-                                   "params": {"result": item}}, spec=spec)
-            if event:
-                if not start <= event.payload["block_number"] <= end:
-                    raise RuntimeError("eth_getLogs returned an event outside requested range")
-                persist(event.payload, rpc=rpc)
+        _backfill_blocks(start, end, spec=spec, rpc=rpc)
         return True
     except Exception as exc:
         logger.warning("evm_factory_backfill_failed", chain=spec.chain,
@@ -691,7 +696,8 @@ def retry_open_gaps(spec: FactorySpec, rpc: JsonRpc, *, limit: int = 10) -> dict
     for gap in gaps:
         start = int(gap["from_cursor"])
         end = min(int(gap["to_cursor"]), start + MAX_BACKFILL_BLOCKS - 1)
-        if backfill_blocks(start, end, spec=spec, rpc=rpc):
+        try:
+            _backfill_blocks(start, end, spec=spec, rpc=rpc)
             state = stream_health.advance_gap(gap["id"], end, details={
                 "backfilled": True, "retry": True,
                 "from": start, "to": end,
@@ -700,8 +706,15 @@ def retry_open_gaps(spec: FactorySpec, rpc: JsonRpc, *, limit: int = 10) -> dict
                 recovered += 1
             elif state == "advanced":
                 advanced += 1
-        else:
+        except Exception as exc:
             failed += 1
+            deferred = stream_health.defer_gap(gap["id"], str(exc))
+            logger.warning(
+                "evm_factory_gap_retry_deferred",
+                chain=spec.chain, stream=spec.stream,
+                start=start, end=end, error=str(exc)[:120],
+                next_retry_at=(deferred or {}).get("next_retry_at"),
+            )
     return {"attempted": len(gaps), "advanced": advanced,
             "recovered": recovered, "failed": failed}
 
