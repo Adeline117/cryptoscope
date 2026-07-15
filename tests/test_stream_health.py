@@ -64,3 +64,20 @@ def test_open_gaps_returns_recovery_queue(health):
     assert {key: gaps[0][key] for key in ("id", "from_cursor", "to_cursor")} == {
         "id": 1, "from_cursor": 11, "to_cursor": 11}
     assert gaps[0]["details"] == '{"observed_after":12}'
+
+
+def test_gap_prefix_can_advance_without_claiming_full_recovery(health):
+    health.observe("solana", "slots", cursor=10, expect_contiguous=True)
+    health.observe("solana", "slots", cursor=20, expect_contiguous=True)
+    gap = health.open_gaps("solana", "slots")[0]
+
+    assert health.advance_gap(gap["id"], 13, details={"chunk": [11, 13]}) \
+        == "advanced"
+    remaining = health.open_gaps("solana", "slots")
+    assert [(item["from_cursor"], item["to_cursor"]) for item in remaining] == [(14, 19)]
+    assert health.snapshot()[0]["status"] == "degraded"
+
+    assert health.advance_gap(gap["id"], 19, details={"chunk": [14, 19]}) \
+        == "resolved"
+    assert health.open_gaps("solana", "slots") == []
+    assert health.snapshot()[0]["status"] == "live"

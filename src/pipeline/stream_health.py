@@ -151,6 +151,52 @@ def resolve_gap(gap_id: int, *, details: dict | None = None,
         c.close()
 
 
+def advance_gap(gap_id: int, through_cursor: int, *, details: dict | None = None,
+                at: datetime | str | None = None) -> str | None:
+    """Checkpoint a verified prefix without pretending the whole gap recovered."""
+    now = _iso(at)
+    through = int(through_cursor)
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT source,stream,from_cursor,to_cursor FROM gaps "
+            "WHERE id=? AND status='open'", (gap_id,),
+        ).fetchone()
+        if not row:
+            c.rollback()
+            return None
+        source, stream, start, end = row
+        if through < start:
+            c.rollback()
+            return None
+        payload = json.dumps(details or {}, separators=(",", ":"))
+        if through >= end:
+            c.execute(
+                "UPDATE gaps SET status='resolved',resolved_at=?,details=? WHERE id=?",
+                (now, payload, gap_id),
+            )
+            result = "resolved"
+        else:
+            c.execute(
+                "UPDATE gaps SET from_cursor=?,details=? WHERE id=?",
+                (through + 1, payload, gap_id),
+            )
+            result = "advanced"
+        remaining = c.execute(
+            "SELECT COUNT(*) FROM gaps WHERE source=? AND stream=? AND status='open'",
+            (source, stream),
+        ).fetchone()[0]
+        c.execute(
+            "UPDATE streams SET status=?,updated_at=? WHERE source=? AND stream=?",
+            ("degraded" if remaining else "live", now, source, stream),
+        )
+        c.commit()
+        return result
+    finally:
+        c.close()
+
+
 def open_gaps(source: str, stream: str, *, limit: int = 100) -> list[dict]:
     c = _conn()
     try:
