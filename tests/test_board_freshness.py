@@ -28,3 +28,25 @@ def test_unknown_view_cannot_inherit_a_generous_default_sla():
 
     with pytest.raises(ValueError, match="unknown board view"):
         _envelope({}, view="new_lane_without_policy")
+
+
+def test_regular_export_can_skip_both_slow_scanners(monkeypatch):
+    from src.pipeline import board_export
+
+    for name in ("render_perps", "render_launch", "render_structure", "render_airdrop"):
+        monkeypatch.setattr(board_export, name, lambda: {})
+    monkeypatch.setattr(
+        board_export, "render_operators",
+        lambda: (_ for _ in ()).throw(AssertionError("operator scanner was called")),
+    )
+    monkeypatch.setattr(
+        board_export, "render_opportunities",
+        lambda: (_ for _ in ()).throw(AssertionError("opportunity scanner was called")),
+    )
+    monkeypatch.setattr(board_export, "render_stats",
+                        lambda opportunities: {"saw": opportunities})
+    monkeypatch.setattr(board_export, "write_views", lambda **views: [])
+
+    result = board_export.run(push=False, include_operators=False,
+                              include_opportunities=False)
+    assert result["views_written"] == 0

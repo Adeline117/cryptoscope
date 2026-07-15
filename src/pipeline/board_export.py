@@ -552,7 +552,8 @@ def push_to_blob(paths: list) -> int:
     return pushed
 
 
-def run(push: bool = True, include_operators: bool = True) -> dict:
+def run(push: bool = True, include_operators: bool = True,
+        include_opportunities: bool = True) -> dict:
     """Render the money-making lanes → Blob. perps (#2/#3) is keyless & fast;
     opportunities (#1) is the home-grown smart-money radar; operators (庄) is the
     verdict engine (slow). Each lane fails independently to null, never blocks."""
@@ -560,9 +561,11 @@ def run(push: bool = True, include_operators: bool = True) -> dict:
     launch = render_launch()                            # #1 low-float first-seen events
     structure = render_structure()                      # public listings / later unlocks
     airdrop = render_airdrop()                          # official, owned-wallet workbench
-    opportunities = render_opportunities()              # #1 early smart-money buys
+    opportunities = render_opportunities() if include_opportunities else None
     operators = render_operators() if include_operators else None
-    stats = render_stats(opportunities)                 # measurement: log + resolve + hit rate
+    # With opportunities disabled, render_stats remains a read of the existing board
+    # cohorts plus the five-lane ledger; it does not manufacture a new empty cohort.
+    stats = render_stats(opportunities)
     paths = write_views(launch=launch, structure=structure, airdrop=airdrop, perps=perps, opportunities=opportunities, operators=operators, stats=stats)
     n = push_to_blob(paths) if push else 0
     return {"views_written": len(paths), "views_pushed": n,

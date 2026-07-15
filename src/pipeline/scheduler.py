@@ -216,6 +216,12 @@ def create_scheduler() -> AsyncIOScheduler:
         id="operator_export",
         name="Operators 独立慢速判决导出 → Blob",
     )
+    scheduler.add_job(
+        _run_opportunity_export,
+        CronTrigger(minute=20),
+        id="opportunity_export",
+        name="聪明钱 Opportunities 独立扫描与记分牌导出 → Blob",
+    )
 
     # EARLIEST lane: poll watched proven wallets' fresh buys every 15 min (much more
     # often than the 45-min board export — this is the real-time-ish signal).
@@ -720,7 +726,7 @@ async def _run_board_export():
     logger.info("scheduled_board_export")
     from src.pipeline import board_export
     try:
-        res = await asyncio.to_thread(board_export.run, True, False)
+        res = await asyncio.to_thread(board_export.run, True, False, False)
         logger.info("board_export_done", **res)
     except Exception as e:
         logger.error("board_export_failed", error=str(e)[:120])
@@ -741,6 +747,25 @@ async def _run_operator_export():
                     pushed=pushed)
     except Exception as e:
         logger.error("operator_export_failed", error=str(e)[:120])
+
+
+async def _run_opportunity_export():
+    """Scan smart-money opportunities and update their control scorecard alone."""
+    import asyncio
+
+    logger.info("scheduled_opportunity_export")
+    from src.pipeline import board_export
+    try:
+        async with _heavy_io_lock():
+            opportunities = await asyncio.to_thread(board_export.render_opportunities)
+        stats = await asyncio.to_thread(board_export.render_stats, opportunities)
+        paths = await asyncio.to_thread(
+            board_export.write_views, opportunities=opportunities, stats=stats)
+        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        logger.info("opportunity_export_done",
+                    opportunities=len(opportunities.get("opportunities", [])), pushed=pushed)
+    except Exception as e:
+        logger.error("opportunity_export_failed", error=str(e)[:120])
 
 
 async def _run_health_summary():
