@@ -28,7 +28,7 @@ PUMP_FUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 PUBLIC_SOLANA_WS = "wss://api.mainnet-beta.solana.com/"
 MAX_BACKFILL_SLOTS = 16
-GAP_RETRY_SLOT_BUDGET = 8
+GAP_RETRY_SLOT_BUDGET = 1
 DB = DATA_DIR / "solana_launch_events.db"
 
 
@@ -308,15 +308,34 @@ def _message(tx: dict) -> dict:
 
 
 def _account_keys(tx: dict) -> tuple[list[str], set[str]]:
+    """Resolve raw/parsed static and loaded keys without inventing signers.
+
+    Raw JSON transactions encode signer status in the message header and encode
+    instruction accounts as indexes.  Address-table keys are appended after the
+    static keys, but can never be transaction signers.
+    """
+    message = _message(tx)
+    header = message.get("header") or {}
+    try:
+        required_signatures = max(0, int(header.get("numRequiredSignatures") or 0))
+    except (TypeError, ValueError):
+        required_signatures = 0
     keys, signers = [], set()
-    for key in _message(tx).get("accountKeys") or []:
+    for index, key in enumerate(message.get("accountKeys") or []):
         value = key.get("pubkey") if isinstance(key, dict) else key
-        if not value:
-            continue
-        value = str(value)
+        value = str(value) if value else ""
+        # Preserve the on-chain index even for malformed values.  Compressing
+        # the list could make a later instruction index resolve to the wrong key.
         keys.append(value)
-        if isinstance(key, dict) and key.get("signer") is True:
+        if value and ((isinstance(key, dict) and key.get("signer") is True)
+                      or (not isinstance(key, dict)
+                          and index < required_signatures)):
             signers.add(value)
+    loaded = (tx.get("meta") or {}).get("loadedAddresses") or {}
+    for kind in ("writable", "readonly"):
+        for key in loaded.get(kind) or []:
+            value = key.get("pubkey") if isinstance(key, dict) else key
+            keys.append(str(value) if value else "")
     return keys, signers
 
 
@@ -326,13 +345,38 @@ def _instructions(tx: dict):
         yield from group.get("instructions") or []
 
 
+def _indexed_value(value: object, keys: list[str]) -> str | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return keys[value] if 0 <= value < len(keys) else None
+    return str(value) if value else None
+
+
+def _instruction_program(instruction: dict, keys: list[str]) -> str | None:
+    program = instruction.get("programId")
+    if program:
+        return str(program)
+    return _indexed_value(instruction.get("programIdIndex"), keys)
+
+
+def _instruction_accounts(instruction: dict, keys: list[str]) -> list[str]:
+    accounts = []
+    for value in instruction.get("accounts") or []:
+        resolved = _indexed_value(value, keys)
+        if not resolved:
+            return []
+        accounts.append(resolved)
+    return accounts
+
+
 def _extract_identity(tx: dict) -> tuple[str | None, str | None, str | None]:
     """Cross-check the creation instruction with transaction signer metadata."""
-    _, signers = _account_keys(tx)
+    keys, signers = _account_keys(tx)
     for instruction in _instructions(tx):
-        if instruction.get("programId") != PUMP_FUN_PROGRAM:
+        if not isinstance(instruction, dict):
             continue
-        accounts = [str(value) for value in instruction.get("accounts") or []]
+        if _instruction_program(instruction, keys) != PUMP_FUN_PROGRAM:
+            continue
+        accounts = _instruction_accounts(instruction, keys)
         if not accounts:
             continue
         mint = accounts[0]
@@ -441,43 +485,52 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                     slot_budget: int = GAP_RETRY_SLOT_BUDGET) -> dict:
     gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
     attempted = recovered = progressed = failed = 0
-    remaining_budget = max(0, int(slot_budget))
+    # A public Solana block can be several MB.  Verify and checkpoint at most one
+    # slot per maintenance tick so historical recovery cannot starve live data.
+    remaining_budget = min(GAP_RETRY_SLOT_BUDGET, max(0, int(slot_budget)))
     for gap in gaps:
         if remaining_budget <= 0:
             break
         start = int(gap["from_cursor"])
-        chunk_size = min(MAX_BACKFILL_SLOTS,
-                         int(gap["to_cursor"]) - start + 1,
-                         remaining_budget)
-        end = start + chunk_size - 1
         attempted += 1
-        remaining_budget -= chunk_size
-        if backfill_slots(start, end, rpc=rpc):
+        remaining_budget -= 1
+        try:
+            _backfill_finalized_slot(start, rpc=rpc)
             state = stream_health.advance_gap(
-                gap["id"], end,
+                gap["id"], start,
                 details={"backfilled": True, "retry": True,
-                         "chunk_from": start, "chunk_to": end,
+                         "slot": start,
                          "gap_to": gap["to_cursor"]},
             )
             if state == "resolved":
                 recovered += 1
             elif state == "advanced":
                 progressed += 1
-        else:
+        except Exception as exc:
             failed += 1
+            deferred = stream_health.defer_gap(gap["id"], str(exc))
+            logger.warning(
+                "solana_launch_backfill_failed", slot=start,
+                error=str(exc)[:120],
+                next_retry_at=(deferred or {}).get("next_retry_at"),
+            )
     return {"attempted": attempted, "recovered": recovered,
             "progressed": progressed, "failed": failed}
 
 
 def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                     *, interval_seconds: float = 60) -> None:
-    while not stop.wait(max(1, interval_seconds)):
-        result = rehydrate_pending(rpc, limit=25)
-        if result["attempted"]:
-            logger.info("solana_launch_rehydrated", **result)
+    while not stop.is_set():
+        # Recover the oldest missing chain evidence before spending RPC budget on
+        # transactions that are already durably present as raw evidence.
         gaps = retry_open_gaps(rpc)
         if gaps["attempted"]:
             logger.info("solana_launch_gap_retry", **gaps)
+        result = rehydrate_pending(rpc, limit=5)
+        if result["attempted"]:
+            logger.info("solana_launch_rehydrated", **result)
+        if stop.wait(max(1, interval_seconds)):
+            break
 
 
 def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[dict, dict] | None:
@@ -487,57 +540,83 @@ def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[d
     logs = [str(line) for line in meta.get("logMessages") or []]
     create_name = _creation_type(logs)
     tx = item.get("transaction") or {}
-    if not create_name or not any(
-            instruction.get("programId") == PUMP_FUN_PROGRAM
-            for instruction in (tx.get("message") or {}).get("instructions") or []):
+    if not create_name:
+        return None
+    normalized = {"transaction": tx, "meta": meta, "slot": int(slot)}
+    keys, _ = _account_keys(normalized)
+    has_program = any(
+        isinstance(instruction, dict)
+        and _instruction_program(instruction, keys) == PUMP_FUN_PROGRAM
+        for instruction in _instructions(normalized)
+    )
+    if not has_program:
+        if any(PUMP_FUN_PROGRAM in line for line in logs):
+            raise RuntimeError(
+                f"slot {slot} transaction {index} has Pump create logs "
+                "but no resolvable Pump instruction")
         return None
     signatures = tx.get("signatures") or []
     if not signatures:
-        return None
+        raise RuntimeError(f"slot {slot} transaction {index} has no signature")
     payload = {
         "kind": "launch", "signature": str(signatures[0]), "slot": int(slot),
         "transaction_index": int(index), "program": PUMP_FUN_PROGRAM,
         "event_type": f"pump_fun_{create_name.lower()}", "logs": logs,
     }
-    normalized = {"transaction": tx, "meta": meta, "slot": int(slot)}
     return payload, normalized
 
 
+def _backfill_finalized_slot(slot: int, *, rpc: JsonRpc) -> None:
+    """Verify one finalized produced/skipped slot, raising on partial evidence."""
+    slot = int(slot)
+    finalized = int(rpc.call("getSlot", [{"commitment": "finalized"}]))
+    if finalized < slot:
+        raise RuntimeError(f"slot {slot} is not finalized (tip {finalized})")
+    first_available = int(rpc.call("getFirstAvailableBlock", []))
+    if slot < first_available:
+        raise RuntimeError(
+            f"slot {slot} predates first available block {first_available}")
+    produced = rpc.call("getBlocks", [slot, slot, {"commitment": "finalized"}])
+    if not isinstance(produced, list):
+        raise RuntimeError("getBlocks returned a non-list result")
+    produced_slots = [int(value) for value in produced]
+    if produced_slots not in ([], [slot]):
+        raise RuntimeError("getBlocks returned invalid slot coverage")
+    if not produced_slots:
+        return
+    block = rpc.call("getBlock", [slot, {
+        "commitment": "finalized", "encoding": "json",
+        "transactionDetails": "full", "rewards": False,
+        "maxSupportedTransactionVersion": 0,
+    }])
+    if not isinstance(block, dict):
+        raise RuntimeError(f"finalized block {slot} is unavailable")
+    transactions = block.get("transactions")
+    if not isinstance(transactions, list):
+        raise RuntimeError(f"finalized block {slot} has no transaction list")
+    for index, item in enumerate(transactions):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"slot {slot} transaction {index} is malformed")
+        launch = _launch_from_block_transaction(item, slot, index)
+        if not launch:
+            continue
+        payload, tx = launch
+        creator, mint, error = _extract_identity(tx)
+        if not creator or not mint:
+            raise RuntimeError(
+                f"slot {slot} create identity is incomplete: {error or 'unknown error'}")
+        persist(payload, transaction=tx)
+
+
 def backfill_slots(from_slot: int, to_slot: int, *, rpc: JsonRpc) -> bool:
-    """Recover one finalized chunk while treating chain-confirmed skips as empty."""
+    """Compatibility wrapper for bounded manual recovery outside the live reader."""
     if to_slot < from_slot:
         return True
     if to_slot - from_slot + 1 > MAX_BACKFILL_SLOTS:
         return False
     try:
-        finalized = int(rpc.call("getSlot", [{"commitment": "finalized"}]))
-        if finalized < int(to_slot):
-            return False
-        first_available = int(rpc.call("getFirstAvailableBlock", []))
-        if int(from_slot) < first_available:
-            raise RuntimeError(
-                f"slot {from_slot} predates first available block {first_available}")
-        produced = rpc.call("getBlocks", [int(from_slot), int(to_slot),
-                                           {"commitment": "finalized"}])
-        if not isinstance(produced, list):
-            raise RuntimeError("getBlocks returned a non-list result")
-        slots = [int(slot) for slot in produced]
-        if slots != sorted(set(slots)) or any(
-                slot < int(from_slot) or slot > int(to_slot) for slot in slots):
-            raise RuntimeError("getBlocks returned invalid slot coverage")
-        for slot in slots:
-            block = rpc.call("getBlock", [slot, {
-                "commitment": "finalized", "encoding": "jsonParsed",
-                "transactionDetails": "full", "rewards": False,
-                "maxSupportedTransactionVersion": 0,
-            }])
-            if not isinstance(block, dict):
-                raise RuntimeError(f"finalized block {slot} is unavailable")
-            for index, item in enumerate(block.get("transactions") or []):
-                launch = _launch_from_block_transaction(item, slot, index)
-                if launch:
-                    payload, tx = launch
-                    persist(payload, transaction=tx)
+        for slot in range(int(from_slot), int(to_slot) + 1):
+            _backfill_finalized_slot(slot, rpc=rpc)
         return True
     except Exception as exc:
         logger.warning("solana_launch_backfill_failed", from_slot=from_slot,
@@ -587,10 +666,12 @@ def build_runner(*, rpc: JsonRpc | None = None,
     return StreamRunner(
         source="solana", stream="pump_fun_launches", connect=connect,
         subscribe=subscribe, parse=parse_message,
-        on_event=lambda payload: persist(payload, rpc=rpc),
+        # The websocket reader only records immutable raw evidence.  RPC
+        # hydration and gap recovery belong to the bounded maintenance worker.
+        on_event=persist,
         heartbeat_seconds=30, health_interval_seconds=1,
         expect_contiguous=True,
-        backfill=lambda start, end: backfill_slots(start, end, rpc=rpc),
+        backfill=None,
     )
 
 
@@ -601,13 +682,8 @@ def main() -> None:
     load_dotenv(PROJECT_ROOT / ".env")
     _conn().close()
     rpc = JsonRpc(os.getenv("SOLANA_STREAM_RPC_URL", PUBLIC_SOLANA_RPC))
-    initial = rehydrate_pending(rpc, include_incomplete=True)
-    if initial["attempted"]:
-        logger.info("solana_launch_initial_rehydration", **initial)
-    recovered = retry_open_gaps(rpc)
-    if recovered["attempted"]:
-        logger.info("solana_launch_initial_gap_retry", **recovered)
     stop = threading.Event()
+    # Never hold up the live subscription on historical multi-MB RPC reads.
     worker = threading.Thread(target=_rehydrate_loop, args=(stop, rpc), daemon=True)
     worker.start()
     try:

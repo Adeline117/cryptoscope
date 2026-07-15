@@ -38,6 +38,47 @@ def _transaction():
                   "logMessages": ["Program log: Instruction: CreateV2"]}}
 
 
+def _raw_transaction(*, loaded_program=False, loaded_sponsor=False):
+    static_keys = ["creator", "mint", "curve"]
+    writable = ["loaded-sponsor"] if loaded_sponsor else []
+    if not loaded_program:
+        static_keys.append("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P")
+    readonly = (["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]
+                if loaded_program else [])
+    program_index = (len(static_keys) + len(writable)
+                     if loaded_program else len(static_keys) - 1)
+    accounts = [1, 2, 0]
+    if loaded_sponsor:
+        accounts.append(len(static_keys))
+    return {
+        "transaction": {
+            "signatures": ["sig-1"],
+            "message": {
+                "header": {
+                    "numRequiredSignatures": 2,
+                    "numReadonlySignedAccounts": 0,
+                    "numReadonlyUnsignedAccounts": 1,
+                },
+                "accountKeys": static_keys,
+                "instructions": [{
+                    "programIdIndex": program_index,
+                    "accounts": accounts,
+                    "data": "raw",
+                }],
+            },
+        },
+        "meta": {
+            "err": None,
+            "loadedAddresses": {"writable": writable, "readonly": readonly},
+            "logMessages": [
+                "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]",
+                "Program log: Instruction: CreateV2",
+            ],
+        },
+        "slot": 123,
+    }
+
+
 def test_subscriptions_use_standard_solana_methods(sol):
     requests = sol.subscribe_requests()
     assert requests[0]["method"] == "logsSubscribe"
@@ -58,6 +99,39 @@ def test_creation_is_parsed_and_hydrated_as_raw_unqualified(sol):
                         "length(hydration_payload_hash) FROM raw_launches").fetchone()
         assert row == ("pump_fun_createv2", "creator", "mint", "complete",
                        "raw_unqualified", 64, 64)
+    finally:
+        c.close()
+
+
+def test_raw_json_transaction_indexes_prove_launch_identity(sol):
+    event = sol.parse_message(json.dumps(_notification()))
+    sol.persist(event.payload, transaction=_raw_transaction())
+
+    c = sol._conn()
+    try:
+        row = c.execute(
+            "SELECT creator,mint,evidence_state,hydration_error FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert row == ("creator", "mint", "complete", None)
+
+
+def test_loaded_addresses_resolve_but_never_become_transaction_signers(sol):
+    tx = _raw_transaction(loaded_program=True, loaded_sponsor=True)
+    keys, signers = sol._account_keys(tx)
+    assert keys == [
+        "creator", "mint", "curve", "loaded-sponsor", sol.PUMP_FUN_PROGRAM,
+    ]
+    assert signers == {"creator", "mint"}
+
+    event = sol.parse_message(json.dumps(_notification()))
+    sol.persist(event.payload, transaction=tx)
+    c = sol._conn()
+    try:
+        assert c.execute(
+            "SELECT creator,mint,evidence_state FROM raw_launches"
+        ).fetchone() == ("creator", "mint", "complete")
     finally:
         c.close()
 
@@ -186,7 +260,7 @@ def test_open_slot_gap_is_retried_and_resolved(sol):
 
 
 def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
-    tx = _transaction()
+    tx = _raw_transaction()
 
     class Rpc:
         def __init__(self):
@@ -198,9 +272,11 @@ def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
             if method == "getFirstAvailableBlock":
                 return 0
             if method == "getBlocks":
-                return [11]
+                assert params[0] == params[1]
+                return [11] if params[0] == 11 else []
             assert method == "getBlock"
             self.slots.append(params[0])
+            assert params[1]["encoding"] == "json"
             return {"transactions": [tx]}
 
     rpc = Rpc()
@@ -215,7 +291,7 @@ def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
     assert sol.backfill_slots(1, sol.MAX_BACKFILL_SLOTS + 1, rpc=rpc) is False
 
 
-def test_long_slot_gap_checkpoints_verified_chunks(sol):
+def test_long_slot_gap_checkpoints_one_verified_slot_per_tick(sol):
     from src.pipeline import stream_health
 
     stream_health.observe("solana", "pump_fun_launches", cursor=10,
@@ -224,24 +300,33 @@ def test_long_slot_gap_checkpoints_verified_chunks(sol):
                           expect_contiguous=True)
 
     class Rpc:
+        def __init__(self):
+            self.blocks = []
+
         def call(self, method, params):
             if method == "getSlot":
                 return 100
             if method == "getFirstAvailableBlock":
                 return 0
             if method == "getBlocks":
-                return list(range(params[0], params[1] + 1))
+                assert params[0] == params[1]
+                return [params[0]]
             assert method == "getBlock"
+            self.blocks.append(params[0])
             return {"transactions": []}
 
-    first = sol.retry_open_gaps(Rpc(), slot_budget=sol.MAX_BACKFILL_SLOTS)
+    rpc = Rpc()
+    first = sol.retry_open_gaps(rpc, slot_budget=sol.MAX_BACKFILL_SLOTS)
     assert first == {"attempted": 1, "recovered": 0, "progressed": 1, "failed": 0}
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
-    assert (gap["from_cursor"], gap["to_cursor"]) == (27, 29)
+    assert (gap["from_cursor"], gap["to_cursor"]) == (12, 29)
+    assert rpc.blocks == [11]
 
-    second = sol.retry_open_gaps(Rpc(), slot_budget=sol.MAX_BACKFILL_SLOTS)
-    assert second == {"attempted": 1, "recovered": 1, "progressed": 0, "failed": 0}
-    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    second = sol.retry_open_gaps(rpc, slot_budget=sol.MAX_BACKFILL_SLOTS)
+    assert second == {"attempted": 1, "recovered": 0, "progressed": 1, "failed": 0}
+    gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
+    assert (gap["from_cursor"], gap["to_cursor"]) == (13, 29)
+    assert rpc.blocks == [11, 12]
 
 
 def test_default_gap_retry_budget_caps_block_rpc_load(sol):
@@ -270,9 +355,118 @@ def test_default_gap_retry_budget_caps_block_rpc_load(sol):
     rpc = Rpc()
     result = sol.retry_open_gaps(rpc)
     assert result == {"attempted": 1, "recovered": 0, "progressed": 1, "failed": 0}
-    assert rpc.blocks == list(range(11, 11 + sol.GAP_RETRY_SLOT_BUDGET))
+    assert rpc.blocks == [11]
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
-    assert gap["from_cursor"] == 11 + sol.GAP_RETRY_SLOT_BUDGET
+    assert gap["from_cursor"] == 12
+
+
+def test_failed_gap_recovery_is_deferred_but_remains_fail_visible(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            raise RuntimeError("public RPC response was truncated")
+
+    assert sol.retry_open_gaps(Rpc()) == {
+        "attempted": 1, "recovered": 0, "progressed": 0, "failed": 1,
+    }
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    health = stream_health.snapshot(stale_after_seconds=60)[0]
+    assert health["status"] == "degraded"
+    assert health["open_gaps"] == 1
+    assert health["deferred_gaps"] == 1
+    assert health["next_gap_retry_at"] is not None
+
+
+def test_malformed_raw_create_does_not_advance_the_gap(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+    malformed = _raw_transaction()
+    malformed["transaction"]["message"]["instructions"][0]["accounts"][0] = 999
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return [11]
+            assert method == "getBlock"
+            return {"transactions": [malformed]}
+
+    assert sol.retry_open_gaps(Rpc()) == {
+        "attempted": 1, "recovered": 0, "progressed": 0, "failed": 1,
+    }
+    c = stream_health._conn()
+    try:
+        gap = c.execute(
+            "SELECT from_cursor,to_cursor,status,retry_count,last_error FROM gaps"
+        ).fetchone()
+    finally:
+        c.close()
+    assert gap[:4] == (11, 11, "open", 1)
+    assert "identity is incomplete" in gap[4]
+
+
+def test_websocket_runner_never_backfills_or_hydrates_inline(sol):
+    class Rpc:
+        def __init__(self):
+            self.calls = 0
+
+        def call(self, method, params):
+            self.calls += 1
+            raise AssertionError("websocket reader must not call RPC")
+
+    rpc = Rpc()
+    runner = sol.build_runner(rpc=rpc, socket_factory=lambda: None)
+    assert runner.backfill is None
+
+    event = sol.parse_message(json.dumps(_notification()))
+    runner.on_event(event.payload)
+    assert rpc.calls == 0
+    c = sol._conn()
+    try:
+        assert c.execute(
+            "SELECT evidence_state,hydrated_at FROM raw_launches"
+        ).fetchone() == ("raw_only", None)
+    finally:
+        c.close()
+
+
+def test_maintenance_recovers_gap_before_bounded_hydration(sol, monkeypatch):
+    order = []
+    monkeypatch.setattr(
+        sol, "retry_open_gaps",
+        lambda rpc: order.append("gap") or {
+            "attempted": 0, "recovered": 0, "progressed": 0, "failed": 0,
+        },
+    )
+
+    def rehydrate(rpc, *, limit):
+        order.append(("hydrate", limit))
+        return {"attempted": 0, "completed": 0, "failed": 0}
+
+    monkeypatch.setattr(sol, "rehydrate_pending", rehydrate)
+
+    class StopAfterOneTick:
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            return True
+
+    sol._rehydrate_loop(StopAfterOneTick(), object(), interval_seconds=1)
+    assert order == ["gap", ("hydrate", 5)]
 
 
 def test_unfinalized_or_pruned_slot_gap_stays_open(sol):
