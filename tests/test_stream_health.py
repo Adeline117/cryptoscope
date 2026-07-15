@@ -19,8 +19,10 @@ def test_contiguous_cursor_detects_gap_without_regressing(health):
     gap = health.observe("hyperliquid", "l2:BTC", cursor=13, event_at=t0,
                          received_at=t0 + timedelta(milliseconds=250),
                          expect_contiguous=True)
-    assert gap == {"classification": "gap_detected", "cursor": 13,
-                   "latency_ms": 250, "status": "degraded", "open_gaps": 1}
+    assert gap["classification"] == "gap_detected" and gap["cursor"] == 13
+    assert gap["latency_ms"] == 250 and gap["status"] == "degraded"
+    assert gap["open_gaps"] == 1
+    assert gap["gap"]["from_cursor"] == 11 and gap["gap"]["to_cursor"] == 12
     old = health.observe("hyperliquid", "l2:BTC", cursor=12, event_at=t0,
                          received_at=t0 + timedelta(seconds=1), expect_contiguous=True)
     assert old["classification"] == "out_of_order" and old["cursor"] == 13

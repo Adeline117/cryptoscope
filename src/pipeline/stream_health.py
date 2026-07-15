@@ -66,6 +66,7 @@ def observe(source: str, stream: str, *, cursor: int | None = None,
         previous_cursor = previous[0] if previous else None
         classification = "event"
         next_cursor = cursor if previous_cursor is None else previous_cursor
+        gap_info = None
         if cursor is not None and previous_cursor is not None:
             if cursor < previous_cursor:
                 classification = "out_of_order"
@@ -80,6 +81,13 @@ def observe(source: str, stream: str, *, cursor: int | None = None,
                     ) VALUES (?,?,?,?,?,'open',?)""",
                               (source, stream, previous_cursor + 1, cursor - 1, received,
                                json.dumps({"observed_after": cursor}, separators=(",", ":"))))
+                    gap_id = c.execute(
+                        "SELECT id FROM gaps WHERE source=? AND stream=? AND from_cursor=? "
+                        "AND to_cursor=?",
+                        (source, stream, previous_cursor + 1, cursor - 1),
+                    ).fetchone()[0]
+                    gap_info = {"id": gap_id, "from_cursor": previous_cursor + 1,
+                                "to_cursor": cursor - 1}
         elif cursor is not None:
             next_cursor = cursor
         open_gaps = c.execute(
@@ -97,7 +105,8 @@ def observe(source: str, stream: str, *, cursor: int | None = None,
                   (source, stream, next_cursor, event, received, latency_ms, status, received))
         c.commit()
         return {"classification": classification, "cursor": next_cursor,
-                "latency_ms": latency_ms, "status": status, "open_gaps": open_gaps}
+                "latency_ms": latency_ms, "status": status, "open_gaps": open_gaps,
+                "gap": gap_info}
     finally:
         c.close()
 
