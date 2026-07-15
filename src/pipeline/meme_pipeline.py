@@ -154,12 +154,49 @@ def _estimate_mcap(meta: dict) -> float | None:
     return None
 
 
-async def _enrich_and_score(tokens: list[dict]) -> list[dict]:
-    """Run GoPlus security checks and alpha scoring on each token."""
+def _classify_security_result(result) -> dict:
+    """Convert a GoPlus response into an evidence-aware directional gate."""
+    risks = [str(value) for value in (result.risks or [])]
+    lowered = " ".join(risks).lower()
+    evidence_available = (
+        isinstance(result.raw, dict)
+        and bool(result.raw)
+        and "unable to verify" not in lowered
+        and "not found" not in lowered
+    )
+    if not evidence_available:
+        state = "unknown"
+    elif result.is_honeypot or result.risk_score < 50:
+        state = "avoid"
+    elif result.risk_score < 70:
+        state = "caution"
+    else:
+        state = "pass"
+    info = result.info if isinstance(result.info, dict) else {}
+    return {
+        "state": state,
+        "evidence_available": evidence_available,
+        "is_honeypot": bool(result.is_honeypot),
+        "can_mint": "mint" in lowered,
+        "has_freeze": "freeze" in lowered or "frozen" in lowered,
+        "has_blacklist": "blacklist" in lowered,
+        "has_proxy": "proxy" in lowered or "upgradeable" in lowered,
+        "goplus_score": result.risk_score,
+        "dev_holding_pct": 0,
+        "holder_count": info.get("holder_count"),
+        "risks": risks[:8],
+    }
+
+
+async def _enrich_and_score(tokens: list[dict], security_checker_factory=None) -> list[dict]:
+    """Score discoveries, but make every directional recommendation fail closed."""
     security_checker = None
     try:
-        from src.collectors.contract_security import ContractSecurityChecker
-        security_checker = ContractSecurityChecker()
+        if security_checker_factory is None:
+            from src.collectors.contract_security import ContractSecurityChecker
+
+            security_checker_factory = ContractSecurityChecker
+        security_checker = security_checker_factory()
         await security_checker.setup()
     except Exception as e:
         logger.warning("security_checker_unavailable", error=str(e))
@@ -174,29 +211,28 @@ async def _enrich_and_score(tokens: list[dict]) -> list[dict]:
             continue
 
         # Run security check
-        security_data = {}
+        security_data = {
+            "state": "unknown",
+            "evidence_available": False,
+            "goplus_score": None,
+            "risks": ["security evidence unavailable"],
+        }
         if security_checker and token.get("token_address"):
             try:
                 chain_map = {"solana": "solana", "ethereum": 1, "bsc": 56, "base": 8453}
                 chain_val = chain_map.get(token["chain_id"], token["chain_id"])
                 result = await security_checker.check_token(str(chain_val), token["token_address"])
                 if result:
-                    security_data = {
-                        "is_honeypot": result.is_honeypot,
-                        "can_mint": "mintable" in " ".join(result.risks).lower() or "mint" in " ".join(result.risks).lower(),
-                        "has_freeze": "freeze" in " ".join(result.risks).lower() or "frozen" in " ".join(result.risks).lower(),
-                        "has_blacklist": "blacklist" in " ".join(result.risks).lower(),
-                        "has_proxy": "proxy" in " ".join(result.risks).lower() or "upgradeable" in " ".join(result.risks).lower(),
-                        "goplus_score": result.risk_score,
-                        "dev_holding_pct": 0,  # GoPlus doesn't always provide this
-                        "holder_count": result.info.get("holder_count"),
-                    }
+                    security_data = _classify_security_result(result)
                     # Extract holder count
-                    token["holder_count"] = result.info.get("holder_count")
+                    token["holder_count"] = security_data.get("holder_count")
             except Exception as e:
                 logger.debug("meme_security_check_failed", token=token.get("token_symbol"), error=str(e))
+                security_data["risks"] = [f"security check failed: {str(e)[:80]}"]
 
         token["security"] = security_data
+        token["security_state"] = security_data["state"]
+        token["security_qualified"] = security_data["state"] == "pass"
 
         # Prepare data for alpha scorer
         scorer_data = {
@@ -229,10 +265,23 @@ async def _enrich_and_score(tokens: list[dict]) -> list[dict]:
 
         # Score
         alpha_result = score_token(scorer_data)
-        token["alpha_score"] = alpha_result["alpha_score"]
-        token["alpha_grade"] = alpha_result["grade"]
-        token["recommendation"] = alpha_result["recommendation"]
-        token["red_flags"] = alpha_result.get("red_flags", [])
+        token["raw_alpha_score"] = alpha_result["alpha_score"]
+        token["raw_alpha_grade"] = alpha_result["grade"]
+        token["raw_recommendation"] = alpha_result["recommendation"]
+        if token["security_qualified"]:
+            token["alpha_score"] = alpha_result["alpha_score"]
+            token["alpha_grade"] = alpha_result["grade"]
+            token["recommendation"] = alpha_result["recommendation"]
+            token["red_flags"] = alpha_result.get("red_flags", [])
+        else:
+            reason = (security_data.get("risks") or ["security evidence unavailable"])[0]
+            token["alpha_score"] = 0
+            token["alpha_grade"] = "D"
+            token["recommendation"] = "SKIP"
+            token["red_flags"] = [
+                f"SECURITY_{security_data['state'].upper()}: {reason}",
+                *alpha_result.get("red_flags", []),
+            ]
 
         scored.append(token)
 
