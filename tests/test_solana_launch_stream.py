@@ -172,11 +172,15 @@ def test_open_slot_gap_is_retried_and_resolved(sol):
 
     class Rpc:
         def call(self, method, params):
-            assert method == "getBlock" and params[0] == 11
-            return None
+            if method == "getSlot":
+                return 12
+            if method == "getFirstAvailableBlock":
+                return 0
+            assert method == "getBlocks" and params[:2] == [11, 11]
+            return []
 
     assert sol.retry_open_gaps(Rpc()) == {
-        "attempted": 1, "recovered": 1, "failed": 0}
+        "attempted": 1, "recovered": 1, "progressed": 0, "failed": 0}
     assert stream_health.open_gaps("solana", "pump_fun_launches") == []
     assert stream_health.snapshot(stale_after_seconds=60)[0]["status"] == "live"
 
@@ -189,13 +193,19 @@ def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
             self.slots = []
 
         def call(self, method, params):
+            if method == "getSlot":
+                return 12
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return [11]
             assert method == "getBlock"
             self.slots.append(params[0])
-            return {"transactions": [tx]} if params[0] == 11 else None
+            return {"transactions": [tx]}
 
     rpc = Rpc()
     assert sol.backfill_slots(10, 12, rpc=rpc) is True
-    assert rpc.slots == [10, 11, 12]
+    assert rpc.slots == [11]
     c = sol._conn()
     try:
         assert c.execute("SELECT signature,slot,transaction_index,evidence_state "
@@ -203,6 +213,53 @@ def test_short_slot_gap_is_backfilled_and_long_gap_stays_open(sol):
     finally:
         c.close()
     assert sol.backfill_slots(1, sol.MAX_BACKFILL_SLOTS + 1, rpc=rpc) is False
+
+
+def test_long_slot_gap_checkpoints_verified_chunks(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=30,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return list(range(params[0], params[1] + 1))
+            assert method == "getBlock"
+            return {"transactions": []}
+
+    first = sol.retry_open_gaps(Rpc(), slot_budget=sol.MAX_BACKFILL_SLOTS)
+    assert first == {"attempted": 1, "recovered": 0, "progressed": 1, "failed": 0}
+    gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
+    assert (gap["from_cursor"], gap["to_cursor"]) == (27, 29)
+
+    second = sol.retry_open_gaps(Rpc(), slot_budget=sol.MAX_BACKFILL_SLOTS)
+    assert second == {"attempted": 1, "recovered": 1, "progressed": 0, "failed": 0}
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+
+
+def test_unfinalized_or_pruned_slot_gap_stays_open(sol):
+    class UnfinalizedRpc:
+        def call(self, method, params):
+            assert method == "getSlot"
+            return 10
+
+    assert sol.backfill_slots(11, 11, rpc=UnfinalizedRpc()) is False
+
+    class PrunedRpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            assert method == "getFirstAvailableBlock"
+            return 20
+
+    assert sol.backfill_slots(11, 11, rpc=PrunedRpc()) is False
 
 
 def test_subscription_error_fails_visible(sol):

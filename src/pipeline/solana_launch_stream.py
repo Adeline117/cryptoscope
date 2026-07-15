@@ -436,19 +436,36 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
     return {"attempted": len(rows), "completed": completed, "failed": failed}
 
 
-def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10) -> dict:
+def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
+                    slot_budget: int = 32) -> dict:
     gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
-    recovered = failed = 0
+    attempted = recovered = progressed = failed = 0
+    remaining_budget = max(0, int(slot_budget))
     for gap in gaps:
-        if backfill_slots(gap["from_cursor"], gap["to_cursor"], rpc=rpc):
-            if stream_health.resolve_gap(
-                    gap["id"], details={"backfilled": True, "retry": True,
-                                        "from": gap["from_cursor"],
-                                        "to": gap["to_cursor"]}):
+        if remaining_budget <= 0:
+            break
+        start = int(gap["from_cursor"])
+        chunk_size = min(MAX_BACKFILL_SLOTS,
+                         int(gap["to_cursor"]) - start + 1,
+                         remaining_budget)
+        end = start + chunk_size - 1
+        attempted += 1
+        remaining_budget -= chunk_size
+        if backfill_slots(start, end, rpc=rpc):
+            state = stream_health.advance_gap(
+                gap["id"], end,
+                details={"backfilled": True, "retry": True,
+                         "chunk_from": start, "chunk_to": end,
+                         "gap_to": gap["to_cursor"]},
+            )
+            if state == "resolved":
                 recovered += 1
+            elif state == "advanced":
+                progressed += 1
         else:
             failed += 1
-    return {"attempted": len(gaps), "recovered": recovered, "failed": failed}
+    return {"attempted": attempted, "recovered": recovered,
+            "progressed": progressed, "failed": failed}
 
 
 def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
@@ -486,20 +503,35 @@ def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[d
 
 
 def backfill_slots(from_slot: int, to_slot: int, *, rpc: JsonRpc) -> bool:
-    """Recover short gaps; long gaps stay open instead of claiming completeness."""
+    """Recover one finalized chunk while treating chain-confirmed skips as empty."""
     if to_slot < from_slot:
         return True
     if to_slot - from_slot + 1 > MAX_BACKFILL_SLOTS:
         return False
     try:
-        for slot in range(int(from_slot), int(to_slot) + 1):
+        finalized = int(rpc.call("getSlot", [{"commitment": "finalized"}]))
+        if finalized < int(to_slot):
+            return False
+        first_available = int(rpc.call("getFirstAvailableBlock", []))
+        if int(from_slot) < first_available:
+            raise RuntimeError(
+                f"slot {from_slot} predates first available block {first_available}")
+        produced = rpc.call("getBlocks", [int(from_slot), int(to_slot),
+                                           {"commitment": "finalized"}])
+        if not isinstance(produced, list):
+            raise RuntimeError("getBlocks returned a non-list result")
+        slots = [int(slot) for slot in produced]
+        if slots != sorted(set(slots)) or any(
+                slot < int(from_slot) or slot > int(to_slot) for slot in slots):
+            raise RuntimeError("getBlocks returned invalid slot coverage")
+        for slot in slots:
             block = rpc.call("getBlock", [slot, {
-                "commitment": "confirmed", "encoding": "jsonParsed",
+                "commitment": "finalized", "encoding": "jsonParsed",
                 "transactionDetails": "full", "rewards": False,
                 "maxSupportedTransactionVersion": 0,
             }])
-            if block is None:
-                continue
+            if not isinstance(block, dict):
+                raise RuntimeError(f"finalized block {slot} is unavailable")
             for index, item in enumerate(block.get("transactions") or []):
                 launch = _launch_from_block_transaction(item, slot, index)
                 if launch:
