@@ -230,6 +230,28 @@ function utcClock(ts){
   const d=new Date(ts); if(Number.isNaN(d.getTime()))return "—";
   return d.toISOString().replace("T"," ").replace(/\.\d{3}Z$/," UTC");
 }
+function launchLifecycleHtml(r){
+  const detected=new Date(r?.detected_at||"");
+  const horizons=r?.outcome?.horizons||{};
+  const unavailable=new Set(r?.outcome?.unavailable_horizons||[]);
+  const clocks=[["1h",1],["24h",24],["7d",168]].map(([name,hours])=>{
+    const target=Number.isNaN(detected.getTime())?null:new Date(detected.getTime()+hours*3600000);
+    const point=horizons[name];
+    let result;
+    if(point){
+      const net=point.net_return_pct_est;
+      const gross=point.gross_return_pct;
+      result=`$${esc(point.price??"—")} · 毛收益 ${gross==null?"—":`${gross>0?"+":""}${esc(gross)}%`} · 估算成本后 ${net==null?"—":`${net>0?"+":""}${esc(net)}%`}`;
+    }else if(unavailable.has(name)) result="历史价格不可得";
+    else if(target&&Date.now()<target.getTime()) result=`等待到 ${esc(utcClock(target.toISOString()))}`;
+    else result="已到评估时点，等待结算器回写";
+    return `<div><b>${name}</b> · ${target?esc(utcClock(target.toISOString())):"时钟不可用"} · ${result}</div>`;
+  }).join("");
+  const quote=r?.quote_at&&r?.expires_at
+    ?`${esc(utcClock(r.quote_at))} → ${esc(utcClock(r.expires_at))}（${esc(expiryText(r))}）`
+    :"无完整双向报价时钟，不可按首次价行动";
+  return `<br><b>进入窗口</b>: ${quote}<br><b>价格失效</b>: 若用户自行建仓，价格 ≤ $${esc(r?.invalidation_price??"—")} 时论文失效；系统不会代为卖出。<br><b>固定评估（不是平仓）</b>: ${clocks}<small>收益扣除冻结的估算成本；真实成交成本标记: ${r?.outcome?.cost_is_real_fill===true?"真实":"非真实成交"}。</small><br><b>真实离场</b>: 无——系统没有成交、没有持仓，也不会自动平仓。`;
+}
 
 let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
@@ -285,9 +307,9 @@ const LANES={
       {k:"px",label:"首次价",n:1,cell:r=>r.entry_price?`<span class="num">$${r.entry_price}</span>`:"—",sort:r=>r.entry_price||0},
       {k:"fdv",label:"FDV / 流动性",n:1,cell:r=>`$${fmtUsd(r.fdv)} <small class="dim">/ ${usd(r.liquidity_usd)}</small>`,sort:r=>r.fdv||0},
       {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
-      {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 -30%</small>`,sort:r=>r.max_notional_usd||0},
+      {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 ≤$${esc(r.invalidation_price??"—")}</small>`,sort:r=>r.max_notional_usd||0},
     ],
-    detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},ed=effectiveDecision(r);return `<span class="so">所以👉</span> ${ed==="SMALL_PROBE"?`安全与双向报价均通过且仍在 ${esc(r.expires_at)} 前有效；只可按上限小额试错，触及失效价退出。`:ed==="EXPIRED"?"原报价已经过期，禁止按旧价格行动；必须重新通过安全与双向路由门。":ed==="AVOID"?"存在已知安全红旗或反向路由失败，不要碰。":"检查不完整，只观察；UNKNOWN 不是安全。"}<br>当前状态: ${esc(ed)} · ${esc(expiryText(r))}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>报价时间: ${esc(r.quote_at||"—")} · 过期时间: ${esc(r.expires_at||"—")}<br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}<br>失效价: $${esc(r.invalidation_price)} · 最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}`},
+    detail:r=>{const sg=r.security_gate||{},ep=r.execution_probe||{},ed=effectiveDecision(r);return `<span class="so">所以👉</span> ${ed==="SMALL_PROBE"?`安全与双向报价均通过且仍在 ${esc(r.expires_at)} 前有效；只可按上限小额试错，触及失效价退出。`:ed==="EXPIRED"?"原报价已经过期，禁止按旧价格行动；必须重新通过安全与双向路由门。":ed==="AVOID"?"存在已知安全红旗或反向路由失败，不要碰。":"检查不完整，只观察；UNKNOWN 不是安全。"}<br>当前状态: ${esc(ed)} · ${esc(expiryText(r))}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchLifecycleHtml(r)}`},
   },
   structure:{
     title:d=>{const e=d?.events||[];return `<b style="color:var(--violet)">公开市场结构事件</b>: ${e.length} 个已入账。上币、解锁、CEX 流入会在这里按实际发生时间分线记录。`},

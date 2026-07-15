@@ -24,3 +24,15 @@ def test_board_exposes_carry_entry_exit_clocks_without_calling_them_fills():
     assert "p.closed_at" in html and "p.close_reason" in html
     assert "测得纸面成本·非成交" in html
     assert "只读盘口纸面测量" in html
+
+
+def test_board_exposes_launch_quote_invalidation_and_measurement_clocks_honestly():
+    html = BOARD.read_text()
+
+    assert "function launchLifecycleHtml(r)" in html
+    assert 'const clocks=[["1h",1],["24h",24],["7d",168]]' in html
+    assert "进入窗口" in html
+    assert "价格失效" in html
+    assert "固定评估（不是平仓）" in html
+    assert "收益扣除冻结的估算成本" in html
+    assert "系统没有成交、没有持仓，也不会自动平仓" in html
