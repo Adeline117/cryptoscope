@@ -28,6 +28,7 @@ PUMP_FUN_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 PUBLIC_SOLANA_WS = "wss://api.mainnet-beta.solana.com/"
 MAX_BACKFILL_SLOTS = 16
+GAP_RETRY_SLOT_BUDGET = 8
 DB = DATA_DIR / "solana_launch_events.db"
 
 
@@ -437,7 +438,7 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
 
 
 def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
-                    slot_budget: int = 32) -> dict:
+                    slot_budget: int = GAP_RETRY_SLOT_BUDGET) -> dict:
     gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
     attempted = recovered = progressed = failed = 0
     remaining_budget = max(0, int(slot_budget))

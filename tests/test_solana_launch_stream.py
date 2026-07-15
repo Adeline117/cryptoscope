@@ -244,6 +244,37 @@ def test_long_slot_gap_checkpoints_verified_chunks(sol):
     assert stream_health.open_gaps("solana", "pump_fun_launches") == []
 
 
+def test_default_gap_retry_budget_caps_block_rpc_load(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=30,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def __init__(self):
+            self.blocks = []
+
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return list(range(params[0], params[1] + 1))
+            assert method == "getBlock"
+            self.blocks.append(params[0])
+            return {"transactions": []}
+
+    rpc = Rpc()
+    result = sol.retry_open_gaps(rpc)
+    assert result == {"attempted": 1, "recovered": 0, "progressed": 1, "failed": 0}
+    assert rpc.blocks == list(range(11, 11 + sol.GAP_RETRY_SLOT_BUDGET))
+    gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
+    assert gap["from_cursor"] == 11 + sol.GAP_RETRY_SLOT_BUDGET
+
+
 def test_unfinalized_or_pruned_slot_gap_stays_open(sol):
     class UnfinalizedRpc:
         def call(self, method, params):
