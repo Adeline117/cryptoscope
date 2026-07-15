@@ -225,6 +225,11 @@ function expiryText(r){
   if(seconds<=0)return "已过期";
   return seconds<60?`剩 ${seconds}s`:`剩 ${Math.ceil(seconds/60)}m`;
 }
+function utcClock(ts){
+  if(!ts)return "—";
+  const d=new Date(ts); if(Number.isNaN(d.getTime()))return "—";
+  return d.toISOString().replace("T"," ").replace(/\.\d{3}Z$/," UTC");
+}
 
 let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
@@ -414,6 +419,7 @@ function renderPlay(){
     h+='<div class="pnote">唯一有结构 edge 的:<b>跨所资金费差</b>——HL 资金费结构性高于 CEX(机构够不着 DEX 腿)。<b>空HL + 多OKX 两永续,delta 中性不赌方向</b>。净额=毛差扣真实成本(费/滑点/再平衡)。</div>';
     h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 净 <span class="num" style="color:var(--good)">+${c.net_ann}%/年</span> <small class="dim">毛${c.edge_ann} · ${c.hold_measured?c.hold_days+'d实测':'持仓未测(14d假设)'} · 尾部ADL</small></div>`).join('');
     if(pp&&(pp.n_open||pp.n_closed)) h+=`<div class="pnote">📊 纸面验证:${pp.n_closed&&pp.avg_net_return_pct!=null?`已平仓 ${pp.n_closed} 个,<b>绝对净收益 ${pp.avg_net_return_pct>0?'+':''}${pp.avg_net_return_pct}%</b>(累计资金费 ${pp.avg_funding_accrued_pct}%,成本 ${pp.avg_cost_pct}%,持仓 ${pp.avg_hold_days}d${pp.avg_annualized_net_pct!=null?`,合格长样本年化 ${pp.avg_annualized_net_pct}%`:`,${esc(pp.annualized_note||'年化样本不足')}`})`:`${pp.n_open} 仓运行中,等差价衰减自然平仓→给实测数字。<b>在此之前净额是模型估,别当已证</b>`}。</div>`;
+    if(pp?.open_positions?.length) h+=pp.open_positions.slice(0,3).map(p=>`<div class="prow"><span class="chip">纸面运行中</span> <b>${esc(p.symbol)}</b> 入场 <span class="num">${esc(utcClock(p.entry_at))}</span> · 最近测量 <span class="num">${esc(utcClock(p.last_measured_at))}</span> · 当前差价 <span class="num">${p.last_diff_ann_pct==null?'—':esc(p.last_diff_ann_pct)+'%/年'}</span><small class="dim">退出:差价&lt;${esc(p.exit_diff_floor_ann_pct)}%/年或市场缺失 · 非实盘</small></div>`).join('');
   } else h+='<div class="pnote dim">此刻无净&gt;0 的跨所 carry 机会。没有就没有,不硬凑一个给你。</div>';
   h+='</div>';
   // 2) DEFENSE
@@ -477,14 +483,20 @@ function renderPerp(d){
         ppBanner=`<div class="sc-card"><span class="k">纸面实测·${pp.n_closed}个已平仓</span>
           <span class="v"><span class="num" style="color:${pp.avg_net_return_pct>0?'var(--good)':'var(--danger)'}">${pp.avg_net_return_pct>0?'+':''}${pp.avg_net_return_pct}%</span><small>绝对净收益</small></span>
           <span class="v"><span class="num">${pp.avg_funding_accrued_pct}%</span><small>累计资金费</small></span>
-          <span class="v"><span class="num" style="color:var(--danger)">${pp.avg_cost_pct}%</span><small>实际成本</small></span>
+          <span class="v"><span class="num" style="color:var(--danger)">${pp.avg_cost_pct}%</span><small>测得纸面成本·非成交</small></span>
           <span class="v"><span class="num">${pp.avg_hold_days}d</span><small>实测持仓</small></span>
           <span class="v"><span class="num dim">${pp.avg_annualized_net_pct!=null?pp.avg_annualized_net_pct+'%':'隐藏'}</span><small>${pp.avg_annualized_net_pct!=null?'长样本年化':esc(pp.annualized_note||'年化样本不足')}</small></span>
           <span class="v"><span class="num dim">${pp.n_open}</span><small>运行中</small></span></div>`;
       } else ppBanner=`<div class="sc-card muted"><span class="k">纸面追踪(实测持仓/滑点/净额)</span><span class="v">${pp.n_open}仓运行中·0平仓 <small>等差价衰减自然平仓→给真实持仓天数和净额,替掉假设</small></span></div>`;
     }
+    let lifecycle="";
+    if(pp?.open_positions?.length||pp?.recent?.length){
+      const opens=(pp.open_positions||[]).slice(0,5).map(p=>`<div class="prow"><span class="chip b-accent">纸面 OPEN</span> <b>${esc(p.symbol)}</b> <span class="num">入场 ${esc(utcClock(p.entry_at))}</span> · <span class="num">最近 ${esc(utcClock(p.last_measured_at))}</span> · 差价 <span class="num">${p.entry_diff_ann_pct==null?'—':esc(p.entry_diff_ann_pct)} → ${p.last_diff_ann_pct==null?'—':esc(p.last_diff_ann_pct)}%/年</span> · 单腿 ${usd(p.notional_usd_per_leg)} <small class="dim">退出条件:差价&lt;${esc(p.exit_diff_floor_ann_pct)}%/年或市场缺失 · 只读盘口纸面测量</small></div>`).join("");
+      const closed=(pp.recent||[]).slice(-5).reverse().map(p=>`<div class="prow"><span class="chip">纸面 CLOSED</span> <b>${esc(p.symbol)}</b> <span class="num">入场 ${esc(utcClock(p.entry_at))}</span> · <span class="num">离场 ${esc(utcClock(p.closed_at))}</span> · 净 <span class="num ${p.net_return_pct>0?'up':'down'}">${p.net_return_pct>0?'+':''}${esc(p.net_return_pct)}%</span> <small class="dim">${esc(p.close_reason||'unknown')} · 非实盘成交</small></div>`).join("");
+      lifecycle=`<div class="play-sec" style="margin:11px 0 14px"><div class="ph">⏱ Carry 进入 / 离开生命周期 <span class="pd">UTC · 纸面盘口测量 · 非实盘</span></div>${opens}${closed}</div>`;
+    }
     html+=`<div class="perp-sec">💰 跨所资金费套利 · delta中性 <small>空HL+多OKX两永续吃差价,不需现货 · <b>净额=毛差 − 往返成本(~0.35%按持仓天数摊)− 再平衡~1.5%/年</b>,这才是真数 · 扣完成本多数机会薄甚至负 · 尾部=ADL级联(为崩盘sizing)</small></div>
-      ${scBanner}${ppBanner}
+      ${scBanner}${ppBanner}${lifecycle}
       <div class="scroll"><table class="tbl"><thead><tr>
         <th>代币</th><th class="n">净额/年(毛)</th><th class="n">构成(HL/OKX)</th><th>交易</th><th class="n">持仓/摊销</th><th>风险</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`;
