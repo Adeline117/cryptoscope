@@ -107,3 +107,28 @@ async def test_blocked_candidate_stays_on_watchlist(monkeypatch):
     result = await stage2.run_stage2_detector(send=False)
     assert result["candidates"] == 1 and result["events"] == 0
     assert result["blocked_security"] == 1 and statuses == []
+
+
+@pytest.mark.asyncio
+async def test_stage2_pair_requests_run_off_event_loop(monkeypatch):
+    import threading
+
+    from src.onchain import watchlist
+    from src.pipeline import stage2_detector as stage2
+
+    loop_thread = threading.get_ident()
+    request_threads = []
+    monkeypatch.setattr(watchlist, "get_active", lambda: [
+        {"token": "0xt", "chain": "base", "symbol": "T"}])
+
+    def best_pair(*_args, **_kwargs):
+        request_threads.append(threading.get_ident())
+        return None
+
+    monkeypatch.setattr(stage2, "_best_pair", best_pair)
+
+    result = await stage2.run_stage2_detector(send=False)
+
+    assert result == {"status": "complete", "checked": 0, "candidates": 0,
+                      "events": 0, "blocked_security": 0}
+    assert request_threads and request_threads[0] != loop_thread

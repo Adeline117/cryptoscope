@@ -17,6 +17,7 @@ choice; this polling MVP captures the same event a few minutes later for free.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import urllib.request
 from datetime import datetime, timezone
@@ -94,7 +95,10 @@ async def run_stage2_detector(send: bool = True) -> dict:
     checked = candidates = events = blocked = 0
     for entry in tokens:
         token, chain = entry["token"], entry["chain"]
-        pair = _best_pair(token, chain)
+        # urllib is synchronous and each request can consume the full 12-second
+        # timeout. Keep the five-minute detector from freezing every other async
+        # scheduler job while it walks the watchlist.
+        pair = await asyncio.to_thread(_best_pair, token, chain)
         if not pair:
             continue
         checked += 1
