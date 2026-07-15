@@ -48,8 +48,75 @@ def _conn() -> sqlite3.Connection:
         entry_diff REAL, pred_net REAL, entry_slip REAL, notional REAL,
         accrued_pct REAL DEFAULT 0, last_ts TEXT, last_diff REAL,
         status TEXT DEFAULT 'open', exit_ts TEXT, exit_slip REAL,
-        hold_h REAL, realized_net REAL)""")
+        hold_h REAL, realized_net REAL, close_reason TEXT)""")
+    cols = {r[1] for r in c.execute("PRAGMA table_info(paper)").fetchall()}
+    if "close_reason" not in cols:
+        c.execute("ALTER TABLE paper ADD COLUMN close_reason TEXT")
     return c
+
+
+def _sync_opportunity_ledger() -> dict:
+    """Mirror every paper episode into the shared five-lane evidence ledger."""
+    from src.pipeline import opportunity_ledger
+
+    c = _conn()
+    try:
+        rows = c.execute(
+            "SELECT id,symbol,entry_ts,entry_diff,pred_net,entry_slip,notional,"
+            "accrued_pct,last_ts,last_diff,status,exit_ts,exit_slip,hold_h,"
+            "realized_net,close_reason FROM paper ORDER BY id"
+        ).fetchall()
+    finally:
+        c.close()
+    synced = resolved = 0
+    for row in rows:
+        (pid, symbol, entry_ts, entry_diff, pred_net, entry_slip, notional,
+         accrued_pct, last_ts, last_diff, status, exit_ts, exit_slip, hold_h,
+         realized_net, close_reason) = row
+        estimated_roundtrip_cost = ((entry_slip or 0) * 2
+                                    + 2 * FEE_PCT_ONEWAY_BOTHLEGS)
+        candidate = {
+            "lane": "carry", "chain": "hyperliquid+okx", "token": symbol,
+            "event_key": f"paper:{pid}", "symbol": symbol,
+            "source": "Hyperliquid + OKX live order books",
+            "event_at": entry_ts, "detected_at": entry_ts, "decision_at": entry_ts,
+            "quote_at": entry_ts, "state": f"paper_{status}",
+            "decision": "PAPER_OPEN", "max_notional_usd": notional,
+            "gross_notional_usd": (notional or 0) * 2,
+            "entry_diff_ann_pct": entry_diff, "predicted_net_ann_pct": pred_net,
+            "entry_slip_pct": entry_slip,
+            "roundtrip_cost_pct_est": estimated_roundtrip_cost,
+            "cost_model": "paper_books_symmetric_exit_estimate_plus_known_taker_fees",
+            "execution_mode": "paper_orderbook_measurement",
+            "exit_diff_floor_ann_pct": CLOSE_DIFF_FLOOR,
+            "paper_position_id": pid,
+        }
+        ident, _ = opportunity_ledger.record(candidate)
+        outcome = {
+            "version": 1, "kind": "delta_neutral_carry_paper",
+            "execution_mode": "paper_orderbook_measurement",
+            "cost_is_real_fill": False, "status": status,
+            "funding_accrued_pct": accrued_pct or 0,
+            "entry_slip_pct": entry_slip,
+            "last_diff_ann_pct": last_diff, "last_measured_at": last_ts,
+        }
+        state = "open"
+        if status == "closed":
+            fees_pct = 2 * FEE_PCT_ONEWAY_BOTHLEGS
+            realized_cost_pct = (entry_slip or 0) + (exit_slip or 0) + fees_pct
+            outcome.update({
+                "closed_at": exit_ts, "hold_h": hold_h,
+                "exit_slip_pct": exit_slip, "fees_pct": fees_pct,
+                "realized_cost_pct": realized_cost_pct,
+                "net_return_pct": (accrued_pct or 0) - realized_cost_pct,
+                "realized_net_ann_pct": realized_net,
+                "close_reason": close_reason or "legacy_unknown",
+            })
+            state = "resolved"
+            resolved += 1
+        opportunity_ledger.save_outcome(ident, outcome, state)
+        synced += 1
+    return {"status": "ok", "synced": synced, "resolved": resolved}
 
 
 def _get(url: str, timeout: int = 10):
@@ -161,10 +228,12 @@ def run(carries: list[dict]) -> dict:
                 # one-time round-trip cost = slippage in + slippage out + fees(2× one-way)
                 cost = (entry_slip or 0) + exit_slip + 2 * FEE_PCT_ONEWAY_BOTHLEGS
                 realized_net = accrued / hold_yr - cost / hold_yr
+                close_reason = "market_missing" if cur is None else "diff_below_floor"
                 c.execute("UPDATE paper SET status='closed', exit_ts=?, exit_slip=?, hold_h=?, "
-                          "accrued_pct=?, realized_net=?, last_ts=?, last_diff=? WHERE id=?",
+                          "accrued_pct=?, realized_net=?, last_ts=?, last_diff=?,"
+                          "close_reason=? WHERE id=?",
                           (now.isoformat(), exit_slip, hold_h, accrued, realized_net,
-                           now.isoformat(), cur_diff, pid))
+                           now.isoformat(), cur_diff, close_reason, pid))
             else:
                 c.execute("UPDATE paper SET accrued_pct=?, last_ts=?, last_diff=? WHERE id=?",
                           (accrued, now.isoformat(), cur_diff, pid))
@@ -182,7 +251,13 @@ def run(carries: list[dict]) -> dict:
         c.commit()
     finally:
         c.close()
-    return paper_stats()
+    stats = paper_stats()
+    try:
+        stats["ledger_sync"] = _sync_opportunity_ledger()
+    except Exception as exc:
+        logger.warning("carry_ledger_sync_failed", error=str(exc)[:120])
+        stats["ledger_sync"] = {"status": "error", "error": str(exc)[:120]}
+    return stats
 
 
 def paper_stats() -> dict:
