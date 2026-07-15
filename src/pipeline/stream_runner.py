@@ -84,7 +84,7 @@ class StreamRunner:
                 if event is None:
                     continue
                 health_now = self.monotonic()
-                should_record_health = (self.expect_contiguous
+                should_record_health = ((self.expect_contiguous and event.cursor is not None)
                                         or self.health_interval_seconds == 0
                                         or last_health is None
                                         or health_now - last_health >= self.health_interval_seconds)

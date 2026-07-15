@@ -103,3 +103,24 @@ def test_high_frequency_non_contiguous_feed_throttles_health_writes(monkeypatch)
     )
     assert runner.run_connection(stop) == 3
     assert len(health_calls) == 1
+
+
+def test_payloads_without_cursor_do_not_disable_health_throttle(monkeypatch):
+    from src.pipeline import stream_health
+    from src.pipeline.stream_runner import StreamEvent, StreamRunner
+
+    stop = threading.Event()
+    ws = _Socket([{"kind": "launch"}, {"kind": "launch"}, {"kind": "slot"}])
+    health_calls = []
+    monkeypatch.setattr(stream_health, "observe",
+                        lambda *args, **kwargs: health_calls.append(kwargs) or {})
+
+    runner = StreamRunner(
+        source="solana", stream="launches", connect=lambda: ws,
+        subscribe=lambda sock: None,
+        parse=lambda raw: StreamEvent(raw, cursor=7 if raw["kind"] == "slot" else None),
+        on_event=lambda payload: stop.set() if payload["kind"] == "slot" else None,
+        expect_contiguous=True, health_interval_seconds=1, monotonic=lambda: 100,
+    )
+    assert runner.run_connection(stop) == 3
+    assert [call["cursor"] for call in health_calls] == [None, 7]
