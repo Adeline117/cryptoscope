@@ -1301,13 +1301,18 @@ async def _run_operator_hunt():
     from src.pipeline.operator_hunt import auto_promote, hunt
     from src.distribution.telegram_sender import send_alert
 
-    suspects = hunt()
+    # Both stages perform synchronous HTTP/RPC and SQLite work.  This is an async
+    # APScheduler job, so running either inline would stall every other scheduled
+    # coroutine until the operator scan finishes.  Keep the stages sequential (the
+    # promotion consumes this scan's suspects) but offload them to the scheduler's
+    # bounded shared executor.
+    suspects = await asyncio.to_thread(hunt)
     # STRICT auto-promotion: any suspect clearing EVERY hard gate (age>=14d, focused
     # funder, mostly-EOA cluster, non-anon identity, proven 聪明庄 history) is
     # registered as a sentinel automatically — closes the manual hunt→sentinel gap
     # without re-admitting the MAME class.
     try:
-        promoted = auto_promote(suspects)
+        promoted = await asyncio.to_thread(auto_promote, suspects)
         if promoted:
             pm = "🤖 <b>自动晋升哨兵(过全部硬门)</b>\n━━━━━━━━━━\n" + "\n".join(
                 f"<b>{p['symbol']}</b> [{p['chain']}] {p['wallets']}钱包 · {p['age_days']:.0f}天"

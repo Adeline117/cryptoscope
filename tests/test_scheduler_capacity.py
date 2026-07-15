@@ -93,6 +93,40 @@ async def test_operator_scan_runs_off_event_loop(monkeypatch):
     assert scan_threads and scan_threads[0] != loop_thread
 
 
+@pytest.mark.asyncio
+async def test_operator_hunt_and_auto_promote_run_off_event_loop(monkeypatch):
+    """The synchronous hunt pipeline must not stall other scheduler coroutines."""
+    import threading
+
+    from src.distribution import telegram_sender
+    from src.pipeline import operator_hunt, scheduler
+
+    loop_thread = threading.get_ident()
+    call_threads = []
+    suspects = []
+
+    def hunt():
+        call_threads.append(("hunt", threading.get_ident()))
+        return suspects
+
+    def auto_promote(got):
+        assert got is suspects
+        call_threads.append(("auto_promote", threading.get_ident()))
+        return []
+
+    async def send_alert(_message):
+        raise AssertionError("empty scan must not send an alert")
+
+    monkeypatch.setattr(operator_hunt, "hunt", hunt)
+    monkeypatch.setattr(operator_hunt, "auto_promote", auto_promote)
+    monkeypatch.setattr(telegram_sender, "send_alert", send_alert)
+
+    await scheduler._run_operator_hunt()
+
+    assert [name for name, _thread in call_threads] == ["hunt", "auto_promote"]
+    assert all(thread != loop_thread for _name, thread in call_threads)
+
+
 def test_perps_export_is_independent_from_wallet_watch():
     from src.pipeline.scheduler import create_scheduler
 
