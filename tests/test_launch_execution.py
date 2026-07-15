@@ -97,6 +97,22 @@ def test_jupiter_roundtrip_quote_replaces_modeled_cost():
     assert event["executable_at"] is None
 
 
+def test_jupiter_quote_uses_slippage_threshold_not_optimistic_output():
+    from src.pipeline import launch_execution as le
+
+    def quotes(url, params, headers):
+        if params["inputMint"] == le.JUPITER_USDC:
+            return {"outAmount": "1000000000", "otherAmountThreshold": "990000000",
+                    "routePlan": [{"swapInfo": {"label": "Buy"}}]}
+        return {"outAmount": "60000000", "otherAmountThreshold": "58800000",
+                "routePlan": [{"swapInfo": {"label": "Sell"}}]}
+
+    got = le._jupiter_route(_event(), "key", quotes)
+
+    assert got["roundtrip_loss_pct"] == 2.0
+    assert got["roundtrip_back_usd"] == 58.8
+
+
 def test_nominal_quoted_route_without_a_valid_quote_clock_is_watch_only():
     from src.pipeline.launch_execution import gate
 
@@ -124,13 +140,39 @@ def test_jupiter_excessive_roundtrip_loss_is_untradeable():
     assert got["roundtrip_loss_pct"] == 20.0
 
 
-def test_missing_router_key_is_unknown_not_executable(monkeypatch):
+def test_missing_router_key_uses_labelled_keyless_quote_fallback(monkeypatch):
     from src.pipeline import launch_execution as le
 
     monkeypatch.delenv("JUPITER_API_KEY", raising=False)
-    got = le.route_probe(_event())
+    calls = []
+
+    def quotes(url, params, headers):
+        calls.append((url, headers))
+        if params["inputMint"] == le.JUPITER_USDC:
+            return {"outAmount": "1000000000",
+                    "routePlan": [{"swapInfo": {"label": "Buy"}}]}
+        return {"outAmount": "58800000",
+                "routePlan": [{"swapInfo": {"label": "Sell"}}]}
+
+    got = le.route_probe(_event(), fetch=quotes)
+
+    assert got["state"] == "quoted"
+    assert got["api_mode"] == "keyless_lite_fallback"
+    assert "keyless fallback" in got["source"]
+    assert calls == [(le.JUPITER_LITE_QUOTE, None),
+                     (le.JUPITER_LITE_QUOTE, None)]
+
+
+def test_jupiter_transport_failure_is_unknown_not_a_fake_no_route():
+    from src.pipeline import launch_execution as le
+
+    def down(*_args, **_kwargs):
+        raise TimeoutError("gateway timeout")
+
+    got = le._jupiter_route(_event(), "key", down)
+
     assert got["state"] == "unknown"
-    assert "not configured" in got["reason"]
+    assert "quote unavailable" in got["reason"]
 
 
 def test_scan_assessment_failure_persists_watch_not_probe(tmp_path, monkeypatch):

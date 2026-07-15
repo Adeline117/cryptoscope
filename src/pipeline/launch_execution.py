@@ -20,6 +20,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 JUPITER_ORDER = "https://api.jup.ag/swap/v2/order"
+# Jupiter postponed the keyless Lite API retirement in February 2026. It remains a
+# deliberately labelled fallback for quote-only validation when no portal key is
+# configured; the keyed V2 order endpoint stays preferred.
+JUPITER_LITE_QUOTE = "https://lite-api.jup.ag/swap/v1/quote"
 JUPITER_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 ZEROX_PRICE = "https://api.0x.org/swap/allowance-holder/price"
 MAX_ROUNDTRIP_LOSS_PCT = 5.0
@@ -161,31 +165,42 @@ def _roundtrip(notional: float, back_usd: float) -> float:
     return round((notional - back_usd) / notional * 100, 4)
 
 
-def _jupiter_route(event: dict, key: str, fetch: Fetch) -> dict:
+def _jupiter_route(event: dict, key: str, fetch: Fetch, *, endpoint: str = JUPITER_ORDER) -> dict:
     notional = float(event.get("max_notional_usd") or 0)
     token = event.get("token")
     if notional <= 0 or not token:
         return {"state": "unknown", "reason": "missing quote notional/token"}
-    headers = {"x-api-key": key}
+    headers = {"x-api-key": key} if key else None
+    source = ("Jupiter Swap v2 order" if endpoint == JUPITER_ORDER
+              else "Jupiter Swap v1 lite quote (keyless fallback)")
     common = {"slippageBps": 100}
     try:
-        buy = fetch(JUPITER_ORDER, {**common, "inputMint": JUPITER_USDC,
+        buy = fetch(endpoint, {**common, "inputMint": JUPITER_USDC,
                     "outputMint": token, "amount": str(round(notional * 1_000_000))}, headers)
-        token_out = int(buy.get("outAmount") or 0)
-        if token_out <= 0 or not buy.get("routePlan"):
-            raise ValueError("no buy route")
-        sell = fetch(JUPITER_ORDER, {**common, "inputMint": token,
-                     "outputMint": JUPITER_USDC, "amount": str(token_out)}, headers)
-        back_raw = int(sell.get("outAmount") or 0)
-        if back_raw <= 0 or not sell.get("routePlan"):
-            raise ValueError("no sell route")
     except Exception as exc:
-        return {"state": "untradeable", "source": "Jupiter Swap v2 order",
-                "reason": str(exc)[:80], "read_only": True}
+        return {"state": "unknown", "source": source,
+                "reason": f"buy quote unavailable: {str(exc)[:70]}", "read_only": True}
+    # Use the minimum accepted output, not the optimistic headline outAmount. This
+    # freezes the configured 1% slippage tolerance into the paper cost estimate.
+    token_out = int(buy.get("otherAmountThreshold") or buy.get("outAmount") or 0)
+    if token_out <= 0 or not buy.get("routePlan"):
+        return {"state": "untradeable", "source": source,
+                "reason": "no buy route", "read_only": True}
+    try:
+        sell = fetch(endpoint, {**common, "inputMint": token,
+                     "outputMint": JUPITER_USDC, "amount": str(token_out)}, headers)
+    except Exception as exc:
+        return {"state": "unknown", "source": source,
+                "reason": f"sell quote unavailable: {str(exc)[:70]}", "read_only": True}
+    back_raw = int(sell.get("otherAmountThreshold") or sell.get("outAmount") or 0)
+    if back_raw <= 0 or not sell.get("routePlan"):
+        return {"state": "untradeable", "source": source,
+                "reason": "no sell route", "read_only": True}
     back_usd = back_raw / 1_000_000
     loss = _roundtrip(notional, back_usd)
     return {"state": "quoted" if loss <= MAX_ROUNDTRIP_LOSS_PCT else "untradeable",
-            "source": "Jupiter Swap v2 order", "read_only": True,
+            "source": source, "read_only": True,
+            "api_mode": "keyed_v2" if endpoint == JUPITER_ORDER else "keyless_lite_fallback",
             "roundtrip_loss_pct": loss, "notional_usd": notional,
             "roundtrip_back_usd": round(back_usd, 6),
             "buy_price_impact_pct": abs(float(buy.get("priceImpact") or 0)) * 100,
@@ -231,10 +246,9 @@ def route_probe(event: dict, fetch: Fetch = _get_json) -> dict:
     chain = event.get("chain")
     if chain == "solana":
         key = os.getenv("JUPITER_API_KEY", "")
-        if not key:
-            return {"state": "unknown", "source": "Jupiter Swap v2 order",
-                    "reason": "JUPITER_API_KEY not configured", "read_only": True}
-        return _jupiter_route(event, key, fetch)
+        if key:
+            return _jupiter_route(event, key, fetch)
+        return _jupiter_route(event, "", fetch, endpoint=JUPITER_LITE_QUOTE)
     if chain in _EVM_USDC:
         key = os.getenv("ZEROX_API_KEY", "")
         if not key:
