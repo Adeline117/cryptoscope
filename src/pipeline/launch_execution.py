@@ -24,6 +24,8 @@ JUPITER_ORDER = "https://api.jup.ag/swap/v2/order"
 # deliberately labelled fallback for quote-only validation when no portal key is
 # configured; the keyed V2 order endpoint stays preferred.
 JUPITER_LITE_QUOTE = "https://lite-api.jup.ag/swap/v1/quote"
+JUPITER_PRICE = "https://api.jup.ag/price/v3"
+JUPITER_LITE_PRICE = "https://lite-api.jup.ag/price/v3"
 JUPITER_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 ZEROX_PRICE = "https://api.0x.org/swap/allowance-holder/price"
 MAX_ROUNDTRIP_LOSS_PCT = 5.0
@@ -186,6 +188,18 @@ def _jupiter_route(event: dict, key: str, fetch: Fetch, *, endpoint: str = JUPIT
     if token_out <= 0 or not buy.get("routePlan"):
         return {"state": "untradeable", "source": source,
                 "reason": "no buy route", "read_only": True}
+    decimals = None
+    price_metadata = {}
+    try:
+        price_endpoint = JUPITER_PRICE if endpoint == JUPITER_ORDER else JUPITER_LITE_PRICE
+        metadata = fetch(price_endpoint, {"ids": token}, headers)
+        price_metadata = metadata.get(token) if isinstance(metadata, dict) else None
+        if isinstance(price_metadata, dict):
+            decimals = int(price_metadata.get("decimals"))
+            if not 0 <= decimals <= 18:
+                decimals = None
+    except (KeyError, TypeError, ValueError, OSError):
+        decimals = None
     try:
         sell = fetch(endpoint, {**common, "inputMint": token,
                      "outputMint": JUPITER_USDC, "amount": str(token_out)}, headers)
@@ -198,11 +212,25 @@ def _jupiter_route(event: dict, key: str, fetch: Fetch, *, endpoint: str = JUPIT
                 "reason": "no sell route", "read_only": True}
     back_usd = back_raw / 1_000_000
     loss = _roundtrip(notional, back_usd)
+    token_units = token_out / (10 ** decimals) if decimals is not None else None
+    entry_reference = (notional / token_units if token_units and token_units > 0 else None)
     return {"state": "quoted" if loss <= MAX_ROUNDTRIP_LOSS_PCT else "untradeable",
             "source": source, "read_only": True,
             "api_mode": "keyed_v2" if endpoint == JUPITER_ORDER else "keyless_lite_fallback",
             "roundtrip_loss_pct": loss, "notional_usd": notional,
             "roundtrip_back_usd": round(back_usd, 6),
+            "token_decimals": decimals,
+            "entry_reference_price": round(entry_reference, 12)
+            if entry_reference is not None else None,
+            "invalidation_reference_price": round(entry_reference * 0.70, 12)
+            if entry_reference is not None else None,
+            "market_reference_price_usd": (price_metadata or {}).get("usdPrice")
+            if isinstance(price_metadata, dict) else None,
+            "price_reference_block": (price_metadata or {}).get("blockId")
+            if isinstance(price_metadata, dict) else None,
+            "price_reference_source": "Jupiter Price v3 decimals + worst-threshold route",
+            "price_reference_reason": None if entry_reference is not None
+            else "token decimals unavailable; route price cannot be standardized",
             "buy_price_impact_pct": abs(float(buy.get("priceImpact") or 0)) * 100,
             "sell_price_impact_pct": abs(float(sell.get("priceImpact") or 0)) * 100,
             "buy_routes": _route_labels(buy), "sell_routes": _route_labels(sell),

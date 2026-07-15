@@ -72,6 +72,8 @@ def test_jupiter_roundtrip_quote_replaces_modeled_cost():
 
     def quotes(url, params, headers):
         requests.append((url, params, headers))
+        if url == le.JUPITER_PRICE:
+            return {"Mint": {"decimals": 6, "usdPrice": 0.06, "blockId": 123}}
         if params["inputMint"] == le.JUPITER_USDC:
             return {"outAmount": "1000000000", "priceImpact": "-0.004",
                     "routePlan": [{"swapInfo": {"label": "Raydium"}}]}
@@ -83,7 +85,8 @@ def test_jupiter_roundtrip_quote_replaces_modeled_cost():
     assert route["roundtrip_loss_pct"] == 2.0
     assert route["buy_price_impact_pct"] == 0.4
     assert route["sell_price_impact_pct"] == 0.6
-    assert all(url == le.JUPITER_ORDER for url, _, _ in requests)
+    assert [url for url, _, _ in requests] == [
+        le.JUPITER_ORDER, le.JUPITER_PRICE, le.JUPITER_ORDER]
     assert all("restrictIntermediateTokens" not in params and
                "instructionVersion" not in params for _, params, _ in requests)
     assert all(headers == {"x-api-key": "key"} for _, _, headers in requests)
@@ -95,12 +98,17 @@ def test_jupiter_roundtrip_quote_replaces_modeled_cost():
     assert event["quote_at"] == route["checked_at"]
     assert event["expires_at"] > event["quote_at"]
     assert event["executable_at"] is None
+    assert route["entry_reference_price"] == 0.06
+    assert route["invalidation_reference_price"] == 0.042
+    assert route["token_decimals"] == 6
 
 
 def test_jupiter_quote_uses_slippage_threshold_not_optimistic_output():
     from src.pipeline import launch_execution as le
 
     def quotes(url, params, headers):
+        if url == le.JUPITER_PRICE:
+            return {"Mint": {"decimals": 6}}
         if params["inputMint"] == le.JUPITER_USDC:
             return {"outAmount": "1000000000", "otherAmountThreshold": "990000000",
                     "routePlan": [{"swapInfo": {"label": "Buy"}}]}
@@ -132,6 +140,8 @@ def test_jupiter_excessive_roundtrip_loss_is_untradeable():
     from src.pipeline import launch_execution as le
 
     def quotes(url, params, headers):
+        if url == le.JUPITER_PRICE:
+            return {"Mint": {"decimals": 6}}
         out = "1000000000" if params["inputMint"] == le.JUPITER_USDC else "48000000"
         return {"outAmount": out, "routePlan": [{"swapInfo": {"label": "AMM"}}]}
 
@@ -148,6 +158,8 @@ def test_missing_router_key_uses_labelled_keyless_quote_fallback(monkeypatch):
 
     def quotes(url, params, headers):
         calls.append((url, headers))
+        if url == le.JUPITER_LITE_PRICE:
+            return {"Mint": {"decimals": 6}}
         if params["inputMint"] == le.JUPITER_USDC:
             return {"outAmount": "1000000000",
                     "routePlan": [{"swapInfo": {"label": "Buy"}}]}
@@ -160,7 +172,26 @@ def test_missing_router_key_uses_labelled_keyless_quote_fallback(monkeypatch):
     assert got["api_mode"] == "keyless_lite_fallback"
     assert "keyless fallback" in got["source"]
     assert calls == [(le.JUPITER_LITE_QUOTE, None),
+                     (le.JUPITER_LITE_PRICE, None),
                      (le.JUPITER_LITE_QUOTE, None)]
+
+
+def test_missing_token_decimals_keeps_route_but_blocks_standardized_entry_price():
+    from src.pipeline import launch_execution as le
+
+    def quotes(url, params, headers):
+        if url == le.JUPITER_PRICE:
+            return {}
+        if params["inputMint"] == le.JUPITER_USDC:
+            return {"outAmount": "1000000000",
+                    "routePlan": [{"swapInfo": {"label": "Buy"}}]}
+        return {"outAmount": "58800000",
+                "routePlan": [{"swapInfo": {"label": "Sell"}}]}
+
+    got = le._jupiter_route(_event(), "key", quotes)
+    assert got["state"] == "quoted"
+    assert got["entry_reference_price"] is None
+    assert "decimals unavailable" in got["price_reference_reason"]
 
 
 def test_jupiter_transport_failure_is_unknown_not_a_fake_no_route():

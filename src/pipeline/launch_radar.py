@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.pipeline.opportunity_ledger import active, record, record_if_absent
 
@@ -155,6 +155,14 @@ def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
             notional_usd=notional, method=str(route.get("source") or "route_unavailable"))
     quote_at = route.get("checked_at") or event.get("quote_at")
     expires_at = event.get("expires_at")
+    security_at = security.get("checked_at") or assessed_at.isoformat()
+    security_expires_at = None
+    if security.get("state") == "pass":
+        try:
+            security_expires_at = (datetime.fromisoformat(security_at).astimezone(timezone.utc)
+                                   + timedelta(minutes=5)).isoformat()
+        except (TypeError, ValueError):
+            security_expires_at = None
     sec_state, route_state = security.get("state") or "unknown", route.get("state") or "unknown"
     reasons = []
     if sec_state != "pass":
@@ -163,17 +171,19 @@ def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
         reasons.append(f"route_{route_state}")
     if cost["completeness"] != "complete":
         reasons.append("cost_incomplete")
-    reasons.extend(("entry_reference_price_unknown", "delivery_sla_unverified"))
+    if route.get("entry_reference_price") is None:
+        reasons.append("entry_reference_price_unknown")
+    reasons.append("delivery_sla_unverified")
     return {
         "kind": "read_only_quote", "assessed_at": assessed_at.isoformat(),
         "security_state": sec_state,
-        "security_at": security.get("checked_at") or assessed_at.isoformat(),
-        "security_expires_at": None,
+        "security_at": security_at, "security_expires_at": security_expires_at,
         "route_state": route_state, "quote_source": route.get("source"),
         "quote_mode": route.get("api_mode"), "quote_at": quote_at,
         "quote_expires_at": expires_at, "expires_at": expires_at,
-        "notional_usd": notional, "entry_reference_price": None,
-        "invalidation_reference_price": None,
+        "notional_usd": notional,
+        "entry_reference_price": route.get("entry_reference_price"),
+        "invalidation_reference_price": route.get("invalidation_reference_price"),
         "roundtrip_back_usd": route.get("roundtrip_back_usd"),
         "cost_contract": cost, "is_real_fill": False,
         "reason_code": reasons[0] if reasons else None,
