@@ -88,3 +88,16 @@ def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
     assert "模型净额/年" in html and "纸面结构" in html
     assert "唯一「个人真能做出正EV」" not in html
     assert "唯一有结构 edge 的" not in html
+
+
+def test_decision_overview_separates_actionable_windows_from_paper_candidates():
+    html = BOARD.read_text()
+
+    assert 'aria-label="当前决策"' in html
+    assert "等待 · 当前不入场" in html
+    assert "有价格、有时钟、有失效条件" in html
+    assert "模型净额为正，不等于已获证" in html
+    assert "不代表全市场覆盖" in html
+    assert 'data-jump="launch"' in html
+    assert 'data-jump="perp"' in html
+    assert 'data-jump="avoid"' in html

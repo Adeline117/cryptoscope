@@ -142,6 +142,29 @@
 
   /* 📋 打法 synthesis */
   .play{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px;max-width:none;border:0;background:transparent;box-shadow:none;overflow:visible}
+  .command{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:20px;padding:26px;
+    border:1px solid var(--border2);border-radius:16px;background:linear-gradient(130deg,var(--s1),color-mix(in srgb,var(--accent-bg) 58%,var(--s2)));box-shadow:var(--shadow)}
+  .decision-kicker{display:flex;align-items:center;gap:8px;margin-bottom:9px;font-size:10.5px;font-weight:750;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .decision-kicker::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 5px color-mix(in srgb,var(--warn) 13%,transparent)}
+  .command.actionable .decision-kicker::before{background:var(--good);box-shadow:0 0 0 5px color-mix(in srgb,var(--good) 13%,transparent)}
+  .decision-title{margin:0;font-size:30px;line-height:1.18;letter-spacing:-.035em;font-weight:780;color:var(--text)}
+  .decision-copy{margin:11px 0 0;max-width:720px;color:var(--muted);font-size:14px;line-height:1.7}
+  .command-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+  .jump{appearance:none;border:1px solid var(--border2);background:var(--s2);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer;font:600 12px var(--sans);transition:.16s ease}
+  .jump:hover{border-color:var(--accent);background:var(--accent-bg);transform:translateY(-1px)}
+  .jump.primary{border-color:var(--accent-b);background:var(--accent);color:#fff}
+  .decision-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  .fact{min-height:92px;padding:15px;background:color-mix(in srgb,var(--s1) 92%,transparent)}
+  .fact .fk{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
+  .fact .fv{display:block;font:700 20px/1.25 var(--mono);color:var(--text)}
+  .fact .fs{display:block;margin-top:4px;font-size:10.5px;line-height:1.35;color:var(--dim)}
+  .fact.warn .fv{color:var(--warn)}.fact.good .fv{color:var(--good)}.fact.danger .fv{color:var(--danger)}
+  .evidence-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .evidence-card{padding:16px 18px;border:1px solid var(--border);border-radius:13px;background:var(--s1)}
+  .evidence-card .ek{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:var(--text)}
+  .evidence-card .ev{margin-top:8px;font:700 18px/1.3 var(--mono);color:var(--text)}
+  .evidence-card .es{margin-top:5px;color:var(--dim);font-size:11.5px;line-height:1.5}
+  .meter{height:5px;margin-top:11px;border-radius:99px;background:var(--s3);overflow:hidden}.meter>i{display:block;height:100%;background:var(--accent);border-radius:inherit}
   .play>.play-sec{grid-column:span 6}.play>.play-sec:first-child{grid-column:span 8}.play>.play-sec:nth-child(2){grid-column:span 4}
   .play-sec{border:1px solid var(--border);border-radius:14px;padding:20px 22px;background:var(--s1);box-shadow:var(--shadow)}
   .play-sec .ph{font-size:15px;font-weight:730;color:var(--text);display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
@@ -170,17 +193,20 @@
   .cell .fu{font-family:var(--mono);font-size:15px;font-weight:600}
   .cell .mt{font-size:10.5px;color:var(--muted)}
   .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--dim);display:flex;flex-wrap:wrap;gap:8px 18px;justify-content:space-between}
+  body[data-view="play"] .lanehead,body[data-view="play"] .readme{display:none}
+  body[data-view="play"] #view{margin-top:18px}
   @media(max-width:980px){
     .wrap{padding:0 20px 56px}.lanehead{grid-template-columns:1fr;gap:18px}.stat{justify-content:flex-start}
-    .stat>div:first-child{padding-left:0}.play>.play-sec,.play>.play-sec:first-child,.play>.play-sec:nth-child(2),.play-verdict{grid-column:1/-1}
+    .stat>div:first-child{padding-left:0}.command{grid-template-columns:1fr}.play>.play-sec,.play>.play-sec:first-child,.play>.play-sec:nth-child(2),.play-verdict{grid-column:1/-1}
   }
   @media(max-width:600px){
-    body{font-size:14px}.wrap{padding:0 12px 44px}header{padding:12px 2px}.logo{width:36px;height:36px}.hr{gap:8px}
-    h1 span{display:none}.live{font-size:10px}.tabs{margin-top:10px;border-radius:12px}.tab{padding:8px 10px}
+    body{font-size:14px}.wrap{padding:0 12px 44px}header{padding:12px 2px}.brand{gap:8px}.logo{width:36px;height:36px}.hr{gap:8px}
+    h1{font-size:15px;white-space:nowrap}h1 span{display:none}.live{font-size:10px;letter-spacing:0;white-space:nowrap}.tabs{margin-top:10px;border-radius:12px}.tab{padding:8px 10px}
     .lanehead{margin-top:12px;padding:18px 16px;border-radius:14px}.lanetitle{font-size:14px}.stat{display:grid;grid-template-columns:repeat(3,1fr);width:100%}
     .stat>div{min-width:0;padding:6px 10px;border-left:1px solid var(--border)}.stat>div:nth-child(3n+1){border-left:0;padding-left:0}
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
-    .play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
+    .command{padding:19px 17px;gap:17px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
+    .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
   }
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
 </style>
@@ -199,21 +225,21 @@
 
   <div class="tabs" role="tablist" id="tabs">
     <div class="grp">
-      <button class="tab on" data-v="play" role="tab">📋 打法</button>
+      <button class="tab on" data-v="play" role="tab">总览</button>
     </div>
     <div class="grp">
-      <button class="tab" data-v="launch" role="tab">🚀 Launch <span class="ct" id="ct-launch"></span></button>
-      <button class="tab" data-v="structure" role="tab">🏗 结构 <span class="ct" id="ct-structure"></span></button>
-      <button class="tab" data-v="airdrop" role="tab">🪂 空投 <span class="ct" id="ct-airdrop"></span></button>
+      <button class="tab" data-v="launch" role="tab">早期机会 <span class="ct" id="ct-launch"></span></button>
+      <button class="tab" data-v="perp" role="tab">Carry / 永续 <span class="ct" id="ct-perp"></span></button>
+      <button class="tab" data-v="structure" role="tab">结构事件 <span class="ct" id="ct-structure"></span></button>
+      <button class="tab" data-v="airdrop" role="tab">空投任务 <span class="ct" id="ct-airdrop"></span></button>
+    </div>
+    <div class="grp">
       <button class="tab" data-v="watch" role="tab">🐋 钱包活动 <span class="ct" id="ct-watch"></span></button>
       <button class="tab" data-v="opp" role="tab">🔎 旧版线索 <span class="ct" id="ct-opp"></span></button>
-      <button class="tab" data-v="avoid" role="tab">🛡️ 避雷 <span class="ct" id="ct-avoid"></span></button>
     </div>
     <div class="grp">
-      <button class="tab" data-v="perp" role="tab">🔥 永续拥挤 <span class="ct" id="ct-perp"></span></button>
-    </div>
-    <div class="grp">
-      <button class="tab" data-v="op" role="tab">🛡️ 操盘防御 <span class="ct" id="ct-op"></span></button>
+      <button class="tab" data-v="avoid" role="tab">风险过滤 <span class="ct" id="ct-avoid"></span></button>
+      <button class="tab" data-v="op" role="tab">操盘防御 <span class="ct" id="ct-op"></span></button>
     </div>
   </div>
 
@@ -455,12 +481,40 @@ function classOp(r){if(!r.ok)return"unknown";const v=r.verdict||"",a=r.acquisiti
 // 📋 打法 — the synthesis: what to consider, what to avoid, what NOT to do. Turns the
 // board from a data dashboard into a clear, honest, ranked trading thesis.
 function renderPlay(){
+  const launches=data.launch?.events||[];
+  const activeLaunch=launches.filter(x=>effectiveDecision(x)==="SMALL_PROBE");
   const carry=(data.perp?.carry||[]).filter(x=>x.net_ann>0);
   const pp=data.perp?.carry_paper;
   const carryEvidence=data.stats?.lanes?.carry;
+  const launchEvidence=data.stats?.lanes?.launch;
+  const sourceHealth=data.structure?.source_health||[];
+  const sourceOk=sourceHealth.filter(x=>x.status==="ok").length;
   const dep=(data.op?.operators||[]).filter(depNow);
   const avoid=avoidRows(data.opp);
   let h='<div class="scroll play">';
+  const actionCount=activeLaunch.length;
+  const verdict=actionCount?`${actionCount} 个小额试探窗口仍有效`:'等待 · 当前不入场';
+  const verdictCopy=actionCount
+    ?'这些候选同时通过安全、双向路由、报价时钟与证据门。仍只能按逐行仓位上限试错，价格失效或时钟到期立即停止使用旧报价。'
+    :'没有任何候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 虽有模型净额为正的候选，但纸面样本尚未证明成本后优势。';
+  h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
+    <div><div class="decision-kicker">当前决策 · ${actionCount?'可小额验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
+      <p class="decision-copy">${verdictCopy}</p>
+      <div class="command-actions"><button class="jump primary" data-jump="launch">查看入场门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
+    <div class="decision-facts">
+      <div class="fact ${actionCount?'good':'warn'}"><span class="fk">可行动</span><span class="fv">${actionCount}</span><span class="fs">有价格、有时钟、有失效条件</span></div>
+      <div class="fact"><span class="fk">纸面候选</span><span class="fv">${carry.length}</span><span class="fs">模型净额为正，不等于已获证</span></div>
+      <div class="fact danger"><span class="fk">应避开</span><span class="fv">${dep.length+avoid.length}</span><span class="fs">派发、高接盘风险或安全红旗</span></div>
+      <div class="fact warn"><span class="fk">数据覆盖</span><span class="fv">${sourceOk}/${sourceHealth.length||'?'}</span><span class="fs">仅为上币来源健康，不代表全市场覆盖</span></div>
+    </div></section>`;
+  if(activeLaunch.length){
+    h+=`<section class="play-sec" style="grid-column:1/-1"><div class="ph">可执行窗口 <span class="pd">报价到期即失效 · 非自动交易</span></div>${activeLaunch.slice(0,4).map(r=>`<div class="prow"><span class="chip b-good">${esc(expiryText(r))}</span> <b>${esc(r.symbol)}</b> 入场参考 <span class="num">$${esc(r.entry_price)}</span> · 失效 ≤ <span class="num">$${esc(r.invalidation_price)}</span> · 最大 <span class="num">${usd(r.max_notional_usd)}</span><button class="jump" data-jump="launch">看完整证据</button></div>`).join('')}</section>`;
+  }
+  h+=`<section class="evidence-grid" aria-label="证据与覆盖">
+    <div class="evidence-card"><div class="ek"><span>早期机会证据</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEvidence?.probe?.n??0}/20 <small class="dim">试验</small></div><div class="es">同期 WATCH 对照 ${launchEvidence?.control?.n??0}/20；必须比较成本后 24h 结果。</div><div class="meter"><i style="width:${Math.min(100,(launchEvidence?.probe?.n||0)/20*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>Carry 证据</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryEvidence?.n??0}/20 <small class="dim">已关闭</small></div><div class="es">成本后为正 ${carryEvidence?.hits??0} 个；订单簿纸面测量，不冒充实盘成交。</div><div class="meter"><i style="width:${Math.min(100,(carryEvidence?.n||0)/20*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
+  </section>`;
   // 1) EDGE
   h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
   if(carry.length){
@@ -569,6 +623,7 @@ function renderPerp(d){
 // ---------- paint ----------
 function paint(){
   const L=LANES[view], d=data[view==="avoid"?"opp":view];
+  document.body.dataset.view=view;
   $("lanetitle").innerHTML=L.title(d);
   const st=(L.stat(d)||[]).slice();
   const ls=data.stats?.lanes?.[view];
@@ -589,6 +644,7 @@ function paint(){
   staleness();
 }
 function wireRows(){
+  document.querySelectorAll("[data-jump]").forEach(btn=>btn.onclick=()=>{view=btn.dataset.jump;paint();document.getElementById("tabs").scrollIntoView({behavior:"smooth",block:"start"})});
   document.querySelectorAll("tr[data-row]").forEach(tr=>tr.onclick=()=>{
     const ex=document.querySelector(`tr.exp[data-exp="${tr.dataset.row}"]`); if(ex)ex.hidden=!ex.hidden;});
   document.querySelectorAll("th[data-col]").forEach(th=>{const c=LANES[view].cols?.find(x=>x.k===th.dataset.col);if(!c||!c.sort)return;
