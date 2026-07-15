@@ -35,7 +35,14 @@ logger = structlog.get_logger()
 
 SCHEMA_VERSION = 1
 EXPORT_DIR = DATA_DIR / "board_export"
-REFRESH_MIN = 45                      # scheduler cadence; drives next_expected_at
+VIEW_FRESHNESS = {
+    # (actual scheduler cadence minutes, tolerated grace minutes)
+    "launch": (3, 3), "structure": (2, 3),
+    "watch": (15, 5), "perps": (15, 5),
+    "airdrop": (60, 15), "opportunities": (60, 15),
+    "operators": (60, 30), "stats": (60, 15),
+    "traders": (24 * 60, 60), "meta": (60, 15),
+}
 
 # v1 endpoint: cross-platform in one call, flat fields, no required platform param
 # (v2 requires platform=). Verified live: max_drawdown and win_rate arrive as PERCENT
@@ -95,7 +102,7 @@ def render_operators() -> dict:
     targets = [v for v in sentinels.values() if v.get("token")]
     with ThreadPoolExecutor(max_workers=3) as ex:
         records = list(ex.map(_analyze_sentinel, targets))
-    return _envelope({"operators": records})
+    return _envelope({"operators": records}, view="operators")
 
 
 def _rug_flag(token: str, chain: str) -> dict:
@@ -200,20 +207,22 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
             o["liq"] = o.get("liquidity")
         return _envelope({"opportunities": gm, "scanned": len(gm), "source": "GMGN 策展聪明钱(全链)",
                           "note": ("GMGN 策展的聪明钱正在买的新币,按聪明钱数排,全链含 Solana。"
-                                   "同时显示狙击/机器人数(反指标)和合约安全。诚实:你看到时已落后其入场,多数会归零。")})
+                                   "同时显示狙击/机器人数(反指标)和合约安全。诚实:你看到时已落后其入场,多数会归零。")},
+                         view="opportunities")
 
     # #1 second path: Cielo curated list (if key present).
     cielo = _cielo_smart_buys()
     if cielo is not None:
         return _envelope({"opportunities": cielo, "scanned": None, "source": "Cielo 策展聪明钱名单",
                           "note": ("Cielo 策展的已验证聪明钱正在买入的币,按买入钱包数排。"
-                                   "已带 GoPlus 避雷。诚实边界:你看到时已落后其入场,多数会归零。")})
+                                   "已带 GoPlus 避雷。诚实边界:你看到时已落后其入场,多数会归零。")},
+                         view="opportunities")
 
     try:
         fresh = _gather_young(chains, pages=2)
     except Exception as e:
         return _envelope({"opportunities": [], "scanned": 0, "scan_error": str(e)[:120],
-                          "source": "自建雷达"})
+                          "source": "自建雷达"}, view="opportunities")
 
     out = []
     scanned = 0
@@ -249,7 +258,8 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
     return _envelope({"opportunities": out, "scanned": scanned, "source": "自建雷达(慢/稀疏)",
                       "note": ("聪明钱=有已实现盈利历史、且相互独立(非同一钱包农场)的钱包正在买入。"
                                "强=≥3个独立主体收敛;弱=1-2个,只是线索。已带 GoPlus 避雷。"
-                               "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")})
+                               "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")},
+                     view="opportunities")
 
 
 def render_launch() -> dict:
@@ -260,33 +270,33 @@ def render_launch() -> dict:
     """
     try:
         from src.pipeline.launch_radar import view
-        return _envelope(view())
+        return _envelope(view(), view="launch")
     except Exception as e:
         logger.warning("render_launch_failed", error=str(e)[:120])
         return _envelope({"events": [], "scan_error": str(e)[:120],
-                          "source": "Launch event ledger"})
+                          "source": "Launch event ledger"}, view="launch")
 
 
 def render_structure() -> dict:
     """Public listing/flow/unlock events, kept distinct from directional calls."""
     try:
         from src.pipeline.structure_radar import view
-        return _envelope(view())
+        return _envelope(view(), view="structure")
     except Exception as e:
         logger.warning("render_structure_failed", error=str(e)[:120])
         return _envelope({"events": [], "scan_error": str(e)[:120],
-                          "source": "Public structure event ledger"})
+                          "source": "Public structure event ledger"}, view="structure")
 
 
 def render_airdrop() -> dict:
     """User-curated official campaigns; missing wallet evidence remains unknown."""
     try:
         from src.pipeline.airdrop_radar import sync
-        return _envelope(sync())
+        return _envelope(sync(), view="airdrop")
     except Exception as e:
         logger.warning("render_airdrop_failed", error=str(e)[:120])
         return _envelope({"events": [], "scan_error": str(e)[:120],
-                          "source": "official campaign watchlist"})
+                          "source": "official campaign watchlist"}, view="airdrop")
 
 
 def render_stats(opportunities: dict | None) -> dict:
@@ -314,10 +324,11 @@ def render_stats(opportunities: dict | None) -> dict:
         lanes.update(opportunity_lane_stats())
         return _envelope({"lanes": lanes,
                           "note": "五线事件按首次价结算1h/24h/7d并扣发现时冻结的成本估算。"
-                                  "样本<20或缺同期对照时只报不可判；纸面成本不冒充真实成交。"})
+                                  "样本<20或缺同期对照时只报不可判；纸面成本不冒充真实成交。"},
+                         view="stats")
     except Exception as e:
         logger.warning("render_stats_failed", error=str(e)[:120])
-        return _envelope({"lanes": {}, "error": str(e)[:120]})
+        return _envelope({"lanes": {}, "error": str(e)[:120]}, view="stats")
 
 
 def render_watch() -> dict:
@@ -328,13 +339,15 @@ def render_watch() -> dict:
     try:
         buys = fresh_smart_buys(chain_codes=("sol", "bsc", "base", "eth"), window_min=45)
     except Exception as e:
-        return _envelope({"watch": [], "watched_wallets": 0, "scan_error": str(e)[:120]})
+        return _envelope({"watch": [], "watched_wallets": 0, "scan_error": str(e)[:120]},
+                         view="watch")
     if buys is None:
         return _envelope({"watch": [], "watched_wallets": len(watchlist()),
-                          "note": "FlareSolverr 未运行 — 实时监听需要它"})
+                          "note": "FlareSolverr 未运行 — 实时监听需要它"}, view="watch")
     return _envelope({"watch": buys, "watched_wallets": len(watchlist()),
                       "note": ("盯着一批已验证盈利的钱包,它们刚买入的币(分钟级,早于排名聚合)。"
-                               "收敛=≥2个独立聪明钱同窗买同一个=最强早信号。仍晚于创建区块内部人。")})
+                               "收敛=≥2个独立聪明钱同窗买同一个=最强早信号。仍晚于创建区块内部人。")},
+                     view="watch")
 
 
 def render_perps() -> dict:
@@ -366,9 +379,11 @@ def render_perps() -> dict:
                           "carry_paper": paper, "source": "Hyperliquid (keyless)",
                           "note": ("💰资金费套利(carry)=唯一对个人可复制的正EV核:现货多+永续空,吃杠杆多头付的费,"
                                    "不赌方向。主流(1.3x加权)优先。这是carry不是无风险套利——费率翻负要倒付,"
-                                   "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")})
+                                   "空腿留足保证金防挤压。拥挤/点火那部分是方向观测(防御用),不是买卖指令。")},
+                         view="perps")
     except Exception as e:
-        return _envelope({"perps": [], "carry": [], "source": "Hyperliquid", "scan_error": str(e)[:120]})
+        return _envelope({"perps": [], "carry": [], "source": "Hyperliquid", "scan_error": str(e)[:120]},
+                         view="perps")
 
 
 def _dex_direction(token: str, chain: str) -> dict:
@@ -469,17 +484,24 @@ def render_traders(window: str = "90d") -> dict:
         "note": ("v0:门先于分。真技能是<1-2%尾巴,本版最强的正面判决只有"
                  "'未被证伪',绝不发'可跟单'。缺链上入场/逐笔数据的指标显式标 unavailable。"),
         "traders": records,
-    })
+    }, view="traders")
 
 
 # --------------------------------------------------------------------------- #
 # envelope / write / push
 # --------------------------------------------------------------------------- #
-def _envelope(body: dict) -> dict:
+def _envelope(body: dict, *, view: str) -> dict:
+    if view not in VIEW_FRESHNESS:
+        raise ValueError(f"unknown board view freshness policy: {view}")
+    cadence_min, grace_min = VIEW_FRESHNESS[view]
     now = datetime.now(timezone.utc)
     return {"schema_version": SCHEMA_VERSION,
+            "view": view,
             "generated_at": now.isoformat(),
-            "next_expected_at": (now + timedelta(minutes=REFRESH_MIN)).isoformat(),
+            "refresh_cadence_min": cadence_min,
+            "freshness_grace_min": grace_min,
+            "next_expected_at": (now + timedelta(minutes=cadence_min)).isoformat(),
+            "stale_after_at": (now + timedelta(minutes=cadence_min + grace_min)).isoformat(),
             **body}
 
 
@@ -493,7 +515,7 @@ def write_views(**views: dict) -> list:
         p = EXPORT_DIR / f"{name}.json"
         p.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         paths.append(p)
-    meta = _envelope({"views": [n for n, v in views.items() if v is not None]})
+    meta = _envelope({"views": [n for n, v in views.items() if v is not None]}, view="meta")
     mp = EXPORT_DIR / "meta.json"
     mp.write_text(json.dumps(meta, ensure_ascii=False, separators=(",", ":")))
     paths.append(mp)

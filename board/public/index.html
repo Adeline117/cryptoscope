@@ -530,9 +530,10 @@ function staleness(){
     :[data[view==="avoid"?"opp":view]].filter(Boolean);
   const d=sources.sort((a,b)=>new Date(a.generated_at)-new Date(b.generated_at))[0], el=$("live");
   if(!d){el.className="live dead";$("livet").textContent="无数据";return}
-  const gen=new Date(d.generated_at).getTime(), next=new Date(d.next_expected_at).getTime(), now=Date.now();
+  const gen=new Date(d.generated_at).getTime(), next=new Date(d.next_expected_at).getTime();
+  const staleAfter=new Date(d.stale_after_at||next+15*6e4).getTime(), now=Date.now();
   $("gen").textContent="数据更新于 "+relMs(gen);
-  if(now<next+15*6e4){el.className="live";$("livet").textContent="LIVE · "+relMs(gen)}
+  if(now<staleAfter){el.className="live";$("livet").textContent="LIVE · "+relMs(gen)}
   else if(now-gen<864e5){el.className="live stale";$("livet").textContent="陈旧 "+relMs(gen)}
   else{el.className="live dead";$("livet").textContent="超24h,别信"}
 }
