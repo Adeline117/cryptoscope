@@ -16,6 +16,24 @@ from src.config import DATA_DIR
 
 DB = DATA_DIR / "opportunity_ledger.db"
 LANES = {"launch", "cascade", "structure", "airdrop", "carry"}
+CLOCK_FIELDS = ("event_at", "detected_at", "decision_at", "quote_at",
+                "executable_at", "expires_at")
+
+
+def _utc_iso(value: object, *, field: str) -> str | None:
+    """Return one canonical UTC timestamp, rejecting ambiguous clock values."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid {field}: {value!r}") from exc
+    if dt.tzinfo is None:
+        raise ValueError(f"{field} must include a timezone")
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 def _conn() -> sqlite3.Connection:
@@ -24,7 +42,9 @@ def _conn() -> sqlite3.Connection:
     c.execute("PRAGMA busy_timeout=8000")
     c.execute("""CREATE TABLE IF NOT EXISTS opportunities(
         id TEXT PRIMARY KEY, lane TEXT NOT NULL, chain TEXT, token TEXT,
-        symbol TEXT, detected_at TEXT NOT NULL, event_at TEXT, source TEXT,
+        symbol TEXT, detected_at TEXT NOT NULL, event_at TEXT,
+        decision_at TEXT NOT NULL, quote_at TEXT, executable_at TEXT, expires_at TEXT,
+        source TEXT,
         state TEXT NOT NULL, decision TEXT NOT NULL, entry_price REAL,
         invalidation_price REAL, max_notional_usd REAL, cost_pct_est REAL,
         cost_model TEXT, cohort_version INTEGER, payload TEXT NOT NULL,
@@ -41,6 +61,13 @@ def _conn() -> sqlite3.Connection:
         # Deliberately NULL for legacy rows: their decision was mutable before v2,
         # so they must never be smuggled into the frozen WATCH-vs-PROBE comparison.
         c.execute("ALTER TABLE opportunities ADD COLUMN cohort_version INTEGER")
+    # Canonical event clocks. Only decision_at can be truthfully reconstructed for
+    # legacy rows: the old first-seen row proves the decision existed by detected_at.
+    # Quote/executable/expiry clocks stay NULL rather than inventing precision.
+    for name in ("decision_at", "quote_at", "executable_at", "expires_at"):
+        if name not in cols:
+            c.execute(f"ALTER TABLE opportunities ADD COLUMN {name} TEXT")
+    c.execute("UPDATE opportunities SET decision_at=detected_at WHERE decision_at IS NULL")
     c.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_lane_open "
               "ON opportunities(lane, outcome_state, detected_at DESC)")
     return c
@@ -68,9 +95,21 @@ def record(candidate: dict) -> tuple[str, bool]:
     # not overwrite an old one.
     ident = candidate.get("id") or event_id(lane, chain, candidate.get("event_key") or token)
     now = datetime.now(timezone.utc).isoformat()
+    detected_at = _utc_iso(candidate.get("detected_at") or now, field="detected_at")
+    clocks = {
+        "event_at": _utc_iso(candidate.get("event_at"), field="event_at"),
+        "decision_at": _utc_iso(candidate.get("decision_at") or detected_at,
+                                field="decision_at"),
+        "quote_at": _utc_iso(candidate.get("quote_at"), field="quote_at"),
+        "executable_at": _utc_iso(candidate.get("executable_at"), field="executable_at"),
+        "expires_at": _utc_iso(candidate.get("expires_at"), field="expires_at"),
+    }
+    if clocks["expires_at"] and clocks["expires_at"] < detected_at:
+        raise ValueError("expires_at cannot precede detected_at")
     payload = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
     values = (ident, lane, chain, token, candidate.get("symbol", "?"),
-              candidate.get("detected_at") or now, candidate.get("event_at"),
+              detected_at, clocks["event_at"], clocks["decision_at"], clocks["quote_at"],
+              clocks["executable_at"], clocks["expires_at"],
               candidate.get("source", "unknown"), candidate.get("state", "new"),
               candidate.get("decision", "WATCH"), candidate.get("entry_price"),
               candidate.get("invalidation_price"), candidate.get("max_notional_usd"),
@@ -80,10 +119,11 @@ def record(candidate: dict) -> tuple[str, bool]:
     try:
         inserted = c.execute("SELECT 1 FROM opportunities WHERE id=?", (ident,)).fetchone() is None
         c.execute("""INSERT INTO opportunities(
-              id,lane,chain,token,symbol,detected_at,event_at,source,state,decision,
+              id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
+              executable_at,expires_at,source,state,decision,
               entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
               cohort_version,payload,updated_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO UPDATE SET
                 state=excluded.state, payload=excluded.payload, updated_at=excluded.updated_at
         """, values)
@@ -100,6 +140,7 @@ def active(lane: str, limit: int = 50) -> list[dict]:
     c = _conn()
     try:
         rows = c.execute("""SELECT id, lane, chain, token, symbol, detected_at, event_at,
+                                  decision_at, quote_at, executable_at, expires_at,
                                   source, state, decision, entry_price, invalidation_price,
                                   max_notional_usd, cost_pct_est, cost_model, cohort_version,
                                   payload, outcome_state, outcome
@@ -110,6 +151,7 @@ def active(lane: str, limit: int = 50) -> list[dict]:
     out = []
     for row in rows:
         keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
+                "decision_at", "quote_at", "executable_at", "expires_at",
                 "source", "state", "decision", "entry_price", "invalidation_price",
                 "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version", "payload",
                 "outcome_state", "outcome")
@@ -121,7 +163,7 @@ def active(lane: str, limit: int = 50) -> list[dict]:
             # rewrite the entry, invalidation, size cap, or discovery timestamp.
             for key, value in payload.items():
                 if key not in {"entry_price", "invalidation_price", "max_notional_usd",
-                               "roundtrip_cost_pct_est", "cost_model", "detected_at"}:
+                               "roundtrip_cost_pct_est", "cost_model", *CLOCK_FIELDS}:
                     item[key] = value
         except (TypeError, json.JSONDecodeError):
             item.pop("payload", None)
@@ -145,6 +187,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
     try:
         where = "WHERE outcome_state='open'" if open_only else ""
         rows = c.execute(f"""SELECT id,lane,chain,token,symbol,detected_at,event_at,
+                                    decision_at,quote_at,executable_at,expires_at,
                                     source,state,decision,entry_price,invalidation_price,
                                     max_notional_usd,cost_pct_est,cost_model,cohort_version,payload,
                                     outcome_state,outcome,updated_at
@@ -153,6 +196,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
     finally:
         c.close()
     keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
+            "decision_at", "quote_at", "executable_at", "expires_at",
             "source", "state", "decision", "entry_price", "invalidation_price",
             "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version", "payload",
             "outcome_state", "outcome", "updated_at")
