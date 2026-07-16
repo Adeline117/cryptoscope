@@ -1833,7 +1833,12 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                     slot_budget: int = GAP_RETRY_SLOT_BUDGET,
                     deadline: float | None = None,
                     monotonic: Callable[[], float] = time.monotonic) -> dict:
-    gaps = stream_health.open_gaps("solana", "pump_fun_launches", limit=limit)
+    # Smallest-remaining-first: the whole budget goes to the queue head, so
+    # oldest-first would let one multi-thousand-slot gap starve hundreds of
+    # one-slot skipped-run gaps that each need a single proof unit.
+    gaps = stream_health.open_gaps(
+        "solana", "pump_fun_launches", limit=limit, order="smallest",
+    )
     attempted = recovered = progressed = failed = 0
     pressure_kind = None
     retry_after = None

@@ -403,16 +403,26 @@ def defer_gap(gap_id: int, error: str, *, at: datetime | str | None = None,
 
 
 def open_gaps(source: str, stream: str, *, limit: int = 100,
-              now: datetime | str | None = None) -> list[dict]:
+              now: datetime | str | None = None,
+              order: str = "oldest") -> list[dict]:
+    # "smallest" orders by remaining unproven span: from_cursor advances as
+    # verified prefixes are checkpointed, so nearly-finished and one-slot gaps
+    # come first and a multi-thousand-slot backlog gap cannot starve them.
+    ordering = {
+        "oldest": "detected_at,id",
+        "smallest": "(to_cursor-from_cursor),detected_at,id",
+    }.get(order)
+    if ordering is None:
+        raise ValueError(f"unknown gap recovery order: {order!r}")
     current = _iso(now)
     c = _conn()
     try:
         rows = c.execute(
-            """SELECT id,from_cursor,to_cursor,detected_at,details,
+            f"""SELECT id,from_cursor,to_cursor,detected_at,details,
                       retry_count,next_retry_at,last_error
                FROM gaps WHERE source=? AND stream=? AND status='open'
                  AND (next_retry_at IS NULL OR next_retry_at<=?)
-               ORDER BY detected_at,id LIMIT ?""",
+               ORDER BY {ordering} LIMIT ?""",
             (source, stream, current, max(0, int(limit))),
         ).fetchall()
     finally:

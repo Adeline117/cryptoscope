@@ -248,6 +248,38 @@ def test_open_gaps_returns_recovery_queue(health):
     assert gaps[0]["details"] == '{"observed_after":12}'
 
 
+def test_open_gaps_smallest_order_serves_small_gaps_before_large_backlog(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    health.observe("solana", "slots", cursor=10, received_at=t0,
+                   expect_contiguous=True)
+    health.observe("solana", "slots", cursor=5011, received_at=t0,
+                   expect_contiguous=True)
+    health.observe("solana", "slots", cursor=5013,
+                   received_at=t0 + timedelta(seconds=1), expect_contiguous=True)
+    health.observe("solana", "slots", cursor=5015,
+                   received_at=t0 + timedelta(seconds=2), expect_contiguous=True)
+    health.observe("solana", "slots", cursor=5020,
+                   received_at=t0 + timedelta(seconds=3), expect_contiguous=True)
+
+    oldest = health.open_gaps("solana", "slots")
+    assert [item["from_cursor"] for item in oldest] == [11, 5012, 5014, 5016]
+
+    smallest = health.open_gaps("solana", "slots", order="smallest")
+    assert [(item["from_cursor"], item["to_cursor"]) for item in smallest] == [
+        (5012, 5012), (5014, 5014), (5016, 5019), (11, 5010)]
+
+    # Ordering follows the REMAINING span: a checkpointed near-complete backlog
+    # gap overtakes a larger untouched gap.
+    big = smallest[-1]
+    assert health.advance_gap(big["id"], 5008) == "advanced"
+    reordered = health.open_gaps("solana", "slots", order="smallest")
+    assert [(item["from_cursor"], item["to_cursor"]) for item in reordered] == [
+        (5012, 5012), (5014, 5014), (5009, 5010), (5016, 5019)]
+
+    with pytest.raises(ValueError):
+        health.open_gaps("solana", "slots", order="newest")
+
+
 def test_gap_prefix_can_advance_without_claiming_full_recovery(health):
     health.observe("solana", "slots", cursor=10, expect_contiguous=True)
     health.observe("solana", "slots", cursor=20, expect_contiguous=True)

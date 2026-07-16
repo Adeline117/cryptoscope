@@ -1144,6 +1144,45 @@ def test_open_slot_gap_is_retried_and_resolved(sol):
     assert stream_health.snapshot(stale_after_seconds=60)[0]["status"] == "live"
 
 
+def test_small_gaps_are_served_before_a_large_backlog_gap(sol):
+    from src.pipeline import stream_health
+
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          received_at=t0, expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=5011,
+                          received_at=t0, expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=5013,
+                          received_at=t0 + timedelta(seconds=1),
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=5015,
+                          received_at=t0 + timedelta(seconds=2),
+                          expect_contiguous=True)
+
+    class Rpc:
+        def __init__(self):
+            self.block_ranges = []
+
+        def call(self, method, params):
+            if method == "getSlot":
+                return 5015
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                self.block_ranges.append(params[:2])
+                assert params[0] in (5012, 5014)
+                return [params[0] + 1]
+            assert method == "getBlock" and params[0] in (5013, 5015)
+            return {"parentSlot": params[0] - 2}
+
+    rpc = Rpc()
+    assert sol.retry_open_gaps(rpc, slot_budget=2) == _gap_stats(2, recovered=2)
+    assert rpc.block_ranges == [[5012, 5015], [5014, 5015]]
+    remaining = stream_health.open_gaps("solana", "pump_fun_launches")
+    assert [(gap["from_cursor"], gap["to_cursor"]) for gap in remaining] == [
+        (11, 5010)]
+
+
 def test_four_skipped_slots_resolve_in_one_proof_budget_unit(sol):
     from src.pipeline import stream_health
 
