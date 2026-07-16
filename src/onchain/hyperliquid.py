@@ -252,9 +252,9 @@ CARRY_REBALANCE_DRAG_ANN = 1.5    # ongoing %/yr to keep the two legs delta-neut
                                   # price moves (periodic rebalances cost fee+slippage).
 CARRY_MODEL_HOLD_DAYS_ASSUMPTION = 14  # disclosed scenario input, never inferred from
                                        # sparse quote-history coverage
-OKX_FUNDING_REQUEST_CAP = 45
-OKX_FUNDING_MAX_WORKERS = 8
-OKX_FUNDING_SCAN_TIMEOUT_S = 75.0
+OKX_FUNDING_REQUEST_CAP = 256
+OKX_FUNDING_MAX_WORKERS = 1
+OKX_FUNDING_SCAN_TIMEOUT_S = 15.0
 CARRY_ENTRY_PRIORITY_METHOD = "current_hl_funding_desc_then_oi_desc_v1"
 
 
@@ -293,7 +293,9 @@ def _hl_spot_tokens() -> set[str]:
         return set()
 
 
-OKX_FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate?instId={}-USDT-SWAP"
+OKX_FUNDING_BULK_URL = (
+    "https://www.okx.com/api/v5/public/funding-rate?instId=ANY"
+)
 OKX_FUNDING_MAX_AGE_MS = 5 * 60 * 1000
 
 
@@ -376,43 +378,15 @@ def _okx_funding_ann(row: dict, *, now_ms: int | None = None) -> float | None:
     return value if status == "observed" else None
 
 
-def _scan_okx_funding_symbol(symbol: str, fetch) -> tuple[float | None, str]:
-    """Scan exact then multiplier aliases for one symbol inside one bounded worker."""
-    status = "unsupported"
-    for base in okx_symbol_candidates(symbol):
-        try:
-            data = fetch(OKX_FUNDING_URL.format(base))
-        except TimeoutError:
-            return None, "request_timeout"
-        except Exception:
-            return None, "request_failed"
-        if not isinstance(data, dict):
-            return None, "request_failed"
-        code = str(data.get("code"))
-        # OKX uses 51001 for a verified nonexistent instId. This is the only nonzero
-        # response that may continue to a deterministic alias; rate limits and every
-        # other API error remain request failures.
-        if code == "51001" and data.get("data") == []:
-            continue
-        if code != "0":
-            return None, "request_failed"
-        rows = data.get("data")
-        if not isinstance(rows, list):
-            return None, "rate_invalid"
-        if not rows:
-            continue
-        value, status = _okx_funding_value(rows[0])
-        return value, status
-    return None, status
-
-
 def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
                      fetch=None, *, max_workers: int = OKX_FUNDING_MAX_WORKERS,
                      scan_timeout_s: float = OKX_FUNDING_SCAN_TIMEOUT_S) -> dict:
-    """Typed bounded-concurrent OKX scan with a hard whole-round deadline.
+    """Map the requested HL universe from one bounded OKX ``instId=ANY`` snapshot.
 
-    Per-symbol failures remain explicit; a timeout can never become ``unsupported``.
-    Output key order follows the input even though workers finish out of order.
+    OKX documents ``ANY`` as all perpetual/X-Perps funding rows. One snapshot removes
+    the old 45-symbol coverage truncation and avoids a burst of per-instrument requests.
+    A source failure applies to every requested symbol and can never become
+    ``unsupported``. Output key order remains identical to the input.
     """
     symbols = list(dict.fromkeys(str(c) for c in coins if c))
     attempted_at = datetime.now(timezone.utc).isoformat()
@@ -424,40 +398,106 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
                 return json.loads(response.read())
     rates: dict[str, float] = {}
     statuses: dict[str, str] = {}
-    limited = symbols[:max(cap, 0)]
     try:
-        worker_limit = max(1, int(max_workers))
+        request_cap = max(0, int(cap))
     except (TypeError, ValueError):
-        worker_limit = OKX_FUNDING_MAX_WORKERS
-    actual_workers = min(worker_limit, len(limited)) if limited else 0
-    results: dict[str, tuple[float | None, str]] = {}
+        request_cap = OKX_FUNDING_REQUEST_CAP
+    limited = symbols[:request_cap]
+    actual_workers = 1 if limited else 0
+    upstream_requests = 0
+    bulk_rows = 0
+    bulk_usdt_swap_rows = 0
+    bulk_invalid_rows = 0
+    source_error_kind = None
+    source_error = None
+    data = None
     if limited:
-        executor = ThreadPoolExecutor(max_workers=actual_workers,
-                                      thread_name_prefix="okx-funding")
-        futures = {
-            executor.submit(_scan_okx_funding_symbol, symbol, fetch): symbol
-            for symbol in limited
-        }
+        executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="okx-funding-bulk",
+        )
+        future = executor.submit(fetch, OKX_FUNDING_BULK_URL)
+        upstream_requests = 1
         try:
-            done, pending = wait(futures, timeout=max(float(scan_timeout_s), 0.0))
-            for future in done:
-                symbol = futures[future]
-                try:
-                    results[symbol] = future.result()
-                except TimeoutError:
-                    results[symbol] = (None, "request_timeout")
-                except Exception:
-                    results[symbol] = (None, "request_failed")
-            for future in pending:
-                results[futures[future]] = (None, "request_timeout")
+            done, pending = wait(
+                [future], timeout=max(float(scan_timeout_s), 0.0),
+            )
+            if pending:
+                source_error_kind = "request_timeout"
+                source_error = "OKX bulk funding snapshot timed out"
                 future.cancel()
+            elif done:
+                try:
+                    data = future.result()
+                except Exception as exc:
+                    reason = getattr(exc, "reason", None)
+                    timed_out = isinstance(exc, TimeoutError) or isinstance(
+                        reason, TimeoutError,
+                    )
+                    source_error_kind = (
+                        "request_timeout" if timed_out else "request_failed"
+                    )
+                    source_error = str(exc)[:160]
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
-    for symbol in limited:
-        value, status = results.get(symbol, (None, "request_timeout"))
-        statuses[symbol] = status
-        if status == "observed" and value is not None:
-            rates[symbol] = value
+
+    index: dict[str, dict] = {}
+    duplicate_ids: set[str] = set()
+    if limited and source_error_kind is None:
+        if not isinstance(data, dict) or str(data.get("code")) != "0":
+            source_error_kind = "request_failed"
+            source_error = (
+                f"OKX bulk funding response code {data.get('code')}"
+                if isinstance(data, dict) else "malformed OKX bulk funding response"
+            )
+        elif not isinstance(data.get("data"), list) or not data["data"]:
+            source_error_kind = "request_failed"
+            source_error = "OKX bulk funding response has no non-empty row list"
+        else:
+            bulk_rows = len(data["data"])
+            for row in data["data"]:
+                inst_id = row.get("instId") if isinstance(row, dict) else None
+                if not isinstance(inst_id, str) or not inst_id:
+                    bulk_invalid_rows += 1
+                    continue
+                if inst_id in index:
+                    duplicate_ids.add(inst_id)
+                    bulk_invalid_rows += 1
+                    continue
+                index[inst_id] = row
+            for inst_id in duplicate_ids:
+                index.pop(inst_id, None)
+            bulk_usdt_swap_rows = sum(
+                inst_id.endswith("-USDT-SWAP")
+                and row.get("instType") == "SWAP"
+                for inst_id, row in index.items()
+            )
+            if not bulk_usdt_swap_rows:
+                source_error_kind = "request_failed"
+                source_error = "OKX bulk funding response has no valid USDT swaps"
+
+    if source_error_kind is not None:
+        for symbol in limited:
+            statuses[symbol] = source_error_kind
+    else:
+        for symbol in limited:
+            status = "rate_invalid" if bulk_invalid_rows else "unsupported"
+            value = None
+            for base in okx_symbol_candidates(symbol):
+                inst_id = f"{base}-USDT-SWAP"
+                if inst_id in duplicate_ids:
+                    status = "rate_invalid"
+                    break
+                row = index.get(inst_id)
+                if row is None:
+                    continue
+                if row.get("instType") != "SWAP":
+                    status = "rate_invalid"
+                    break
+                value, status = _okx_funding_value(row)
+                break
+            statuses[symbol] = status
+            if status == "observed" and value is not None:
+                rates[symbol] = value
     for symbol in symbols[len(limited):]:
         statuses[symbol] = "request_cap"
     counts = {name: sum(value == name for value in statuses.values()) for name in (
@@ -469,7 +509,7 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
         state = "not_needed"
     elif bad and not rates and counts["unsupported"] == 0:
         state = "unavailable"
-    elif bad or counts["request_cap"]:
+    elif bad or counts["request_cap"] or bulk_invalid_rows:
         state = "partial"
     else:
         state = "ok"
@@ -477,10 +517,18 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
             "summary": {"state": state, "attempted_at": attempted_at,
                         "requested": len(symbols), **counts,
                         "duration_ms": round((monotonic() - started) * 1000),
-                        "max_workers": actual_workers}}
+                        "max_workers": actual_workers,
+                        "transport_mode": "bulk_any",
+                        "upstream_requests": upstream_requests,
+                        "bulk_rows": bulk_rows,
+                        "bulk_usdt_swap_rows": bulk_usdt_swap_rows,
+                        "bulk_invalid_rows": bulk_invalid_rows,
+                        "source_error_kind": source_error_kind,
+                        "source_error": source_error}}
 
 
-def okx_funding_map(coins: list[str], cap: int = 45, fetch=None) -> dict[str, float]:
+def okx_funding_map(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
+                    fetch=None) -> dict[str, float]:
     """{coin: OKX annualized funding %} for the given coins (bounded loop, keyless).
     OKX's interval can change by contract/regime, so each rate is annualized from the
     response's fundingTime→nextFundingTime interval. The cross-exchange EDGE lives here:

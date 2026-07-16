@@ -11,12 +11,16 @@ _MIGRATED_BASES: dict[str, tuple[str, ...]] = {
 
 def candidates(symbol: str) -> tuple[str, ...]:
     """Prefer exact, then verified migration and multiplier-prefix aliases."""
-    exact = str(symbol or "").strip().upper()
+    raw = str(symbol or "").strip()
+    exact = raw.upper()
     if not exact:
         return ()
     ordered = [exact]
     ordered.extend(_MIGRATED_BASES.get(exact, ()))
-    if exact.startswith("K") and len(exact) > 1:
+    # Hyperliquid spells kilo-contract aliases with a lowercase ``k`` (kPEPE).
+    # Never strip an uppercase K from a real ticker such as KAS/KAVA/KDA.
+    if (raw.startswith("k") and len(exact) > 1
+            and raw[1:] == raw[1:].upper()):
         ordered.append(exact[1:])
     if exact.startswith("1000") and len(exact) > 4:
         ordered.append(exact[4:])

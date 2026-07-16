@@ -798,11 +798,14 @@ def test_okx_contract_metadata_maps_multiplier_symbols_and_never_defaults(monkey
          "settleCcy": "USDT", "ctValCcy": "BTC", "ctVal": "0.01"},
         {"instId": "PEPE-USDT-SWAP", "state": "live", "ctType": "linear",
          "settleCcy": "USDT", "ctValCcy": "PEPE", "ctVal": "10000000"},
+        {"instId": "AS-USDT-SWAP", "state": "live", "ctType": "linear",
+         "settleCcy": "USDT", "ctValCcy": "AS", "ctVal": "1"},
     ]})
 
     assert carry._okx_contract("BTC") == ("BTC", 0.01)
     assert carry._okx_contract("kPEPE") == ("PEPE", 10_000_000)
     assert carry._okx_contract("1000PEPE") == ("PEPE", 10_000_000)
+    assert carry._okx_contract("KAS") is None
     assert carry._okx_ctval("UNKNOWN") is None
 
 

@@ -20,6 +20,12 @@ def _row(*, interval_h=8, age_ms=0, **overrides):
     return row
 
 
+def _bulk_row(symbol: str, **overrides):
+    row = _row(**overrides)
+    row.update({"instId": f"{symbol}-USDT-SWAP", "instType": "SWAP"})
+    return row
+
+
 def test_okx_funding_annualizes_actual_contract_interval():
     now_ms = 1_000_000_000
     eight_hour = {"fundingRate": "0.0001", "fundingTime": str(now_ms),
@@ -46,12 +52,12 @@ def test_okx_funding_rejects_missing_invalid_or_stale_period(row):
 
 
 def test_okx_funding_map_omits_unverifiable_interval():
-    valid = _row(interval_h=4)
-    invalid = _row(nextFundingTime="")
+    valid = _bulk_row("GOOD", interval_h=4)
+    invalid = _bulk_row("BAD", nextFundingTime="")
 
     got = hl.okx_funding_map(
         ["GOOD", "BAD"],
-        fetch=lambda url: {"code": "0", "data": [valid if "GOOD" in url else invalid]},
+        fetch=lambda _url: {"code": "0", "data": [valid, invalid]},
     )
 
     assert got["GOOD"] == pytest.approx(21.9)
@@ -59,35 +65,56 @@ def test_okx_funding_map_omits_unverifiable_interval():
 
 
 def test_okx_funding_map_prefers_exact_then_multiplier_alias():
-    valid = _row(interval_h=4)
     calls = []
 
     def fetch(url):
         calls.append(url)
-        return ({"code": "0", "data": [valid]} if "PEPE-USDT" in url
-                and "KPEPE" not in url else {"code": "51001", "data": []})
+        return {"code": "0", "data": [_bulk_row("PEPE", interval_h=4)]}
 
     got = hl.okx_funding_map(["kPEPE"], fetch=fetch)
     assert got["kPEPE"] == pytest.approx(21.9)
-    assert "KPEPE-USDT-SWAP" in calls[0]
-    assert "PEPE-USDT-SWAP" in calls[1]
+    assert calls == [hl.OKX_FUNDING_BULK_URL]
+
+
+def test_okx_uppercase_k_ticker_never_drops_identity_prefix():
+    scan = hl.okx_funding_scan(
+        ["KAS"],
+        fetch=lambda _url: {"code": "0", "data": [
+            _bulk_row("AS"), _bulk_row("ETH"),
+        ]},
+    )
+
+    assert hl.okx_symbol_candidates("KAS") == ("KAS",)
+    assert scan["rates"] == {}
+    assert scan["status_by_symbol"] == {"KAS": "unsupported"}
+
+
+def test_okx_exact_stale_contract_never_falls_through_to_fresh_alias():
+    scan = hl.okx_funding_scan(
+        ["kPEPE"],
+        fetch=lambda _url: {"code": "0", "data": [
+            _bulk_row(
+                "KPEPE", age_ms=hl.OKX_FUNDING_MAX_AGE_MS + 1,
+            ),
+            _bulk_row("PEPE"),
+        ]},
+    )
+
+    assert scan["rates"] == {}
+    assert scan["status_by_symbol"] == {"kPEPE": "rate_stale"}
 
 
 def test_okx_funding_map_uses_only_verified_migration_aliases():
-    valid = _row(interval_h=4)
     calls = []
 
     def fetch(url):
         calls.append(url)
-        if "MATIC-USDT-SWAP" in url:
-            return {"code": "51001", "data": [], "msg": "instrument does not exist"}
-        return {"code": "0", "data": [valid]}
+        return {"code": "0", "data": [_bulk_row("POL", interval_h=4)]}
 
     got = hl.okx_funding_map(["MATIC"], fetch=fetch)
 
     assert got["MATIC"] == pytest.approx(21.9)
-    assert "MATIC-USDT-SWAP" in calls[0]
-    assert "POL-USDT-SWAP" in calls[1]
+    assert calls == [hl.OKX_FUNDING_BULK_URL]
 
 
 def test_okx_nonzero_error_other_than_missing_instrument_fails_closed():
@@ -99,6 +126,43 @@ def test_okx_nonzero_error_other_than_missing_instrument_fails_closed():
     assert scan["rates"] == {}
     assert scan["status_by_symbol"] == {"BTC": "request_failed"}
     assert scan["summary"]["state"] == "unavailable"
+
+
+@pytest.mark.parametrize("data", [[], None])
+def test_okx_bulk_empty_or_malformed_snapshot_never_claims_unsupported(data):
+    scan = hl.okx_funding_scan(
+        ["BTC", "MISSING"],
+        fetch=lambda _url: {"code": "0", "data": data},
+    )
+
+    assert scan["rates"] == {}
+    assert scan["status_by_symbol"] == {
+        "BTC": "request_failed", "MISSING": "request_failed",
+    }
+    assert scan["summary"]["state"] == "unavailable"
+    assert scan["summary"]["source_error_kind"] == "request_failed"
+
+
+def test_okx_bulk_invalid_identity_or_duplicate_is_not_unsupported():
+    malformed = hl.okx_funding_scan(
+        ["MISSING"],
+        fetch=lambda _url: {"code": "0", "data": [
+            _bulk_row("ETH"), {"fundingRate": "0.1"},
+        ]},
+    )
+    duplicate = hl.okx_funding_scan(
+        ["BTC"],
+        fetch=lambda _url: {"code": "0", "data": [
+            _bulk_row("BTC"), _bulk_row("BTC"), _bulk_row("ETH"),
+        ]},
+    )
+
+    assert malformed["status_by_symbol"] == {"MISSING": "rate_invalid"}
+    assert malformed["summary"]["bulk_invalid_rows"] == 1
+    assert malformed["summary"]["state"] == "unavailable"
+    assert duplicate["status_by_symbol"] == {"BTC": "rate_invalid"}
+    assert duplicate["summary"]["bulk_invalid_rows"] == 1
+    assert duplicate["summary"]["state"] == "unavailable"
 
 
 def _ctx(name: str, *, funding_ann: float, oi_usd: float = 2_000_000) -> dict:
@@ -246,6 +310,7 @@ def test_single_venue_candidate_is_separate_from_cross_venue_paper_scope(monkeyp
 
 
 def test_scan_carry_reports_source_symbol_okx_and_cap_states(monkeypatch):
+    monkeypatch.setattr(hl, "OKX_FUNDING_REQUEST_CAP", 45)
     monkeypatch.setattr(
         hl, "carry_signals", lambda _rows, *, okx_rates=None: []
     )
@@ -296,6 +361,7 @@ def test_scan_carry_reports_source_symbol_okx_and_cap_states(monkeypatch):
 
 def test_scan_carry_cap_prioritizes_open_then_current_right_tail(monkeypatch):
     """HL universe order must not push a late high-funding pair behind the OKX cap."""
+    monkeypatch.setattr(hl, "OKX_FUNDING_REQUEST_CAP", 45)
     lows = [_ctx(f"LOW{i:02d}", funding_ann=10.0, oi_usd=2_000_000 + i)
             for i in range(50)]
     rows = [
@@ -340,24 +406,21 @@ def test_scan_carry_cap_prioritizes_open_then_current_right_tail(monkeypatch):
 
 
 def test_okx_funding_scan_classifies_every_non_observation():
-    valid = _row(interval_h=4)
-    stale = _row(interval_h=4, age_ms=hl.OKX_FUNDING_MAX_AGE_MS + 1)
-    invalid = _row(nextFundingTime="")
-
-    def fetch(url):
-        symbol = url.split("instId=")[1].split("-")[0]
-        if symbol == "FAILED":
-            raise OSError("offline")
-        rows = {"FRESH": [valid], "STALE": [stale], "INVALID": [invalid],
-                "UNSUPPORTED": []}[symbol]
-        return {"code": "0", "data": rows}
+    rows = [
+        _bulk_row("FRESH", interval_h=4),
+        _bulk_row(
+            "STALE", interval_h=4,
+            age_ms=hl.OKX_FUNDING_MAX_AGE_MS + 1,
+        ),
+        _bulk_row("INVALID", nextFundingTime=""),
+    ]
 
     scan = hl.okx_funding_scan(
-        ["FRESH", "FAILED", "STALE", "INVALID", "UNSUPPORTED", "CAPPED"],
-        cap=5, fetch=fetch,
+        ["FRESH", "STALE", "INVALID", "UNSUPPORTED", "CAPPED"],
+        cap=4, fetch=lambda _url: {"code": "0", "data": rows},
     )
     assert scan["status_by_symbol"] == {
-        "FRESH": "observed", "FAILED": "request_failed", "STALE": "rate_stale",
+        "FRESH": "observed", "STALE": "rate_stale",
         "INVALID": "rate_invalid", "UNSUPPORTED": "unsupported",
         "CAPPED": "request_cap",
     }
@@ -365,39 +428,67 @@ def test_okx_funding_scan_classifies_every_non_observation():
     assert scan["summary"]["state"] == "partial"
 
 
-def test_okx_funding_scan_is_bounded_concurrent_and_order_stable():
-    symbols = [f"S{i:02d}" for i in range(12)]
+def test_okx_bulk_scan_removes_legacy_45_cap_with_one_order_stable_request():
+    symbols = [f"S{i:02d}" for i in range(80)]
     lock = Lock()
     active = 0
     peak = 0
+    calls = []
 
     def fetch(url):
         nonlocal active, peak
-        symbol = url.split("instId=")[1].split("-")[0]
-        index = int(symbol[1:])
+        calls.append(url)
         with lock:
             active += 1
             peak = max(peak, active)
         try:
-            sleep(0.01 * (1 + (index % 3)))
+            sleep(0.02)
             return {"code": "0", "data": [
-                _row(fundingRate=str(0.0001 + index / 1_000_000))
+                _bulk_row(
+                    symbol,
+                    fundingRate=str(0.0001 + index / 1_000_000),
+                )
+                for index, symbol in reversed(list(enumerate(symbols)))
             ]}
         finally:
             with lock:
                 active -= 1
 
     scan = hl.okx_funding_scan(
-        symbols, fetch=fetch, max_workers=3, scan_timeout_s=2,
+        symbols, fetch=fetch, max_workers=8, scan_timeout_s=2,
     )
 
-    assert 1 < peak <= 3
+    assert peak == 1
+    assert calls == [hl.OKX_FUNDING_BULK_URL]
     assert list(scan["status_by_symbol"]) == symbols
     assert list(scan["rates"]) == symbols
     assert all(status == "observed" for status in scan["status_by_symbol"].values())
-    assert scan["rates"]["S00"] < scan["rates"]["S11"]
-    assert scan["summary"]["max_workers"] == 3
+    assert scan["rates"]["S00"] < scan["rates"]["S79"]
+    assert scan["summary"]["max_workers"] == 1
+    assert scan["summary"]["upstream_requests"] == 1
+    assert scan["summary"]["transport_mode"] == "bulk_any"
+    assert scan["summary"]["bulk_usdt_swap_rows"] == len(symbols)
+    assert scan["summary"]["request_cap"] == 0
     assert scan["summary"]["request_timeout"] == 0
+
+
+def test_okx_bulk_scan_closes_every_symbol_without_cap_or_silent_gap():
+    symbols = [f"C{i:02d}" for i in range(77)]
+    supported = symbols[:67]
+    scan = hl.okx_funding_scan(
+        symbols,
+        fetch=lambda _url: {"code": "0", "data": [
+            _bulk_row(symbol) for symbol in supported
+        ]},
+    )
+
+    assert len(scan["status_by_symbol"]) == len(symbols)
+    assert scan["summary"]["requested"] == 77
+    assert scan["summary"]["observed"] == 67
+    assert scan["summary"]["unsupported"] == 10
+    assert scan["summary"]["request_cap"] == 0
+    assert scan["summary"]["upstream_requests"] == 1
+    assert scan["summary"]["state"] == "ok"
 
 
 def test_okx_funding_scan_whole_round_timeout_is_fail_closed():
