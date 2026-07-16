@@ -102,23 +102,37 @@ def _install_sources(
     *,
     rows: list[dict] | None = None,
     address: str = "0xAbC",
+    mapped_count: int = 1_000,
+    market_page_mutator=None,
 ) -> list[str]:
     rows = copy.deepcopy(rows if rows is not None else _market_rows())
-    coin_list = [
-        {"id": "bitcoin", "symbol": "btc", "platforms": {"ethereum": address}},
-        {"id": "dummy-2", "symbol": "d2", "platforms": {}},
-        {"id": "dummy-3", "symbol": "d3", "platforms": {}},
-        {"id": "dummy-4", "symbol": "d4", "platforms": {}},
+    assert 0 <= mapped_count <= pu._COINGECKO_MARKET_EXPECTED_UNIQUE_IDS
+    coin_list = []
+    ranked_rows = []
+    for index in range(pu._COINGECKO_MARKET_EXPECTED_UNIQUE_IDS):
+        coin_id = "bitcoin" if index == 0 else f"coin-{index:03d}"
+        symbol = "btc" if index == 0 else f"t{index:03d}"
+        platforms = {"ethereum": address} if index < mapped_count else {}
+        coin_list.append({
+            "id": coin_id,
+            "symbol": symbol,
+            "platforms": platforms,
+        })
+        ranked_rows.append({"id": coin_id, "symbol": symbol})
+    coin_list.extend([
         {"id": "official-empty-symbol", "symbol": "", "platforms": {}},
         {"id": "official-spaced-symbol", "symbol": "yee\N{NO-BREAK SPACE}",
          "platforms": {}},
-    ]
+    ])
     market_pages = {
-        1: [{"id": "bitcoin", "symbol": "btc"}],
-        2: [{"id": "dummy-2", "symbol": "d2"}],
-        3: [{"id": "dummy-3", "symbol": "d3"}],
-        4: [{"id": "dummy-4", "symbol": "d4"}],
+        page: ranked_rows[
+            (page - 1) * pu._COINGECKO_MARKET_PAGE_SIZE:
+            page * pu._COINGECKO_MARKET_PAGE_SIZE
+        ]
+        for page in range(1, pu._COINGECKO_MARKET_PAGE_COUNT + 1)
     }
+    if market_page_mutator is not None:
+        market_page_mutator(market_pages)
     calls: list[str] = []
 
     def fetch(url: str, timeout: int = 20) -> dict[str, object]:
@@ -134,7 +148,7 @@ def _install_sources(
             return _evidence({"code": "0", "msg": "", "data": rows})
         if url == pu._COINGECKO_LIST_URL:
             return _evidence(coin_list)
-        for page in range(1, 5):
+        for page in range(1, pu._COINGECKO_MARKET_PAGE_COUNT + 1):
             if url == pu._COINGECKO_MARKETS_URL.format(page=page):
                 return _evidence(market_pages[page])
         raise AssertionError("unexpected mocked URL")
@@ -251,9 +265,13 @@ def test_off_refresh_is_research_only_and_compatibility_loaders_are_empty(
     assert set(cached["source_health"]["sources"][0]["response_sha256"]) == {
         "exchange_time", "instruments",
     }
-    assert cached["mapping_source"]["list_row_count"] == 6
-    assert cached["mapping_source"]["list_usable_row_count"] == 4
+    assert cached["mapping_source"]["list_row_count"] == 1_002
+    assert cached["mapping_source"]["list_usable_row_count"] == 1_000
     assert cached["mapping_source"]["list_excluded_row_count"] == 2
+    assert cached["mapping_source"]["market_unique_id_count"] == 1_000
+    assert [
+        page["row_count"] for page in cached["mapping_source"]["market_pages"]
+    ] == [250, 250, 250, 250]
 
 
 def test_refresh_wrapper_preserves_signature_but_never_promotes_heuristic(monkeypatch):
@@ -390,6 +408,143 @@ def test_stale_valid_cache_still_protects_refresh_inventory_baseline(monkeypatch
     with pytest.raises(pu._ContractError) as caught:
         pu._reject_operational_inventory_drop(100)
     assert caught.value.reason_code == "okx_inventory_operational_drop"
+
+
+@pytest.mark.parametrize(
+    ("case", "reason"),
+    [
+        ("short_page", "coingecko_markets_page_size_invalid"),
+        ("long_page", "coingecko_markets_page_size_invalid"),
+        ("cross_page_duplicate", "coingecko_markets_id_duplicate"),
+    ],
+)
+def test_coingecko_ranked_inventory_is_exact_and_preserves_old_cache(
+    monkeypatch,
+    case,
+    reason,
+):
+    _make_valid_cache(monkeypatch)
+    before = pu._CACHE.read_bytes()
+
+    def mutate(pages):
+        if case == "short_page":
+            pages[1].pop()
+        elif case == "long_page":
+            pages[1].append({"id": "overflow", "symbol": "overflow"})
+        else:
+            pages[2][0] = copy.deepcopy(pages[1][0])
+
+    _install_sources(monkeypatch, market_page_mutator=mutate)
+
+    result = pu.refresh_result()
+
+    assert result["reason_codes"] == [reason]
+    assert result["cache_preserved"] is True
+    assert pu._CACHE.read_bytes() == before
+
+
+def test_initial_mapping_coverage_exact_third_passes(monkeypatch):
+    _install_sources(
+        monkeypatch,
+        rows=_market_rows(102),
+        mapped_count=34,
+    )
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["market_count"] == 102
+    assert result["mapped_count"] == 34
+
+
+def test_initial_mapping_coverage_one_below_third_is_rejected(monkeypatch):
+    _install_sources(
+        monkeypatch,
+        rows=_market_rows(102),
+        mapped_count=33,
+    )
+
+    result = pu.refresh_result()
+
+    assert result["reason_codes"] == ["coingecko_mapping_coverage_below_floor"]
+    assert not pu._CACHE.exists()
+
+
+def test_mapping_coverage_rejection_preserves_old_cache_byte_for_byte(monkeypatch):
+    _make_valid_cache(monkeypatch)
+    before = pu._CACHE.read_bytes()
+    _install_sources(
+        monkeypatch,
+        rows=_market_rows(102),
+        mapped_count=33,
+    )
+
+    result = pu.refresh_result()
+
+    assert result["reason_codes"] == ["coingecko_mapping_coverage_below_floor"]
+    assert result["cache_preserved"] is True
+    assert pu._CACHE.read_bytes() == before
+
+
+def test_mapping_retention_exact_75_percent_passes(monkeypatch):
+    _make_valid_cache(monkeypatch, mapped_count=100)
+    _install_sources(monkeypatch, mapped_count=75)
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["mapped_count"] == 75
+
+
+def test_mapping_retention_one_below_75_percent_preserves_old_cache(monkeypatch):
+    _make_valid_cache(monkeypatch, mapped_count=100)
+    before = pu._CACHE.read_bytes()
+    _install_sources(monkeypatch, mapped_count=74)
+
+    result = pu.refresh_result()
+
+    assert result["reason_codes"] == ["coingecko_mapping_operational_drop"]
+    assert result["cache_preserved"] is True
+    assert pu._CACHE.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("mutation", "reason"),
+    [
+        ("page_count", "mapping_source_evidence_invalid"),
+        ("unique_count", "mapping_source_unavailable"),
+        ("coverage", "coingecko_mapping_coverage_below_floor"),
+        ("adapter_float", "mapping_source_unavailable"),
+        ("adapter_bool", "mapping_source_unavailable"),
+        ("page_float", "mapping_source_evidence_invalid"),
+        ("page_bool", "mapping_source_evidence_invalid"),
+    ],
+)
+def test_load_revalidates_ranked_inventory_and_mapping_coverage(
+    monkeypatch,
+    mutation,
+    reason,
+):
+    payload = _make_valid_cache(monkeypatch, mapped_count=100)
+    if mutation == "page_count":
+        payload["mapping_source"]["market_pages"][0]["row_count"] = 249
+    elif mutation == "unique_count":
+        payload["mapping_source"]["market_unique_id_count"] = 999
+    elif mutation == "coverage":
+        payload["universe"] = dict(list(payload["universe"].items())[:33])
+        payload["mapped_count"] = 33
+    elif mutation == "adapter_float":
+        payload["mapping_source"]["adapter_version"] = 2.0
+    elif mutation == "adapter_bool":
+        payload["mapping_source"]["adapter_version"] = True
+    elif mutation == "page_float":
+        payload["mapping_source"]["market_pages"][0]["page"] = 1.0
+    else:
+        payload["mapping_source"]["market_pages"][0]["page"] = True
+    _write_cache(payload)
+
+    assert pu.load_result()["reason_codes"] == [reason]
+    assert pu.load() == {}
 
 
 @pytest.mark.parametrize(

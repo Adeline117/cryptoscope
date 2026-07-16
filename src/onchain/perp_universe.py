@@ -34,10 +34,16 @@ _CACHE = DATA_DIR / "perp_universe.json"
 CACHE_SCHEMA_VERSION = 2
 CACHE_TTL_SECONDS = 26 * 60 * 60
 NATIVE_ADAPTER_VERSION = 2
-COINGECKO_ADAPTER_VERSION = 1
+COINGECKO_ADAPTER_VERSION = 2
 MAPPING_METHOD = "symbol_market_cap_heuristic"
 RESEARCH_ACTIONABILITY = "research_only"
 CCXT_MODE_ENV = "CRYPTOSCOPE_CCXT_OKX_SWAP_MARKETS_MODE"
+
+_COINGECKO_MARKET_PAGE_COUNT = 4
+_COINGECKO_MARKET_PAGE_SIZE = 250
+_COINGECKO_MARKET_EXPECTED_UNIQUE_IDS = (
+    _COINGECKO_MARKET_PAGE_COUNT * _COINGECKO_MARKET_PAGE_SIZE
+)
 
 _OKX_TIME_URL = "https://www.okx.com/api/v5/public/time"
 _OKX_INSTRUMENTS_URL = (
@@ -48,7 +54,7 @@ _COINGECKO_LIST_URL = (
 )
 _COINGECKO_MARKETS_URL = (
     "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd"
-    "&order=market_cap_desc&per_page=250&page={page}"
+    f"&order=market_cap_desc&per_page={_COINGECKO_MARKET_PAGE_SIZE}&page={{page}}"
 )
 
 # Hard retained-byte limits.  Every reader asks for at most one byte beyond the
@@ -65,6 +71,10 @@ _MAX_REFRESH_DURATION_SECONDS = 5 * 60
 _MIN_OPERATIONAL_MARKET_COUNT = 100
 _MAX_OPERATIONAL_DROP_NUMERATOR = 3
 _MAX_OPERATIONAL_DROP_DENOMINATOR = 4
+_MIN_MAPPING_COVERAGE_NUMERATOR = 1
+_MIN_MAPPING_COVERAGE_DENOMINATOR = 3
+_MIN_MAPPING_RETENTION_NUMERATOR = 3
+_MIN_MAPPING_RETENTION_DENOMINATOR = 4
 
 _AUTHORITY_KEY = "exchange:okx"
 _DATASET_KEY = "okx:public-rest:swap-markets"
@@ -460,8 +470,8 @@ def _read_cache_bytes() -> bytes:
         raise
 
 
-def _previous_market_count() -> int | None:
-    """Recover a structurally valid prior count even after actionability expiry.
+def _previous_inventory_counts() -> tuple[int, int] | None:
+    """Recover structurally valid prior market/mapping counts after expiry.
 
     Freshness controls whether scanners may consume a snapshot.  It must not disable
     the independent completeness alarm on the next refresh: otherwise a weekly run
@@ -482,8 +492,11 @@ def _previous_market_count() -> int | None:
         if generated_at > now:
             return None
         validated = _validate_cache_payload(payload, generated_at)
-        count = validated.get("market_count")
-        return count if type(count) is int else None
+        market_count = validated.get("market_count")
+        mapped_count = validated.get("mapped_count")
+        if type(market_count) is int and type(mapped_count) is int:
+            return market_count, mapped_count
+        return None
     except (OSError, UnicodeDecodeError, _ContractError):
         return None
     except Exception as exc:
@@ -495,6 +508,16 @@ def _previous_market_count() -> int | None:
         return None
 
 
+def _previous_market_count() -> int | None:
+    counts = _previous_inventory_counts()
+    return counts[0] if counts is not None else None
+
+
+def _previous_mapped_count() -> int | None:
+    counts = _previous_inventory_counts()
+    return counts[1] if counts is not None else None
+
+
 def _reject_operational_inventory_drop(current_count: int) -> None:
     previous_count = _previous_market_count()
     if (
@@ -503,6 +526,24 @@ def _reject_operational_inventory_drop(current_count: int) -> None:
         < previous_count * _MAX_OPERATIONAL_DROP_NUMERATOR
     ):
         raise _ContractError("okx_inventory_operational_drop")
+
+
+def _reject_mapping_completeness(
+    market_count: int,
+    mapped_count: int,
+) -> None:
+    if (
+        mapped_count * _MIN_MAPPING_COVERAGE_DENOMINATOR
+        < market_count * _MIN_MAPPING_COVERAGE_NUMERATOR
+    ):
+        raise _ContractError("coingecko_mapping_coverage_below_floor")
+    previous_count = _previous_mapped_count()
+    if (
+        type(previous_count) is int
+        and mapped_count * _MIN_MAPPING_RETENTION_DENOMINATOR
+        < previous_count * _MIN_MAPPING_RETENTION_NUMERATOR
+    ):
+        raise _ContractError("coingecko_mapping_operational_drop")
 
 
 def _platform_to_hit(platforms: object) -> dict[str, str] | None:
@@ -567,11 +608,13 @@ def _coingecko_research_mapping(
     ranked_ids: dict[str, list[str]] = defaultdict(list)
     ranked_seen: set[str] = set()
     page_evidence: list[dict[str, object]] = []
-    for page in (1, 2, 3, 4):
+    for page in range(1, _COINGECKO_MARKET_PAGE_COUNT + 1):
         evidence = _fetch_json(_COINGECKO_MARKETS_URL.format(page=page))
         payload = _evidence_payload(evidence, "coingecko_markets_evidence_invalid")
-        if not isinstance(payload, list) or not payload:
+        if not isinstance(payload, list):
             raise _ContractError("coingecko_markets_schema_invalid")
+        if len(payload) != _COINGECKO_MARKET_PAGE_SIZE:
+            raise _ContractError("coingecko_markets_page_size_invalid")
         for row in payload:
             if not isinstance(row, dict):
                 raise _ContractError("coingecko_markets_row_invalid")
@@ -584,9 +627,10 @@ def _coingecko_research_mapping(
                 or not isinstance(symbol, str)
                 or not symbol
                 or symbol != symbol.strip()
-                or coin_id in ranked_seen
             ):
                 raise _ContractError("coingecko_markets_row_invalid")
+            if coin_id in ranked_seen:
+                raise _ContractError("coingecko_markets_id_duplicate")
             if coin_id not in platforms_by_id or symbols_by_id[coin_id] != symbol.upper():
                 raise _ContractError("coingecko_catalog_conflict")
             ranked_seen.add(coin_id)
@@ -597,6 +641,8 @@ def _coingecko_research_mapping(
             "bytes": evidence["bytes"],
             "row_count": len(payload),
         })
+    if len(ranked_seen) != _COINGECKO_MARKET_EXPECTED_UNIQUE_IDS:
+        raise _ContractError("coingecko_markets_unique_count_invalid")
 
     universe: dict[str, dict[str, object]] = {}
     for market_id, market in sorted(market_catalog.items()):
@@ -631,6 +677,7 @@ def _coingecko_research_mapping(
         "list_row_count": len(list_payload),
         "list_usable_row_count": len(platforms_by_id),
         "list_excluded_row_count": excluded_list_rows,
+        "market_unique_id_count": len(ranked_seen),
         "market_pages": page_evidence,
     }
     return dict(sorted(universe.items())), mapping_source
@@ -918,6 +965,7 @@ def refresh_result() -> dict[str, object]:
                 _ccxt_shadow_snapshot(), market_catalog,
             ))
         universe, mapping_source = _coingecko_research_mapping(market_catalog)
+        _reject_mapping_completeness(len(market_catalog), len(universe))
         generated_at = _require_utc(_utc_now(), "local_time_invalid")
         observed_times = [
             _parse_utc_iso(source["observed_at"], "source_time_invalid")
@@ -1125,11 +1173,13 @@ def _validate_mapping_source(value: object, *, generated_at: datetime) -> None:
             "list_row_count",
             "list_usable_row_count",
             "list_excluded_row_count",
+            "market_unique_id_count",
             "market_pages",
         }
         or value.get("status") != "observed"
         or value.get("provider_key") != "provider:coingecko"
-        or value.get("adapter_version") != COINGECKO_ADAPTER_VERSION
+        or type(value.get("adapter_version")) is not int
+        or value["adapter_version"] != COINGECKO_ADAPTER_VERSION
         or not isinstance(value.get("list_sha256"), str)
         or not _SHA256.fullmatch(value["list_sha256"])
         or type(value.get("list_bytes")) is not int
@@ -1142,6 +1192,10 @@ def _validate_mapping_source(value: object, *, generated_at: datetime) -> None:
         or value["list_excluded_row_count"] < 0
         or value["list_row_count"]
         != value["list_usable_row_count"] + value["list_excluded_row_count"]
+        or type(value.get("market_unique_id_count")) is not int
+        or value["market_unique_id_count"]
+        != _COINGECKO_MARKET_EXPECTED_UNIQUE_IDS
+        or value["list_usable_row_count"] < value["market_unique_id_count"]
     ):
         raise _ContractError("mapping_source_unavailable")
     observed = _parse_utc_iso(
@@ -1154,19 +1208,23 @@ def _validate_mapping_source(value: object, *, generated_at: datetime) -> None:
     ):
         raise _ContractError("mapping_source_time_invalid")
     pages = value.get("market_pages")
-    if not isinstance(pages, list) or len(pages) != 4:
+    if (
+        not isinstance(pages, list)
+        or len(pages) != _COINGECKO_MARKET_PAGE_COUNT
+    ):
         raise _ContractError("mapping_source_evidence_invalid")
     for expected_page, page in enumerate(pages, start=1):
         if (
             not isinstance(page, dict)
             or set(page) != {"page", "sha256", "bytes", "row_count"}
-            or page.get("page") != expected_page
+            or type(page.get("page")) is not int
+            or page["page"] != expected_page
             or not isinstance(page.get("sha256"), str)
             or not _SHA256.fullmatch(page["sha256"])
             or type(page.get("bytes")) is not int
             or not 0 < page["bytes"] <= _MAX_RETAINED_HTTP_BYTES
             or type(page.get("row_count")) is not int
-            or page["row_count"] <= 0
+            or page["row_count"] != _COINGECKO_MARKET_PAGE_SIZE
         ):
             raise _ContractError("mapping_source_evidence_invalid")
 
@@ -1282,6 +1340,11 @@ def _validate_cache_payload(
         or not _SHA256.fullmatch(payload["market_catalog_digest"])
     ):
         raise _ContractError("market_catalog_evidence_invalid")
+    if (
+        mapped_count * _MIN_MAPPING_COVERAGE_DENOMINATOR
+        < market_count * _MIN_MAPPING_COVERAGE_NUMERATOR
+    ):
+        raise _ContractError("coingecko_mapping_coverage_below_floor")
     sources = _validate_source_health(
         payload.get("source_health"), generated_at=generated_at,
     )
