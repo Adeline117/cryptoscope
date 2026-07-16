@@ -5,6 +5,7 @@ import hashlib
 import json
 import math
 import os
+import time
 import urllib.parse
 from datetime import datetime, timezone
 from typing import Any
@@ -24,6 +25,178 @@ SIGNATURE_PAGE_SIZE = 1_000
 
 class ReconciliationError(RuntimeError):
     """An epoch cannot be sealed from complete independent evidence."""
+
+
+RECONCILIATION_RPC_ALGORITHM = "signature_pagination_transaction_hydration_v1"
+
+
+def new_rpc_run_telemetry() -> dict:
+    """Return a bounded, public-safe accumulator for one reconciliation attempt."""
+    return {
+        "version": 1,
+        "algorithm": RECONCILIATION_RPC_ALGORITHM,
+        "rpc_calls_total": 0,
+        "rpc_failures_total": 0,
+        "rpc_calls_by_method": {},
+        "rpc_failures_by_method": {},
+        "rpc_calls_by_role": {"live": 0, "archive": 0},
+        "rpc_failures_by_role": {"live": 0, "archive": 0},
+        "approx_success_response_bytes": 0,
+        "run_elapsed_ms": 0,
+    }
+
+
+def _start_rpc_run_telemetry(telemetry: dict | None) -> dict:
+    target = telemetry if telemetry is not None else {}
+    if not isinstance(target, dict):
+        raise TypeError("reconciliation telemetry must be a mutable object")
+    target.clear()
+    target.update(new_rpc_run_telemetry())
+    return target
+
+
+def _finish_rpc_run_telemetry(telemetry: dict, started: float) -> None:
+    telemetry["run_elapsed_ms"] = max(
+        0, round((time.monotonic() - started) * 1_000),
+    )
+
+
+def reconciliation_worker_details(
+    telemetry: dict, *, outcome: str, error_kind: str | None = None,
+) -> dict:
+    """Bind metrics to a categorical outcome without publishing exception text."""
+    rpc = new_rpc_run_telemetry()
+    for key in rpc:
+        if key in telemetry:
+            rpc[key] = telemetry[key]
+    details = {"schema_version": 1, "outcome": str(outcome), "rpc": rpc}
+    if error_kind:
+        details["error_kind"] = str(error_kind)[:80]
+    return details
+
+
+_PUBLIC_RECONCILIATION_OUTCOMES = {
+    "unconfigured", "sealed_clean", "sealed_breached", "waiting_finality",
+    "rpc_pressure", "failed",
+}
+_PUBLIC_RPC_METHODS = (
+    "getGenesisHash", "getSlot", "getFirstAvailableBlock", "getBlocks",
+    "getSignaturesForAddress", "getTransaction",
+)
+_PUBLIC_RPC_ROLES = ("live", "archive")
+
+
+def _public_counter(value: object, *, maximum: int = 1_000_000_000) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if 0 <= value <= maximum else None
+
+
+def _public_counter_map(value: object, keys: tuple[str, ...]) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    projected = {}
+    for key in keys:
+        count = _public_counter(value.get(key, 0))
+        if count is None:
+            return None
+        if count:
+            projected[key] = count
+    return projected
+
+
+def _public_category(value: object) -> str | None:
+    if not isinstance(value, str) or not 0 < len(value) <= 80:
+        return None
+    if not all(character.isalnum() or character in "_.-" for character in value):
+        return None
+    return value
+
+
+def _public_reconciliation_details(value: object) -> dict | None:
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        return None
+    outcome = value.get("outcome")
+    rpc = value.get("rpc")
+    if outcome not in _PUBLIC_RECONCILIATION_OUTCOMES or not isinstance(rpc, dict):
+        return None
+    calls = _public_counter(rpc.get("rpc_calls_total"))
+    failures = _public_counter(rpc.get("rpc_failures_total"))
+    response_bytes = _public_counter(
+        rpc.get("approx_success_response_bytes"), maximum=10**15,
+    )
+    elapsed = rpc.get("run_elapsed_ms")
+    by_method = _public_counter_map(
+        rpc.get("rpc_calls_by_method"), _PUBLIC_RPC_METHODS,
+    )
+    failures_by_method = _public_counter_map(
+        rpc.get("rpc_failures_by_method"), _PUBLIC_RPC_METHODS,
+    )
+    by_role = _public_counter_map(rpc.get("rpc_calls_by_role"), _PUBLIC_RPC_ROLES)
+    failures_by_role = _public_counter_map(
+        rpc.get("rpc_failures_by_role"), _PUBLIC_RPC_ROLES,
+    )
+    valid = (
+        rpc.get("version") == 1
+        and rpc.get("algorithm") == RECONCILIATION_RPC_ALGORITHM
+        and calls is not None and failures is not None and failures <= calls
+        and response_bytes is not None
+        and not isinstance(elapsed, bool) and isinstance(elapsed, (int, float))
+        and math.isfinite(elapsed) and 0 <= elapsed <= 86_400_000
+        and by_method is not None and sum(by_method.values()) == calls
+        and failures_by_method is not None
+        and sum(failures_by_method.values()) == failures
+        and by_role is not None and sum(by_role.values()) == calls
+        and failures_by_role is not None
+        and sum(failures_by_role.values()) == failures
+    )
+    if not valid:
+        return None
+    public = {
+        "schema_version": 1,
+        "outcome": outcome,
+        "rpc": {
+            "version": 1,
+            "algorithm": RECONCILIATION_RPC_ALGORITHM,
+            "rpc_calls_total": calls,
+            "rpc_failures_total": failures,
+            "rpc_calls_by_method": by_method,
+            "rpc_failures_by_method": failures_by_method,
+            "rpc_calls_by_role": by_role,
+            "rpc_failures_by_role": failures_by_role,
+            "approx_success_response_bytes": response_bytes,
+            "run_elapsed_ms": elapsed,
+        },
+    }
+    error_kind = _public_category(value.get("error_kind"))
+    if error_kind:
+        public["error_kind"] = error_kind
+    return public
+
+
+def public_reconciliation_health(row: object) -> dict | None:
+    """Project one worker row without leaking endpoint-bearing error text."""
+    if not isinstance(row, dict):
+        return None
+    status = row.get("status")
+    if status not in {"live", "degraded", "stale"}:
+        status = "unavailable"
+    updated = row.get("updated_at")
+    if not isinstance(updated, str):
+        updated = None
+    age = row.get("age_seconds")
+    if (isinstance(age, bool) or not isinstance(age, (int, float))
+            or not math.isfinite(age) or age < 0):
+        age = None
+    gaps = _public_counter(row.get("open_gaps"))
+    return {
+        "status": status,
+        "updated_at": updated,
+        "age_seconds": age,
+        "stale": row.get("stale") is True,
+        "open_gaps": gaps if gaps is not None else 0,
+        "details": _public_reconciliation_details(row.get("details")),
+    }
 
 
 def configured_archive_endpoint() -> str | None:
@@ -115,8 +288,37 @@ def _ensure_schema(connection) -> None:
         connection.commit()
 
 
-def _rpc(rpc: object, method: str, params: list) -> Any:
-    result = rpc.call(method, params)
+def _rpc(
+    rpc: object, method: str, params: list, *, telemetry: dict | None = None,
+    role: str,
+) -> Any:
+    if telemetry is not None:
+        telemetry["rpc_calls_total"] += 1
+        by_method = telemetry["rpc_calls_by_method"]
+        by_method[method] = int(by_method.get(method, 0)) + 1
+        by_role = telemetry["rpc_calls_by_role"]
+        by_role[role] = int(by_role.get(role, 0)) + 1
+    try:
+        result = rpc.call(method, params)
+    except Exception:
+        if telemetry is not None:
+            telemetry["rpc_failures_total"] += 1
+            failed_methods = telemetry["rpc_failures_by_method"]
+            failed_methods[method] = int(failed_methods.get(method, 0)) + 1
+            failed_roles = telemetry["rpc_failures_by_role"]
+            failed_roles[role] = int(failed_roles.get(role, 0)) + 1
+        raise
+    if telemetry is not None:
+        try:
+            encoded = json.dumps(
+                result, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False, default=str,
+            ).encode("utf-8")
+            telemetry["approx_success_response_bytes"] += len(encoded)
+        except Exception:
+            # Telemetry must never make a valid reconciliation fail. RPC values
+            # are JSON in production; exotic test doubles simply contribute 0.
+            pass
     return result
 
 
@@ -132,10 +334,13 @@ def _integer(value: object, *, field: str) -> int:
     return result
 
 
-def _produced_slots(rpc: object, start: int, end: int) -> list[int]:
+def _produced_slots(
+    rpc: object, start: int, end: int, *, telemetry: dict | None = None,
+    role: str,
+) -> list[int]:
     raw = _rpc(rpc, "getBlocks", [
         start, end, {"commitment": "finalized"},
-    ])
+    ], telemetry=telemetry, role=role)
     if not isinstance(raw, list):
         raise ReconciliationError("getBlocks returned a non-list")
     values = [_integer(value, field="produced slot") for value in raw]
@@ -144,7 +349,9 @@ def _produced_slots(rpc: object, start: int, end: int) -> list[int]:
     return values
 
 
-def _program_signatures(rpc: object, start: int, end: int) -> dict[str, int]:
+def _program_signatures(
+    rpc: object, start: int, end: int, *, telemetry: dict | None = None,
+) -> dict[str, int]:
     """Page newest-to-oldest until the archive proves it crossed epoch start."""
     before = None
     seen_cursors: set[str] = set()
@@ -159,6 +366,7 @@ def _program_signatures(rpc: object, start: int, end: int) -> dict[str, int]:
             options["before"] = before
         payload = _rpc(
             rpc, "getSignaturesForAddress", [stream.PUMP_FUN_PROGRAM, options],
+            telemetry=telemetry, role="archive",
         )
         if not isinstance(payload, list):
             raise ReconciliationError("getSignaturesForAddress returned a non-list")
@@ -192,11 +400,14 @@ def _program_signatures(rpc: object, start: int, end: int) -> dict[str, int]:
     return selected
 
 
-def _canonical_launch(rpc: object, signature: str, expected_slot: int) -> tuple[dict, dict] | None:
+def _canonical_launch(
+    rpc: object, signature: str, expected_slot: int, *,
+    telemetry: dict | None = None,
+) -> tuple[dict, dict] | None:
     tx = _rpc(rpc, "getTransaction", [signature, {
         "commitment": "finalized", "encoding": "jsonParsed",
         "maxSupportedTransactionVersion": 0,
-    }])
+    }], telemetry=telemetry, role="archive")
     if not isinstance(tx, dict):
         raise ReconciliationError(f"finalized transaction unavailable: {signature[:12]}")
     signatures = ((tx.get("transaction") or {}).get("signatures") or [])
@@ -285,10 +496,11 @@ def _mark_comparison(
         )
 
 
-def reconcile_next_epoch(
+def _reconcile_next_epoch(
     live_rpc: object, archive_rpc: object, *,
     now: datetime | None = None, epoch_slots: int = DEFAULT_EPOCH_SLOTS,
     safety_slots: int = DEFAULT_SAFETY_SLOTS, start_slot: int | None = None,
+    telemetry: dict | None = None,
 ) -> dict:
     """Seal one complete epoch; incomplete reads never advance the cursor."""
     checked = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -297,13 +509,23 @@ def reconcile_next_epoch(
     live_provider, archive_provider = _provider(live_rpc), _provider(archive_rpc)
     if _provider_host(live_rpc) == _provider_host(archive_rpc):
         raise ReconciliationError("live and archive providers must use different hosts")
-    live_genesis = _rpc(live_rpc, "getGenesisHash", [])
-    archive_genesis = _rpc(archive_rpc, "getGenesisHash", [])
+    live_genesis = _rpc(
+        live_rpc, "getGenesisHash", [], telemetry=telemetry, role="live",
+    )
+    archive_genesis = _rpc(
+        archive_rpc, "getGenesisHash", [], telemetry=telemetry, role="archive",
+    )
     if not isinstance(live_genesis, str) or live_genesis != archive_genesis:
         raise ReconciliationError("live and archive providers disagree on genesis")
     finalized_head = min(
-        _integer(_rpc(live_rpc, "getSlot", [{"commitment": "finalized"}]), field="live head"),
-        _integer(_rpc(archive_rpc, "getSlot", [{"commitment": "finalized"}]), field="archive head"),
+        _integer(_rpc(
+            live_rpc, "getSlot", [{"commitment": "finalized"}],
+            telemetry=telemetry, role="live",
+        ), field="live head"),
+        _integer(_rpc(
+            archive_rpc, "getSlot", [{"commitment": "finalized"}],
+            telemetry=telemetry, role="archive",
+        ), field="archive head"),
     ) - safety
     if finalized_head < 0:
         return {"state": "waiting_finality", "finalized_head": finalized_head}
@@ -329,19 +551,30 @@ def reconcile_next_epoch(
             "finalized_head": finalized_head,
         }
     first_available = _integer(
-        _rpc(archive_rpc, "getFirstAvailableBlock", []), field="first available block",
+        _rpc(
+            archive_rpc, "getFirstAvailableBlock", [], telemetry=telemetry,
+            role="archive",
+        ), field="first available block",
     )
     if first_available > first:
         raise ReconciliationError("archive provider cannot serve epoch start")
-    live_blocks = _produced_slots(live_rpc, first, last)
-    archive_blocks = _produced_slots(archive_rpc, first, last)
+    live_blocks = _produced_slots(
+        live_rpc, first, last, telemetry=telemetry, role="live",
+    )
+    archive_blocks = _produced_slots(
+        archive_rpc, first, last, telemetry=telemetry, role="archive",
+    )
     if live_blocks != archive_blocks:
         raise ReconciliationError("live and archive providers disagree on produced slots")
-    signatures = _program_signatures(archive_rpc, first, last)
+    signatures = _program_signatures(
+        archive_rpc, first, last, telemetry=telemetry,
+    )
     archive_launches: set[str] = set()
     archive_provider_id = _provider(archive_rpc)
     for signature, slot in sorted(signatures.items(), key=lambda item: (item[1], item[0])):
-        launch = _canonical_launch(archive_rpc, signature, slot)
+        launch = _canonical_launch(
+            archive_rpc, signature, slot, telemetry=telemetry,
+        )
         if launch is None:
             continue
         payload, transaction = launch
@@ -414,6 +647,25 @@ def reconcile_next_epoch(
         "checked_at": checked.isoformat(), "evidence_hash": evidence_hash,
         "finalized_head": finalized_head,
     }
+
+
+def reconcile_next_epoch(
+    live_rpc: object, archive_rpc: object, *,
+    now: datetime | None = None, epoch_slots: int = DEFAULT_EPOCH_SLOTS,
+    safety_slots: int = DEFAULT_SAFETY_SLOTS, start_slot: int | None = None,
+    telemetry: dict | None = None,
+) -> dict:
+    """Run one epoch and always finalize bounded RPC cost telemetry."""
+    metrics = _start_rpc_run_telemetry(telemetry)
+    started = time.monotonic()
+    try:
+        result = _reconcile_next_epoch(
+            live_rpc, archive_rpc, now=now, epoch_slots=epoch_slots,
+            safety_slots=safety_slots, start_slot=start_slot, telemetry=metrics,
+        )
+    finally:
+        _finish_rpc_run_telemetry(metrics, started)
+    return {**result, "rpc_telemetry": dict(metrics)}
 
 
 def reconciliation_epoch_proof(
@@ -645,6 +897,10 @@ def source_readiness(
     live = next((row for row in health if row.get("stream") == "pump_fun_launches"), None)
     maintenance = next((row for row in health
                         if row.get("stream") == stream.MAINTENANCE_STREAM), None)
+    reconciliation = public_reconciliation_health(next(
+        (row for row in health if row.get("stream") == "pump_fun_reconciliation"),
+        None,
+    ))
     runtime_ok = (not require_runtime_health or bool(
         live and live.get("status") == "live" and not live.get("open_gaps")
         and maintenance and maintenance.get("status") == "live"
@@ -710,6 +966,9 @@ def source_readiness(
             "missing_live": epochs[0][7], "extra_live": epochs[0][8],
             "finalized_head": epochs[0][9],
         } if epochs else None),
-        "runtime": {"live": live, "maintenance": maintenance},
+        "runtime": {
+            "live": live, "maintenance": maintenance,
+            "reconciliation": reconciliation,
+        },
         "reason_codes": reasons,
     }

@@ -95,6 +95,17 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
     assert got["state"] == "sealed_clean"
     assert got["canonical_launches"] == got["live_launches"] == 1
     assert got["missing_live"] == got["extra_live"] == 0
+    telemetry = got["rpc_telemetry"]
+    assert telemetry["algorithm"] == "signature_pagination_transaction_hydration_v1"
+    assert telemetry["rpc_calls_total"] == 9
+    assert telemetry["rpc_failures_total"] == 0
+    assert telemetry["rpc_calls_by_method"] == {
+        "getBlocks": 2, "getFirstAvailableBlock": 1, "getGenesisHash": 2,
+        "getSignaturesForAddress": 1, "getSlot": 2, "getTransaction": 1,
+    }
+    assert telemetry["rpc_calls_by_role"] == {"live": 3, "archive": 6}
+    assert telemetry["approx_success_response_bytes"] > 0
+    assert telemetry["run_elapsed_ms"] >= 0
     connection = stream._conn()
     try:
         state = connection.execute(
@@ -473,3 +484,42 @@ def test_epoch_and_candidate_marking_commit_atomically(reconcile, monkeypatch):
         connection.close()
     assert epochs == cursors == 0
     assert candidate == ("unverified", None)
+
+
+def test_rpc_failure_is_counted_and_cannot_advance_epoch_cursor(reconcile):
+    module, stream, _health = reconcile
+
+    class FailingArchive(FakeRpc):
+        def call(self, method, params):
+            if method == "getTransaction":
+                raise RuntimeError("upstream socket closed at https://secret.invalid")
+            return super().call(method, params)
+
+    telemetry = {}
+    with pytest.raises(RuntimeError, match="upstream socket closed"):
+        module.reconcile_next_epoch(
+            FakeRpc("https://live.example"),
+            FailingArchive("https://archive.example"),
+            epoch_slots=4, safety_slots=0, start_slot=100,
+            telemetry=telemetry,
+        )
+
+    assert telemetry["rpc_calls_total"] == 9
+    assert telemetry["rpc_failures_total"] == 1
+    assert telemetry["rpc_failures_by_method"] == {"getTransaction": 1}
+    assert telemetry["rpc_failures_by_role"] == {"live": 0, "archive": 1}
+    assert "secret.invalid" not in str(
+        module.reconciliation_worker_details(
+            telemetry, outcome="failed", error_kind="RuntimeError",
+        )
+    )
+    connection = stream._conn()
+    try:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM reconciliation_epochs"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM reconciliation_cursor"
+        ).fetchone()[0] == 0
+    finally:
+        connection.close()

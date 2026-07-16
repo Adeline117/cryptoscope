@@ -79,6 +79,11 @@ finally:
 
 def _legacy_stream_health(path: Path) -> None:
     with sqlite3.connect(path) as connection:
+        connection.execute("""CREATE TABLE streams(
+            source TEXT NOT NULL, stream TEXT NOT NULL, cursor INTEGER,
+            last_event_at TEXT, last_received_at TEXT, latency_ms INTEGER,
+            status TEXT NOT NULL, last_error TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY(source,stream))""")
         connection.execute("""CREATE TABLE gaps(
             id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL,
             stream TEXT NOT NULL, from_cursor INTEGER NOT NULL,
@@ -201,4 +206,9 @@ def test_legacy_sqlite_migrations_survive_concurrent_process_startup_and_restart
             assert connection.execute(
                 f"SELECT COUNT(*) FROM {written_table}"
             ).fetchone()[0] == 7
+            if case == "stream_health":
+                assert "details" in {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(streams)")
+                }
             assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"

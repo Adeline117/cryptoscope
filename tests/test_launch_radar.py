@@ -629,7 +629,7 @@ def test_batch_quote_side_pool_is_valid_but_never_used_as_entry(
 
 def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
-    from src.pipeline import stream_health
+    from src.pipeline import solana_launch_reconcile, stream_health
 
     monkeypatch.delenv("SOLANA_RECONCILIATION_RPC_URL", raising=False)
     now = datetime.now(timezone.utc)
@@ -638,6 +638,28 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
         "solana", "pump_fun_maintenance", status="degraded",
         error="RPC circuit open", at=now,
     )
+    telemetry = solana_launch_reconcile.new_rpc_run_telemetry()
+    telemetry.update({
+        "rpc_calls_total": 7,
+        "rpc_failures_total": 1,
+        "rpc_calls_by_method": {
+            "getGenesisHash": 2, "getSlot": 2,
+            "getFirstAvailableBlock": 1, "getBlocks": 1,
+            "getTransaction": 1,
+        },
+        "rpc_failures_by_method": {"getTransaction": 1},
+        "rpc_calls_by_role": {"live": 3, "archive": 4},
+        "rpc_failures_by_role": {"live": 0, "archive": 1},
+        "approx_success_response_bytes": 12_345,
+        "run_elapsed_ms": 812,
+    })
+    stream_health.report_worker(
+        "solana", "pump_fun_reconciliation", status="degraded",
+        error="private archive failed at https://secret-rpc.example/api-key",
+        details=solana_launch_reconcile.reconciliation_worker_details(
+            telemetry, outcome="rpc_pressure", error_kind="rate_limited",
+        ), at=now,
+    )
     payload = lr.view()
     solana = payload["primary_sources"]["solana"]
     assert solana["available"] is True
@@ -645,6 +667,16 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     assert solana["qualification"]["recent_complete"] == 1
     assert solana["maintenance"]["status"] == "degraded"
     assert solana["maintenance"]["last_error"] == "RPC circuit open"
+    reconciliation = solana["reconciliation"]
+    assert reconciliation["status"] == "degraded"
+    assert reconciliation["details"]["outcome"] == "rpc_pressure"
+    assert reconciliation["details"]["rpc"]["rpc_calls_total"] == 7
+    assert (solana["source_readiness"]["runtime"]["reconciliation"]
+            == reconciliation)
+    assert set(reconciliation) == {
+        "status", "updated_at", "age_seconds", "stale", "open_gaps", "details",
+    }
+    assert "secret-rpc.example" not in str(payload)
     assert solana["source_readiness"]["ready"] is False
     assert "archive_provider_not_configured" in solana["source_readiness"]["reason_codes"]
     assert solana["protocol_admission"]["state"] == "scheduled"

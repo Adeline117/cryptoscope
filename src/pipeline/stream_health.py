@@ -53,6 +53,7 @@ def _conn() -> sqlite3.Connection:
             source TEXT NOT NULL, stream TEXT NOT NULL, cursor INTEGER,
             last_event_at TEXT, last_received_at TEXT, latency_ms INTEGER,
             status TEXT NOT NULL, last_error TEXT, updated_at TEXT NOT NULL,
+            details TEXT,
             PRIMARY KEY(source,stream))""")
         c.execute("""CREATE TABLE IF NOT EXISTS gaps(
             id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, stream TEXT NOT NULL,
@@ -61,20 +62,32 @@ def _conn() -> sqlite3.Connection:
             resolved_at TEXT, details TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
             next_retry_at TEXT, last_error TEXT,
             UNIQUE(source,stream,from_cursor,to_cursor))""")
-        migrations = (
+        stream_migrations = (
+            ("details", "TEXT"),
+        )
+        gap_migrations = (
             ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
             ("next_retry_at", "TEXT"),
             ("last_error", "TEXT"),
         )
+        stream_columns = {row[1] for row in c.execute("PRAGMA table_info(streams)")}
         gap_columns = {row[1] for row in c.execute("PRAGMA table_info(gaps)")}
-        if any(name not in gap_columns for name, _kind in migrations):
+        if (any(name not in stream_columns for name, _kind in stream_migrations)
+                or any(name not in gap_columns for name, _kind in gap_migrations)):
             # Scheduler and both stream workers can open the same legacy DB at
             # startup. Serialize only the migration, then re-read the schema while
             # holding the write lock so a second process never acts on a stale
             # PRAGMA result and attempts the same ALTER TABLE.
             c.execute("BEGIN IMMEDIATE")
+            stream_columns = {
+                row[1] for row in c.execute("PRAGMA table_info(streams)")
+            }
+            for name, kind in stream_migrations:
+                if name not in stream_columns:
+                    c.execute(f"ALTER TABLE streams ADD COLUMN {name} {kind}")
+                    stream_columns.add(name)
             gap_columns = {row[1] for row in c.execute("PRAGMA table_info(gaps)")}
-            for name, kind in migrations:
+            for name, kind in gap_migrations:
                 if name not in gap_columns:
                     c.execute(f"ALTER TABLE gaps ADD COLUMN {name} {kind}")
                     gap_columns.add(name)
@@ -176,24 +189,33 @@ def mark_disconnected(source: str, stream: str, error: str,
 
 def report_worker(source: str, stream: str, *, status: str,
                   error: str | None = None,
+                  details: dict | None = None,
                   at: datetime | str | None = None) -> None:
     """Heartbeat a background worker without pretending it emitted market data."""
     if not source or not stream:
         raise ValueError("source and stream are required")
     if status not in {"live", "degraded"}:
         raise ValueError("worker status must be live or degraded")
+    if details is not None and not isinstance(details, dict):
+        raise ValueError("worker details must be an object")
+    details_json = (json.dumps(
+        details, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ) if details is not None else None)
+    if details_json is not None and len(details_json.encode("utf-8")) > 16_384:
+        raise ValueError("worker details exceed 16384 bytes")
     now = _iso(at)
     c = _conn()
     try:
         c.execute("""INSERT INTO streams(
-                         source,stream,last_received_at,status,last_error,updated_at
-                     ) VALUES (?,?,?,?,?,?)
+                         source,stream,last_received_at,status,last_error,updated_at,
+                         details
+                     ) VALUES (?,?,?,?,?,?,?)
                      ON CONFLICT(source,stream) DO UPDATE SET
                        last_received_at=excluded.last_received_at,
                        status=excluded.status,last_error=excluded.last_error,
-                       updated_at=excluded.updated_at""",
+                       updated_at=excluded.updated_at,details=excluded.details""",
                   (source, stream, now, status,
-                   str(error)[:240] if error else None, now))
+                   str(error)[:240] if error else None, now, details_json))
         c.commit()
     finally:
         c.close()
@@ -339,7 +361,7 @@ def snapshot(*, now: datetime | str | None = None,
     c = _conn()
     try:
         rows = c.execute("""SELECT source,stream,cursor,last_event_at,last_received_at,
-                                   latency_ms,status,last_error,updated_at
+                                   latency_ms,status,last_error,updated_at,details
                             FROM streams ORDER BY source,stream""").fetchall()
         gaps = {(s, st): (n, deferred, next_retry) for s, st, n, deferred, next_retry
                 in c.execute(
@@ -353,9 +375,15 @@ def snapshot(*, now: datetime | str | None = None,
         c.close()
     out = []
     keys = ("source", "stream", "cursor", "last_event_at", "last_received_at",
-            "latency_ms", "status", "last_error", "updated_at")
+            "latency_ms", "status", "last_error", "updated_at", "details")
     for row in rows:
         item = dict(zip(keys, row))
+        raw_details = item.get("details")
+        try:
+            parsed_details = json.loads(raw_details) if raw_details else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed_details = None
+        item["details"] = parsed_details if isinstance(parsed_details, dict) else None
         received = item.get("last_received_at")
         age = ((current - datetime.fromisoformat(received)).total_seconds()
                if received else None)

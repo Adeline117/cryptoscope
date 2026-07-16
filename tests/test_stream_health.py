@@ -95,9 +95,56 @@ def test_worker_heartbeat_distinguishes_degraded_alive_from_stale(health):
     assert recovered["status"] == "live" and recovered["last_error"] is None
 
 
+def test_worker_details_are_structured_and_omission_clears_previous_run(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    details = {
+        "schema_version": 1, "outcome": "sealed_clean",
+        "rpc": {"rpc_calls_total": 9, "rpc_failures_total": 0},
+    }
+    health.report_worker(
+        "solana", "pump_fun_reconciliation", status="live",
+        details=details, at=t0,
+    )
+    assert health.snapshot(now=t0)[0]["details"] == details
+
+    health.report_worker(
+        "solana", "pump_fun_reconciliation", status="degraded",
+        error="next run did not configure telemetry", at=t0 + timedelta(seconds=1),
+    )
+    assert health.snapshot(now=t0 + timedelta(seconds=1))[0]["details"] is None
+
+
+def test_legacy_stream_table_adds_worker_details_without_rebuild(health):
+    legacy = sqlite3.connect(health.DB)
+    legacy.execute("""CREATE TABLE streams(
+        source TEXT NOT NULL, stream TEXT NOT NULL, cursor INTEGER,
+        last_event_at TEXT, last_received_at TEXT, latency_ms INTEGER,
+        status TEXT NOT NULL, last_error TEXT, updated_at TEXT NOT NULL,
+        PRIMARY KEY(source,stream))""")
+    legacy.commit()
+    legacy.close()
+
+    health.report_worker(
+        "solana", "pump_fun_reconciliation", status="live",
+        details={"schema_version": 1, "outcome": "waiting_finality"},
+    )
+
+    connection = health._conn()
+    try:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(streams)")]
+    finally:
+        connection.close()
+    assert columns[-1] == "details"
+    assert health.snapshot()[0]["details"]["outcome"] == "waiting_finality"
+
+
 def test_worker_heartbeat_rejects_misleading_status(health):
     with pytest.raises(ValueError, match="live or degraded"):
         health.report_worker("solana", "maintenance", status="disconnected")
+    with pytest.raises(ValueError, match="details must be an object"):
+        health.report_worker(
+            "solana", "maintenance", status="live", details=["not", "an", "object"],
+        )
 
 
 def test_stream_clocks_require_timezone(health):

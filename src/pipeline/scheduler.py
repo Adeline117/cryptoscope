@@ -798,12 +798,16 @@ async def _run_solana_launch_reconciliation():
     from src.pipeline import solana_launch_stream as stream
     from src.pipeline import stream_health
 
+    telemetry = reconcile.new_rpc_run_telemetry()
     endpoint = reconcile.configured_archive_endpoint()
     if not endpoint:
         await asyncio.to_thread(
             stream_health.report_worker,
             "solana", "pump_fun_reconciliation", status="degraded",
             error="SOLANA_RECONCILIATION_RPC_URL is not configured",
+            details=reconcile.reconciliation_worker_details(
+                telemetry, outcome="unconfigured",
+            ),
         )
         logger.warning("solana_launch_reconciliation_unconfigured")
         return
@@ -824,7 +828,7 @@ async def _run_solana_launch_reconciliation():
             reconcile.reconcile_next_epoch,
             stream.JsonRpc(stream.configured_rpc_endpoint()),
             stream.JsonRpc(endpoint),
-            start_slot=start_slot,
+            start_slot=start_slot, telemetry=telemetry,
         )
         _RECONCILIATION_PRESSURE_FAILURES = 0
         _RECONCILIATION_RETRY_AT = 0.0
@@ -834,6 +838,9 @@ async def _run_solana_launch_reconciliation():
             "solana", "pump_fun_reconciliation",
             status="live" if healthy else "degraded",
             error=None if healthy else str(result)[:240],
+            details=reconcile.reconciliation_worker_details(
+                telemetry, outcome=str(result.get("state") or "unknown"),
+            ),
         )
         logger.info("solana_launch_reconciliation_done", **result)
     except stream.RpcPressureError as exc:
@@ -846,6 +853,9 @@ async def _run_solana_launch_reconciliation():
             stream_health.report_worker,
             "solana", "pump_fun_reconciliation", status="degraded",
             error=(f"archive RPC {exc.kind}; retry in {cooldown}s")[:240],
+            details=reconcile.reconciliation_worker_details(
+                telemetry, outcome="rpc_pressure", error_kind=exc.kind,
+            ),
         )
         logger.warning(
             "solana_launch_reconciliation_pressure",
@@ -860,6 +870,9 @@ async def _run_solana_launch_reconciliation():
             stream_health.report_worker,
             "solana", "pump_fun_reconciliation", status="degraded",
             error=f"{type(exc).__name__}: {exc}"[:240],
+            details=reconcile.reconciliation_worker_details(
+                telemetry, outcome="failed", error_kind=type(exc).__name__,
+            ),
         )
         logger.error(
             "solana_launch_reconciliation_failed", error=str(exc)[:160],

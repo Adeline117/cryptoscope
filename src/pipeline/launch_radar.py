@@ -961,19 +961,23 @@ def view() -> dict:
             launch_protocol_gate.read(protocol_id=PROTOCOL_ID) or protocol_admission
         )
         source_readiness = solana_launch_reconcile.source_readiness()
+        reconciliation = (source_readiness.get("runtime") or {}).get(
+            "reconciliation"
+        )
         primary = {"available": True,
                    "qualification": solana_launch_stream.qualification_summary(
                        ledger_readback=lambda ident, mint: event_id_readback_matches(
                            ident, lane="launch", chain="solana", token=mint)),
                    "streams": streams,
                    "maintenance": maintenance,
+                   "reconciliation": reconciliation,
                    "market_provider": solana_launch_stream.qualification_provider_health(),
                    "source_readiness": source_readiness,
                    "protocol_admission": protocol_admission,
                    }
     except Exception as exc:
         primary = {"available": False, "reason": str(exc)[:120],
-                   "streams": [], "maintenance": None,
+                   "streams": [], "maintenance": None, "reconciliation": None,
                    "source_readiness": source_readiness,
                    "protocol_admission": protocol_admission}
     try:
