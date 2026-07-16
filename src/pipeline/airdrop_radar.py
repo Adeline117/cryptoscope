@@ -33,13 +33,19 @@ EXPLORER_HOSTS = {
     "base": {"basescan.org"},
     "bsc": {"bscscan.com"},
     "solana": {"solscan.io"},
+    "starknet": {"voyager.online", "starkscan.co"},
 }
 DEFAULT_RPCS = {
     "ethereum": "https://ethereum-rpc.publicnode.com",
     "base": "https://mainnet.base.org",
     "bsc": "https://bsc-dataseed.binance.org",
     "solana": "https://api.mainnet-beta.solana.com",
+    # Mainnet preset published in Starknet's official StarkZap documentation.
+    "starknet": "https://api.cartridge.gg/x/starknet/mainnet",
 }
+STARKNET_MAINNET_CHAIN_ID = "0x534e5f4d41494e"  # felt("SN_MAIN")
+STARKNET_FELT_RE = re.compile(r"^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,62})$")
+STARKNET_ACCEPTED = {"ACCEPTED_ON_L2": 1, "ACCEPTED_ON_L1": 2}
 
 
 def _load(path: Path = WATCHLIST) -> list[dict]:
@@ -172,8 +178,12 @@ def _transaction_url(value: object, chain: str) -> str | None:
         return None
     path = urlparse(parsed[0]).path.rstrip("/")
     tx_id = path.rsplit("/", 1)[-1] if "/tx/" in path else ""
-    valid = (bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_id))
-             if chain != "solana" else bool(re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{64,88}", tx_id)))
+    if chain == "solana":
+        valid = bool(re.fullmatch(r"[1-9A-HJ-NP-Za-km-z]{64,88}", tx_id))
+    elif chain == "starknet":
+        valid = bool(STARKNET_FELT_RE.fullmatch(tx_id))
+    else:
+        valid = bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", tx_id))
     return parsed[0] if valid else None
 
 
@@ -182,7 +192,7 @@ def _rpc_url(chain: str) -> str | None:
     return configured or DEFAULT_RPCS.get(chain)
 
 
-def _rpc_json(url: str, method: str, params: list) -> dict:
+def _rpc_json(url: str, method: str, params: object) -> dict:
     request = urllib.request.Request(
         url,
         data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method,
@@ -194,6 +204,89 @@ def _rpc_json(url: str, method: str, params: list) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _starknet_felt(value: object) -> str | None:
+    if not isinstance(value, str) or not STARKNET_FELT_RE.fullmatch(value):
+        return None
+    return value.lower()
+
+
+def _verify_starknet_transaction(rpc: str, tx_id: str, fetch) -> dict | None:
+    """Verify finalized execution and block membership on Starknet mainnet.
+
+    This proves transaction execution only. It does not prove which campaign action
+    the call represented or the amount of any reward reported beside it.
+    """
+    tx_felt = _starknet_felt(tx_id)
+    if tx_felt is None:
+        return None
+
+    chain_response = fetch(rpc, "starknet_chainId", [])
+    if (not isinstance(chain_response, dict)
+            or str(chain_response.get("result", "")).lower()
+            != STARKNET_MAINNET_CHAIN_ID):
+        return None
+
+    receipt_response = fetch(
+        rpc, "starknet_getTransactionReceipt", {"transaction_hash": tx_id},
+    )
+    receipt = receipt_response.get("result") if isinstance(receipt_response, dict) else None
+    if not isinstance(receipt, dict):
+        return None
+    receipt_finality = receipt.get("finality_status")
+    receipt_hash = _starknet_felt(receipt.get("transaction_hash"))
+    block_hash = _starknet_felt(receipt.get("block_hash"))
+    block_number = receipt.get("block_number")
+    if (receipt.get("execution_status") != "SUCCEEDED"
+            or receipt_finality not in STARKNET_ACCEPTED
+            or receipt_hash != tx_felt
+            or block_hash in (None, "0x0")
+            or isinstance(block_number, bool)
+            or not isinstance(block_number, int)
+            or block_number < 0):
+        return None
+
+    block_response = fetch(
+        rpc, "starknet_getBlockWithTxHashes",
+        [{"block_hash": receipt["block_hash"]}],
+    )
+    block = block_response.get("result") if isinstance(block_response, dict) else None
+    if not isinstance(block, dict):
+        return None
+    block_status = block.get("status")
+    observed_block_hash = _starknet_felt(block.get("block_hash"))
+    observed_block_number = block.get("block_number")
+    transactions = block.get("transactions")
+    timestamp = block.get("timestamp")
+    tx_in_block = (isinstance(transactions, list)
+                   and any(_starknet_felt(value) == tx_felt for value in transactions))
+    if (block_status not in STARKNET_ACCEPTED
+            or STARKNET_ACCEPTED[block_status] < STARKNET_ACCEPTED[receipt_finality]
+            or observed_block_hash != block_hash
+            or isinstance(observed_block_number, bool)
+            or not isinstance(observed_block_number, int)
+            or observed_block_number != block_number
+            or not tx_in_block
+            or isinstance(timestamp, bool)
+            or not isinstance(timestamp, int)
+            or timestamp <= 0):
+        return None
+
+    confirmed_at = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    return {
+        "source": "starknet_mainnet_rpc",
+        "tx_id": tx_id,
+        "chain_id": STARKNET_MAINNET_CHAIN_ID,
+        "block_hash": receipt["block_hash"],
+        "block_number": block_number,
+        "finality_status": block_status,
+        "execution_status": "SUCCEEDED",
+        "confirmed_at": confirmed_at.isoformat(),
+        "onchain_success": True,
+        "verification_scope": "transaction_execution_only",
+        "campaign_semantics_verified": False,
+    }
+
+
 def _verify_transaction(tx_url: str, chain: str, fetch=_rpc_json) -> dict | None:
     """Require a successful mainnet transaction and derive its time from chain data."""
     rpc = _rpc_url(chain)
@@ -201,6 +294,8 @@ def _verify_transaction(tx_url: str, chain: str, fetch=_rpc_json) -> dict | None
     if not rpc or not tx_id:
         return None
     try:
+        if chain == "starknet":
+            return _verify_starknet_transaction(rpc, tx_id, fetch)
         if chain == "solana":
             response = fetch(rpc, "getTransaction", [tx_id, {
                 "encoding": "json", "commitment": "confirmed",
@@ -233,7 +328,8 @@ def _verify_transaction(tx_url: str, chain: str, fetch=_rpc_json) -> dict | None
         return {"source": f"{chain}_mainnet_rpc", "tx_id": tx_id,
                 "block_number": int(block_number, 16),
                 "confirmed_at": confirmed_at.isoformat(), "onchain_success": True}
-    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (OSError, ValueError, TypeError, KeyError, OverflowError,
+            json.JSONDecodeError):
         return None
 
 

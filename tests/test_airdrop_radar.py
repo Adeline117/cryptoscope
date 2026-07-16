@@ -253,6 +253,32 @@ def test_claim_transaction_url_must_match_chain_explorer_and_hash_shape():
                      source_verifier=_verified_source) is None
 
 
+def test_starknet_claim_url_requires_an_exact_mainnet_explorer_and_canonical_felt():
+    from src.pipeline.airdrop_radar import _transaction_url
+
+    tx_hash = "0x" + "a" * 63
+    assert _transaction_url(
+        f"https://voyager.online/tx/{tx_hash}", "starknet"
+    ) == f"https://voyager.online/tx/{tx_hash}"
+    assert _transaction_url(
+        f"https://starkscan.co/tx/{tx_hash}", "starknet"
+    ) == f"https://starkscan.co/tx/{tx_hash}"
+    assert _transaction_url("https://voyager.online/tx/0x0", "starknet")
+
+    assert _transaction_url(
+        f"https://sepolia.voyager.online/tx/{tx_hash}", "starknet"
+    ) is None
+    assert _transaction_url(
+        f"https://voyager.online.evil.test/tx/{tx_hash}", "starknet"
+    ) is None
+    assert _transaction_url(
+        "https://voyager.online/tx/0x0" + "a" * 62, "starknet"
+    ) is None
+    assert _transaction_url(
+        "https://voyager.online/tx/0x" + "a" * 64, "starknet"
+    ) is None
+
+
 def test_claimed_status_rejects_nonexistent_or_failed_onchain_transaction():
     from src.pipeline.airdrop_radar import normalize
 
@@ -344,3 +370,133 @@ def test_evm_transaction_verification_requires_success_and_chain_block_time(monk
                            "blockNumber": "0x7b"}}
 
     assert ar._verify_transaction(tx_url, "ethereum", fetch=failed) is None
+
+
+def test_starknet_transaction_verification_cross_checks_mainnet_receipt_and_block():
+    from src.pipeline import airdrop_radar as ar
+
+    tx_hash = "0x" + "a" * 63
+    block_hash = "0x" + "b" * 63
+    tx_url = "https://voyager.online/tx/" + tx_hash
+    calls = []
+
+    def rpc(_url, method, params):
+        calls.append((method, params))
+        if method == "starknet_chainId":
+            return {"result": ar.STARKNET_MAINNET_CHAIN_ID}
+        if method == "starknet_getTransactionReceipt":
+            return {"result": {
+                "transaction_hash": tx_hash,
+                "execution_status": "SUCCEEDED",
+                "finality_status": "ACCEPTED_ON_L2",
+                "block_hash": block_hash,
+                "block_number": 123,
+            }}
+        return {"result": {
+            "status": "ACCEPTED_ON_L1",
+            "block_hash": block_hash,
+            "block_number": 123,
+            "timestamp": 1720717760,
+            "transactions": ["0x1", tx_hash],
+        }}
+
+    got = ar._verify_transaction(tx_url, "starknet", fetch=rpc)
+
+    assert got == {
+        "source": "starknet_mainnet_rpc",
+        "tx_id": tx_hash,
+        "chain_id": ar.STARKNET_MAINNET_CHAIN_ID,
+        "block_hash": block_hash,
+        "block_number": 123,
+        "finality_status": "ACCEPTED_ON_L1",
+        "execution_status": "SUCCEEDED",
+        "confirmed_at": "2024-07-11T17:09:20+00:00",
+        "onchain_success": True,
+        "verification_scope": "transaction_execution_only",
+        "campaign_semantics_verified": False,
+    }
+    assert calls == [
+        ("starknet_chainId", []),
+        ("starknet_getTransactionReceipt", {"transaction_hash": tx_hash}),
+        ("starknet_getBlockWithTxHashes", [{"block_hash": block_hash}]),
+    ]
+
+
+def test_starknet_transaction_verification_rejects_wrong_chain_or_unsettled_execution():
+    from src.pipeline import airdrop_radar as ar
+
+    tx_hash = "0x" + "a" * 63
+    block_hash = "0x" + "b" * 63
+    tx_url = "https://starkscan.co/tx/" + tx_hash
+
+    def verify(*, chain_id=ar.STARKNET_MAINNET_CHAIN_ID,
+               execution="SUCCEEDED", finality="ACCEPTED_ON_L2"):
+        def rpc(_url, method, _params):
+            if method == "starknet_chainId":
+                return {"result": chain_id}
+            if method == "starknet_getTransactionReceipt":
+                return {"result": {
+                    "transaction_hash": tx_hash,
+                    "execution_status": execution,
+                    "finality_status": finality,
+                    "block_hash": block_hash,
+                    "block_number": 123,
+                }}
+            return {"result": {
+                "status": "ACCEPTED_ON_L2", "block_hash": block_hash,
+                "block_number": 123, "timestamp": 1720717760,
+                "transactions": [tx_hash],
+            }}
+        return ar._verify_transaction(tx_url, "starknet", fetch=rpc)
+
+    assert verify(chain_id="0x534e5f5345504f4c4941") is None
+    assert verify(execution="REVERTED") is None
+    assert verify(finality="PRE_CONFIRMED") is None
+    assert verify(finality="UNKNOWN") is None
+
+
+def test_starknet_transaction_verification_rejects_inconsistent_block_evidence():
+    from src.pipeline import airdrop_radar as ar
+
+    tx_hash = "0x" + "a" * 63
+    other_tx = "0x" + "c" * 63
+    block_hash = "0x" + "b" * 63
+    tx_url = "https://voyager.online/tx/" + tx_hash
+
+    def verify(receipt_changes=None, block_changes=None):
+        receipt = {
+            "transaction_hash": tx_hash, "execution_status": "SUCCEEDED",
+            "finality_status": "ACCEPTED_ON_L1", "block_hash": block_hash,
+            "block_number": 123,
+        }
+        block = {
+            "status": "ACCEPTED_ON_L1", "block_hash": block_hash,
+            "block_number": 123, "timestamp": 1720717760,
+            "transactions": [tx_hash],
+        }
+        receipt.update(receipt_changes or {})
+        block.update(block_changes or {})
+
+        def rpc(_url, method, _params):
+            if method == "starknet_chainId":
+                return {"result": ar.STARKNET_MAINNET_CHAIN_ID}
+            if method == "starknet_getTransactionReceipt":
+                return {"result": receipt}
+            return {"result": block}
+        return ar._verify_transaction(tx_url, "starknet", fetch=rpc)
+
+    assert verify(receipt_changes={"transaction_hash": other_tx}) is None
+    assert verify(receipt_changes={"block_hash": "0x0"}) is None
+    assert verify(block_changes={"block_hash": "0x" + "d" * 63}) is None
+    assert verify(block_changes={"block_number": 124}) is None
+    assert verify(block_changes={"block_number": 123.0}) is None
+    assert verify(block_changes={"transactions": [other_tx]}) is None
+    assert verify(block_changes={"status": "ACCEPTED_ON_L2"}) is None
+    assert verify(block_changes={"status": "PRE_CONFIRMED"}) is None
+    assert verify(block_changes={"timestamp": 0}) is None
+    assert verify(block_changes={"timestamp": True}) is None
+
+    def offline(_url, _method, _params):
+        raise OSError("offline")
+
+    assert ar._verify_transaction(tx_url, "starknet", fetch=offline) is None
