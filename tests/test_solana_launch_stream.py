@@ -1017,6 +1017,20 @@ def test_adaptive_budgets_ramp_only_after_full_clean_cycles_and_reset(sol):
     assert sol._adjust_gap_budget(
         4, 1, _gap_stats(1, failed=1),
     ) == (1, 0)
+    assert sol._adjust_gap_budget(
+        4, 1, _gap_stats(4, progressed=4, pressure_kind="rate_limited"),
+    ) == (1, 0)
+    # A hit wall-clock deadline is not provider pressure: back off by halving
+    # instead of restarting the ramp from the floor.
+    assert sol._adjust_gap_budget(
+        16, 1, _gap_stats(9, progressed=9, deadline_exhausted=True),
+    ) == (8, 0)
+    assert sol._adjust_gap_budget(
+        1, 1, _gap_stats(1, recovered=1, deadline_exhausted=True),
+    ) == (1, 0)
+    assert sol._adjust_gap_budget(
+        16, 1, _gap_stats(9, progressed=8, failed=1, deadline_exhausted=True),
+    ) == (1, 0)
 
     hydration_limit = 5
     hydration_streak = 0
@@ -1181,6 +1195,33 @@ def test_small_gaps_are_served_before_a_large_backlog_gap(sol):
     remaining = stream_health.open_gaps("solana", "pump_fun_launches")
     assert [(gap["from_cursor"], gap["to_cursor"]) for gap in remaining] == [
         (11, 5010)]
+
+
+def test_ramped_budget_reaches_past_the_default_fetch_window(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    for cursor in range(12, 36, 2):
+        stream_health.observe("solana", "pump_fun_launches", cursor=cursor,
+                              expect_contiguous=True)
+    assert len(stream_health.open_gaps("solana", "pump_fun_launches")) == 12
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 100
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return [params[0] + 1]
+            assert method == "getBlock"
+            return {"parentSlot": params[0] - 2}
+
+    assert sol.retry_open_gaps(
+        Rpc(), slot_budget=sol.GAP_RETRY_MAX_SLOT_BUDGET,
+    ) == _gap_stats(12, recovered=12)
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
 
 
 def test_four_skipped_slots_resolve_in_one_proof_budget_unit(sol):
@@ -1386,13 +1427,13 @@ def test_long_slot_gap_checkpoints_each_verified_slot_within_budget(sol):
             return {"transactions": []}
 
     rpc = Rpc()
-    first = sol.retry_open_gaps(rpc, slot_budget=sol.MAX_BACKFILL_SLOTS)
+    first = sol.retry_open_gaps(rpc, slot_budget=4)
     assert first == _gap_stats(4, progressed=4)
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
     assert (gap["from_cursor"], gap["to_cursor"]) == (15, 29)
     assert rpc.blocks == [11, 12, 13, 14]
 
-    second = sol.retry_open_gaps(rpc, slot_budget=sol.MAX_BACKFILL_SLOTS)
+    second = sol.retry_open_gaps(rpc, slot_budget=4)
     assert second == _gap_stats(4, progressed=4)
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
     assert (gap["from_cursor"], gap["to_cursor"]) == (19, 29)

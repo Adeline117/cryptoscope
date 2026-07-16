@@ -37,7 +37,10 @@ PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 PUBLIC_SOLANA_WS = "wss://api.mainnet-beta.solana.com/"
 MAX_BACKFILL_SLOTS = 16
 GAP_RETRY_SLOT_BUDGET = 1
-GAP_RETRY_MAX_SLOT_BUDGET = 4
+# 16 proof units rarely fit inside GAP_WORK_BUDGET_SECONDS when blocks are
+# produced (multi-MB getBlock each); the wall-clock deadline is the real
+# limiter and _adjust_gap_budget backs off gently when it is hit.
+GAP_RETRY_MAX_SLOT_BUDGET = 16
 GAP_RETRY_RAMP_CLEAN_CYCLES = 2
 SKIPPED_SLOT_PROOF_LOOKAHEAD = 512
 HYDRATION_RETRY_BASE_SECONDS = 60
@@ -181,9 +184,13 @@ def _adjust_gap_budget(current: int, clean_cycles: int,
                        result: dict) -> tuple[int, int]:
     current = min(GAP_RETRY_MAX_SLOT_BUDGET,
                   max(GAP_RETRY_SLOT_BUDGET, int(current)))
-    if result.get("pressure_kind") or result.get("deadline_exhausted") \
-            or int(result.get("failed") or 0):
+    if result.get("pressure_kind") or int(result.get("failed") or 0):
         return GAP_RETRY_SLOT_BUDGET, 0
+    if result.get("deadline_exhausted"):
+        # Running out of lane wall-clock is not provider pressure: the budget
+        # simply outgrew the time slice. Halve instead of restarting the ramp
+        # from the floor, or a raised ceiling would sawtooth at 1.
+        return max(GAP_RETRY_SLOT_BUDGET, current // 2), 0
     attempted = int(result.get("attempted") or 0)
     completed = int(result.get("recovered") or 0) + int(
         result.get("progressed") or 0)
@@ -1833,23 +1840,26 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                     slot_budget: int = GAP_RETRY_SLOT_BUDGET,
                     deadline: float | None = None,
                     monotonic: Callable[[], float] = time.monotonic) -> dict:
-    # Smallest-remaining-first: the whole budget goes to the queue head, so
-    # oldest-first would let one multi-thousand-slot gap starve hundreds of
-    # one-slot skipped-run gaps that each need a single proof unit.
-    gaps = stream_health.open_gaps(
-        "solana", "pump_fun_launches", limit=limit, order="smallest",
-    )
     attempted = recovered = progressed = failed = 0
     pressure_kind = None
     retry_after = None
     deadline_stopped = 0
     deadline_exhausted = False
-    # Blocks can be several MB. Recovery stays sequential and never starts more
-    # than four proof units in one bounded maintenance cycle. One unit may prove
-    # a leading skipped run, but a produced block is still handled one slot at a
-    # time so partial evidence can never advance the gap cursor.
+    # Blocks can be several MB. Recovery stays sequential and bounded per
+    # maintenance cycle. One unit may prove a leading skipped run, but a
+    # produced block is still handled one slot at a time so partial evidence
+    # can never advance the gap cursor.
     remaining_budget = min(
         GAP_RETRY_MAX_SLOT_BUDGET, max(0, int(slot_budget)),
+    )
+    # Smallest-remaining-first: the whole budget goes to the queue head, so
+    # oldest-first would let one multi-thousand-slot gap starve hundreds of
+    # one-slot skipped-run gaps that each need a single proof unit. The fetch
+    # window must cover at least one gap per budget unit or a ramped budget
+    # goes unused against a backlog of one-slot gaps.
+    gaps = stream_health.open_gaps(
+        "solana", "pump_fun_launches",
+        limit=max(int(limit), remaining_budget), order="smallest",
     )
     stop_lane = False
     for gap in gaps:
