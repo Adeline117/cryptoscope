@@ -10,19 +10,25 @@ no such entries and makes no directional or execution claim.
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import hashlib
 import json
 import os
 import re
+import stat
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
+from typing import Iterator, Mapping
 
 import structlog
 
@@ -66,6 +72,8 @@ _MAX_CACHE_BYTES = 8 * 1024 * 1024
 _MAX_REDIRECT_DRAIN_BYTES = 64 * 1024
 _MAX_EXCHANGE_CLOCK_SKEW_SECONDS = 30
 _MAX_REFRESH_DURATION_SECONDS = 5 * 60
+_CACHE_PUBLISH_LOCK_TIMEOUT_SECONDS = 5.0
+_CACHE_PUBLISH_LOCK_POLL_SECONDS = 0.01
 # Operational completeness controls, not OKX protocol guarantees.  A catalog
 # below this floor, or more than 25% below the last still-valid snapshot, is more
 # likely a partial response than a real market event and must not replace cache.
@@ -131,6 +139,44 @@ class _CachePublishError(_ContractError):
         )
         super().__init__(reason_code)
         self.state = state
+
+
+class _CachePublishLockError(_ContractError):
+    """Bounded lock-acquisition failure without filesystem details."""
+
+
+class _IncumbentCacheError(_ContractError):
+    """A present incumbent could not be trusted for a source-vector CAS."""
+
+    def __init__(self, reason_code: str, *, status: str) -> None:
+        super().__init__(reason_code)
+        self.status = status
+
+
+class _CachePublishRejected(_ContractError):
+    """A valid candidate lost the monotonic publication comparison."""
+
+    def __init__(self, reason_code: str, *, status: str) -> None:
+        super().__init__(reason_code)
+        self.status = status
+
+
+class _CachePublishReadbackError(_ContractError):
+    """A durable rename could not be verified as the acknowledged candidate."""
+
+
+class _CachePublishLockTimeout(Exception):
+    """Internal sentinel converted to one bounded public reason code."""
+
+
+@dataclass(frozen=True)
+class _IncumbentSnapshot:
+    payload: dict[str, object]
+    generated_at: datetime
+    current_result: dict[str, object]
+
+
+_CACHE_PUBLISH_THREAD_LOCK = threading.Lock()
 
 
 def _utc_now() -> datetime:
@@ -899,6 +945,142 @@ def _contains_forbidden_cache_key(value: object) -> bool:
     return False
 
 
+def _cache_publish_lock_path():
+    """Return the stable sibling lockfile for the currently configured cache."""
+    return _CACHE.with_name(f".{_CACHE.name}.publish.lock")
+
+
+def _pause_for_publish_lock(deadline: float) -> None:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _CachePublishLockTimeout
+    time.sleep(min(_CACHE_PUBLISH_LOCK_POLL_SECONDS, remaining))
+
+
+def _release_cache_publish_lock(
+    descriptor: int | None,
+    *,
+    file_locked: bool,
+    thread_locked: bool,
+) -> None:
+    """Release every acquired layer; cleanup errors never leak path details."""
+    if descriptor is not None:
+        if file_locked:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except Exception as exc:
+                try:
+                    logger.warning(
+                        "perp_universe_cache_lock_cleanup_failed",
+                        reason_code="cache_publish_unlock_failed",
+                        error_kind=type(exc).__name__,
+                    )
+                except Exception:
+                    pass
+        try:
+            os.close(descriptor)
+        except Exception as exc:
+            try:
+                logger.warning(
+                    "perp_universe_cache_lock_cleanup_failed",
+                    reason_code="cache_publish_lock_close_failed",
+                    error_kind=type(exc).__name__,
+                )
+            except Exception:
+                pass
+    if thread_locked:
+        try:
+            _CACHE_PUBLISH_THREAD_LOCK.release()
+        except Exception as exc:
+            try:
+                logger.warning(
+                    "perp_universe_cache_lock_cleanup_failed",
+                    reason_code="cache_publish_thread_unlock_failed",
+                    error_kind=type(exc).__name__,
+                )
+            except Exception:
+                pass
+
+
+@contextmanager
+def _cache_publish_lock() -> Iterator[None]:
+    """Serialize publishers in this process and across processes, with a deadline."""
+    deadline = time.monotonic() + _CACHE_PUBLISH_LOCK_TIMEOUT_SECONDS
+    descriptor: int | None = None
+    thread_locked = False
+    file_locked = False
+    try:
+        while not _CACHE_PUBLISH_THREAD_LOCK.acquire(blocking=False):
+            _pause_for_publish_lock(deadline)
+        thread_locked = True
+
+        _CACHE.parent.mkdir(parents=True, exist_ok=True)
+        flags = os.O_RDWR | os.O_CREAT
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(str(_cache_publish_lock_path()), flags, 0o600)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_nlink != 1
+            or metadata.st_uid != os.getuid()
+        ):
+            raise OSError("lockfile type invalid")
+        if stat.S_IMODE(metadata.st_mode) != 0o600:
+            os.fchmod(descriptor, 0o600)
+            metadata = os.fstat(descriptor)
+            if (
+                metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise OSError("lockfile mode invalid")
+
+        while True:
+            try:
+                fcntl.flock(
+                    descriptor,
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+                file_locked = True
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN}:
+                    raise
+                _pause_for_publish_lock(deadline)
+    except _CachePublishLockTimeout:
+        _release_cache_publish_lock(
+            descriptor,
+            file_locked=file_locked,
+            thread_locked=thread_locked,
+        )
+        raise _CachePublishLockError("cache_publish_lock_timeout") from None
+    except Exception:
+        _release_cache_publish_lock(
+            descriptor,
+            file_locked=file_locked,
+            thread_locked=thread_locked,
+        )
+        raise _CachePublishLockError("cache_publish_lock_failed") from None
+    except BaseException:
+        # Async control-flow exceptions must still release an already-acquired
+        # thread lock and descriptor, but they retain their original semantics.
+        _release_cache_publish_lock(
+            descriptor,
+            file_locked=file_locked,
+            thread_locked=thread_locked,
+        )
+        raise
+
+    try:
+        yield
+    finally:
+        _release_cache_publish_lock(
+            descriptor,
+            file_locked=file_locked,
+            thread_locked=thread_locked,
+        )
+
+
 def _atomic_write_cache(envelope: Mapping[str, object]) -> _CachePublishState:
     if _contains_forbidden_cache_key(envelope):
         raise _ContractError("cache_contains_raw_response")
@@ -907,6 +1089,7 @@ def _atomic_write_cache(envelope: Mapping[str, object]) -> _CachePublishState:
         raise _ContractError("cache_size_invalid")
     temporary: str | None = None
     raw_descriptor: int | None = None
+    directory_descriptor: int | None = None
     state = _CachePublishState(
         namespace_replaced=False,
         directory_synced=False,
@@ -932,24 +1115,14 @@ def _atomic_write_cache(envelope: Mapping[str, object]) -> _CachePublishState:
             namespace_replaced=True,
             directory_synced=False,
         )
-        directory_fd = os.open(str(_CACHE.parent), os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        except Exception:
-            # Preserve the directory-fsync failure as the durability verdict.  A
-            # secondary close failure must neither mask it nor claim the rename is
-            # durable.
-            try:
-                os.close(directory_fd)
-            except Exception:
-                pass
-            raise
+        directory_descriptor = os.open(str(_CACHE.parent), os.O_RDONLY)
+        os.fsync(directory_descriptor)
         state = _CachePublishState(
             namespace_replaced=True,
             directory_synced=True,
         )
         try:
-            os.close(directory_fd)
+            os.close(directory_descriptor)
         except Exception as exc:
             # The parent-directory fsync is the commit point.  A later close error
             # is a cleanup warning, not evidence that the acknowledged rename lost
@@ -962,15 +1135,21 @@ def _atomic_write_cache(envelope: Mapping[str, object]) -> _CachePublishState:
                 )
             except Exception:
                 pass
+        finally:
+            directory_descriptor = None
         return state
-    except Exception as exc:
-        # A failed fdopen never transferred ownership.  Close the raw descriptor
-        # before unlinking its directory entry; cleanup failures are secondary and
-        # must never replace the staged publication verdict.
+    except BaseException as exc:
+        # Keep every raw descriptor owned by this scope visible to one cleanup path.
+        # Cleanup failures are secondary and must never replace the staged verdict.
+        try:
+            if directory_descriptor is not None:
+                os.close(directory_descriptor)
+        except BaseException:
+            pass
         try:
             if raw_descriptor is not None:
                 os.close(raw_descriptor)
-        except Exception:
+        except BaseException:
             pass
         try:
             if temporary is not None:
@@ -979,7 +1158,11 @@ def _atomic_write_cache(envelope: Mapping[str, object]) -> _CachePublishState:
             pass
         except OSError:
             pass
+        except BaseException:
+            pass
         if isinstance(exc, _ContractError):
+            raise
+        if not isinstance(exc, Exception):
             raise
         raise _CachePublishError(state) from None
 
@@ -1014,6 +1197,252 @@ def _require_disk_write() -> dict[str, object]:
     return dict(snapshot)
 
 
+def _read_incumbent_for_publish(
+    *,
+    publish_now: datetime,
+) -> _IncumbentSnapshot | None:
+    """Read and validate exactly one incumbent while holding the publish lock."""
+    try:
+        raw = _read_cache_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise _IncumbentCacheError(
+            "cache_incumbent_read_failed", status="unavailable",
+        ) from None
+    if not raw or len(raw) > _MAX_CACHE_BYTES:
+        raise _IncumbentCacheError(
+            "cache_incumbent_invalid", status="invalid",
+        )
+    try:
+        payload = _json_loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise _ContractError("cache_schema_invalid")
+        generated_at = _parse_utc_iso(
+            payload.get("generated_at"), "cache_generated_at_invalid",
+        )
+        # Validate against its own generation instant first.  This distinguishes a
+        # structurally trusted but currently stale snapshot from an invalid one.
+        _validate_cache_payload(payload, generated_at)
+        try:
+            current_result = _validate_cache_payload(payload, publish_now)
+        except _ContractError as exc:
+            if exc.reason_code != "cache_stale":
+                raise
+            current_result = _failure(
+                "stale", "cache_stale", cache_preserved=True,
+            )
+    except (UnicodeDecodeError, _ContractError):
+        raise _IncumbentCacheError(
+            "cache_incumbent_invalid", status="invalid",
+        ) from None
+    except Exception:
+        raise _IncumbentCacheError(
+            "cache_incumbent_invalid", status="invalid",
+        ) from None
+    return _IncumbentSnapshot(
+        payload=dict(payload),
+        generated_at=generated_at,
+        current_result=dict(current_result),
+    )
+
+
+def _source_vector(
+    payload: Mapping[str, object],
+) -> tuple[datetime, datetime]:
+    health = payload.get("source_health")
+    sources = health.get("sources") if isinstance(health, Mapping) else None
+    native = next(
+        (
+            source for source in sources
+            if isinstance(source, Mapping)
+            and source.get("path_key") == _NATIVE_PATH_KEY
+        ),
+        None,
+    ) if isinstance(sources, list) else None
+    mapping = payload.get("mapping_source")
+    if not isinstance(native, Mapping) or not isinstance(mapping, Mapping):
+        raise _ContractError("cache_publish_projection_invalid")
+    return (
+        _parse_utc_iso(native.get("observed_at"), "source_time_invalid"),
+        _parse_utc_iso(
+            mapping.get("observed_at"), "mapping_source_time_invalid",
+        ),
+    )
+
+
+def _component_projection_digests(
+    payload: Mapping[str, object],
+) -> tuple[str, str]:
+    """Digest durable evidence projections, excluding generation and TTL fields."""
+    native_projection = {
+        "source_health": payload.get("source_health"),
+        "market_catalog_digest": payload.get("market_catalog_digest"),
+        "market_count": payload.get("market_count"),
+    }
+    mapping_projection = {
+        "mapping_source": payload.get("mapping_source"),
+        "mapping_policy": payload.get("mapping_policy"),
+        "mapped_count": payload.get("mapped_count"),
+        "universe": payload.get("universe"),
+    }
+    return _sha256(native_projection), _sha256(mapping_projection)
+
+
+def _incumbent_baseline_counts(
+    incumbent: _IncumbentSnapshot | None,
+    *,
+    publish_now: datetime,
+) -> tuple[int | None, int | None]:
+    if (
+        incumbent is None
+        or incumbent.generated_at > publish_now
+        or publish_now - incumbent.generated_at > _MAX_OPERATIONAL_BASELINE_AGE
+    ):
+        return None, None
+    market_count = incumbent.payload.get("market_count")
+    mapped_count = incumbent.payload.get("mapped_count")
+    return (
+        market_count if type(market_count) is int else None,
+        mapped_count if type(mapped_count) is int else None,
+    )
+
+
+def _publication_decision(
+    candidate: Mapping[str, object],
+    incumbent: Mapping[str, object],
+) -> str:
+    candidate_generated_at = _parse_utc_iso(
+        candidate.get("generated_at"), "cache_generated_at_invalid",
+    )
+    incumbent_generated_at = _parse_utc_iso(
+        incumbent.get("generated_at"), "cache_generated_at_invalid",
+    )
+    if candidate_generated_at < incumbent_generated_at:
+        raise _CachePublishRejected(
+            "cache_publish_clock_regression", status="invalid",
+        )
+    candidate_vector = _source_vector(candidate)
+    incumbent_vector = _source_vector(incumbent)
+    regressed = tuple(
+        candidate_time < incumbent_time
+        for candidate_time, incumbent_time in zip(
+            candidate_vector, incumbent_vector,
+        )
+    )
+    advanced = tuple(
+        candidate_time > incumbent_time
+        for candidate_time, incumbent_time in zip(
+            candidate_vector, incumbent_vector,
+        )
+    )
+    if any(regressed):
+        reason_code = (
+            "cache_publish_source_incomparable"
+            if any(advanced)
+            else "cache_publish_source_regression"
+        )
+        raise _CachePublishRejected(reason_code, status="unavailable")
+
+    candidate_digests = _component_projection_digests(candidate)
+    incumbent_digests = _component_projection_digests(incumbent)
+    if any(
+        candidate_vector[index] == incumbent_vector[index]
+        and candidate_digests[index] != incumbent_digests[index]
+        for index in range(2)
+    ):
+        raise _CachePublishRejected(
+            "cache_publish_evidence_conflict", status="invalid",
+        )
+    return "publish" if any(advanced) else "unchanged"
+
+
+def _readback_published_candidate(
+    envelope: Mapping[str, object],
+    *,
+    publish_now: datetime,
+) -> dict[str, object]:
+    """Verify the exact durable namespace entry before acknowledging ``written``."""
+    try:
+        raw = _read_cache_bytes()
+    except (FileNotFoundError, OSError):
+        raise _CachePublishReadbackError(
+            "cache_readback_failed_after_replace",
+        ) from None
+    try:
+        expected = _canonical_bytes(envelope) + b"\n"
+        if raw != expected:
+            raise _ContractError("cache_readback_mismatch")
+        payload = _json_loads(raw.decode("utf-8"))
+        if not isinstance(payload, dict):
+            raise _ContractError("cache_readback_mismatch")
+        result = _validate_cache_payload(payload, publish_now)
+        if (
+            payload.get("cache_digest") != envelope.get("cache_digest")
+            or _source_vector(payload) != _source_vector(envelope)
+            or _component_projection_digests(payload)
+            != _component_projection_digests(envelope)
+        ):
+            raise _ContractError("cache_readback_mismatch")
+    except (UnicodeDecodeError, _ContractError):
+        raise _CachePublishReadbackError(
+            "cache_readback_mismatch_after_replace",
+        ) from None
+    except Exception:
+        raise _CachePublishReadbackError(
+            "cache_readback_failed_after_replace",
+        ) from None
+    return dict(result)
+
+
+def _publish_candidate(
+    envelope: Mapping[str, object],
+) -> dict[str, object]:
+    """CAS one complete candidate under bounded thread/process serialization."""
+    # A long collection can outlive the initial guard.  Check once immediately
+    # before lock acquisition, again after acquisition, and at the atomic commit.
+    _require_disk_write()
+    with _cache_publish_lock():
+        _require_disk_write()
+        publish_now = _require_utc(_utc_now(), "local_time_invalid")
+        candidate_result = _validate_cache_payload(envelope, publish_now)
+        incumbent = _read_incumbent_for_publish(publish_now=publish_now)
+        previous_market_count, previous_mapped_count = (
+            _incumbent_baseline_counts(incumbent, publish_now=publish_now)
+        )
+        market_count = candidate_result["market_count"]
+        mapped_count = candidate_result["mapped_count"]
+        if type(market_count) is not int or type(mapped_count) is not int:
+            raise _ContractError("market_catalog_evidence_invalid")
+        _reject_operational_inventory_drop(
+            market_count, previous_market_count,
+        )
+        _reject_mapping_completeness(
+            market_count, mapped_count, previous_mapped_count,
+        )
+
+        if incumbent is not None:
+            decision = _publication_decision(envelope, incumbent.payload)
+            if decision == "unchanged":
+                unchanged = dict(incumbent.current_result)
+                unchanged["cache_preserved"] = True
+                unchanged["refresh_status"] = "unchanged"
+                return unchanged
+
+        _require_disk_write()
+        publish_state = _atomic_write_cache(envelope)
+        if not (
+            publish_state.namespace_replaced
+            and publish_state.directory_synced
+        ):
+            raise _CachePublishError(publish_state)
+        written = _readback_published_candidate(
+            envelope, publish_now=publish_now,
+        )
+        written["refresh_status"] = "written"
+        return written
+
+
 def refresh_result() -> dict[str, object]:
     """Refresh the latest research envelope without promoting heuristic mappings."""
     try:
@@ -1035,31 +1464,29 @@ def refresh_result() -> dict[str, object]:
         return _failure("invalid", "ccxt_mode_invalid")
     try:
         market_catalog, native_source = _native_okx_snapshot()
-        baseline_counts = _previous_inventory_counts()
-        previous_market_count, previous_mapped_count = (
-            baseline_counts if baseline_counts is not None else (None, None)
-        )
-        _reject_operational_inventory_drop(
-            len(market_catalog), previous_market_count,
-        )
         sources = [native_source]
         if mode == "shadow":
             sources.append(_validate_ccxt_shadow(
                 _ccxt_shadow_snapshot(), market_catalog,
             ))
         universe, mapping_source = _coingecko_research_mapping(market_catalog)
+        # The absolute floor is independent of an incumbent and can reject before
+        # lock acquisition.  Retention is checked again against the latest cache in
+        # the serialized publication section.
         _reject_mapping_completeness(
-            len(market_catalog), len(universe), previous_mapped_count,
+            len(market_catalog), len(universe), None,
         )
         generated_at = _require_utc(_utc_now(), "local_time_invalid")
-        observed_times = [
+        source_observed_times = [
             _parse_utc_iso(source["observed_at"], "source_time_invalid")
             for source in sources
         ]
-        observed_times.append(_parse_utc_iso(
+        mapping_observed_at = _parse_utc_iso(
             mapping_source["observed_at"], "mapping_source_time_invalid",
-        ))
-        if any(observed > generated_at for observed in observed_times):
+        )
+        if max(source_observed_times) > mapping_observed_at:
+            raise _ContractError("mapping_source_precedes_market_observation")
+        if mapping_observed_at > generated_at:
             raise _ContractError("source_time_in_future")
         source_health = _source_health(sources)
         if (
@@ -1090,20 +1517,43 @@ def refresh_result() -> dict[str, object]:
         # latest snapshot.  This also catches implementation drift between refresh
         # and load without briefly publishing an unreadable cache.
         _validate_cache_payload(envelope, generated_at)
-        # Recheck immediately before the temp-file write.  A transition to CRITICAL
-        # may spend the completed HTTP work, but never writes into the pressured disk.
-        _require_disk_write()
-        publish_state = _atomic_write_cache(envelope)
-        if not (
-            publish_state.namespace_replaced
-            and publish_state.directory_synced
-        ):
-            raise _CachePublishError(publish_state)
-        loaded = load_result(_now=generated_at)
-        loaded["refresh_status"] = "written"
-        return loaded
+        return _publish_candidate(envelope)
     except stream_disk_guard.StreamDiskCritical:
         return _failure("blocked", "disk_critical_before_write")
+    except _CachePublishLockError as exc:
+        logger.warning(
+            "perp_universe_cache_publish_lock_failed",
+            reason_code=exc.reason_code,
+            error_kind=type(exc).__name__,
+        )
+        return _failure("unavailable", exc.reason_code)
+    except _IncumbentCacheError as exc:
+        logger.warning(
+            "perp_universe_cache_incumbent_rejected",
+            reason_code=exc.reason_code,
+            error_kind=type(exc).__name__,
+        )
+        return _failure(
+            exc.status, exc.reason_code, cache_preserved=True,
+        )
+    except _CachePublishRejected as exc:
+        logger.warning(
+            "perp_universe_cache_publish_rejected",
+            reason_code=exc.reason_code,
+            error_kind=type(exc).__name__,
+        )
+        return _failure(
+            exc.status, exc.reason_code, cache_preserved=True,
+        )
+    except _CachePublishReadbackError as exc:
+        logger.warning(
+            "perp_universe_cache_readback_failed",
+            reason_code=exc.reason_code,
+            error_kind=type(exc).__name__,
+        )
+        return _failure(
+            "unavailable", exc.reason_code, cache_preserved=False,
+        )
     except _CachePublishError as exc:
         logger.warning(
             "perp_universe_cache_publish_failed",
@@ -1263,7 +1713,11 @@ def _validate_source_health(
     return validated_sources
 
 
-def _validate_mapping_source(value: object, *, generated_at: datetime) -> None:
+def _validate_mapping_source(
+    value: object,
+    *,
+    generated_at: datetime,
+) -> datetime:
     if (
         not isinstance(value, dict)
         or set(value) != {
@@ -1330,6 +1784,7 @@ def _validate_mapping_source(value: object, *, generated_at: datetime) -> None:
             or page["row_count"] != _COINGECKO_MARKET_PAGE_SIZE
         ):
             raise _ContractError("mapping_source_evidence_invalid")
+    return observed
 
 
 def _validate_universe(value: object) -> dict[str, dict[str, object]]:
@@ -1455,9 +1910,14 @@ def _validate_cache_payload(
     )
     if any(source["market_count"] != market_count for source in sources):
         raise _ContractError("inventory_conflict")
-    _validate_mapping_source(
+    mapping_observed_at = _validate_mapping_source(
         payload.get("mapping_source"), generated_at=generated_at,
     )
+    if max(
+        _parse_utc_iso(source["observed_at"], "source_time_invalid")
+        for source in sources
+    ) > mapping_observed_at:
+        raise _ContractError("mapping_source_precedes_market_observation")
     if payload.get("mapping_policy") != {
         "mapping_method": MAPPING_METHOD,
         "default_actionability": RESEARCH_ACTIONABILITY,

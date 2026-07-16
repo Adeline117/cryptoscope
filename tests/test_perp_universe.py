@@ -12,9 +12,12 @@ import errno
 import hashlib
 import io
 import json
+import multiprocessing
+import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -223,11 +226,102 @@ def _write_cache(payload: dict, *, resign: bool = True) -> None:
     pu._CACHE.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _make_valid_cache(monkeypatch, **source_kwargs) -> dict:
+def _retime_payload(
+    payload: dict,
+    *,
+    source_observed_at: datetime,
+    mapping_observed_at: datetime,
+    generated_at: datetime | None = None,
+) -> dict:
+    for source in payload["source_health"]["sources"]:
+        previous_observed = datetime.fromisoformat(source["observed_at"])
+        shift = source_observed_at - previous_observed
+        for field in (
+            "local_started_at",
+            "local_completed_at",
+            "exchange_time_at",
+            "observed_at",
+        ):
+            source[field] = (
+                datetime.fromisoformat(source[field]) + shift
+            ).isoformat()
+    payload["mapping_source"]["observed_at"] = mapping_observed_at.isoformat()
+    if generated_at is not None:
+        payload["generated_at"] = generated_at.isoformat()
+        payload["expires_at"] = (
+            generated_at + timedelta(seconds=pu.CACHE_TTL_SECONDS)
+        ).isoformat()
+    payload["cache_digest"] = pu._cache_digest(payload)
+    return payload
+
+
+def _make_valid_cache(
+    monkeypatch,
+    *,
+    age_source_vector: bool = True,
+    **source_kwargs,
+) -> dict:
     _install_sources(monkeypatch, **source_kwargs)
     result = pu.refresh_result()
     assert result["status"] == "research_only"
-    return _read_cache()
+    payload = _read_cache()
+    if age_source_vector:
+        _retime_payload(
+            payload,
+            source_observed_at=NOW - timedelta(seconds=2),
+            mapping_observed_at=NOW - timedelta(seconds=1),
+        )
+        _write_cache(payload)
+    return payload
+
+
+class _SpawnGuard:
+    def require_evidence_write(self, _source: str) -> dict[str, object]:
+        return {"state": "ok"}
+
+
+def _spawn_publish_candidate(
+    cache_path: str,
+    payload: dict,
+    now_iso: str,
+    ready,
+    start,
+    results,
+) -> None:
+    pu._CACHE = Path(cache_path)
+    pu._utc_now = lambda: datetime.fromisoformat(now_iso)
+    pu.stream_disk_guard.GUARD = _SpawnGuard()
+    ready.set()
+    if not start.wait(10):
+        results.put(("timeout", None))
+        return
+    try:
+        result = pu._publish_candidate(payload)
+    except pu._ContractError as exc:
+        results.put(("rejected", exc.reason_code))
+    except Exception as exc:
+        results.put(("unexpected", type(exc).__name__))
+    else:
+        results.put(("ok", result.get("refresh_status")))
+
+
+def _spawn_hold_publish_lock(
+    cache_path: str,
+    entered,
+    release,
+    results,
+) -> None:
+    pu._CACHE = Path(cache_path)
+    try:
+        with pu._cache_publish_lock():
+            entered.set()
+            if not release.wait(10):
+                results.put(("timeout", None))
+                return
+    except Exception as exc:
+        results.put(("unexpected", type(exc).__name__))
+    else:
+        results.put(("ok", None))
 
 
 def test_off_refresh_is_research_only_and_compatibility_loaders_are_empty(
@@ -249,7 +343,7 @@ def test_off_refresh_is_research_only_and_compatibility_loaders_are_empty(
         "observed_path_count": 1,
     }
     assert len(calls) == 7
-    assert _isolated.calls == ["perp_universe", "perp_universe"]
+    assert _isolated.calls == ["perp_universe"] * 4
     research = result["research_universe"]["BTC"]
     assert research["mapping_method"] == "symbol_market_cap_heuristic"
     assert research["actionability"] == "research_only"
@@ -371,6 +465,35 @@ def test_critical_transition_before_write_spends_http_but_writes_nothing(
     assert not pu._CACHE.exists()
 
 
+@pytest.mark.parametrize(
+    "states",
+    [
+        ["ok", "ok", "critical"],
+        ["ok", "ok", "ok", "critical"],
+    ],
+)
+def test_critical_after_lock_or_at_atomic_commit_never_writes(
+    monkeypatch,
+    _isolated,
+    states,
+):
+    _isolated.states = states
+    _install_sources(monkeypatch)
+    writes = []
+    monkeypatch.setattr(
+        pu,
+        "_atomic_write_cache",
+        lambda *_args: writes.append("write") or pytest.fail("write under CRITICAL"),
+    )
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "blocked"
+    assert result["reason_codes"] == ["disk_critical_before_write"]
+    assert writes == []
+    assert not pu._CACHE.exists()
+
+
 def test_operational_floor_rejects_truncated_native_catalog_before_mapping(
     monkeypatch,
 ):
@@ -393,7 +516,7 @@ def test_large_drop_from_last_valid_inventory_is_rejected(monkeypatch):
     result = pu.refresh_result()
 
     assert result["reason_codes"] == ["okx_inventory_operational_drop"]
-    assert calls == [pu._OKX_TIME_URL, pu._OKX_INSTRUMENTS_URL]
+    assert len(calls) == 7
     assert pu._CACHE.read_bytes() == before
 
 
@@ -408,17 +531,28 @@ def test_market_inventory_retention_exact_75_percent_passes(monkeypatch):
     assert result["mapped_count"] == 375
 
 
-def test_refresh_reads_one_baseline_for_both_retention_gates(monkeypatch):
+def test_refresh_reads_one_locked_incumbent_for_both_retention_gates(monkeypatch):
+    _make_valid_cache(
+        monkeypatch,
+        rows=_market_rows(500),
+        mapped_count=400,
+    )
     _install_sources(
         monkeypatch,
         rows=_market_rows(375),
         mapped_count=300,
     )
     baseline_reads = []
+    real_read = pu._read_cache_bytes
+
+    def read_cache():
+        baseline_reads.append("read")
+        return real_read()
+
     monkeypatch.setattr(
         pu,
-        "_previous_inventory_counts",
-        lambda: baseline_reads.append("read") or (500, 400),
+        "_read_cache_bytes",
+        read_cache,
     )
 
     result = pu.refresh_result()
@@ -426,7 +560,8 @@ def test_refresh_reads_one_baseline_for_both_retention_gates(monkeypatch):
     assert result["status"] == "research_only"
     assert result["market_count"] == 375
     assert result["mapped_count"] == 300
-    assert baseline_reads == ["read"]
+    # One incumbent read plus one post-write verification readback.
+    assert baseline_reads == ["read", "read"]
 
 
 def test_14_day_stale_cache_still_protects_both_inventory_baselines(monkeypatch):
@@ -741,6 +876,325 @@ def test_cached_source_conflict_raw_data_and_timezone_fail_closed(
     assert pu.load() == {}
 
 
+def test_same_projection_is_unchanged_without_extending_bytes_mtime_or_ttl(
+    monkeypatch,
+):
+    incumbent = _make_valid_cache(
+        monkeypatch, age_source_vector=False,
+    )
+    before_bytes = pu._CACHE.read_bytes()
+    before_stat = pu._CACHE.stat()
+    before_expiry = incumbent["expires_at"]
+    later = NOW + timedelta(seconds=1)
+    candidate = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW,
+        mapping_observed_at=NOW,
+        generated_at=later,
+    )
+    monkeypatch.setattr(pu, "_utc_now", lambda: later)
+
+    result = pu._publish_candidate(candidate)
+
+    after_stat = pu._CACHE.stat()
+    assert result["status"] == "research_only"
+    assert result["refresh_status"] == "unchanged"
+    assert result["cache_preserved"] is True
+    assert result["expires_at"] == before_expiry
+    assert pu._CACHE.read_bytes() == before_bytes
+    assert after_stat.st_mtime_ns == before_stat.st_mtime_ns
+    assert _read_cache()["expires_at"] == before_expiry
+
+
+def test_refresh_surfaces_same_evidence_as_unchanged_not_written(monkeypatch):
+    _make_valid_cache(monkeypatch, age_source_vector=False)
+    before = pu._CACHE.read_bytes()
+    _install_sources(monkeypatch)
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["refresh_status"] == "unchanged"
+    assert result["cache_preserved"] is True
+    assert pu._CACHE.read_bytes() == before
+
+
+def test_same_vector_different_projection_is_bounded_conflict(monkeypatch):
+    _make_valid_cache(monkeypatch, age_source_vector=False)
+    before = pu._CACHE.read_bytes()
+    _install_sources(monkeypatch, address="0xDef")
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "invalid"
+    assert result["reason_codes"] == ["cache_publish_evidence_conflict"]
+    assert result["cache_preserved"] is True
+    assert "refresh_status" not in result
+    assert pu._CACHE.read_bytes() == before
+
+
+def test_equal_native_component_requires_equal_projection(monkeypatch):
+    incumbent = _make_valid_cache(
+        monkeypatch, age_source_vector=False,
+    )
+    later = NOW + timedelta(seconds=1)
+    candidate = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW,
+        mapping_observed_at=later,
+        generated_at=later,
+    )
+    candidate["market_catalog_digest"] = "f" * 64
+    candidate["cache_digest"] = pu._cache_digest(candidate)
+    pu._validate_cache_payload(candidate, later)
+
+    with pytest.raises(pu._CachePublishRejected) as caught:
+        pu._publication_decision(candidate, incumbent)
+
+    assert caught.value.reason_code == "cache_publish_evidence_conflict"
+
+
+def test_source_vector_incomparable_and_clock_regression_are_rejected(monkeypatch):
+    incumbent = _make_valid_cache(
+        monkeypatch, age_source_vector=False,
+    )
+    _retime_payload(
+        incumbent,
+        source_observed_at=NOW - timedelta(seconds=4),
+        mapping_observed_at=NOW - timedelta(seconds=2),
+    )
+
+    incomparable = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW - timedelta(seconds=3),
+        mapping_observed_at=NOW - timedelta(seconds=3),
+    )
+    pu._validate_cache_payload(incomparable, NOW)
+    with pytest.raises(pu._CachePublishRejected) as caught:
+        pu._publication_decision(incomparable, incumbent)
+    assert caught.value.reason_code == "cache_publish_source_incomparable"
+
+    clock_regressed = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW - timedelta(seconds=2),
+        mapping_observed_at=NOW - timedelta(seconds=1),
+        generated_at=NOW - timedelta(seconds=1),
+    )
+    pu._validate_cache_payload(clock_regressed, NOW)
+    with pytest.raises(pu._CachePublishRejected) as caught:
+        pu._publication_decision(clock_regressed, incumbent)
+    assert caught.value.reason_code == "cache_publish_clock_regression"
+
+
+def test_latest_locked_baseline_rejects_candidate_that_passed_older_baseline(
+    monkeypatch,
+):
+    incumbent = _make_valid_cache(
+        monkeypatch,
+        rows=_market_rows(500),
+        mapped_count=500,
+        age_source_vector=False,
+    )
+    before = pu._CACHE.read_bytes()
+    candidate = copy.deepcopy(incumbent)
+    candidate["universe"] = dict(list(candidate["universe"].items())[:374])
+    candidate["market_count"] = 374
+    candidate["mapped_count"] = 374
+    candidate["market_catalog_digest"] = "e" * 64
+    for source in candidate["source_health"]["sources"]:
+        source["market_count"] = 374
+    candidate["cache_digest"] = pu._cache_digest(candidate)
+    pu._validate_cache_payload(candidate, NOW)
+
+    with pytest.raises(pu._ContractError) as caught:
+        pu._publish_candidate(candidate)
+
+    assert caught.value.reason_code == "okx_inventory_operational_drop"
+    assert pu._CACHE.read_bytes() == before
+
+
+def test_existing_invalid_incumbent_fails_closed_without_replacement(monkeypatch):
+    pu._CACHE.write_bytes(b'{"schema_version":2,"token":"private"}')
+    before = pu._CACHE.read_bytes()
+    _install_sources(monkeypatch)
+    writes = []
+    monkeypatch.setattr(
+        pu,
+        "_atomic_write_cache",
+        lambda *_args: writes.append("write") or pytest.fail("invalid overwrite"),
+    )
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "invalid"
+    assert result["reason_codes"] == ["cache_incumbent_invalid"]
+    assert result["cache_preserved"] is True
+    assert writes == []
+    assert pu._CACHE.read_bytes() == before
+    assert "private" not in repr(result)
+
+
+def test_contract_enforces_latest_exchange_path_before_mapping(monkeypatch):
+    _install_sources(monkeypatch)
+    monkeypatch.setenv(pu.CCXT_MODE_ENV, "shadow")
+    monkeypatch.setattr(pu, "_ccxt_shadow_snapshot", _shadow_snapshot)
+    assert pu.refresh_result()["refresh_status"] == "written"
+    payload = _read_cache()
+    native = next(
+        source for source in payload["source_health"]["sources"]
+        if source["path_key"] == pu._NATIVE_PATH_KEY
+    )
+    shift = timedelta(seconds=-2)
+    for field in (
+        "local_started_at", "local_completed_at",
+        "exchange_time_at", "observed_at",
+    ):
+        native[field] = (
+            datetime.fromisoformat(native[field]) + shift
+        ).isoformat()
+    payload["mapping_source"]["observed_at"] = (
+        NOW - timedelta(seconds=1)
+    ).isoformat()
+    _write_cache(payload)
+
+    assert pu.load_result()["reason_codes"] == [
+        "mapping_source_precedes_market_observation",
+    ]
+
+
+def test_slow_older_thread_cannot_overwrite_newer_publication(monkeypatch):
+    incumbent = _make_valid_cache(
+        monkeypatch, age_source_vector=False,
+    )
+    _retime_payload(
+        incumbent,
+        source_observed_at=NOW - timedelta(seconds=6),
+        mapping_observed_at=NOW - timedelta(seconds=5),
+    )
+    _write_cache(incumbent)
+    old = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW - timedelta(seconds=4),
+        mapping_observed_at=NOW - timedelta(seconds=3),
+    )
+    old["universe"]["BTC"]["address"] = "0xold"
+    old["cache_digest"] = pu._cache_digest(old)
+    new = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW - timedelta(seconds=2),
+        mapping_observed_at=NOW - timedelta(seconds=1),
+    )
+    new["universe"]["BTC"]["address"] = "0xnew"
+    new["cache_digest"] = pu._cache_digest(new)
+    old_ready = threading.Event()
+    old_start = threading.Event()
+    outcomes = {}
+
+    def publish(name, payload, ready, start):
+        ready.set()
+        assert start.wait(5)
+        try:
+            outcomes[name] = ("ok", pu._publish_candidate(payload))
+        except pu._ContractError as exc:
+            outcomes[name] = ("rejected", exc.reason_code)
+
+    old_thread = threading.Thread(
+        target=publish, args=("old", old, old_ready, old_start),
+    )
+    new_start = threading.Event()
+    new_start.set()
+    new_thread = threading.Thread(
+        target=publish,
+        args=("new", new, threading.Event(), new_start),
+    )
+    old_thread.start()
+    assert old_ready.wait(5)
+    new_thread.start()
+    new_thread.join(5)
+    assert not new_thread.is_alive()
+    old_start.set()
+    old_thread.join(5)
+    assert not old_thread.is_alive()
+
+    assert outcomes["new"][0] == "ok"
+    assert outcomes["new"][1]["refresh_status"] == "written"
+    assert outcomes["old"] == (
+        "rejected", "cache_publish_source_regression",
+    )
+    assert _read_cache()["universe"]["BTC"]["address"] == "0xnew"
+
+
+def test_slow_older_spawn_process_cannot_overwrite_newer_publication(monkeypatch):
+    incumbent = _make_valid_cache(
+        monkeypatch, age_source_vector=False,
+    )
+    _retime_payload(
+        incumbent,
+        source_observed_at=NOW - timedelta(seconds=6),
+        mapping_observed_at=NOW - timedelta(seconds=5),
+    )
+    _write_cache(incumbent)
+    old = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW - timedelta(seconds=4),
+        mapping_observed_at=NOW - timedelta(seconds=3),
+    )
+    old["universe"]["BTC"]["address"] = "0xold"
+    old["cache_digest"] = pu._cache_digest(old)
+    new = _retime_payload(
+        copy.deepcopy(incumbent),
+        source_observed_at=NOW - timedelta(seconds=2),
+        mapping_observed_at=NOW - timedelta(seconds=1),
+    )
+    new["universe"]["BTC"]["address"] = "0xnew"
+    new["cache_digest"] = pu._cache_digest(new)
+    context = multiprocessing.get_context("spawn")
+    results = context.Queue()
+    old_ready = context.Event()
+    old_start = context.Event()
+    new_ready = context.Event()
+    new_start = context.Event()
+    old_process = context.Process(
+        target=_spawn_publish_candidate,
+        args=(
+            str(pu._CACHE), old, NOW.isoformat(),
+            old_ready, old_start, results,
+        ),
+    )
+    new_process = context.Process(
+        target=_spawn_publish_candidate,
+        args=(
+            str(pu._CACHE), new, NOW.isoformat(),
+            new_ready, new_start, results,
+        ),
+    )
+    processes = [old_process, new_process]
+    try:
+        old_process.start()
+        assert old_ready.wait(10)
+        new_process.start()
+        assert new_ready.wait(10)
+        new_start.set()
+        new_result = results.get(timeout=10)
+        new_process.join(10)
+        assert new_process.exitcode == 0
+        old_start.set()
+        old_result = results.get(timeout=10)
+        old_process.join(10)
+        assert old_process.exitcode == 0
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+            process.join(5)
+
+    assert new_result == ("ok", "written")
+    assert old_result == (
+        "rejected", "cache_publish_source_regression",
+    )
+    assert _read_cache()["universe"]["BTC"]["address"] == "0xnew"
+
+
 def test_atomic_write_orders_file_fsync_replace_and_directory_fsync(
     monkeypatch,
 ):
@@ -803,6 +1257,363 @@ def test_atomic_write_orders_file_fsync_replace_and_directory_fsync(
     assert list(pu._CACHE.parent.glob("*.tmp")) == []
 
 
+def test_lockfile_is_stable_owned_and_tightened_without_unlink(monkeypatch):
+    lock_path = pu._cache_publish_lock_path()
+    lock_path.write_bytes(b"")
+    lock_path.chmod(0o666)
+    before_inode = lock_path.stat().st_ino
+    unlinks = []
+    real_unlink = pu.os.unlink
+
+    def unlink(path):
+        unlinks.append(str(path))
+        return real_unlink(path)
+
+    monkeypatch.setattr(pu.os, "unlink", unlink)
+    with pu._cache_publish_lock():
+        assert lock_path.stat().st_ino == before_inode
+        assert lock_path.stat().st_mode & 0o777 == 0o600
+    with pu._cache_publish_lock():
+        assert lock_path.stat().st_ino == before_inode
+
+    assert lock_path.exists()
+    assert str(lock_path) not in unlinks
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ("error", "cache_publish_lock_failed"),
+        ("timeout", "cache_publish_lock_timeout"),
+    ],
+)
+def test_lock_acquisition_failure_is_bounded_and_closes_descriptor(
+    monkeypatch,
+    failure,
+    reason,
+):
+    real_open = pu.os.open
+    descriptors = []
+    secret = "https://secret.invalid/lock TOKEN"
+
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._cache_publish_lock_path()):
+            descriptors.append(descriptor)
+        return descriptor
+
+    def flock(_descriptor, operation):
+        if operation & pu.fcntl.LOCK_EX:
+            if failure == "timeout":
+                raise BlockingIOError(errno.EAGAIN, secret)
+            raise OSError(errno.EIO, secret)
+        raise AssertionError("unlock after failed acquisition")
+
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(pu.fcntl, "flock", flock)
+    if failure == "timeout":
+        monkeypatch.setattr(pu, "_CACHE_PUBLISH_LOCK_TIMEOUT_SECONDS", 0)
+
+    with pytest.raises(pu._CachePublishLockError) as caught:
+        with pu._cache_publish_lock():
+            pytest.fail("lock unexpectedly acquired")
+
+    assert caught.value.reason_code == reason
+    assert len(descriptors) == 1
+    with pytest.raises(OSError) as descriptor_error:
+        pu.os.fstat(descriptors[0])
+    assert descriptor_error.value.errno == errno.EBADF
+    assert pu._cache_publish_lock_path().exists()
+    assert "secret.invalid" not in repr(caught.value)
+    assert pu._CACHE_PUBLISH_THREAD_LOCK.acquire(blocking=False)
+    pu._CACHE_PUBLISH_THREAD_LOCK.release()
+
+
+def test_keyboard_interrupt_during_flock_poll_releases_fd_and_thread_lock(
+    monkeypatch,
+):
+    real_open = pu.os.open
+    descriptors = []
+
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._cache_publish_lock_path()):
+            descriptors.append(descriptor)
+        return descriptor
+
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(
+        pu.fcntl,
+        "flock",
+        lambda *_args: (_ for _ in ()).throw(
+            BlockingIOError(errno.EAGAIN, "busy"),
+        ),
+    )
+    monkeypatch.setattr(
+        pu.time,
+        "sleep",
+        lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        with pu._cache_publish_lock():
+            pytest.fail("lock unexpectedly acquired")
+
+    assert len(descriptors) == 1
+    with pytest.raises(OSError) as descriptor_error:
+        pu.os.fstat(descriptors[0])
+    assert descriptor_error.value.errno == errno.EBADF
+    assert pu._CACHE_PUBLISH_THREAD_LOCK.acquire(blocking=False)
+    pu._CACHE_PUBLISH_THREAD_LOCK.release()
+
+
+def test_refresh_lock_failure_returns_only_bounded_fields_and_never_writes(
+    monkeypatch,
+):
+    _install_sources(monkeypatch)
+    writes = []
+    warnings = []
+    secret = "https://secret.invalid/flock?token=private"
+
+    class Logs:
+        def warning(self, event, **fields):
+            warnings.append((event, fields))
+
+    def flock(_descriptor, operation):
+        if operation & pu.fcntl.LOCK_EX:
+            raise OSError(errno.EIO, secret)
+        raise AssertionError("unexpected unlock")
+
+    monkeypatch.setattr(pu, "logger", Logs())
+    monkeypatch.setattr(pu.fcntl, "flock", flock)
+    monkeypatch.setattr(
+        pu,
+        "_atomic_write_cache",
+        lambda *_args: writes.append("write") or pytest.fail("write without lock"),
+    )
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "unavailable"
+    assert result["reason_codes"] == ["cache_publish_lock_failed"]
+    assert "refresh_status" not in result
+    assert writes == []
+    assert warnings == [(
+        "perp_universe_cache_publish_lock_failed",
+        {
+            "reason_code": "cache_publish_lock_failed",
+            "error_kind": "_CachePublishLockError",
+        },
+    )]
+    assert "secret.invalid" not in repr(result)
+    assert "secret.invalid" not in repr(warnings)
+
+
+def test_foreign_lockfile_owner_fails_closed_and_closes_descriptor(monkeypatch):
+    real_open = pu.os.open
+    real_fstat = pu.os.fstat
+    lock_descriptors = []
+
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._cache_publish_lock_path()):
+            lock_descriptors.append(descriptor)
+        return descriptor
+
+    class ForeignMetadata:
+        def __init__(self, metadata):
+            self.st_mode = metadata.st_mode
+            self.st_nlink = metadata.st_nlink
+            self.st_uid = metadata.st_uid + 1
+
+    def fstat(descriptor):
+        metadata = real_fstat(descriptor)
+        return (
+            ForeignMetadata(metadata)
+            if descriptor in lock_descriptors else metadata
+        )
+
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(pu.os, "fstat", fstat)
+
+    with pytest.raises(pu._CachePublishLockError) as caught:
+        with pu._cache_publish_lock():
+            pytest.fail("foreign lockfile was trusted")
+
+    assert caught.value.reason_code == "cache_publish_lock_failed"
+    assert len(lock_descriptors) == 1
+    with pytest.raises(OSError) as descriptor_error:
+        real_fstat(lock_descriptors[0])
+    assert descriptor_error.value.errno == errno.EBADF
+
+
+def test_unlock_and_close_double_failure_does_not_leak_or_hold_thread_lock(
+    monkeypatch,
+):
+    real_flock = pu.fcntl.flock
+    real_close = pu.os.close
+    lock_descriptors = []
+    warnings = []
+
+    class Logs:
+        def warning(self, event, **fields):
+            warnings.append((event, fields))
+
+    real_open = pu.os.open
+
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._cache_publish_lock_path()):
+            lock_descriptors.append(descriptor)
+        return descriptor
+
+    def flock(descriptor, operation):
+        result = real_flock(descriptor, operation)
+        if operation == pu.fcntl.LOCK_UN:
+            raise OSError("https://secret.invalid/unlock TOKEN")
+        return result
+
+    def close(descriptor):
+        result = real_close(descriptor)
+        if descriptor in lock_descriptors:
+            raise OSError("https://secret.invalid/close TOKEN")
+        return result
+
+    monkeypatch.setattr(pu, "logger", Logs())
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(pu.fcntl, "flock", flock)
+    monkeypatch.setattr(pu.os, "close", close)
+
+    with pu._cache_publish_lock():
+        pass
+
+    assert len(lock_descriptors) == 1
+    with pytest.raises(OSError) as descriptor_error:
+        pu.os.fstat(lock_descriptors[0])
+    assert descriptor_error.value.errno == errno.EBADF
+    assert pu._CACHE_PUBLISH_THREAD_LOCK.acquire(blocking=False)
+    pu._CACHE_PUBLISH_THREAD_LOCK.release()
+    assert [fields["reason_code"] for _event, fields in warnings] == [
+        "cache_publish_unlock_failed",
+        "cache_publish_lock_close_failed",
+    ]
+    assert "secret.invalid" not in repr(warnings)
+
+
+def test_spawn_process_lock_contention_times_out_without_hanging(monkeypatch):
+    context = multiprocessing.get_context("spawn")
+    entered = context.Event()
+    release = context.Event()
+    results = context.Queue()
+    holder = context.Process(
+        target=_spawn_hold_publish_lock,
+        args=(str(pu._CACHE), entered, release, results),
+    )
+    try:
+        holder.start()
+        assert entered.wait(10)
+        monkeypatch.setattr(pu, "_CACHE_PUBLISH_LOCK_TIMEOUT_SECONDS", 0)
+        with pytest.raises(pu._CachePublishLockError) as caught:
+            with pu._cache_publish_lock():
+                pytest.fail("cross-process lock was not exclusive")
+        assert caught.value.reason_code == "cache_publish_lock_timeout"
+        release.set()
+        assert results.get(timeout=10) == ("ok", None)
+        holder.join(10)
+        assert holder.exitcode == 0
+    finally:
+        release.set()
+        if holder.is_alive():
+            holder.terminate()
+        holder.join(5)
+
+
+def test_post_write_readback_mismatch_is_never_acknowledged(monkeypatch):
+    _install_sources(monkeypatch)
+    real_read = pu._read_cache_bytes
+    reads = 0
+
+    def read_cache():
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return real_read()
+        return b'{}\n'
+
+    monkeypatch.setattr(pu, "_read_cache_bytes", read_cache)
+
+    result = pu.refresh_result()
+
+    assert reads == 2
+    assert result["status"] == "unavailable"
+    assert result["reason_codes"] == [
+        "cache_readback_mismatch_after_replace",
+    ]
+    assert result["cache_preserved"] is False
+    assert "refresh_status" not in result
+    assert pu._CACHE.exists()
+
+
+def test_keyboard_interrupt_before_fdopen_transfer_closes_fd_and_temp(monkeypatch):
+    real_mkstemp = pu.tempfile.mkstemp
+    descriptors = []
+    temporary_paths = []
+
+    def mkstemp(*args, **kwargs):
+        descriptor, path = real_mkstemp(*args, **kwargs)
+        descriptors.append(descriptor)
+        temporary_paths.append(path)
+        return descriptor, path
+
+    monkeypatch.setattr(pu.tempfile, "mkstemp", mkstemp)
+    monkeypatch.setattr(
+        pu.os,
+        "fdopen",
+        lambda *_args: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        pu._atomic_write_cache({})
+
+    assert len(descriptors) == len(temporary_paths) == 1
+    with pytest.raises(OSError) as descriptor_error:
+        pu.os.fstat(descriptors[0])
+    assert descriptor_error.value.errno == errno.EBADF
+    assert not pu.os.path.exists(temporary_paths[0])
+    assert list(pu._CACHE.parent.glob("*.tmp")) == []
+
+
+def test_keyboard_interrupt_during_directory_fsync_closes_directory_fd(
+    monkeypatch,
+):
+    real_open = pu.os.open
+    real_fsync = pu.os.fsync
+    directory_descriptors = []
+
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._CACHE.parent) and flags == pu.os.O_RDONLY:
+            directory_descriptors.append(descriptor)
+        return descriptor
+
+    def fsync(descriptor):
+        if descriptor in directory_descriptors:
+            raise KeyboardInterrupt
+        return real_fsync(descriptor)
+
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(pu.os, "fsync", fsync)
+
+    with pytest.raises(KeyboardInterrupt):
+        pu._atomic_write_cache({})
+
+    assert len(directory_descriptors) == 1
+    with pytest.raises(OSError) as descriptor_error:
+        pu.os.fstat(directory_descriptors[0])
+    assert descriptor_error.value.errno == errno.EBADF
+    assert list(pu._CACHE.parent.glob("*.tmp")) == []
+
+
 @pytest.mark.parametrize("previous_cache", [False, True])
 @pytest.mark.parametrize("cleanup_close_raises", [False, True])
 def test_fdopen_failure_closes_raw_descriptor_and_preserves_cache_state(
@@ -846,7 +1657,7 @@ def test_fdopen_failure_closes_raw_descriptor_and_preserves_cache_state(
     result = pu.refresh_result()
 
     assert len(descriptors) == len(temporary_paths) == 1
-    assert close_calls == descriptors
+    assert all(descriptor in close_calls for descriptor in descriptors)
     with pytest.raises(OSError) as caught:
         pu.os.fstat(descriptors[0])
     assert caught.value.errno == errno.EBADF
