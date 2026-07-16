@@ -9,6 +9,7 @@ import os
 import resource
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import wraps
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -25,6 +26,53 @@ _RECONCILIATION_PRESSURE_FAILURES = 0
 _RECONCILIATION_RETRY_AT = 0.0
 _RECONCILIATION_BACKOFF_BASE_SECONDS = 60
 _RECONCILIATION_BACKOFF_MAX_SECONDS = 1_800
+
+
+def _disk_guarded_job(job_id: str, func):
+    """Wrap one zero-argument async job with reversible disk-pressure shedding."""
+    was_shed = False
+    previous_state = None
+
+    @wraps(func)
+    async def guarded():
+        nonlocal was_shed, previous_state
+
+        from src.ops.disk_shedding import disk_shedding_decision
+
+        decision = disk_shedding_decision(job_id)
+        if decision["skip"]:
+            was_shed = True
+            previous_state = decision["disk_state"]
+            logger.warning("scheduled_job_disk_shed", **decision)
+            return {
+                "status": "skipped",
+                "job_id": job_id,
+                "reason": decision["reason"],
+                "disk_state": decision["disk_state"],
+            }
+        if was_shed:
+            logger.info(
+                "scheduled_job_disk_shed_recovered",
+                job_id=job_id,
+                previous_disk_state=previous_state,
+                disk_state=decision["disk_state"],
+                disk_policy=decision["disk_policy"],
+            )
+            was_shed = False
+            previous_state = None
+        return await func()
+
+    return guarded
+
+
+def _install_disk_shedding_guards(scheduler: AsyncIOScheduler) -> None:
+    """Validate the complete active-job policy, then guard every scheduled call."""
+    from src.ops.disk_shedding import validate_disk_job_policy
+
+    jobs = scheduler.get_jobs()
+    validate_disk_job_policy(job.id for job in jobs)
+    for job in jobs:
+        job.modify(func=_disk_guarded_job(job.id, job.func))
 
 
 def _reconciliation_backoff_seconds(retry_after: int | None, failures: int) -> int:
@@ -569,6 +617,7 @@ def create_scheduler() -> AsyncIOScheduler:
         except Exception:
             pass
 
+    _install_disk_shedding_guards(scheduler)
     return scheduler
 
 
