@@ -1484,6 +1484,42 @@ def test_gap_budget_stops_after_first_failure_without_touching_later_slots(
     assert "provider omitted" in gap[3]
 
 
+def test_full_budget_cycle_ending_at_deadline_is_not_deadline_exhausted(
+        sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=30,
+                          expect_contiguous=True)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    def recover(slot, **kwargs):
+        clock.value = 20
+        return {
+            "state": "produced", "slot": slot,
+            "verified_through": slot, "launches": 0,
+        }
+
+    monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
+    result = sol.retry_open_gaps(
+        object(), slot_budget=1, deadline=20, monotonic=clock,
+    )
+
+    # The budget was spent in full and every unit completed: this is a clean
+    # cycle the ramp may build on, not a deadline stop.
+    assert result == _gap_stats(1, progressed=1)
+    gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
+    assert (gap["from_cursor"], gap["to_cursor"]) == (12, 29)
+
+
 def test_gap_deadline_checkpoints_completed_slot_then_stops(sol, monkeypatch):
     from src.pipeline import stream_health
 

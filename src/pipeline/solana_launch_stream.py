@@ -1926,10 +1926,11 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                         "verified Solana gap checkpoint was not persisted")
                 progressed += 1
                 cursor = checkpoint + 1
-                if deadline is not None and monotonic() >= deadline:
-                    deadline_exhausted = True
-                    stop_lane = True
-                    break
+                # No post-advance deadline probe: the while-top pre-check
+                # already stops remaining work, and probing here would brand a
+                # cycle that spent its full budget cleanly as deadline
+                # exhausted, so the budget ramp could never park at a budget
+                # that exactly fits the lane's wall clock.
             except MaintenanceDeadlineExceeded:
                 # The outer pre-check guarantees this slot was selected within
                 # budget. A slot proof spans several RPCs, so work_started only
