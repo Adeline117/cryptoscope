@@ -13,7 +13,7 @@ def test_fast_and_slow_views_have_independent_freshness_policies():
     launch = _envelope({}, view="launch")
     operators = _envelope({}, view="operators")
     perps = _envelope({}, view="perps")
-    for payload, cadence, grace in ((launch, 0.5, 0.5), (perps, 5, 5),
+    for payload, cadence, grace in ((launch, 3, 1), (perps, 5, 5),
                                     (operators, 60, 30)):
         generated = datetime.fromisoformat(payload["generated_at"])
         expected = datetime.fromisoformat(payload["next_expected_at"])
@@ -65,7 +65,7 @@ def test_regular_export_can_skip_separately_scheduled_scanners(monkeypatch):
 def test_board_does_not_claim_one_refresh_cadence_for_every_lane():
     board = (Path(__file__).parents[1] / "board" / "public" / "index.html").read_text()
 
-    assert "Launch 报价最多每 30 秒采集/每 10 秒读取" in board
+    assert "Launch 发现每 3 分钟；仅有合格候选时，报价最多每 30 秒采集/每 10 秒读取" in board
     assert "其他赛道 2–60 分钟采集/每 60 秒读取" in board
     assert "每 15 分钟自动刷新" not in board
 
@@ -124,7 +124,7 @@ def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path,
 
     meta = json.loads((tmp_path / "meta.json").read_text())
     assert meta["views"] == ["launch", "perps"]
-    assert meta["view_status"]["launch"]["refresh_cadence_min"] == 0.5
+    assert meta["view_status"]["launch"]["refresh_cadence_min"] == 3
     assert meta["view_status"]["perps"]["refresh_cadence_min"] == 5
     assert meta["view_status"]["perps"] == original_perps_status
     assert (tmp_path / "perps.json").read_bytes() == original_perps

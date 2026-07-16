@@ -38,7 +38,10 @@ SCHEMA_VERSION = 1
 EXPORT_DIR = DATA_DIR / "board_export"
 VIEW_FRESHNESS = {
     # (actual scheduler cadence minutes, tolerated grace minutes)
-    "launch": (0.5, 0.5), "structure": (2, 3),
+    # Discovery is a real three-minute market scan. The separate 30-second quote
+    # job publishes only when it actually obtains an eligible fresh assessment;
+    # an idle heartbeat must not impersonate a new market observation.
+    "launch": (3, 1), "structure": (2, 3),
     "watch": (15, 5), "perps": (5, 5),
     "airdrop": (60, 15), "opportunities": (60, 15),
     "operators": (60, 30), "stats": (60, 15),
