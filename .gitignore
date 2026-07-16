@@ -44,6 +44,9 @@ output/threads/
 # Generated board payloads (published from runtime state, never source-controlled)
 data/board_export/
 
+# Stable runtime coordination files (never source-controlled or unlinked by jobs)
+data/.perp_universe.json.publish.lock
+
 # OS
 .DS_Store
 Thumbs.db
