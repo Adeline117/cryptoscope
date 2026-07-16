@@ -314,6 +314,60 @@ async def test_unconfigured_reconciliation_is_fail_visible(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_rate_pressure_opens_exponential_circuit(monkeypatch):
+    from src.pipeline import scheduler, solana_launch_reconcile, solana_launch_stream
+    from src.pipeline import stream_health
+
+    clock = [100.0]
+    calls = []
+    reports = []
+    monkeypatch.setenv("SOLANA_RECONCILIATION_RPC_URL", "https://archive.example")
+    monkeypatch.setattr(scheduler.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(scheduler, "_RECONCILIATION_PRESSURE_FAILURES", 0)
+    monkeypatch.setattr(scheduler, "_RECONCILIATION_RETRY_AT", 0.0)
+    monkeypatch.setattr(solana_launch_stream, "JsonRpc", lambda endpoint: endpoint)
+    monkeypatch.setattr(
+        stream_health, "report_worker",
+        lambda source, stream, **kwargs: reports.append((source, stream, kwargs)),
+    )
+
+    def reconcile(*_args, **_kwargs):
+        calls.append(clock[0])
+        if len(calls) < 3:
+            raise solana_launch_stream.RpcPressureError(
+                "429", kind="rate_limited", retry_after_seconds=None,
+            )
+        return {"state": "waiting_finality", "finalized_head": 1}
+
+    monkeypatch.setattr(solana_launch_reconcile, "reconcile_next_epoch", reconcile)
+
+    await scheduler._run_solana_launch_reconciliation()
+    assert calls == [100.0]
+    assert scheduler._RECONCILIATION_PRESSURE_FAILURES == 1
+    assert scheduler._RECONCILIATION_RETRY_AT == 160.0
+    assert reports[-1][2] == {
+        "status": "degraded", "error": "archive RPC rate_limited; retry in 60s",
+    }
+
+    clock[0] = 159.9
+    await scheduler._run_solana_launch_reconciliation()
+    assert calls == [100.0]
+    assert len(reports) == 1
+
+    clock[0] = 160.0
+    await scheduler._run_solana_launch_reconciliation()
+    assert calls == [100.0, 160.0]
+    assert scheduler._RECONCILIATION_PRESSURE_FAILURES == 2
+    assert scheduler._RECONCILIATION_RETRY_AT == 280.0
+
+    clock[0] = 280.0
+    await scheduler._run_solana_launch_reconciliation()
+    assert calls == [100.0, 160.0, 280.0]
+    assert scheduler._RECONCILIATION_PRESSURE_FAILURES == 0
+    assert scheduler._RECONCILIATION_RETRY_AT == 0.0
+
+
+@pytest.mark.asyncio
 async def test_idle_launch_quote_refresh_keeps_liveness_local(monkeypatch):
     from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
 

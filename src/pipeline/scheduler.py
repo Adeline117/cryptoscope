@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import resource
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import structlog
@@ -19,6 +21,20 @@ logger = structlog.get_logger()
 
 _HEAVY_IO_LOCK: asyncio.Lock | None = None
 _HEAVY_IO_LOOP: asyncio.AbstractEventLoop | None = None
+_RECONCILIATION_PRESSURE_FAILURES = 0
+_RECONCILIATION_RETRY_AT = 0.0
+_RECONCILIATION_BACKOFF_BASE_SECONDS = 60
+_RECONCILIATION_BACKOFF_MAX_SECONDS = 1_800
+
+
+def _reconciliation_backoff_seconds(retry_after: int | None, failures: int) -> int:
+    """Bound retries so a constrained archive is not hammered every 30 seconds."""
+    exponent = max(0, min(6, int(failures) - 1))
+    exponential = _RECONCILIATION_BACKOFF_BASE_SECONDS * (2 ** exponent)
+    return min(
+        _RECONCILIATION_BACKOFF_MAX_SECONDS,
+        max(exponential, max(0, int(retry_after or 0))),
+    )
 
 
 def _heavy_io_lock() -> asyncio.Lock:
@@ -728,6 +744,8 @@ async def _run_solana_launch_reconciliation():
     """Seal one bounded epoch; frequent runs can catch up without unbounded loops."""
     import asyncio
 
+    global _RECONCILIATION_PRESSURE_FAILURES, _RECONCILIATION_RETRY_AT
+
     from src.pipeline import solana_launch_reconcile as reconcile
     from src.pipeline import solana_launch_stream as stream
     from src.pipeline import stream_health
@@ -741,6 +759,16 @@ async def _run_solana_launch_reconciliation():
         )
         logger.warning("solana_launch_reconciliation_unconfigured")
         return
+    retry_in = _RECONCILIATION_RETRY_AT - time.monotonic()
+    if retry_in > 0:
+        # The pressure failure was already reported when the circuit opened.  Keep
+        # ordinary 30-second scheduler ticks quiet until a real retry is allowed.
+        logger.debug(
+            "solana_launch_reconciliation_circuit_open",
+            retry_in_seconds=math.ceil(retry_in),
+            pressure_failures=_RECONCILIATION_PRESSURE_FAILURES,
+        )
+        return
     try:
         start_raw = os.getenv("SOLANA_RECONCILIATION_START_SLOT", "").strip()
         start_slot = int(start_raw) if start_raw else None
@@ -750,6 +778,8 @@ async def _run_solana_launch_reconciliation():
             stream.JsonRpc(endpoint),
             start_slot=start_slot,
         )
+        _RECONCILIATION_PRESSURE_FAILURES = 0
+        _RECONCILIATION_RETRY_AT = 0.0
         healthy = result.get("state") in {"sealed_clean", "waiting_finality"}
         await asyncio.to_thread(
             stream_health.report_worker,
@@ -758,7 +788,26 @@ async def _run_solana_launch_reconciliation():
             error=None if healthy else str(result)[:240],
         )
         logger.info("solana_launch_reconciliation_done", **result)
+    except stream.RpcPressureError as exc:
+        _RECONCILIATION_PRESSURE_FAILURES += 1
+        cooldown = _reconciliation_backoff_seconds(
+            exc.retry_after_seconds, _RECONCILIATION_PRESSURE_FAILURES,
+        )
+        _RECONCILIATION_RETRY_AT = time.monotonic() + cooldown
+        await asyncio.to_thread(
+            stream_health.report_worker,
+            "solana", "pump_fun_reconciliation", status="degraded",
+            error=(f"archive RPC {exc.kind}; retry in {cooldown}s")[:240],
+        )
+        logger.warning(
+            "solana_launch_reconciliation_pressure",
+            pressure_kind=exc.kind,
+            retry_in_seconds=cooldown,
+            pressure_failures=_RECONCILIATION_PRESSURE_FAILURES,
+        )
     except Exception as exc:
+        _RECONCILIATION_PRESSURE_FAILURES = 0
+        _RECONCILIATION_RETRY_AT = 0.0
         await asyncio.to_thread(
             stream_health.report_worker,
             "solana", "pump_fun_reconciliation", status="degraded",
