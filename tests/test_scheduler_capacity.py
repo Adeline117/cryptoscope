@@ -418,6 +418,78 @@ async def test_real_launch_quote_refresh_publishes_assessment(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_incomplete_stable_launch_push_never_creates_delivery_proof(monkeypatch):
+    from src.pipeline import board_export, launch_delivery, scheduler
+
+    calls = []
+    monkeypatch.setattr(
+        board_export, "write_views",
+        lambda **views: calls.append(("write", views)) or ["launch", "meta"],
+    )
+    monkeypatch.setattr(
+        board_export, "push_to_blob",
+        lambda paths: calls.append(("push", paths)) or 1,
+    )
+    monkeypatch.setattr(
+        launch_delivery, "publish_and_verify_launch_snapshots",
+        lambda _launch: (_ for _ in ()).throw(
+            AssertionError("incomplete stable publication cannot claim delivery")
+        ),
+    )
+
+    result = await scheduler._publish_launch_with_delivery(
+        {"view": "launch", "events": []},
+    )
+
+    assert calls == [
+        ("write", {"launch": {"view": "launch", "events": []}}),
+        ("push", ["launch", "meta"]),
+    ]
+    assert result["pushed"] == 1
+    assert result["delivery_attempted"] == 0
+    assert result["delivery_inserted"] == 0
+    assert result["a3_pushed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_verified_delivery_is_rederived_and_republished_as_a3(monkeypatch):
+    from src.pipeline import board_export, launch_delivery, scheduler
+
+    first = {"view": "launch", "events": [{"action_level": "A2_PAPER_READY"}]}
+    promoted = {"view": "launch", "events": [{"action_level": "A3_MANUAL_PROBE"}]}
+    calls = []
+    monkeypatch.setattr(
+        board_export, "write_views",
+        lambda **views: calls.append(("write", views["launch"])) or ["launch", "meta"],
+    )
+    monkeypatch.setattr(
+        board_export, "push_to_blob",
+        lambda paths: calls.append(("push", paths)) or len(paths),
+    )
+    monkeypatch.setattr(
+        launch_delivery, "publish_and_verify_launch_snapshots",
+        lambda launch: calls.append(("prove", launch)) or {
+            "eligible": 1, "attempted": 1, "uploaded": 1, "read_back": 1,
+            "inserted": 1, "errors": 0,
+        },
+    )
+    monkeypatch.setattr(
+        board_export, "render_launch",
+        lambda: calls.append(("render-promoted",)) or promoted,
+    )
+
+    result = await scheduler._publish_launch_with_delivery(first)
+
+    assert calls == [
+        ("write", first), ("push", ["launch", "meta"]), ("prove", first),
+        ("render-promoted",), ("write", promoted),
+        ("push", ["launch", "meta"]),
+    ]
+    assert result["delivery_inserted"] == 1
+    assert result["a3_pushed"] == 2
+
+
+@pytest.mark.asyncio
 async def test_launch_render_failure_preserves_last_good_view(tmp_path, monkeypatch):
     from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
     from tests.test_board_data_contract import _launch_body

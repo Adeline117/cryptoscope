@@ -731,11 +731,10 @@ async def _run_launch_radar():
         # export would destroy the very latency advantage this lane is meant to test.
         from src.pipeline import board_export
         launch = await asyncio.to_thread(board_export.render_launch)
-        paths = await asyncio.to_thread(board_export.write_views, launch=launch)
-        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        delivery = await _publish_launch_with_delivery(launch)
         logger.info("launch_radar_done", scanned=res["scanned"], assessed=res.get("assessed", 0),
                     inserted=res["inserted"],
-                    active=len(res["events"]), pushed=pushed)
+                    active=len(res["events"]), **delivery)
     except Exception as e:
         logger.error("launch_radar_failed", error=str(e)[:120])
 
@@ -836,11 +835,58 @@ async def _run_launch_quotes():
             return
         from src.pipeline import board_export
         launch = await asyncio.to_thread(board_export.render_launch)
-        paths = await asyncio.to_thread(board_export.write_views, launch=launch)
-        pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
-        logger.info("launch_quote_refresh_done", **result, pushed=pushed)
+        delivery = await _publish_launch_with_delivery(launch)
+        logger.info("launch_quote_refresh_done", **result, **delivery)
     except Exception as exc:
         logger.error("launch_quote_refresh_failed", error=str(exc)[:120])
+
+
+async def _publish_launch_with_delivery(launch: dict) -> dict:
+    """Publish stable discovery first, then prove an immutable public snapshot.
+
+    Blob overwrite propagation is not a delivery SLA.  If the stable launch/meta
+    batch is incomplete, no immutable proof is attempted and the row remains A2.
+    """
+    import asyncio
+
+    from src.pipeline import board_export
+
+    paths = await asyncio.to_thread(board_export.write_views, launch=launch)
+    pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+    summary = {
+        "pushed": pushed,
+        "delivery_eligible": 0,
+        "delivery_attempted": 0,
+        "delivery_uploaded": 0,
+        "delivery_read_back": 0,
+        "delivery_inserted": 0,
+        "delivery_errors": 0,
+        "delivery_deferred": 0,
+        "a3_pushed": 0,
+    }
+    if pushed != len(paths):
+        return summary
+
+    from src.pipeline.launch_delivery import publish_and_verify_launch_snapshots
+
+    proof = await asyncio.to_thread(publish_and_verify_launch_snapshots, launch)
+    for field in (
+        "eligible", "attempted", "uploaded", "read_back", "inserted", "errors",
+        "deferred",
+    ):
+        summary[f"delivery_{field}"] = proof.get(field, 0)
+    if not proof.get("inserted"):
+        return summary
+
+    # The proof is a separate immutable fact. Re-read the ledger so A3 is derived,
+    # validated against SQL authority, and then published with the public snapshot
+    # URL. Automatic execution remains hard-disabled by both contracts.
+    promoted = await asyncio.to_thread(board_export.render_launch)
+    promoted_paths = await asyncio.to_thread(board_export.write_views, launch=promoted)
+    summary["a3_pushed"] = await asyncio.to_thread(
+        board_export.push_to_blob, promoted_paths,
+    )
+    return summary
 
 
 async def _run_structure_radar():
