@@ -671,6 +671,8 @@ def _validate_stats_view(payload: Mapping[str, Any]) -> None:
     if "launch" not in lanes:
         raise BoardViewContractError("stats.lanes.launch is required")
     _validate_launch_stats(lanes["launch"], path="stats.lanes.launch")
+    if "carry" in lanes:
+        _validate_carry_stats(lanes["carry"], path="stats.lanes.carry")
 
 
 def _aware_clock(value: Any, *, path: str) -> datetime:
@@ -1155,11 +1157,200 @@ def _validate_observation_rows(value: Any, *, path: str) -> None:
             )
 
 
+def _validate_carry_proxy_semantics(value: Any, *, path: str,
+                                    real_fill_field: str) -> Mapping[str, Any]:
+    """Freeze Carry's public claim as a partial quote proxy, never real edge."""
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    exact = {
+        "cohort_kind": "descriptive_quote_proxy",
+        "cost_completeness": "partial",
+        "all_in_total_pct": None,
+        real_fill_field: False,
+        "real_edge_eligible": False,
+    }
+    for field, expected in exact.items():
+        if value.get(field) != expected or type(value.get(field)) is not type(expected):
+            raise BoardViewContractError(
+                f"{path}.{field} violates the Carry proxy contract"
+            )
+    if _exact_nonnegative_int(
+            value.get("real_edge_n"), path=f"{path}.real_edge_n") != 0:
+        raise BoardViewContractError(
+            f"{path}.real_edge_n must remain zero until real-fill validation exists"
+        )
+    if ("auto_execution_allowed" in value
+            and value.get("auto_execution_allowed") is not False):
+        raise BoardViewContractError(
+            f"{path}.auto_execution_allowed must be exactly false"
+        )
+    return value
+
+
+def _validate_exclusion_breakdown(value: Any, *, excluded_n: int,
+                                  path: str) -> None:
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    total = 0
+    for reason, count in value.items():
+        if not isinstance(reason, str) or not reason.strip():
+            raise BoardViewContractError(f"{path} keys must be non-empty strings")
+        total += _exact_nonnegative_int(count, path=f"{path}.{reason}")
+    # One excluded episode may carry several independent reason codes, so the
+    # reason total can exceed the row total but can never under-explain it.
+    if (excluded_n == 0 and total != 0) or (excluded_n > 0 and total < excluded_n):
+        raise BoardViewContractError(
+            f"{path} does not account for the excluded Carry episodes"
+        )
+
+
+def _validate_carry_stats(value: Any, *, path: str) -> None:
+    value = _validate_carry_proxy_semantics(
+        value, path=path, real_fill_field="cost_is_real_fill",
+    )
+    exact = {
+        "metric": "quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy",
+        "execution_mode": "paper_orderbook_measurement",
+        "edge_verdict": "不可判",
+    }
+    for field, expected in exact.items():
+        if value.get(field) != expected or type(value.get(field)) is not type(expected):
+            raise BoardViewContractError(
+                f"{path}.{field} violates the Carry evidence contract"
+            )
+    n = _exact_nonnegative_int(value.get("n"), path=f"{path}.n")
+    n_proxy = _exact_nonnegative_int(
+        value.get("n_proxy"), path=f"{path}.n_proxy",
+    )
+    hits = _exact_nonnegative_int(value.get("hits"), path=f"{path}.hits")
+    total = _exact_nonnegative_int(
+        value.get("total_closed"), path=f"{path}.total_closed",
+    )
+    excluded = _exact_nonnegative_int(
+        value.get("excluded_closed"), path=f"{path}.excluded_closed",
+    )
+    _exact_nonnegative_int(value.get("pending"), path=f"{path}.pending")
+    if n_proxy != n or hits > n or total != n + excluded:
+        raise BoardViewContractError(
+            f"{path} proxy/closed/excluded counts are inconsistent"
+        )
+    _validate_exclusion_breakdown(
+        value.get("excluded_by_reason"), excluded_n=excluded,
+        path=f"{path}.excluded_by_reason",
+    )
+    from src.pipeline.opportunity_outcomes import MIN_N as CARRY_MIN_N
+
+    verdict = value.get("verdict")
+    expected_verdict = "measured" if n >= CARRY_MIN_N else "不可判"
+    if verdict != expected_verdict:
+        raise BoardViewContractError(f"{path}.verdict contradicts its proxy sample")
+
+
+def _validate_carry_episode_rows(value: Any, *, expected_n: int,
+                                 path: str) -> None:
+    if not isinstance(value, list) or len(value) != expected_n:
+        raise BoardViewContractError(f"{path} must contain exactly {expected_n} rows")
+    for index, row in enumerate(value):
+        row_path = f"{path}[{index}]"
+        if not isinstance(row, Mapping):
+            raise BoardViewContractError(f"{row_path} must be an object")
+        contract = _validate_cost_contract(
+            row.get("cost_contract"), path=f"{row_path}.cost_contract",
+        )
+        if contract is None:
+            raise BoardViewContractError(f"{row_path}.cost_contract is required")
+        contract_exact = {
+            "purpose": "paper_measurement",
+            "method": "cross_perp_paper_quote_proxy_v1",
+            "completeness": "partial",
+            "all_in_total_pct": None,
+            "is_real_fill": False,
+        }
+        for field, expected in contract_exact.items():
+            if (contract.get(field) != expected
+                    or type(contract.get(field)) is not type(expected)):
+                raise BoardViewContractError(
+                    f"{row_path}.cost_contract.{field} violates the Carry proxy contract"
+                )
+        row_exact = {
+            "settled_funding_pct": None,
+            "basis_pnl_pct": None,
+            "realized_net_return_pct": None,
+            "real_edge_eligible": False,
+        }
+        for field, expected in row_exact.items():
+            if row.get(field) != expected or type(row.get(field)) is not type(expected):
+                raise BoardViewContractError(
+                    f"{row_path}.{field} cannot claim real Carry execution"
+                )
+        if "is_real_fill" in row and row.get("is_real_fill") is not False:
+            raise BoardViewContractError(f"{row_path}.is_real_fill must be exactly false")
+
+
+def _validate_carry_paper(value: Any, *, health: Any, path: str) -> None:
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    if not value:
+        paper_health = health.get("paper") if isinstance(health, Mapping) else None
+        if (not isinstance(paper_health, Mapping)
+                or paper_health.get("state") not in {"partial", "error"}):
+            raise BoardViewContractError(
+                f"{path} may be empty only when the paper tracker failed explicitly"
+            )
+        return
+    value = _validate_carry_proxy_semantics(
+        value, path=path, real_fill_field="is_real_fill",
+    )
+    n_proxy = _exact_nonnegative_int(
+        value.get("n_proxy_closed"), path=f"{path}.n_proxy_closed",
+    )
+    n_closed = _exact_nonnegative_int(
+        value.get("n_closed"), path=f"{path}.n_closed",
+    )
+    total = _exact_nonnegative_int(
+        value.get("n_closed_total"), path=f"{path}.n_closed_total",
+    )
+    excluded = _exact_nonnegative_int(
+        value.get("n_closed_excluded"), path=f"{path}.n_closed_excluded",
+    )
+    n_open = _exact_nonnegative_int(
+        value.get("n_open"), path=f"{path}.n_open",
+    )
+    n_exit_pending = _exact_nonnegative_int(
+        value.get("n_exit_pending"), path=f"{path}.n_exit_pending",
+    )
+    _exact_nonnegative_int(
+        value.get("n_quarantined_total"), path=f"{path}.n_quarantined_total",
+    )
+    if n_closed != n_proxy or total != n_closed + excluded:
+        raise BoardViewContractError(
+            f"{path} proxy/closed/excluded counts are inconsistent"
+        )
+    if n_exit_pending > n_open:
+        raise BoardViewContractError(f"{path}.n_exit_pending exceeds open episodes")
+    open_positions = value.get("open_positions")
+    _validate_carry_episode_rows(
+        open_positions, expected_n=n_open, path=f"{path}.open_positions",
+    )
+    recent = value.get("recent", [])
+    _validate_carry_episode_rows(
+        recent, expected_n=min(n_proxy, 8), path=f"{path}.recent",
+    )
+    _validate_exclusion_breakdown(
+        value.get("excluded_by_reason"), excluded_n=excluded,
+        path=f"{path}.excluded_by_reason",
+    )
+
+
 def _validate_perps_view(payload: Mapping[str, Any]) -> None:
     for key in ("perps", "carry"):
         if key not in payload:
             raise BoardViewContractError(f"perps.{key} is required")
         _validate_observation_rows(payload[key], path=f"perps.{key}")
+    _validate_carry_paper(
+        payload.get("carry_paper"), health=payload.get("carry_source_health"),
+        path="perps.carry_paper",
+    )
 
 
 def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,

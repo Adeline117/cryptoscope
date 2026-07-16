@@ -247,6 +247,49 @@ def _view(board_export, view, body):
     return board_export._envelope(body, view=view)
 
 
+def _carry_contract_fixtures():
+    from src.pipeline.execution_cost import carry_paper_contract
+
+    def episode(*, closed: bool) -> dict:
+        return {
+            "symbol": "BTC", "execution_mode": "paper_orderbook_measurement",
+            "cost_contract": carry_paper_contract(
+                notional_usd_per_leg=10_000,
+                entry_book_impact_pct=0.05,
+                exit_book_impact_pct=0.06 if closed else None,
+                modeled_fee_pct=0.19,
+            ),
+            "settled_funding_pct": None, "basis_pnl_pct": None,
+            "realized_net_return_pct": None, "real_edge_eligible": False,
+        }
+
+    stats = {
+        "n": 1, "n_proxy": 1, "hits": 1, "real_edge_n": 0,
+        "total_closed": 2, "excluded_closed": 1,
+        "excluded_by_reason": {"legacy_episode": 1}, "pending": 0,
+        "metric": "quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy",
+        "cohort_kind": "descriptive_quote_proxy",
+        "cost_completeness": "partial", "all_in_total_pct": None,
+        "cost_is_real_fill": False,
+        "execution_mode": "paper_orderbook_measurement",
+        "real_edge_eligible": False,
+        "verdict": "不可判", "edge_verdict": "不可判",
+    }
+    paper = {
+        "cohort_kind": "descriptive_quote_proxy",
+        "n_open": 1, "n_closed": 1, "n_proxy_closed": 1,
+        "real_edge_n": 0, "n_exit_pending": 0,
+        "n_quarantined_total": 0, "n_closed_total": 2,
+        "n_closed_excluded": 1,
+        "excluded_by_reason": {"legacy_episode": 1},
+        "cost_completeness": "partial", "all_in_total_pct": None,
+        "is_real_fill": False, "real_edge_eligible": False,
+        "open_positions": [episode(closed=False)],
+        "recent": [episode(closed=True)],
+    }
+    return stats, paper
+
+
 def test_wrong_view_name_rejects_write_and_preserves_existing_files(tmp_path, monkeypatch):
     from src.pipeline import board_export
 
@@ -699,7 +742,12 @@ def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkey
     observed_at = datetime.now(timezone.utc).isoformat()
     launch = _view(board_export, "launch", _launch_body([_launch_event()]))
     perps = _view(board_export, "perps", {
-        "perps": [], "carry": [], "cascade_events": [{
+        "perps": [], "carry": [], "carry_paper": {},
+        "carry_source_health": {
+            "state": "partial",
+            "paper": {"state": "error", "error_kind": "tracker_failed"},
+        },
+        "cascade_events": [{
             "id": "cascade-1", "lane": "cascade", "chain": "hyperliquid",
             "token": "BTC", "symbol": "BTC", "source": "Hyperliquid",
             "detected_at": observed_at, "decision_at": observed_at,
@@ -962,6 +1010,109 @@ def test_stats_view_quarantines_legacy_and_rejects_execution_edge_claims(
         with pytest.raises(ValueError):
             board_export.write_views(stats=bad)
         assert (tmp_path / "stats.json").read_bytes() == before
+
+
+def test_carry_public_contract_rejects_real_edge_and_count_claims(
+        tmp_path, monkeypatch):
+    from src.pipeline import board_export, board_outcomes, opportunity_ledger
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    monkeypatch.setattr(board_outcomes, "DB", tmp_path / "board_picks.db")
+    monkeypatch.setattr(opportunity_ledger, "DB", tmp_path / "ledger.db")
+    carry_stats, carry_paper = _carry_contract_fixtures()
+    stats = board_export.render_stats(None)
+    stats["lanes"]["carry"] = carry_stats
+    perps = _view(board_export, "perps", {
+        "perps": [], "carry": [], "cascade_events": [],
+        "carry_paper": carry_paper,
+        "carry_source_health": {"state": "ok", "paper": {"state": "ok"}},
+    })
+    board_export.write_views(stats=stats, perps=perps)
+    before = {
+        name: (tmp_path / f"{name}.json").read_bytes()
+        for name in ("stats", "perps", "meta")
+    }
+
+    mutations = (
+        ("stats", lambda value: value.update(real_edge_n=1)),
+        ("stats", lambda value: value.update(real_edge_eligible=True)),
+        ("stats", lambda value: value.update(cost_is_real_fill=True)),
+        ("stats", lambda value: value.update(edge_verdict="已获真实优势")),
+        ("stats", lambda value: value.update(n_proxy=0)),
+        ("stats", lambda value: value.update(total_closed=1)),
+        ("stats", lambda value: value.update(verdict="measured")),
+        ("stats", lambda value: value.update(excluded_by_reason={})),
+        ("perps", lambda value: value.update(real_edge_n=1)),
+        ("perps", lambda value: value.update(real_edge_eligible=True)),
+        ("perps", lambda value: value.update(is_real_fill=True)),
+        ("perps", lambda value: value.update(n_proxy_closed=0)),
+        ("perps", lambda value: value.update(n_closed_total=1)),
+        ("perps", lambda value: value.update(excluded_by_reason={})),
+    )
+    for target, mutate in mutations:
+        bad_stats, bad_perps = deepcopy(stats), deepcopy(perps)
+        candidate = (bad_stats["lanes"]["carry"] if target == "stats"
+                     else bad_perps["carry_paper"])
+        mutate(candidate)
+        with pytest.raises(ValueError):
+            board_export.write_views(stats=bad_stats, perps=bad_perps)
+        assert {
+            name: (tmp_path / f"{name}.json").read_bytes()
+            for name in ("stats", "perps", "meta")
+        } == before
+
+
+def test_carry_episode_contract_rejects_real_fill_fields(tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    _stats, carry_paper = _carry_contract_fixtures()
+    good = _view(board_export, "perps", {
+        "perps": [], "carry": [], "cascade_events": [],
+        "carry_paper": carry_paper,
+        "carry_source_health": {"state": "ok", "paper": {"state": "ok"}},
+    })
+    board_export.write_views(perps=good)
+    before = (tmp_path / "perps.json").read_bytes()
+
+    mutations = (
+        lambda row: row["cost_contract"].update(is_real_fill=True),
+        lambda row: row["cost_contract"].update(all_in_total_pct=0.1),
+        lambda row: row.update(is_real_fill=True),
+        lambda row: row.update(settled_funding_pct=0.1),
+        lambda row: row.update(basis_pnl_pct=0.1),
+        lambda row: row.update(realized_net_return_pct=0.1),
+        lambda row: row.update(real_edge_eligible=True),
+    )
+    for collection in ("open_positions", "recent"):
+        for mutate in mutations:
+            bad = deepcopy(good)
+            mutate(bad["carry_paper"][collection][0])
+            with pytest.raises(ValueError):
+                board_export.write_views(perps=bad)
+            assert (tmp_path / "perps.json").read_bytes() == before
+
+
+def test_carry_paper_empty_requires_explicit_tracker_failure(tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    failed = _view(board_export, "perps", {
+        "perps": [], "carry": [], "cascade_events": [], "carry_paper": {},
+        "carry_source_health": {
+            "state": "partial", "paper": {
+                "state": "error", "error_kind": "tracker_failed",
+            },
+        },
+    })
+    board_export.write_views(perps=failed)
+    before = (tmp_path / "perps.json").read_bytes()
+    hidden = deepcopy(failed)
+    hidden["carry_source_health"]["paper"] = {"state": "ok"}
+
+    with pytest.raises(ValueError, match="tracker failed explicitly"):
+        board_export.write_views(perps=hidden)
+    assert (tmp_path / "perps.json").read_bytes() == before
 
 
 def test_stats_open_admission_requires_complete_frozen_pass_proof(
