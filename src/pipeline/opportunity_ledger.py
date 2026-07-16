@@ -187,6 +187,39 @@ def _conn() -> sqlite3.Connection:
         if name not in cols:
             c.execute(f"ALTER TABLE opportunities ADD COLUMN {name} TEXT")
     c.execute("UPDATE opportunities SET decision_at=detected_at WHERE decision_at IS NULL")
+    # Cohort 6 is the first Launch protocol to claim a cryptographically bound,
+    # immutable discovery snapshot.  Application-level ON CONFLICT rules are not a
+    # sufficient guard: a maintenance script or future code path could otherwise
+    # rewrite the frozen entry/cost first and append a newly matching hash later.
+    # Mutable liveness, payload enrichment and outcome columns remain updateable.
+    c.execute("""CREATE TRIGGER IF NOT EXISTS launch_v6_snapshot_no_update
+                 BEFORE UPDATE ON opportunities
+                 WHEN OLD.lane='launch' AND OLD.cohort_version>=6 AND (
+                      NEW.lane IS NOT OLD.lane
+                   OR NEW.chain IS NOT OLD.chain
+                   OR NEW.token IS NOT OLD.token
+                   OR NEW.symbol IS NOT OLD.symbol
+                   OR NEW.detected_at IS NOT OLD.detected_at
+                   OR NEW.event_at IS NOT OLD.event_at
+                   OR NEW.decision_at IS NOT OLD.decision_at
+                   OR NEW.quote_at IS NOT OLD.quote_at
+                   OR NEW.executable_at IS NOT OLD.executable_at
+                   OR NEW.expires_at IS NOT OLD.expires_at
+                   OR NEW.source IS NOT OLD.source
+                   OR NEW.decision IS NOT OLD.decision
+                   OR NEW.entry_price IS NOT OLD.entry_price
+                   OR NEW.invalidation_price IS NOT OLD.invalidation_price
+                   OR NEW.max_notional_usd IS NOT OLD.max_notional_usd
+                   OR NEW.cost_pct_est IS NOT OLD.cost_pct_est
+                   OR NEW.cost_model IS NOT OLD.cost_model
+                   OR NEW.cost_contract_version IS NOT OLD.cost_contract_version
+                   OR NEW.cost_contract IS NOT OLD.cost_contract
+                   OR NEW.entry_observation_version IS NOT OLD.entry_observation_version
+                   OR NEW.entry_observation IS NOT OLD.entry_observation
+                   OR NEW.cohort_version IS NOT OLD.cohort_version
+                 ) BEGIN
+                   SELECT RAISE(ABORT, 'launch v6 discovery snapshot is immutable');
+                 END""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_lane_open "
               "ON opportunities(lane, outcome_state, detected_at DESC)")
     c.execute("""CREATE TABLE IF NOT EXISTS execution_assessments(

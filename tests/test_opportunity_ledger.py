@@ -104,6 +104,34 @@ def test_clocks_are_canonical_and_first_observation_is_immutable(tmp_path, monke
     assert row["expires_at"] == "2026-07-14T12:03:00+00:00"
 
 
+def test_v6_launch_snapshot_is_database_immutable_but_outcome_remains_writable(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry(cohort_version=6))
+    connection = ledger._conn()
+    with pytest.raises(sqlite3.IntegrityError, match="snapshot is immutable"):
+        connection.execute(
+            "UPDATE opportunities SET entry_price=999, cost_model='after_result' "
+            "WHERE id=?",
+            (ident,),
+        )
+    connection.rollback()
+    connection.execute(
+        "UPDATE opportunities SET state='aged_out' WHERE id=?", (ident,)
+    )
+    connection.commit()
+    connection.close()
+
+    ledger.save_outcome(ident, {"horizons": {}, "note": "still appendable"})
+    row = ledger.outcome_rows()[0]
+    assert row["entry_price"] == 1.0
+    assert row["cost_model"] == "test_frozen_cost"
+    assert row["state"] == "aged_out"
+    assert row["outcome"]["note"] == "still appendable"
+
+
 def test_entry_observation_is_validated_normalized_and_frozen_on_first_insert(
         tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
@@ -350,6 +378,7 @@ def test_legacy_schema_backfills_only_provable_decision_clock(tmp_path, monkeypa
         "entry_observation_hash", "cost_contract_hash", "payload",
     } <= price_columns
     assert {
+        "launch_v6_snapshot_no_update",
         "outcome_price_observations_no_update",
         "outcome_price_observations_no_delete",
     } <= triggers
