@@ -1,6 +1,7 @@
 """The opportunity ledger keeps evidence clocks explicit and immutable."""
 from __future__ import annotations
 
+import importlib
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -380,6 +381,154 @@ def test_price_observation_is_idempotent_bound_and_returned_with_outcome_rows(
     assert ledger.price_observations() == stored
     row = ledger.outcome_rows()[0]
     assert row["price_observations"] == {"24h": stored[0]}
+
+
+def test_stored_price_observation_revalidates_all_frozen_bindings(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    observation_id, _ = ledger.append_price_observation(
+        ident, "24h", _price_observation()
+    )
+    row = ledger.outcome_rows()[0]
+
+    proven = ledger.validate_stored_price_observation(
+        row, "24h", row["price_observations"]["24h"]
+    )
+
+    assert proven["observation_id"] == observation_id
+    assert proven["opportunity_id"] == ident
+    assert proven["horizon"] == "24h"
+    assert proven["chain"] == "solana"
+    assert proven["token"] == "token"
+    assert proven["pool"] == "FrozenPool"
+    assert proven["price"] == 1.25
+
+
+def test_stored_price_observation_rejects_id_hash_and_merge_tampering(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    ledger.append_price_observation(ident, "24h", _price_observation())
+    row = ledger.outcome_rows()[0]
+    stored = row["price_observations"]["24h"]
+    cases = []
+    bad = {**stored, "observation_id": "0" * 32}
+    cases.append((bad, "observation_id"))
+    bad = {**stored, "entry_observation_hash": "0" * 64}
+    cases.append((bad, "entry_observation_hash binding disagrees"))
+    bad = {**stored, "cost_contract_hash": "0" * 64}
+    cases.append((bad, "cost_contract_hash binding disagrees"))
+    bad = {**stored, "price": 999_999.0}
+    cases.append((bad, "observation_id"))
+    bad = {**stored, "opportunity_id": "attacker-selected-event"}
+    cases.append((bad, "opportunity_id binding disagrees"))
+    bad = {**stored, "horizon": "1h"}
+    cases.append((bad, "horizon binding disagrees"))
+
+    for tampered, message in cases:
+        with pytest.raises(ValueError, match=message):
+            ledger.validate_stored_price_observation(row, "24h", tampered)
+
+    changed_contract = {**row, "cost_contract": {**row["cost_contract"], "version": 99}}
+    with pytest.raises(ValueError, match="cost_contract_hash binding disagrees"):
+        ledger.validate_stored_price_observation(changed_contract, "24h", stored)
+
+
+@pytest.mark.parametrize(("overrides", "message"), [
+    ({"target_at": "2026-07-15T12:00:02+00:00"}, "target_at disagrees"),
+    ({"retrieved_at": "2026-07-15T11:59:59+00:00"}, "before its target"),
+    ({
+        "candle_at": "2026-07-15T09:00:01+00:00",
+        "distance_seconds": 10_800,
+    }, "more than 7200"),
+    ({"distance_seconds": float("nan")}, "finite and nonnegative"),
+    ({"price": float("inf")}, "positive finite"),
+    ({"currency": "eur"}, "currency"),
+    ({"field": "open"}, "field"),
+    ({"identity_verified": False}, "identity_verified"),
+    ({"chain": "base"}, "chain disagrees"),
+    ({"token": "other"}, "token disagrees"),
+    ({"pool": "OtherPool"}, "pool disagrees"),
+])
+def test_stored_price_observation_rejects_semantic_and_clock_tampering(
+        tmp_path, monkeypatch, overrides, message):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    ledger.append_price_observation(ident, "24h", _price_observation())
+    row = ledger.outcome_rows()[0]
+    stored = {**row["price_observations"]["24h"], **overrides}
+
+    with pytest.raises(ValueError, match=message):
+        ledger.validate_stored_price_observation(row, "24h", stored)
+
+
+def test_stored_price_observation_survives_restart_and_wall_clock_rollback(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    path = tmp_path / "ledger.db"
+    monkeypatch.setattr(ledger, "DB", path)
+    observed = datetime(2099, 1, 1, tzinfo=timezone.utc)
+
+    class AppendClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2099, 1, 2, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(ledger, "datetime", AppendClock)
+    candidate = _candidate_with_entry(
+        event_at=(observed - timedelta(minutes=2)).isoformat(),
+        detected_at=(observed - timedelta(minutes=1)).isoformat(),
+        decision_at=(observed + timedelta(seconds=1)).isoformat(),
+        quote_at=(observed + timedelta(seconds=2)).isoformat(),
+        executable_at=(observed + timedelta(seconds=3)).isoformat(),
+        expires_at=(observed + timedelta(minutes=3)).isoformat(),
+        entry_observation=_entry_observation(observed_at=observed.isoformat()),
+    )
+    ident, _ = ledger.record(candidate)
+    target = observed + timedelta(hours=1)
+    observation_id, _ = ledger.append_price_observation(
+        ident,
+        "1h",
+        _price_observation(
+            horizon="1h",
+            target_at=target.isoformat(),
+            candle_at=target.isoformat(),
+            retrieved_at=(target + timedelta(minutes=5)).isoformat(),
+        ),
+    )
+
+    # Reload restores the real 2026 wall clock, which is earlier than this stored
+    # fixture. Validation must use its immutable append clock, not process ``now``.
+    restarted = importlib.reload(ledger)
+    monkeypatch.setattr(restarted, "DB", path)
+    row = restarted.outcome_rows()[0]
+    proven = restarted.validate_stored_price_observation(
+        row, "1h", row["price_observations"]["1h"]
+    )
+    assert proven["observation_id"] == observation_id
+    assert proven["retrieved_at"] == (target + timedelta(minutes=5)).isoformat()
+
+
+@pytest.mark.parametrize("reserved", ["observation_id", "created_at", "payload"])
+def test_price_observation_rejects_ledger_reserved_payload_fields(
+        tmp_path, monkeypatch, reserved):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    with pytest.raises(ValueError, match="ledger-reserved"):
+        ledger.append_price_observation(
+            ident, "24h", _price_observation(**{reserved: "forged"})
+        )
 
 
 def test_price_observation_rejects_conflict_and_frozen_binding_mismatches(

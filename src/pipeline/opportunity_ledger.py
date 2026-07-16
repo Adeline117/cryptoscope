@@ -477,6 +477,12 @@ def _normalize_price_observation(
         raise ValueError("price observation must be a mapping")
     if observation.get("version") != 1:
         raise ValueError("unsupported price observation version")
+    reserved = {"observation_id", "created_at", "payload"}.intersection(observation)
+    if reserved:
+        raise ValueError(
+            "price observation contains ledger-reserved fields: "
+            + ", ".join(sorted(reserved))
+        )
     entry = opportunity.get("entry_observation")
     contract = opportunity.get("cost_contract")
     if not isinstance(entry, dict) or not entry:
@@ -534,8 +540,11 @@ def _normalize_price_observation(
             "price observation distance_seconds must be finite and nonnegative"
         ) from exc
     actual_distance = (target_clock - candle_clock).total_seconds()
-    if (not math.isfinite(distance) or distance < 0
-            or not math.isclose(distance, actual_distance, rel_tol=0, abs_tol=1e-6)):
+    if not math.isfinite(distance) or distance < 0:
+        raise ValueError(
+            "price observation distance_seconds must be finite and nonnegative"
+        )
+    if not math.isclose(distance, actual_distance, rel_tol=0, abs_tol=1e-6):
         raise ValueError("price observation distance_seconds disagrees with its clocks")
     if distance > 7200:
         raise ValueError("price observation candle is more than 7200 seconds from target")
@@ -555,8 +564,6 @@ def _normalize_price_observation(
         supplied = observation.get(name)
         if supplied is not None and supplied != expected:
             raise ValueError(f"price observation {name} binding disagrees with ledger")
-    if observation.get("observation_id") is not None:
-        raise ValueError("price observation_id is assigned by the ledger")
     return {
         **observation,
         "version": 1,
@@ -653,6 +660,105 @@ def _price_observation_from_row(row: tuple) -> dict:
     except (TypeError, json.JSONDecodeError):
         payload = {}
     return {**payload, **stored}
+
+
+_PRICE_OBSERVATION_BOUND_COLUMNS = (
+    "opportunity_id", "horizon", "target_at", "provider", "chain", "pool",
+    "candle_at", "distance_seconds", "price", "retrieved_at",
+    "entry_observation_hash", "cost_contract_hash",
+)
+
+
+def validate_stored_price_observation(
+        row: dict, horizon: str, stored: dict) -> dict:
+    """Revalidate one append-only observation without consulting mutable state.
+
+    ``outcome_rows`` exposes a convenient payload/column merge.  This function
+    strips only the ledger-assigned id and creation clock, revalidates the complete
+    remaining mapping, then recomputes both frozen-evidence hashes and the
+    deterministic observation id.  A payload or merged-column rewrite therefore
+    cannot silently become an edge input.
+
+    The persisted ``created_at`` clock is used as the append-time boundary.  A
+    process restart or wall-clock rollback therefore cannot make valid historical
+    evidence fail merely because its retrieval clock is later than ``now``.
+    """
+    if not isinstance(row, dict):
+        raise ValueError("opportunity row must be a mapping")
+    if not isinstance(stored, dict):
+        raise ValueError("stored price observation must be a mapping")
+    ident = row.get("id")
+    if not isinstance(ident, str) or not ident:
+        raise ValueError("opportunity row id is required")
+    if horizon not in PRICE_HORIZONS:
+        raise ValueError(f"unknown price observation horizon: {horizon}")
+
+    created_at = _utc_iso(
+        stored.get("created_at"), field="price_observation.created_at"
+    )
+    if created_at is None or stored.get("created_at") != created_at:
+        raise ValueError("stored price observation created_at is not canonical UTC")
+    ledger_at = datetime.fromisoformat(created_at)
+    payload = {
+        name: value for name, value in stored.items()
+        if name not in {"observation_id", "created_at"}
+    }
+    normalized = _normalize_price_observation(
+        ident,
+        horizon,
+        payload,
+        {
+            "chain": row.get("chain"),
+            "entry_observation": row.get("entry_observation"),
+            "cost_contract": row.get("cost_contract"),
+        },
+        ledger_at,
+    )
+
+    for name in _PRICE_OBSERVATION_BOUND_COLUMNS:
+        expected = normalized[name]
+        actual = stored.get(name)
+        if name in {"distance_seconds", "price"}:
+            if (isinstance(actual, bool) or not isinstance(actual, (int, float))
+                    or not math.isfinite(float(actual))
+                    or float(actual) != float(expected)):
+                raise ValueError(
+                    f"stored price observation {name} column disagrees with payload"
+                )
+        elif actual != expected:
+            raise ValueError(
+                f"stored price observation {name} column disagrees with payload"
+            )
+
+    expected_id = hashlib.sha256(
+        f"{ident}:{horizon}:{_canonical_json(normalized)}".encode()
+    ).hexdigest()[:32]
+    if stored.get("observation_id") != expected_id:
+        raise ValueError("stored price observation observation_id disagrees with payload")
+
+    expected_keys = set(normalized) | {"observation_id", "created_at"}
+    if set(stored) != expected_keys:
+        raise ValueError("stored price observation merged fields disagree with payload")
+    for name, expected in normalized.items():
+        actual = stored.get(name)
+        if name in {"distance_seconds", "price"}:
+            matches = (
+                not isinstance(actual, bool)
+                and isinstance(actual, (int, float))
+                and math.isfinite(float(actual))
+                and float(actual) == float(expected)
+            )
+        else:
+            matches = actual == expected
+        if not matches:
+            raise ValueError(
+                f"stored price observation merged {name} disagrees with payload"
+            )
+    return {
+        **normalized,
+        "observation_id": expected_id,
+        "created_at": created_at,
+    }
 
 
 def _read_price_observations(
