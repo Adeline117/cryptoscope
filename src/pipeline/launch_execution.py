@@ -31,6 +31,7 @@ JUPITER_USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 ZEROX_PRICE = "https://api.0x.org/swap/allowance-holder/price"
 MAX_ROUNDTRIP_LOSS_PCT = 5.0
 QUOTE_TTL_SECONDS = 60
+SECURITY_TTL_SECONDS = 5 * 60
 
 # 0x's indicative route is retained as evidence but not promoted to executable:
 # network gas is not yet converted to USD. BSC is deliberately omitted because its

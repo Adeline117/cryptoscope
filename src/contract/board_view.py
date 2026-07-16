@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -60,15 +60,31 @@ def _aware_clock(value: Any, *, path: str) -> datetime:
     return clock
 
 
-def _validate_cost_contract(value: Any, *, path: str) -> None:
+def _validate_cost_contract(value: Any, *, path: str) -> dict | None:
     if value is None:
-        return
+        return None
     try:
         from src.pipeline.execution_cost import validate
 
-        validate(value)
+        return validate(value)
     except (TypeError, ValueError) as exc:
         raise BoardViewContractError(f"{path} is invalid: {exc}") from exc
+
+
+def _validate_launch_a3(row: Mapping[str, Any], *, assessment: Any,
+                        generated_at: datetime, path: str) -> None:
+    """Recheck every public manual-probe gate instead of trusting its label."""
+    from src.contract.launch_probe import launch_manual_probe_failures
+    from src.pipeline.launch_execution import QUOTE_TTL_SECONDS
+
+    wall_now = datetime.now(timezone.utc)
+    if abs((wall_now - generated_at).total_seconds()) > QUOTE_TTL_SECONDS:
+        raise BoardViewContractError(f"{path} A3 envelope is outside the live quote window")
+    failures = launch_manual_probe_failures(
+        row, assessment, row.get("evidence_gate"), now=wall_now
+    )
+    if failures:
+        raise BoardViewContractError(f"{path} invalid A3 manual probe: {', '.join(failures)}")
 
 
 def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
@@ -110,6 +126,10 @@ def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
             raise BoardViewContractError(
                 f"{path} contradicts {level}: expected actionable/effective {expected}"
             )
+        if level == "A3_MANUAL_PROBE":
+            _validate_launch_a3(
+                row, assessment=assessment, generated_at=generated_at, path=path
+            )
 
     if row.get("actionable_now"):
         if effective not in {"SMALL_PROBE", "CLAIM_CHECK"}:
@@ -141,6 +161,8 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         raise BoardViewContractError(
             f"view name mismatch: output {name!r}, payload {envelope.view!r}"
         )
+    if envelope.generated_at > datetime.now(timezone.utc) + timedelta(seconds=5):
+        raise BoardViewContractError(f"{name} generated_at is ahead of the wall clock")
     if not math.isclose(envelope.refresh_cadence_min, cadence_min, abs_tol=1e-9):
         raise BoardViewContractError(f"{name} refresh cadence does not match policy")
     if not math.isclose(envelope.freshness_grace_min, grace_min, abs_tol=1e-9):

@@ -243,6 +243,9 @@ def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool
     kind = assessment.get("kind", "read_only_quote")
     if kind not in {"read_only_quote", "paper_fill", "real_fill"}:
         raise ValueError(f"unknown execution assessment kind: {kind}")
+    configured_auto_execution = assessment.get("auto_execution_allowed")
+    if configured_auto_execution is not None and configured_auto_execution is not False:
+        raise ValueError("execution assessments cannot allow automatic execution")
     is_real_fill = bool(assessment.get("is_real_fill", False))
     if (kind == "real_fill") != is_real_fill:
         raise ValueError("real_fill kind and is_real_fill must agree")
@@ -252,6 +255,8 @@ def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool
     clock_names = ("security_at", "security_expires_at", "quote_at",
                    "quote_expires_at", "expires_at")
     clocks = {name: _utc_iso(assessment.get(name), field=name) for name in clock_names}
+    if clocks["quote_expires_at"] is None and clocks["expires_at"] is not None:
+        clocks["quote_expires_at"] = clocks["expires_at"]
     if clocks["quote_at"] and clocks["expires_at"]:
         if datetime.fromisoformat(clocks["expires_at"]) <= datetime.fromisoformat(clocks["quote_at"]):
             raise ValueError("execution assessment expiry must be after quote_at")
@@ -270,6 +275,7 @@ def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool
         "security_state": str(assessment.get("security_state") or "unknown"),
         "route_state": str(assessment.get("route_state") or "unknown"),
         "cost_contract": contract, "is_real_fill": is_real_fill,
+        "auto_execution_allowed": False,
     }
     canonical = json.dumps(normalized, ensure_ascii=False, sort_keys=True,
                            separators=(",", ":"))
@@ -360,7 +366,49 @@ def _latest_assessment_map(c: sqlite3.Connection, identities: list[str]) -> dict
 
 def _current_assessment(item: dict) -> dict:
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-    return {**payload, **{key: value for key, value in item.items() if key != "payload"}}
+    current = {**payload, **{key: value for key, value in item.items() if key != "payload"}}
+    # Old immutable assessments predate the explicit flag. Missing meant disabled;
+    # expose that fact explicitly while preserving any contradictory stored value.
+    current.setdefault("auto_execution_allowed", False)
+    if current.get("quote_expires_at") is None and current.get("expires_at") is not None:
+        current["quote_expires_at"] = current["expires_at"]
+    security = (dict(current["security_gate"])
+                if isinstance(current.get("security_gate"), dict) else {})
+    security.update({
+        "state": current.get("security_state") or "unknown",
+        "checked_at": current.get("security_at"),
+        "expires_at": current.get("security_expires_at"),
+    })
+    for field in ("hard_flags", "cautions", "unknown_fields"):
+        security.setdefault(field, [])
+    current["security_gate"] = security
+    execution = (dict(current["execution_probe"])
+                 if isinstance(current.get("execution_probe"), dict) else {})
+    contract = current.get("cost_contract") if isinstance(current.get("cost_contract"), dict) else {}
+    route_loss = next((component.get("pct") for component in contract.get("components", [])
+                       if isinstance(component, dict) and component.get("name") == "route_loss"
+                       and component.get("status") == "included"), None)
+    network_fee = next((component for component in contract.get("components", [])
+                        if isinstance(component, dict)
+                        and component.get("name") == "network_fee"), None)
+    execution.update({
+        "state": current.get("route_state") or "unknown",
+        "source": current.get("quote_source") or execution.get("source"),
+        "api_mode": current.get("quote_mode") or execution.get("api_mode"),
+        "checked_at": current.get("quote_at"),
+        "notional_usd": current.get("notional_usd"),
+        "entry_reference_price": current.get("entry_reference_price"),
+        "invalidation_reference_price": current.get("invalidation_reference_price"),
+        "roundtrip_back_usd": current.get("roundtrip_back_usd"),
+        "roundtrip_loss_pct": route_loss,
+        "network_fees_included": (
+            network_fee.get("status") == "included" if network_fee else None
+        ),
+        "is_real_fill": current.get("is_real_fill") is True,
+        "read_only": current.get("kind") == "read_only_quote",
+    })
+    current["execution_probe"] = execution
+    return current
 
 
 def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | None,
@@ -389,48 +437,21 @@ def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | No
     if assessment.get("security_state") == "avoid" or assessment.get("route_state") == "untradeable":
         return {**common, "action_level": "A0_BLOCKED",
                 "action_reason_codes": ["security_or_reverse_route_block"]}
-    expiry = assessment.get("expires_at")
-    try:
-        expiry_dt = datetime.fromisoformat(expiry).astimezone(timezone.utc) if expiry else None
-    except (TypeError, ValueError):
-        expiry_dt = None
-    if (assessment.get("security_state") != "pass"
-            or assessment.get("route_state") != "quoted"
-            or not assessment.get("quote_at") or expiry_dt is None or expiry_dt <= now):
-        reasons = []
-        if assessment.get("security_state") != "pass":
-            reasons.append("security_not_pass")
-        if assessment.get("route_state") != "quoted":
-            reasons.append("route_not_quoted")
-        if not assessment.get("quote_at"):
-            reasons.append("quote_clock_missing")
-        if expiry_dt is None or expiry_dt <= now:
-            reasons.append("quote_expired_or_invalid")
-        return {**common, "action_level": "A1_WATCH", "action_reason_codes": reasons}
-    reasons = []
-    contract = assessment.get("cost_contract") or {}
-    if contract.get("completeness") != "complete" or contract.get("all_in_total_pct") is None:
-        reasons.append("all_in_cost_incomplete")
-    if assessment.get("entry_reference_price") is None:
-        reasons.append("entry_reference_price_unknown")
-    if assessment.get("invalidation_reference_price") is None:
-        reasons.append("invalidation_reference_price_unknown")
-    if not evidence_gate or evidence_gate.get("state") != "pass":
-        reasons.append("evidence_gate_not_pass")
-    security_expiry = assessment.get("security_expires_at")
-    try:
-        security_fresh = (security_expiry is not None
-                          and datetime.fromisoformat(security_expiry).astimezone(timezone.utc) > now)
-    except (TypeError, ValueError):
-        security_fresh = False
-    if not security_fresh:
-        reasons.append("security_freshness_unproven")
-    if current.get("delivery_sla_state") != "pass":
-        reasons.append("delivery_sla_unverified")
-    if item.get("decision") != "SMALL_PROBE":
-        reasons.append("discovery_cohort_not_probe")
+    from src.contract.launch_probe import launch_manual_probe_failures
+
+    candidate = {**item, "recorded_decision": item.get("decision"),
+                 "auto_execution_allowed": False, "is_expired": False}
+    reasons = launch_manual_probe_failures(
+        candidate, current, evidence_gate, now=now
+    )
     if reasons:
-        return {**common, "action_level": "A2_PAPER_READY",
+        watch_reasons = {
+            "assessment_not_read_only_quote", "security_not_pass", "route_not_quoted",
+            "quote_source_missing", "quote_clock_invalid", "security_clock_invalid",
+        }
+        level = "A1_WATCH" if any(reason in watch_reasons for reason in reasons) \
+            else "A2_PAPER_READY"
+        return {**common, "action_level": level,
                 "action_reason_codes": reasons}
     return {**common, "action_level": "A3_MANUAL_PROBE", "actionable_now": True,
             "action_reason_codes": ["all_manual_probe_gates_pass"]}

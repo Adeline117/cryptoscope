@@ -16,10 +16,14 @@ from datetime import datetime, timedelta, timezone
 from src.pipeline.opportunity_ledger import (
     active, event_id_readback_matches, record, record_if_absent,
 )
+from src.contract.launch_probe import (
+    MAX_POOL_LIQUIDITY_FRACTION, MAX_PROBE_NOTIONAL_USD, MIN_PROBE_NOTIONAL_USD,
+    SUPPORTED_LAUNCH_CHAINS,
+)
 
 PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
 PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
-SUPPORTED_CHAINS = {"solana", "base", "bsc", "ethereum"}
+SUPPORTED_CHAINS = set(SUPPORTED_LAUNCH_CHAINS)
 MAX_CANDIDATES = 30
 MAX_EXECUTION_ASSESSMENTS = 5
 
@@ -97,7 +101,10 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     flow_ratio = buys / max(sells, 1)
     # $25 is a hard cap for the first probe at $5k liquidity, rising only with depth.
     # This prevents a visual "opportunity" from silently implying an unfillable bet.
-    max_notional = round(min(500.0, max(25.0, liq * 0.003)), 2)
+    max_notional = round(min(
+        MAX_PROBE_NOTIONAL_USD,
+        max(MIN_PROBE_NOTIONAL_USD, liq * MAX_POOL_LIQUIDITY_FRACTION),
+    ), 2)
     # Frozen at discovery so later validation cannot choose a friendlier cost after
     # seeing the return. This is a conservative model, not a claim of a real fill:
     # constant-product impact on entry+exit plus a 0.60% DEX fee/routing buffer.
@@ -160,7 +167,9 @@ def _assess_candidate(event: dict, assessor, *, assessed: int,
 
 def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
     """Convert a mutable gate result into one append-only current measurement."""
-    security, route = event.get("security_gate") or {}, event.get("execution_probe") or {}
+    chain, token = event.get("chain"), event.get("token")
+    security = {**(event.get("security_gate") or {}), "chain": chain, "token": token}
+    route = {**(event.get("execution_probe") or {}), "chain": chain, "token": token}
     notional = float(event.get("max_notional_usd") or 0)
     from src.pipeline.execution_cost import route_contract, unknown_route_contract
     try:
@@ -177,8 +186,9 @@ def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
     security_expires_at = None
     if security.get("state") == "pass":
         try:
+            from src.pipeline.launch_execution import SECURITY_TTL_SECONDS
             security_expires_at = (datetime.fromisoformat(security_at).astimezone(timezone.utc)
-                                   + timedelta(minutes=5)).isoformat()
+                                   + timedelta(seconds=SECURITY_TTL_SECONDS)).isoformat()
         except (TypeError, ValueError):
             security_expires_at = None
     sec_state, route_state = security.get("state") or "unknown", route.get("state") or "unknown"
@@ -193,7 +203,8 @@ def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
         reasons.append("entry_reference_price_unknown")
     reasons.append("delivery_sla_unverified")
     return {
-        "kind": "read_only_quote", "assessed_at": assessed_at.isoformat(),
+        "kind": "read_only_quote", "chain": chain, "token": token,
+        "assessed_at": assessed_at.isoformat(),
         "security_state": sec_state,
         "security_at": security_at, "security_expires_at": security_expires_at,
         "route_state": route_state, "quote_source": route.get("source"),
@@ -532,8 +543,9 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
                                 .astimezone(timezone.utc)).total_seconds()
             except (TypeError, ValueError, KeyError):
                 security_age = 301
+            from src.pipeline.launch_execution import SECURITY_TTL_SECONDS
             security = (cached_security if isinstance(cached_security, dict)
-                        and security_age <= 300 else security_probe(event))
+                        and security_age <= SECURITY_TTL_SECONDS else security_probe(event))
             route = (route_probe(event) if security.get("state") == "pass"
                      else {"state": "skipped", "reason": "security gate did not pass",
                            "read_only": True})

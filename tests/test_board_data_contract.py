@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -13,6 +14,79 @@ def _launch_event(**overrides):
         "actionable_now": False, "auto_execution_allowed": False,
         "effective_decision": "WATCH",
     }
+    event.update(overrides)
+    return event
+
+
+def _a3_event(**overrides):
+    from src.pipeline.edge_validation import (
+        COHORT_VERSION, LAUNCH_COST_METHOD, PROTOCOL_ID, PROTOCOL_START_AT,
+    )
+    from src.pipeline.execution_cost import discovery_contract, route_contract
+
+    now = datetime.now(timezone.utc)
+    assessment = {
+        "assessment_id": "assessment-1", "kind": "read_only_quote",
+        "opportunity_id": "launch-1", "chain": "solana", "token": "Mint111",
+        "assessed_at": now.isoformat(),
+        "security_state": "pass", "security_at": now.isoformat(),
+        "security_expires_at": (now + timedelta(minutes=5)).isoformat(),
+        "security_gate": {
+            "state": "pass", "checked_at": now.isoformat(),
+            "expires_at": (now + timedelta(minutes=5)).isoformat(),
+            "hard_flags": [], "cautions": [], "unknown_fields": [],
+            "chain": "solana", "token": "Mint111",
+            "source": "GoPlus Solana + finalized Solana RPC",
+            "providers": {
+                "goplus": {"state": "pass", "source": "GoPlus Solana"},
+                "solana_rpc": {
+                    "state": "pass", "source": "Solana finalized getAccountInfo",
+                },
+            },
+        },
+        "route_state": "quoted", "quote_source": "Jupiter", "quote_at": now.isoformat(),
+        "quote_expires_at": (now + timedelta(minutes=1)).isoformat(),
+        "expires_at": (now + timedelta(minutes=1)).isoformat(),
+        "notional_usd": 25.0, "entry_reference_price": 1.1,
+        "invalidation_reference_price": 0.77, "roundtrip_back_usd": 24.55,
+        "execution_probe": {
+            "state": "quoted", "source": "Jupiter", "checked_at": now.isoformat(),
+            "chain": "solana", "token": "Mint111",
+            "read_only": True, "is_real_fill": False, "network_fees_included": True,
+            "notional_usd": 25.0, "roundtrip_loss_pct": 1.8,
+            "roundtrip_back_usd": 24.55,
+            "entry_reference_price": 1.1, "invalidation_reference_price": 0.77,
+        },
+        "cost_contract": route_contract(
+            notional_usd=25, route_loss_pct=1.8, network_fee_pct=0.02,
+            method="complete_board_contract_test",
+        ),
+        "delivery_sla_state": "pass", "is_real_fill": False,
+        "auto_execution_allowed": False,
+    }
+    event = _launch_event(
+        chain="solana", token="Mint111", symbol="T", source="test primary chain stream",
+        state="live", outcome_state="open", is_expired=False,
+        action_level="A3_MANUAL_PROBE", actionable_now=True,
+        effective_decision="SMALL_PROBE", decision="SMALL_PROBE",
+        recorded_decision="SMALL_PROBE", entry_price=1.0,
+        invalidation_price=0.7, liquidity_usd=8_000.0, max_notional_usd=25.0,
+        detected_at=(datetime.fromisoformat(PROTOCOL_START_AT)
+                     + timedelta(seconds=1)).isoformat(),
+        cohort_version=COHORT_VERSION, cost_contract_version=1,
+        cost_pct_est=1.2,
+        cost_contract=discovery_contract(
+            notional_usd=25, modeled_roundtrip_pct=1.2, method=LAUNCH_COST_METHOD,
+        ),
+        evidence_gate={
+            "state": "pass", "lane": "launch", "protocol_id": PROTOCOL_ID,
+            "protocol_state": "pass", "cost_is_real_fill": False,
+            "edge_verdict": "有前向纸面edge迹象", "minimum_n": 100,
+            "measured_n": 200, "look_n_per_arm": 100,
+            "reason": "pre-registered forward look passed in contract fixture",
+        },
+        current_assessment=assessment,
+    )
     event.update(overrides)
     return event
 
@@ -61,6 +135,48 @@ def test_batch_preflight_rejects_nan_without_partial_update(tmp_path, monkeypatc
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_future_generated_clock_cannot_make_quotes_live_for_years(tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    payload = _view(board_export, "launch", {"events": []})
+    generated = datetime(2100, 1, 1, tzinfo=timezone.utc)
+    cadence = timedelta(minutes=payload["refresh_cadence_min"])
+    grace = timedelta(minutes=payload["freshness_grace_min"])
+    payload.update({
+        "generated_at": generated.isoformat(),
+        "next_expected_at": (generated + cadence).isoformat(),
+        "stale_after_at": (generated + cadence + grace).isoformat(),
+    })
+
+    with pytest.raises(ValueError, match="wall clock"):
+        board_export.write_views(launch=payload)
+
+    assert not (tmp_path / "launch.json").exists()
+
+
+def test_a3_expiring_during_render_cannot_cross_the_write_boundary(
+        tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    event = _a3_event()
+    stale = datetime.now(timezone.utc) - timedelta(seconds=61)
+    event["current_assessment"].update({
+        "assessed_at": stale.isoformat(), "quote_at": stale.isoformat(),
+        "quote_expires_at": (stale + timedelta(seconds=60)).isoformat(),
+        "expires_at": (stale + timedelta(seconds=60)).isoformat(),
+    })
+    event["current_assessment"]["execution_probe"]["checked_at"] = stale.isoformat()
+
+    with pytest.raises(ValueError, match="quote_clock_invalid"):
+        board_export.write_views(
+            launch=_view(board_export, "launch", {"events": [event]})
+        )
+
+    assert not (tmp_path / "launch.json").exists()
+
+
 @pytest.mark.parametrize("changes", [
     {"actionable_now": False},
     {"auto_execution_allowed": True},
@@ -70,14 +186,7 @@ def test_false_a3_cannot_cross_public_boundary(tmp_path, monkeypatch, changes):
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    now = datetime.now(timezone.utc)
-    assessment = {
-        "expires_at": (now + timedelta(minutes=1)).isoformat(),
-    }
-    event = _launch_event(
-        action_level="A3_MANUAL_PROBE", actionable_now=True,
-        effective_decision="SMALL_PROBE", current_assessment=assessment,
-    )
+    event = _a3_event()
     event.update(changes)
 
     with pytest.raises(ValueError):
@@ -91,19 +200,244 @@ def test_current_consistent_a3_can_cross_public_boundary(tmp_path, monkeypatch):
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    event = _launch_event(
-        action_level="A3_MANUAL_PROBE", actionable_now=True,
-        effective_decision="SMALL_PROBE",
-        current_assessment={
-            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
-        },
-    )
+    event = _a3_event()
 
     board_export.write_views(
         launch=_view(board_export, "launch", {"events": [event]})
     )
 
     assert (tmp_path / "launch.json").exists()
+
+
+@pytest.mark.parametrize("case", [
+    "assessment_missing", "security_unknown", "route_unknown", "quote_clock_missing",
+    "quote_expired", "security_clock_expired", "entry_missing", "invalidation_negative",
+    "notional_zero", "partial_cost", "evidence_blocked", "delivery_unverified",
+    "auto_execution_unspecified", "assessment_auto_execution", "public_entry_missing",
+    "public_invalidation_missing", "public_notional_missing", "notional_above_cap",
+    "cost_notional_mismatch", "future_quote", "future_security_check",
+    "outside_protocol", "wrong_evidence_protocol", "stale_long_quote",
+    "long_quote_ttl", "long_security_ttl", "assessment_not_read_only",
+    "assessment_id_missing", "quote_source_missing", "public_security_missing",
+    "public_route_missing", "short_side", "chain_missing", "source_unknown",
+    "assessment_opportunity_mismatch", "assessment_clock_missing",
+    "evidence_shape_incomplete", "security_hard_flag", "route_source_mismatch",
+    "route_loss_negative", "route_clock_mismatch", "network_cost_missing",
+    "route_cost_missing", "all_in_cost_above_limit", "discovery_notional_mismatch",
+    "discovery_cost_total_mismatch",
+    "unsupported_chain", "event_not_live", "outcome_invalidated", "absolute_cap",
+    "security_reason", "route_reason", "nested_notional_mismatch",
+    "quote_source_unknown", "current_method_missing", "discovery_real_fill",
+    "discovery_cost_complete",
+    "bsc_jupiter", "solana_zerox", "assessment_asset_mismatch",
+    "security_source_missing", "security_provider_missing", "route_token_mismatch",
+    "liquidity_missing", "cap_liquidity_mismatch", "quote_below_cap",
+])
+def test_incomplete_a3_never_replaces_last_known_good_view(
+        tmp_path, monkeypatch, case):
+    from src.pipeline import board_export
+    from src.pipeline.execution_cost import route_contract
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    old = _view(board_export, "launch", {"events": [_launch_event(symbol="KNOWN_GOOD")]})
+    board_export.write_views(launch=old)
+    before = (tmp_path / "launch.json").read_bytes()
+    before_meta = (tmp_path / "meta.json").read_bytes()
+    event = deepcopy(_a3_event())
+    assessment = event["current_assessment"]
+    if case == "assessment_missing":
+        event["current_assessment"] = None
+    elif case == "security_unknown":
+        assessment["security_state"] = "unknown"
+    elif case == "route_unknown":
+        assessment["route_state"] = "unknown"
+    elif case == "quote_clock_missing":
+        assessment["quote_at"] = None
+    elif case == "quote_expired":
+        assessment["expires_at"] = "2020-01-01T00:00:00+00:00"
+    elif case == "security_clock_expired":
+        assessment["security_expires_at"] = "2020-01-01T00:00:00+00:00"
+    elif case == "entry_missing":
+        assessment["entry_reference_price"] = None
+    elif case == "invalidation_negative":
+        assessment["invalidation_reference_price"] = -1
+    elif case == "notional_zero":
+        assessment["notional_usd"] = 0
+    elif case == "partial_cost":
+        assessment["cost_contract"] = route_contract(
+            notional_usd=25, route_loss_pct=1.8, method="partial_board_contract_test"
+        )
+    elif case == "evidence_blocked":
+        event["evidence_gate"] = {"state": "blocked"}
+    elif case == "delivery_unverified":
+        assessment["delivery_sla_state"] = "unverified"
+    elif case == "auto_execution_unspecified":
+        event["auto_execution_allowed"] = None
+    elif case == "assessment_auto_execution":
+        assessment["auto_execution_allowed"] = True
+    elif case == "public_entry_missing":
+        event["entry_price"] = None
+    elif case == "public_invalidation_missing":
+        event["invalidation_price"] = None
+    elif case == "public_notional_missing":
+        event["max_notional_usd"] = None
+    elif case == "notional_above_cap":
+        assessment["notional_usd"] = 50
+        assessment["cost_contract"] = route_contract(
+            notional_usd=50, route_loss_pct=1.8, network_fee_pct=0.02,
+            method="oversize_board_contract_test",
+        )
+    elif case == "cost_notional_mismatch":
+        assessment["notional_usd"] = 20
+    elif case == "future_quote":
+        assessment["quote_at"] = "2100-01-01T00:00:00+00:00"
+    elif case == "future_security_check":
+        assessment["security_at"] = "2100-01-01T00:00:00+00:00"
+    elif case == "outside_protocol":
+        event["cohort_version"] = 4
+    elif case == "wrong_evidence_protocol":
+        event["evidence_gate"]["protocol_id"] = "retuned-after-outcomes"
+    elif case == "stale_long_quote":
+        assessment["quote_at"] = "2020-01-01T00:00:00+00:00"
+    elif case == "long_quote_ttl":
+        expiry = datetime.now(timezone.utc) + timedelta(minutes=2)
+        assessment["quote_expires_at"] = assessment["expires_at"] = expiry.isoformat()
+    elif case == "long_security_ttl":
+        assessment["security_expires_at"] = (
+            datetime.now(timezone.utc) + timedelta(minutes=10)
+        ).isoformat()
+    elif case == "assessment_not_read_only":
+        assessment["kind"] = "paper_fill"
+    elif case == "assessment_id_missing":
+        assessment["assessment_id"] = None
+    elif case == "quote_source_missing":
+        assessment["quote_source"] = None
+    elif case == "public_security_missing":
+        assessment["security_gate"] = None
+    elif case == "public_route_missing":
+        assessment["execution_probe"] = None
+    elif case == "short_side":
+        event["side"] = "SHORT"
+    elif case == "chain_missing":
+        event["chain"] = ""
+    elif case == "source_unknown":
+        event["source"] = "unknown"
+    elif case == "assessment_opportunity_mismatch":
+        assessment["opportunity_id"] = "another-launch-event"
+    elif case == "assessment_clock_missing":
+        assessment["assessed_at"] = None
+    elif case == "evidence_shape_incomplete":
+        event["evidence_gate"].pop("reason")
+    elif case == "security_hard_flag":
+        assessment["security_gate"]["hard_flags"] = ["is_honeypot"]
+    elif case == "route_source_mismatch":
+        assessment["execution_probe"]["source"] = "unrelated router"
+    elif case == "route_loss_negative":
+        assessment["execution_probe"]["roundtrip_loss_pct"] = -99
+    elif case == "route_clock_mismatch":
+        assessment["execution_probe"]["checked_at"] = "2100-01-01T00:00:00+00:00"
+    elif case == "network_cost_missing":
+        contract = assessment["cost_contract"]
+        contract["components"] = [contract["components"][0]]
+        contract["known_total_pct"] = contract["all_in_total_pct"] = 1.8
+    elif case == "route_cost_missing":
+        contract = assessment["cost_contract"]
+        contract["components"] = [contract["components"][1]]
+        contract["known_total_pct"] = contract["all_in_total_pct"] = 0.02
+    elif case == "all_in_cost_above_limit":
+        assessment["cost_contract"] = route_contract(
+            notional_usd=25, route_loss_pct=5.0, network_fee_pct=0.02,
+            method="over_limit_board_contract_test",
+        )
+    elif case == "discovery_notional_mismatch":
+        from src.pipeline.edge_validation import LAUNCH_COST_METHOD
+        from src.pipeline.execution_cost import discovery_contract
+
+        event["cost_contract"] = discovery_contract(
+            notional_usd=1, modeled_roundtrip_pct=1.2, method=LAUNCH_COST_METHOD,
+        )
+    elif case == "discovery_cost_total_mismatch":
+        event["cost_pct_est"] = 9.9
+    elif case == "unsupported_chain":
+        event["chain"] = "mars"
+    elif case == "event_not_live":
+        event["state"] = "reorg_removed"
+    elif case == "outcome_invalidated":
+        event["outcome_state"] = "invalidated"
+    elif case == "absolute_cap":
+        event["max_notional_usd"] = assessment["notional_usd"] = 1_000
+        assessment["roundtrip_back_usd"] = 982
+        assessment["execution_probe"].update({
+            "notional_usd": 1_000, "roundtrip_back_usd": 982,
+        })
+        assessment["cost_contract"] = route_contract(
+            notional_usd=1_000, route_loss_pct=1.8, network_fee_pct=0.02,
+            method="oversize_absolute_cap_test",
+        )
+        from src.pipeline.edge_validation import LAUNCH_COST_METHOD
+        from src.pipeline.execution_cost import discovery_contract
+
+        event["cost_contract"] = discovery_contract(
+            notional_usd=1_000, modeled_roundtrip_pct=1.2, method=LAUNCH_COST_METHOD,
+        )
+    elif case == "security_reason":
+        assessment["security_gate"]["reason"] = "honeypot detected"
+    elif case == "route_reason":
+        assessment["execution_probe"]["reason"] = "no sell route"
+    elif case == "nested_notional_mismatch":
+        assessment["execution_probe"]["notional_usd"] = 999
+    elif case == "quote_source_unknown":
+        assessment["quote_source"] = assessment["execution_probe"]["source"] = "unknown"
+    elif case == "current_method_missing":
+        assessment["cost_contract"]["method"] = ""
+    elif case == "discovery_real_fill":
+        event["cost_contract"]["is_real_fill"] = True
+    elif case == "discovery_cost_complete":
+        contract = event["cost_contract"]
+        contract["components"][1] = {
+            "name": "network_fee", "pct": 0.0, "status": "included",
+        }
+        contract["all_in_total_pct"] = contract["known_total_pct"] = 1.2
+        contract["completeness"] = "complete"
+    elif case == "bsc_jupiter":
+        event["chain"] = assessment["chain"] = "bsc"
+        assessment["security_gate"]["chain"] = "bsc"
+        assessment["execution_probe"]["chain"] = "bsc"
+    elif case == "solana_zerox":
+        assessment["quote_source"] = assessment["execution_probe"]["source"] = (
+            "0x indicative price v2"
+        )
+    elif case == "assessment_asset_mismatch":
+        assessment["token"] = "AnotherMint"
+    elif case == "security_source_missing":
+        assessment["security_gate"]["source"] = None
+    elif case == "security_provider_missing":
+        assessment["security_gate"]["providers"] = {}
+    elif case == "route_token_mismatch":
+        assessment["execution_probe"]["token"] = "AnotherMint"
+    elif case == "liquidity_missing":
+        event["liquidity_usd"] = None
+    elif case == "cap_liquidity_mismatch":
+        event["liquidity_usd"] = 100_000
+    elif case == "quote_below_cap":
+        assessment["notional_usd"] = 1
+        assessment["roundtrip_back_usd"] = 0.982
+        assessment["cost_contract"] = route_contract(
+            notional_usd=1, route_loss_pct=1.8, network_fee_pct=0.02,
+            method="undersized_quote_test",
+        )
+        assessment["execution_probe"].update({
+            "notional_usd": 1, "roundtrip_back_usd": 0.982,
+        })
+
+    with pytest.raises(ValueError):
+        board_export.write_views(
+            launch=_view(board_export, "launch", {"events": [event]})
+        )
+
+    assert (tmp_path / "launch.json").read_bytes() == before
+    assert (tmp_path / "meta.json").read_bytes() == before_meta
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkeypatch):
