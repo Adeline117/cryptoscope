@@ -114,6 +114,8 @@ def _valid_body(view: str) -> dict:
         "perps": [{"symbol": "BTC"}],
         "carry": [{"symbol": "ETH"}],
         "cascade_events": [_cascade_event()],
+        "carry_paper": {},
+        "carry_source_health": {"paper": {"state": "partial"}},
     }
 
 

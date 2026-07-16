@@ -86,7 +86,13 @@ async def test_perps_render_failure_preserves_last_good_view(tmp_path, monkeypat
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
     old = board_export._envelope(
-        {"perps": [{"symbol": "OLD"}], "carry": [], "cascade_events": []},
+        {
+            "perps": [{"symbol": "OLD"}],
+            "carry": [],
+            "cascade_events": [],
+            "carry_paper": {},
+            "carry_source_health": {"paper": {"state": "partial"}},
+        },
         view="perps",
     )
     board_export.write_views(perps=old)
