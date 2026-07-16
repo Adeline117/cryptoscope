@@ -26,6 +26,7 @@ PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
 SUPPORTED_CHAINS = set(SUPPORTED_LAUNCH_CHAINS)
 MAX_CANDIDATES = 30
 MAX_EXECUTION_ASSESSMENTS = 5
+ENTRY_EVIDENCE_COHORT_VERSION = 6
 
 
 def _num(value, default=0.0) -> float:
@@ -79,11 +80,13 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     now = now or datetime.now(timezone.utc)
     base = pair.get("baseToken") or {}
     chain, token = pair.get("chainId"), base.get("address")
+    pair_address = pair.get("pairAddress")
     price = _num(pair.get("priceUsd"))
     liq = _num((pair.get("liquidity") or {}).get("usd"))
     fdv = _num(pair.get("fdv") or pair.get("marketCap"))
     created_ms = pair.get("pairCreatedAt")
-    if chain not in SUPPORTED_CHAINS or not token or price <= 0 or not created_ms:
+    if (chain not in SUPPORTED_CHAINS or not token or not pair_address
+            or price <= 0 or not created_ms):
         return None
     try:
         event_at = datetime.fromtimestamp(float(created_ms) / 1000, tz=timezone.utc)
@@ -111,7 +114,6 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     from src.pipeline.slippage import price_impact
     roundtrip_cost = round(2 * price_impact(liq, max_notional) + 0.60, 3)
     from src.pipeline.execution_cost import discovery_contract
-    from src.pipeline.edge_validation import COHORT_VERSION
     cost_contract = discovery_contract(
         notional_usd=max_notional, modeled_roundtrip_pct=roundtrip_cost,
         method="constant_product_roundtrip_plus_0.60pct_buffer_v1")
@@ -122,21 +124,33 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
         reasons.append(f"5m 买/卖 {buys}/{sells}")
     if boost:
         reasons.append(f"推广 {boost:.0f}(仅作注意力，不是买入理由)")
+    observed_at = now.astimezone(timezone.utc).isoformat()
     return {
         "lane": "launch", "chain": chain, "token": token,
         "symbol": base.get("symbol") or "?", "name": base.get("name") or "",
-        "source": source, "event_at": event_at.isoformat(), "state": "live",
+        "source": source, "event_at": event_at.isoformat(), "detected_at": observed_at,
+        "decision_at": observed_at, "state": "live",
         "decision": decision, "entry_price": price,
+        "entry_observation": {
+            "version": 1, "provider": "dexscreener_token_pairs_v1",
+            "observed_at": observed_at, "chain": chain,
+            "base_token": token,
+            "quote_token": (pair.get("quoteToken") or {}).get("address"),
+            "pair": pair_address, "price": price, "currency": "usd",
+            "field": "priceUsd", "identity_verified": True,
+        },
         "invalidation_price": round(price * 0.70, 12),
         "max_notional_usd": max_notional, "age_min": round(age_min, 1),
         "roundtrip_cost_pct_est": roundtrip_cost,
         "cost_model": "constant_product_roundtrip_plus_0.60pct_buffer",
-        # v5 starts a fresh protocol after v4's shared-calendar attrition flaw was
-        # found. Earlier versions remain descriptive and can never be relabeled.
-        "cost_contract": cost_contract, "cohort_version": COHORT_VERSION,
+        # v6 isolates the new decision-clock/exact-pool evidence contract.  The edge
+        # validator opens it only at its separately committed future boundary; these
+        # rows can never leak into or retroactively rewrite the frozen v5 cohort.
+        "cost_contract": cost_contract,
+        "cohort_version": ENTRY_EVIDENCE_COHORT_VERSION,
         "fdv": fdv, "liquidity_usd": liq, "volume_m5": vol5,
         "buys_m5": buys, "sells_m5": sells, "flow_ratio": round(flow_ratio, 2),
-        "boost_active": boost, "pair": pair.get("pairAddress"), "url": pair.get("url"),
+        "boost_active": boost, "pair": pair_address, "url": pair.get("url"),
         "reasons": reasons,
     }
 
@@ -481,7 +495,7 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
 def refresh_quotes(*, now: datetime | None = None, assessor=None,
                    max_candidates: int = 1, refresh_before_seconds: int = 30,
                    retry_after_seconds: int = 60) -> dict:
-    """Refresh a bounded set of protocol-eligible v5 quotes without rediscovery.
+    """Refresh a bounded set of evidence-bound quotes without rediscovery.
 
     Discovery remains a three-minute event job. This fast path only appends current
     read-only measurements and never changes the frozen cohort, price, or cost.
@@ -491,8 +505,17 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     from src.pipeline.edge_validation import is_protocol_event
 
-    rows = [row for row in ledger.outcome_rows(open_only=True)
-            if row.get("decision") == "SMALL_PROBE" and is_protocol_event(row)]
+    rows = [
+        row for row in ledger.outcome_rows(open_only=True)
+        if row.get("decision") == "SMALL_PROBE"
+        and (
+            is_protocol_event(row)
+            or (
+                row.get("cohort_version") == ENTRY_EVIDENCE_COHORT_VERSION
+                and isinstance(row.get("entry_observation"), dict)
+            )
+        )
+    ]
     recent = []
     for row in rows:
         try:

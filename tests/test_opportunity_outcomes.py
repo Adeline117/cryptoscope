@@ -29,6 +29,49 @@ def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE
     return item
 
 
+def _launch_with_entry(detected_at: str, observed_at: str, token: str = "token") -> dict:
+    item = _launch(detected_at, token, protocol=True)
+    item.update({
+        "decision_at": observed_at,
+        "entry_observation": {
+            "version": 1,
+            "provider": "dexscreener_token_pairs_v1",
+            "observed_at": observed_at,
+            "chain": "solana",
+            "base_token": token,
+            "quote_token": "So11111111111111111111111111111111111111112",
+            "pair": f"pool-{token}",
+            "price": 100.0,
+            "currency": "usd",
+            "field": "priceUsd",
+            "identity_verified": True,
+        },
+    })
+    return item
+
+
+def _observed_price(row: dict, target: datetime, *, price: float = 110.0,
+                    **overrides) -> dict:
+    item = {
+        "version": 1,
+        "provider": "geckoterminal_public_v2",
+        "chain": row["chain"],
+        "token": row["token"],
+        "token_side": "base",
+        "pool": row["entry_observation"]["pair"],
+        "currency": "usd",
+        "field": "close",
+        "target_at": target.isoformat(),
+        "candle_at": target.isoformat(),
+        "distance_seconds": 0,
+        "price": price,
+        "retrieved_at": (target + timedelta(minutes=5)).isoformat(),
+        "identity_verified": True,
+    }
+    item.update(overrides)
+    return item
+
+
 def _carry_proxy_outcome(*, net_proxy: float | None = 0.25,
                          exit_book_impact: float | None = 0.05) -> dict:
     from src.pipeline.carry_paper import (
@@ -85,6 +128,111 @@ def test_resolver_settles_one_horizon_per_event_and_preserves_entry(ledger):
     assert len(calls) == 2
     assert row["entry_price"] == 100.0
     assert row["id"] == ident
+
+
+def test_resolver_uses_entry_observation_clock_and_append_only_price_evidence(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    detected = now - timedelta(hours=26)
+    observed = now - timedelta(hours=23)
+    ident, _ = ledger.record(_launch_with_entry(
+        detected.isoformat(), observed.isoformat(), "anchored",
+    ))
+    ledger.save_outcome(ident, {
+        "horizons": {"1h": {"net_return_pct_est": 0}},
+    })
+    calls = []
+
+    not_due = oo.resolve(
+        now=now,
+        price_at=lambda row, when: calls.append(when) or _observed_price(row, when),
+    )
+    assert not_due["lookups"] == 0
+    assert calls == []
+
+    resolved_at = now + timedelta(hours=2)
+    got = oo.resolve(
+        now=resolved_at,
+        price_at=lambda row, when: calls.append(when) or _observed_price(row, when),
+    )
+    assert got["settled"] == 1
+    assert calls == [observed + timedelta(hours=24)]
+
+    row = ledger.outcome_rows()[0]
+    point = row["outcome"]["horizons"]["24h"]
+    observation = row["price_observations"]["24h"]
+    assert point["outcome_anchor_at"] == observed.isoformat()
+    assert point["target_at"] == (observed + timedelta(hours=24)).isoformat()
+    assert point["price_observation_id"] == observation["observation_id"]
+    assert observation["opportunity_id"] == ident
+    assert observation["pool"] == "pool-anchored"
+    assert observation["token"] == "anchored"
+
+
+def test_resolver_reuses_appended_price_after_outcome_write_interruption(
+        ledger, monkeypatch):
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    observed = now - timedelta(hours=25)
+    ident, _ = ledger.record(_launch_with_entry(
+        (observed - timedelta(minutes=9)).isoformat(), observed.isoformat(), "resume",
+    ))
+    row = ledger.outcome_rows()[0]
+    target = observed + timedelta(hours=24)
+    evidence = _observed_price(row, target)
+    observation_id, inserted = ledger.append_price_observation(ident, "24h", evidence)
+    assert inserted is True
+
+    def should_not_fetch(_row, _when):
+        raise AssertionError("immutable observation should be reused")
+
+    got = oo.resolve(now=now, price_at=should_not_fetch)
+    point = ledger.outcome_rows()[0]["outcome"]["horizons"]["24h"]
+    assert got["settled"] == 1
+    assert point["price_observation_id"] == observation_id
+
+
+def test_resolver_rejects_unbound_typed_price_instead_of_settling(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    observed = now - timedelta(hours=25)
+    ledger.record(_launch_with_entry(
+        (observed - timedelta(minutes=3)).isoformat(), observed.isoformat(), "strict",
+    ))
+
+    def wrong_pool(row, when):
+        return _observed_price(row, when, pool="attacker-selected-pool", price=999_999)
+
+    got = oo.resolve(now=now, price_at=wrong_pool)
+    row = ledger.outcome_rows()[0]
+    assert got["settled"] == 0
+    assert "24h" not in (row["outcome"].get("horizons") or {})
+    assert "pool disagrees" in row["outcome"]["price_observation_rejected"]["24h"]["reason"]
+    assert row["price_observations"] == {}
+
+
+def test_default_launch_price_reader_uses_the_frozen_pair(monkeypatch):
+    from src.pipeline import opportunity_outcomes as oo
+    from src.pipeline import outcome_tracker
+
+    when = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    row = _launch_with_entry(
+        (when - timedelta(hours=1)).isoformat(), when.isoformat(), "exact-token",
+    )
+    calls = []
+    monkeypatch.setattr(
+        outcome_tracker,
+        "_price_observation_at",
+        lambda token, chain, pool, target: calls.append(
+            (token, chain, pool, target)
+        ) or {"price": 1},
+    )
+
+    assert oo._default_price_at(row, when) == {"price": 1}
+    assert calls == [("exact-token", "solana", "pool-exact-token", when)]
 
 
 def test_short_cascade_return_has_correct_sign(ledger):

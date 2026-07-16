@@ -41,7 +41,8 @@ MIN_N = 20
 MAX_PRICE_LOOKUPS = 20       # hard network/resource budget per hourly resolver run
 UNRESOLVABLE_DAYS = 21       # 7d horizon plus a generous historical-data grace period
 SUPPORTED_LANES = {"launch", "cascade"}
-PriceAt = Callable[[dict, datetime], float | None]
+PriceResult = float | dict | None
+PriceAt = Callable[[dict, datetime], PriceResult]
 
 
 def _aware(value: str) -> datetime:
@@ -111,8 +112,29 @@ def _hyperliquid_price_at(row: dict, when: datetime) -> float | None:
         return None
 
 
-def _default_price_at(row: dict, when: datetime) -> float | None:
+def _outcome_anchor(row: dict) -> datetime:
+    """Return the immutable price-observation clock used for every horizon.
+
+    New events are anchored to the actual decision-time quote.  Rows created before
+    that evidence contract remain descriptive and retain their historical detection
+    clock; a malformed supplied observation never silently falls back to that clock.
+    """
+    if row.get("entry_observation") is not None:
+        normalized = opportunity_ledger.validate_entry_observation(row)
+        if not normalized:
+            raise ValueError("entry observation is empty")
+        return _aware(normalized["observed_at"])
+    return _aware(row["detected_at"])
+
+
+def _default_price_at(row: dict, when: datetime) -> PriceResult:
     if row.get("lane") == "launch":
+        observation = row.get("entry_observation")
+        if observation is not None:
+            from src.pipeline.outcome_tracker import _price_observation_at
+            return _price_observation_at(
+                row.get("token"), row.get("chain"), observation.get("pair"), when,
+            )
         from src.pipeline.outcome_tracker import _price_at
         return _price_at(row.get("token"), row.get("chain"), when,
                          raise_rate_limit=True)
@@ -121,18 +143,27 @@ def _default_price_at(row: dict, when: datetime) -> float | None:
     return None
 
 
-def _settled(entry: float, price: float, direction: str, cost_pct: float) -> dict:
+def _settled(entry: float, price: float, direction: str, cost_pct: float, *,
+             anchor_at: datetime | None = None, target_at: datetime | None = None,
+             observation_id: str | None = None) -> dict:
     raw = (price / entry - 1.0) * 100
     gross = -raw if direction == "short" else raw
     net = gross - cost_pct
-    return {"price": price, "gross_return_pct": round(gross, 4),
-            "net_return_pct_est": round(net, 4), "positive_after_cost": net > 0}
+    result = {"price": price, "gross_return_pct": round(gross, 4),
+              "net_return_pct_est": round(net, 4), "positive_after_cost": net > 0}
+    if anchor_at is not None:
+        result["outcome_anchor_at"] = anchor_at.isoformat()
+    if target_at is not None:
+        result["target_at"] = target_at.isoformat()
+    if observation_id is not None:
+        result["price_observation_id"] = observation_id
+    return result
 
 
 def _next_due_task(row: dict, now: datetime) -> dict | None:
     """Choose one due horizon for an event, prioritizing the 24h evidence gate."""
     try:
-        t0 = _aware(row["detected_at"])
+        t0 = _outcome_anchor(row)
     except (TypeError, ValueError, KeyError):
         return None
     outcome = row.get("outcome") or {}
@@ -205,7 +236,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         row, name, hours = task["row"], task["name"], task["hours"]
         try:
             entry = float(row.get("entry_price") or 0)
-            t0 = _aware(row["detected_at"])
+            t0 = _outcome_anchor(row)
         except (TypeError, ValueError, KeyError):
             continue
         if entry <= 0:
@@ -217,31 +248,69 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         outcome.update({"version": 1, "direction": _direction(row),
                         "cost_pct_est": cost_pct, "cost_model": cost_model,
                         "cost_is_real_fill": False, "horizons": horizons})
-        lookups += 1
-        by_lane[row["lane"]] = by_lane.get(row["lane"], 0) + 1
-        by_horizon[name] = by_horizon.get(name, 0) + 1
-        outcome["last_attempt_at"] = now.isoformat()
-        attempted_at = dict(outcome.get("attempted_at") or {})
-        attempted_at[name] = now.isoformat()
-        outcome["attempted_at"] = attempted_at
-        attempts = dict(outcome.get("attempts") or {})
-        attempts[name] = int(attempts.get(name) or 0) + 1
-        outcome["attempts"] = attempts
+        target_at = t0 + timedelta(hours=hours)
+        observation = (row.get("price_observations") or {}).get(name)
+        if observation is None:
+            lookups += 1
+            by_lane[row["lane"]] = by_lane.get(row["lane"], 0) + 1
+            by_horizon[name] = by_horizon.get(name, 0) + 1
+            outcome["last_attempt_at"] = now.isoformat()
+            attempted_at = dict(outcome.get("attempted_at") or {})
+            attempted_at[name] = now.isoformat()
+            outcome["attempted_at"] = attempted_at
+            attempts = dict(outcome.get("attempts") or {})
+            attempts[name] = int(attempts.get(name) or 0) + 1
+            outcome["attempts"] = attempts
         try:
-            price = price_at(row, t0 + timedelta(hours=hours))
+            price_result = observation if observation is not None else price_at(row, target_at)
         except Exception as exc:
             from src.pipeline.evidence import OhlcvRateLimited
-            if not isinstance(exc, OhlcvRateLimited):
+            from src.pipeline.outcome_tracker import PriceObservationInvalid
+            if isinstance(exc, PriceObservationInvalid):
+                rejected = dict(outcome.get("price_observation_rejected") or {})
+                rejected[name] = {"at": now.isoformat(), "reason": str(exc)[:160]}
+                outcome["price_observation_rejected"] = rejected
+                price_result = None
+            elif not isinstance(exc, OhlcvRateLimited):
                 raise
-            source_backoff = str(exc)[:120]
-            outcome["price_source_backoff"] = {
-                "at": now.isoformat(), "horizon": name, "reason": source_backoff}
-            outcome["updated_at"] = now.isoformat()
-            opportunity_ledger.save_outcome(row["id"], outcome, "open")
-            break
+            else:
+                source_backoff = str(exc)[:120]
+                outcome["price_source_backoff"] = {
+                    "at": now.isoformat(), "horizon": name, "reason": source_backoff}
+                outcome["updated_at"] = now.isoformat()
+                opportunity_ledger.save_outcome(row["id"], outcome, "open")
+                break
         state = "open"
-        if price is not None and price > 0:
-            horizons[name] = _settled(entry, float(price), _direction(row), cost_pct)
+        price = None
+        observation_id = None
+        if isinstance(price_result, dict):
+            try:
+                price = float(price_result.get("price"))
+            except (TypeError, ValueError, OverflowError):
+                price = None
+            if row.get("entry_observation") is not None:
+                try:
+                    if observation is not None:
+                        observation_id = observation.get("observation_id")
+                    else:
+                        observation_id, _inserted = opportunity_ledger.append_price_observation(
+                            row["id"], name, price_result,
+                        )
+                except (TypeError, ValueError) as exc:
+                    price = None
+                    rejected = dict(outcome.get("price_observation_rejected") or {})
+                    rejected[name] = {"at": now.isoformat(), "reason": str(exc)[:160]}
+                    outcome["price_observation_rejected"] = rejected
+        elif price_result is not None and row.get("entry_observation") is None:
+            try:
+                price = float(price_result)
+            except (TypeError, ValueError, OverflowError):
+                price = None
+        if price is not None and math.isfinite(price) and price > 0:
+            horizons[name] = _settled(
+                entry, price, _direction(row), cost_pct, anchor_at=t0,
+                target_at=target_at, observation_id=observation_id,
+            )
             settled += 1
         elif (now - t0).total_seconds() >= UNRESOLVABLE_DAYS * 86400:
             # Retire this horizon, not the whole event: a missing 1h candle must not
@@ -545,7 +614,7 @@ def _horizon_24h_progress(rows: list[dict], *, now: datetime | None = None) -> d
     overdue = []
     for row in rows:
         try:
-            due_at = _aware(row["detected_at"]) + timedelta(hours=24)
+            due_at = _outcome_anchor(row) + timedelta(hours=24)
         except (TypeError, ValueError, KeyError):
             continue
         outcome = row.get("outcome") or {}

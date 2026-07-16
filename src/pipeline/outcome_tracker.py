@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import math
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -23,6 +24,10 @@ import structlog
 from src.config import DATA_DIR
 
 logger = structlog.get_logger()
+
+
+class PriceObservationInvalid(RuntimeError):
+    """The historical response cannot prove the requested token/pool identity."""
 
 DB_PATH = DATA_DIR / "alert_outcomes.db"
 HORIZONS_H = [4, 24]            # score price move 4h and 24h after the alert
@@ -161,6 +166,85 @@ def _price_at(token: str, chain: str, when: datetime, *,
             raise
         logger.debug("price_at_failed", token=token, error=str(e)[:60])
     return None
+
+
+def _price_observation_at(token: str, chain: str, pool: str, when: datetime, *,
+                          retrieved_at: datetime | None = None,
+                          max_distance_seconds: int = 2 * 3600) -> dict | None:
+    """Return auditable USD evidence from the frozen pool at or before a horizon.
+
+    Hourly candle timestamps identify the interval open, while the value used here is
+    its close.  Only a fully closed candle whose close is no later than the target is
+    accepted, preventing future data from leaking into a nominal 24-hour result.
+    """
+    from src.pipeline.evidence import _ohlcv_evidence
+
+    target = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+    target = target.astimezone(timezone.utc)
+    request_started = datetime.now(timezone.utc)
+    claimed_retrieval = retrieved_at
+    if claimed_retrieval is not None:
+        claimed_retrieval = (claimed_retrieval if claimed_retrieval.tzinfo else
+                             claimed_retrieval.replace(tzinfo=timezone.utc))
+        claimed_retrieval = claimed_retrieval.astimezone(timezone.utc)
+    if (claimed_retrieval or request_started) < target:
+        return None
+    payload = _ohlcv_evidence(
+        chain, pool, token, before=int((target + timedelta(hours=1)).timestamp()),
+        timeframe="hour",
+    )
+    same = (lambda left, right: left == right) if chain == "solana" else (
+        lambda left, right: left.lower() == right.lower())
+    try:
+        request_identity_matches = (
+            same(str(payload.get("pool")), pool)
+            and same(str(payload.get("token")), token)
+        )
+    except (AttributeError, TypeError):
+        request_identity_matches = False
+    if not request_identity_matches:
+        raise PriceObservationInvalid("historical response request identity mismatch")
+    retrieved = claimed_retrieval or datetime.now(timezone.utc)
+    meta = payload.get("meta") or {}
+    identities = []
+    for side in ("base", "quote"):
+        item = meta.get(side) or {}
+        address = item.get("address") if isinstance(item, dict) else None
+        if address:
+            identities.append((side, str(address)))
+    matched_side = next((side for side, address in identities
+                         if same(address, token)), None)
+    if matched_side is None:
+        raise PriceObservationInvalid("GeckoTerminal OHLCV token identity mismatch")
+
+    candidates = []
+    for raw in payload.get("candles") or []:
+        try:
+            opened = datetime.fromtimestamp(int(raw[0]), tz=timezone.utc)
+            closed = opened + timedelta(hours=1)
+            price = float(raw[4])
+        except (IndexError, TypeError, ValueError, OSError, OverflowError):
+            continue
+        if (not math.isfinite(price) or price <= 0 or closed > target
+                or closed > retrieved):
+            continue
+        distance = int((target - closed).total_seconds())
+        if distance > max(0, int(max_distance_seconds)):
+            continue
+        candidates.append((abs(distance), -opened.timestamp(), opened, closed,
+                           distance, price))
+    if not candidates:
+        return None
+    _distance, _newest, opened, closed, distance, price = min(candidates)
+    return {
+        "version": 1, "provider": "geckoterminal_public_v2",
+        "network": payload.get("network"), "chain": chain, "token": token,
+        "token_side": matched_side, "pair": pool, "pool": pool, "currency": "usd",
+        "field": "close", "target_at": target.isoformat(),
+        "candle_open_at": opened.isoformat(), "candle_at": closed.isoformat(),
+        "distance_seconds": distance, "price": price,
+        "retrieved_at": retrieved.isoformat(), "identity_verified": True,
+    }
 
 
 def resolve_outcomes() -> int:

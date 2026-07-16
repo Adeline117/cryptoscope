@@ -130,11 +130,87 @@ def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
 # ---------------------------------------------------------------- base rate
 
 _CANDLE_CACHE: dict = {}
+_CANDLE_EVIDENCE_CACHE: dict = {}
 _POOL_CACHE: dict = {}
 
 
 class OhlcvRateLimited(RuntimeError):
     """The shared historical-price source requested a scheduler-level backoff."""
+
+
+def _ohlcv_evidence(chain: str, pool: str, token: str, before: int,
+                    timeframe: str = "hour") -> dict:
+    """Fetch one exact-pool, exact-token USD candle page with response identity.
+
+    The legacy scorer only needed a list of candles. Forward outcome validation also
+    needs to prove which token side was priced and which pool supplied it. GeckoTerminal
+    supports a token address selector and returns base/quote metadata, so retain that
+    response instead of silently re-selecting a pool at settlement time.
+    """
+    import json
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    net = {"bsc": "bsc", "ethereum": "eth", "base": "base",
+           "solana": "solana"}.get(chain)
+    if not net:
+        raise ValueError(f"unsupported chain {chain}")
+    if not all(isinstance(value, str) and value.strip()
+               for value in (pool, token)):
+        raise ValueError("exact OHLCV evidence requires pool and token")
+    if timeframe != "hour":
+        raise ValueError("forward outcome evidence only supports hourly candles")
+    pool = pool.strip()
+    token = token.strip()
+    identity = (lambda value: value) if chain == "solana" else (
+        lambda value: value.lower()
+    )
+    key = (chain, identity(pool), identity(token), int(before), timeframe)
+    if key in _CANDLE_EVIDENCE_CACHE:
+        return _CANDLE_EVIDENCE_CACHE[key]
+    query = urllib.parse.urlencode({
+        "aggregate": 1, "limit": 1000, "before_timestamp": int(before),
+        "currency": "usd", "token": token,
+    })
+    encoded_pool = urllib.parse.quote(pool, safe="")
+    url = (f"https://api.geckoterminal.com/api/v2/networks/{net}/pools/{encoded_pool}"
+           f"/ohlcv/{timeframe}?{query}")
+    last = None
+    for attempt in range(4):
+        try:
+            request = urllib.request.Request(
+                url, headers={"User-Agent": "CryptoScope/OutcomeEvidence/1.0",
+                              "Accept": "application/json;version=20230302"})
+            with urllib.request.urlopen(request, timeout=25) as response:
+                payload = json.load(response)
+            if not isinstance(payload, dict):
+                raise RuntimeError("GeckoTerminal OHLCV returned a non-object")
+            candles = ((payload.get("data") or {}).get("attributes") or {}).get(
+                "ohlcv_list") or []
+            meta = payload.get("meta") or {}
+            if not isinstance(candles, list) or not isinstance(meta, dict):
+                raise RuntimeError("GeckoTerminal OHLCV evidence is malformed")
+            result = {"candles": candles, "meta": meta, "network": net,
+                      "pool": pool, "token": token, "currency": "usd",
+                      "timeframe": timeframe}
+            _CANDLE_EVIDENCE_CACHE[key] = result
+            time.sleep(2.2)
+            return result
+        except urllib.error.HTTPError as error:
+            try:
+                error.close()
+            except Exception:
+                pass
+            if error.code == 429:
+                raise OhlcvRateLimited("GeckoTerminal OHLCV rate limited") from error
+            last = error
+            time.sleep(6 * (attempt + 1))
+        except Exception as error:
+            last = error
+            time.sleep(6 * (attempt + 1))
+    raise RuntimeError(f"ohlcv evidence unavailable after retries: {str(last)[:60]}")
 
 
 def _ohlcv(chain: str, pool: str, before: int | None = None,

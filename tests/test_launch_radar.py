@@ -23,8 +23,22 @@ def test_qualify_emits_small_probe_only_for_fresh_tradeable_flow():
     assert got["decision"] == "SMALL_PROBE"
     assert got["invalidation_price"] == pytest.approx(0.00007)
     assert got["max_notional_usd"] == 60  # 0.3% of pool, not an unbounded suggestion
-    assert got["cohort_version"] == 5
+    assert got["cohort_version"] == 6
     assert got["cost_contract"]["purpose"] == "discovery_outcome"
+    assert got["detected_at"] == got["decision_at"]
+    assert got["entry_observation"] == {
+        "version": 1,
+        "provider": "dexscreener_token_pairs_v1",
+        "observed_at": got["decision_at"],
+        "chain": "solana",
+        "base_token": "Token",
+        "quote_token": None,
+        "pair": "pool",
+        "price": 0.0001,
+        "currency": "usd",
+        "field": "priceUsd",
+        "identity_verified": True,
+    }
 
 
 def test_probe_and_watch_freeze_the_same_discovery_cost_method():
@@ -206,6 +220,8 @@ def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
     row = ol.active("launch", now=now)[0]
     assert row["primary_evidence"]["signature"] == "sig-primary"
     assert row["source"] == "Pump.fun standard logs + DEX Screener pool"
+    assert row["entry_observation"]["observed_at"] == now.isoformat()
+    assert row["detected_at"] <= row["entry_observation"]["observed_at"]
     c = stream._conn()
     try:
         state = c.execute("SELECT qualification_state,ledger_event_id FROM raw_launches").fetchone()
