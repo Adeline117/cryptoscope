@@ -54,49 +54,170 @@ class CollectionResult(BaseModel):
 # --- Cache ---
 
 CACHE_DB = DATA_DIR / "cache.db"
+CACHE_CLEANUP_BATCH_SIZE = 250
+MAX_RESPONSE_CACHE_BODY_BYTES = 4 * 1024 * 1024
 
 
 class CollectorCache:
     """SQLite-based cache to avoid re-fetching and enable deduplication."""
+
+    # Collector instances are created independently but commonly point at the
+    # same file. Serialize cold schema setup inside this process; SQLite's
+    # busy_timeout remains the cross-process backstop.
+    _init_locks: dict[str, asyncio.Lock] = {}
 
     def __init__(self, db_path: Path = CACHE_DB):
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
 
     async def init(self) -> None:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = await aiosqlite.connect(str(self.db_path))
-        # WAL + busy_timeout: many collectors share this cache file under the
-        # scheduler; without these, concurrent access raises "database is locked".
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA busy_timeout=10000")
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS seen_items (
-                item_hash TEXT PRIMARY KEY,
-                source_id TEXT NOT NULL,
-                item_id TEXT NOT NULL,
-                url TEXT,
-                first_seen_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL
+        lock_key = str(self.db_path.resolve())
+        init_lock = self._init_locks.setdefault(lock_key, asyncio.Lock())
+        async with init_lock:
+            if self._db is not None:
+                return
+
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            db = await aiosqlite.connect(str(self.db_path))
+            try:
+                # Set the timeout before asking SQLite to switch journal mode so
+                # simultaneous collector startups wait rather than fail fast.
+                await db.execute("PRAGMA busy_timeout=10000")
+                await db.execute("PRAGMA journal_mode=WAL")
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS seen_items (
+                        item_hash TEXT PRIMARY KEY,
+                        source_id TEXT NOT NULL,
+                        item_id TEXT NOT NULL,
+                        url TEXT,
+                        first_seen_at TEXT NOT NULL,
+                        last_seen_at TEXT NOT NULL
+                    )
+                """)
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS response_cache (
+                        cache_key TEXT PRIMARY KEY,
+                        response_body TEXT NOT NULL,
+                        cached_at TEXT NOT NULL,
+                        ttl_seconds INTEGER NOT NULL
+                    )
+                """)
+                await db.commit()
+                await self._delete_expired_responses(db)
+            except Exception:
+                await db.close()
+                raise
+            self._db = db
+
+    @staticmethod
+    def _expiration_reason(
+        cached_at: Any, ttl_seconds: Any, now: datetime
+    ) -> str | None:
+        """Return why a cache row is unusable, or None while it is fresh."""
+        try:
+            raw_cached_at = cached_at.strip()
+            if raw_cached_at.endswith(("Z", "z")):
+                raw_cached_at = f"{raw_cached_at[:-1]}+00:00"
+            cached_time = datetime.fromisoformat(raw_cached_at)
+            if cached_time.tzinfo is None:
+                # Backward compatibility for rows written before timestamps
+                # were explicitly timezone-aware.
+                cached_time = cached_time.replace(tzinfo=timezone.utc)
+            else:
+                cached_time = cached_time.astimezone(timezone.utc)
+        except (AttributeError, TypeError, ValueError):
+            return "invalid_cached_at"
+
+        try:
+            ttl = int(ttl_seconds)
+        except (TypeError, ValueError):
+            return "invalid_ttl"
+        if ttl <= 0:
+            return "invalid_ttl"
+
+        if cached_time > now:
+            return "future_cached_at"
+        if (now - cached_time).total_seconds() >= ttl:
+            return "expired"
+        return None
+
+    async def _delete_expired_responses(
+        self, db: aiosqlite.Connection
+    ) -> None:
+        """Remove unusable responses in bounded transactions, never VACUUMing."""
+        last_key: str | None = None
+        deleted = 0
+        invalid = 0
+
+        while True:
+            if last_key is None:
+                sql = """
+                    SELECT cache_key, cached_at, ttl_seconds
+                    FROM response_cache
+                    ORDER BY cache_key
+                    LIMIT ?
+                """
+                params: tuple[Any, ...] = (CACHE_CLEANUP_BATCH_SIZE,)
+            else:
+                sql = """
+                    SELECT cache_key, cached_at, ttl_seconds
+                    FROM response_cache
+                    WHERE cache_key > ?
+                    ORDER BY cache_key
+                    LIMIT ?
+                """
+                params = (last_key, CACHE_CLEANUP_BATCH_SIZE)
+
+            async with db.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+            if not rows:
+                break
+
+            last_key = rows[-1][0]
+            # Sample after SELECT so a legitimate concurrent refresh written
+            # after cleanup started is not mistaken for a future-dated row.
+            now = datetime.now(timezone.utc)
+            stale_rows = []
+            for cache_key, cached_at, ttl_seconds in rows:
+                reason = self._expiration_reason(cached_at, ttl_seconds, now)
+                if reason is not None:
+                    stale_rows.append((cache_key, cached_at, ttl_seconds))
+                    if reason != "expired":
+                        invalid += 1
+
+            if stale_rows:
+                before = db.total_changes
+                # Include the observed clock and TTL in the predicate. If a
+                # concurrent writer refreshed the key, its new row survives.
+                await db.executemany(
+                    """
+                    DELETE FROM response_cache
+                    WHERE cache_key = ? AND cached_at IS ? AND ttl_seconds IS ?
+                    """,
+                    stale_rows,
+                )
+                await db.commit()
+                deleted += db.total_changes - before
+
+        if deleted:
+            logger.info(
+                "response_cache_expired_pruned",
+                deleted=deleted,
+                invalid_clocks=invalid,
             )
-        """)
-        await self._db.execute("""
-            CREATE TABLE IF NOT EXISTS response_cache (
-                cache_key TEXT PRIMARY KEY,
-                response_body TEXT NOT NULL,
-                cached_at TEXT NOT NULL,
-                ttl_seconds INTEGER NOT NULL
-            )
-        """)
-        await self._db.commit()
 
     async def close(self) -> None:
         if self._db:
             await self._db.close()
+            self._db = None
 
     def _hash_item(self, source_id: str, item_id: str, url: str) -> str:
         raw = f"{source_id}:{item_id}:{url}"
         return hashlib.sha256(raw.encode()).hexdigest()
+
+    @staticmethod
+    def _key_fingerprint(cache_key: str) -> str:
+        return hashlib.sha256(cache_key.encode()).hexdigest()[:12]
 
     async def is_seen(self, source_id: str, item_id: str, url: str) -> bool:
         h = self._hash_item(source_id, item_id, url)
@@ -125,19 +246,52 @@ class CollectorCache:
             if row is None:
                 return None
             body, cached_at, ttl = row
-            cached_time = datetime.fromisoformat(cached_at).replace(tzinfo=timezone.utc)
-            elapsed = (datetime.now(timezone.utc) - cached_time).total_seconds()
-            if elapsed > ttl:
+            reason = self._expiration_reason(
+                cached_at, ttl, datetime.now(timezone.utc)
+            )
+            if reason is not None:
                 await self._db.execute(
-                    "DELETE FROM response_cache WHERE cache_key = ?", (cache_key,)
+                    """
+                    DELETE FROM response_cache
+                    WHERE cache_key = ? AND cached_at IS ? AND ttl_seconds IS ?
+                    """,
+                    (cache_key, cached_at, ttl),
                 )
                 await self._db.commit()
+                if reason != "expired":
+                    logger.warning(
+                        "response_cache_invalid_clock",
+                        cache_key_hash=self._key_fingerprint(cache_key),
+                        reason=reason,
+                    )
                 return None
             return body
 
     async def set_cached_response(
         self, cache_key: str, body: str, ttl_seconds: int = 3600
-    ) -> None:
+    ) -> bool:
+        if (
+            isinstance(ttl_seconds, bool)
+            or not isinstance(ttl_seconds, int)
+            or ttl_seconds <= 0
+        ):
+            logger.warning(
+                "response_cache_invalid_ttl",
+                cache_key_hash=self._key_fingerprint(cache_key),
+                ttl_type=type(ttl_seconds).__name__,
+            )
+            return False
+
+        body_bytes = len(body.encode("utf-8"))
+        if body_bytes > MAX_RESPONSE_CACHE_BODY_BYTES:
+            logger.warning(
+                "response_cache_body_too_large",
+                cache_key_hash=self._key_fingerprint(cache_key),
+                body_bytes=body_bytes,
+                max_body_bytes=MAX_RESPONSE_CACHE_BODY_BYTES,
+            )
+            return False
+
         now = datetime.now(timezone.utc).isoformat()
         await self._db.execute(
             """INSERT INTO response_cache (cache_key, response_body, cached_at, ttl_seconds)
@@ -146,6 +300,7 @@ class CollectorCache:
             (cache_key, body, now, ttl_seconds, body, now, ttl_seconds),
         )
         await self._db.commit()
+        return True
 
 
 # --- Base Collector ---
