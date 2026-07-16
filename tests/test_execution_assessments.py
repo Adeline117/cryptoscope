@@ -4,30 +4,105 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 
-def _setup(tmp_path, monkeypatch):
-    from src.pipeline import opportunity_ledger as ledger
-    from src.pipeline.edge_validation import (
-        COHORT_VERSION, LAUNCH_COST_METHOD, PROTOCOL_START_AT,
+@pytest.fixture(autouse=True)
+def _explicit_test_source_authorities(monkeypatch):
+    """Unit rows use deterministic authorities; SQLite integration is separate."""
+    from src.pipeline import edge_validation as ev
+
+    monkeypatch.setattr(
+        ev, "_candidate_source_proof",
+        lambda _row, snapshot: dict(snapshot["reconciliation_proof"]),
     )
-    from src.pipeline.execution_cost import discovery_contract
+    monkeypatch.setattr(
+        ev, "_protocol_admission_state",
+        lambda: {"state": "open", "enrollment_open": True, "reason_codes": []},
+    )
+
+
+def _freeze_test_source_snapshot(*, detected_at: str, decision_at: str) -> dict:
+    from src.contract.launch_selector import freeze_source_snapshot
+
+    proof = {
+        "version": 1, "epoch_id": "1" * 32,
+        "from_slot": 0, "to_slot": 1_000, "status": "sealed_clean",
+        "checked_at": detected_at,
+        "live_provider": "solana_rpc:live.example",
+        "archive_provider": "solana_rpc:archive.example",
+        "genesis_hash": "mainnet-genesis", "evidence_hash": "e" * 64,
+        "finalized_head": 1_000, "live_captured_at": detected_at,
+        "live_observation_hash": "a" * 64,
+        "archive_observation_hash": "a" * 64,
+        "hydration_identity_hash": "b" * 64,
+    }
+    return freeze_source_snapshot(
+        signature="signature-token", slot=1, event_type="pump_fun_createv2",
+        detected_at=detected_at, captured_at=detected_at,
+        decision_at=decision_at, mint="token", raw_payload_hash="a" * 64,
+        hydration_payload_hash="b" * 64, capture_mode="live_ws",
+        source_provider="solana_rpc:live.example",
+        reconciliation_state="verified_live", reconciled_at=detected_at,
+        reconciliation_proof=proof,
+    )
+
+
+def _setup(tmp_path, monkeypatch, *, decision="WATCH", invalidation_price=0.7):
+    from src.pipeline import opportunity_ledger as ledger
+    from src.pipeline import edge_validation
+    from src.contract.launch_selector import (
+        evaluate_selector_snapshot, freeze_selector_snapshot,
+    )
+    from src.pipeline.execution_cost import solana_launch_full_paper_contract
 
     monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
-    contract = discovery_contract(notional_usd=25, modeled_roundtrip_pct=1.2,
-                                  method=LAUNCH_COST_METHOD)
-    detected_at = (
-        datetime.fromisoformat(PROTOCOL_START_AT) + timedelta(seconds=1)
-    ).isoformat()
+    at = datetime.now(timezone.utc).replace(microsecond=0)
+    monkeypatch.setattr(
+        edge_validation, "PROTOCOL_START_AT", (at - timedelta(hours=1)).isoformat()
+    )
+    event_at = at - timedelta(minutes=30)
+    selector_snapshot = freeze_selector_snapshot(
+        pool_created_at=event_at.isoformat(), liquidity_usd=8_000,
+        fdv_usd=100_000, volume_m5_usd=500 if decision == "SMALL_PROBE" else 0,
+        buys_m5=5 if decision == "SMALL_PROBE" else 1, sells_m5=2,
+    )
+    selector = evaluate_selector_snapshot(
+        selector_snapshot, event_at=event_at.isoformat(), decision_at=at.isoformat(),
+    )
+    contract = solana_launch_full_paper_contract(
+        notional_usd=selector["max_notional_usd"],
+        modeled_route_roundtrip_pct=selector["modeled_route_roundtrip_pct"],
+        method=edge_validation.LAUNCH_COST_METHOD,
+    )
+    detected_at = at.isoformat()
     ident, _ = ledger.record({
         "lane": "launch", "chain": "solana", "token": "token", "symbol": "T",
-        "source": "test primary chain stream", "decision": "WATCH",
+        "source": "Pump.fun standard logs + DEX Screener pool", "decision": decision,
         "state": "live", "entry_price": 1.0,
-        "invalidation_price": 0.7, "liquidity_usd": 8_000,
-        "max_notional_usd": 25,
-        "detected_at": detected_at,
-        "roundtrip_cost_pct_est": 1.2, "cost_contract": contract,
-        "cohort_version": COHORT_VERSION,
+        "invalidation_price": invalidation_price, "liquidity_usd": 8_000,
+        "max_notional_usd": selector["max_notional_usd"],
+        "event_at": event_at.isoformat(),
+        "detected_at": detected_at, "decision_at": detected_at,
+        "entry_observation": {
+            "version": 1, "provider": "dexscreener_token_pairs_v1",
+            "observed_at": detected_at, "chain": "solana",
+            "base_token": "token", "quote_token": "SOL", "pair": "pool",
+            "price": 1.0, "currency": "usd", "field": "priceUsd",
+            "identity_verified": True,
+            "selector_snapshot": selector_snapshot,
+            "source_snapshot": _freeze_test_source_snapshot(
+                detected_at=detected_at, decision_at=detected_at,
+            ),
+        },
+        "roundtrip_cost_pct_est": contract["all_in_total_pct"],
+        "cost_model": edge_validation.LAUNCH_COST_METHOD, "cost_contract": contract,
+        "cohort_version": edge_validation.COHORT_VERSION,
     })
     return ledger, ident
+
+
+def _protocol_time() -> datetime:
+    from src.pipeline.edge_validation import PROTOCOL_START_AT
+
+    return datetime.fromisoformat(PROTOCOL_START_AT) + timedelta(hours=1)
 
 
 def _assessment(at, **overrides):
@@ -77,8 +152,12 @@ def _passing_edge_gate(lane="launch"):
     return {
         "state": "pass", "lane": lane, "protocol_id": PROTOCOL_ID,
         "protocol_state": "pass", "cost_is_real_fill": False,
-        "edge_verdict": "有前向纸面edge迹象", "minimum_n": 100,
+        "edge_verdict": "有前向纸面selector edge迹象", "minimum_n": 100,
         "measured_n": 200, "look_n_per_arm": 100,
+        "sample_kind": "forward_paper_selector",
+        "selection_stage": "discovery_rule_before_security_and_route",
+        "real_edge_n": 0, "real_edge_eligible": False,
+        "execution_edge_eligible": False, "auto_execution_allowed": False,
         "reason": "pre-registered forward look passed in test fixture",
     }
 
@@ -107,7 +186,7 @@ def test_two_quotes_are_retained_and_latest_is_selected(tmp_path, monkeypatch):
 
 def test_duplicate_assessment_is_idempotent(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    at = _protocol_time()
     assessment = _assessment(at)
     first = ledger.append_execution_assessment(ident, assessment)
     second = ledger.append_execution_assessment(ident, assessment)
@@ -131,7 +210,7 @@ def test_assessment_table_rejects_mutation(tmp_path, monkeypatch):
     import sqlite3
 
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    at = _protocol_time()
     assessment_id, _ = ledger.append_execution_assessment(ident, _assessment(at))
     c = ledger._conn()
     try:
@@ -184,7 +263,7 @@ def test_discovery_cost_contract_is_stored_on_immutable_row(tmp_path, monkeypatc
 
 def test_fresh_partial_quote_resolves_to_paper_ready_not_actionable(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    now = _protocol_time()
     ledger.append_execution_assessment(ident, _assessment(now))
     row = ledger.active("launch", now=now)[0]
     assert row["action_level"] == "A2_PAPER_READY"
@@ -197,9 +276,9 @@ def test_fresh_partial_quote_resolves_to_paper_ready_not_actionable(tmp_path, mo
     assert row["current_assessment"]["execution_probe"]["roundtrip_loss_pct"] == 2.0
 
 
-def test_expired_v5_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
+def test_expired_v6_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    at = _protocol_time()
     ledger.append_execution_assessment(ident, _assessment(at))
     row = ledger.active("launch", now=at + timedelta(seconds=61))[0]
     assert row["action_level"] == "A1_WATCH"
@@ -208,26 +287,20 @@ def test_expired_v5_quote_downgrades_immediately_to_watch(tmp_path, monkeypatch)
 
 def test_known_untradeable_reverse_route_is_blocked(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    at = _protocol_time()
     ledger.append_execution_assessment(ident, _assessment(at, route_state="untradeable"))
     row = ledger.active("launch", now=at)[0]
     assert row["action_level"] == "A0_BLOCKED"
     assert row["effective_decision"] == "AVOID"
 
 
-def test_a3_requires_every_manual_gate_and_still_disables_auto_trade(tmp_path, monkeypatch):
+def test_manual_probe_stays_a2_until_quote_and_delivery_verifiers_exist(
+        tmp_path, monkeypatch):
     from src.pipeline.execution_cost import route_contract
     from src.pipeline import opportunity_outcomes
 
-    ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute("UPDATE opportunities SET decision='SMALL_PROBE' WHERE id=?",
-                  (ident,))
-        c.commit()
-    finally:
-        c.close()
+    ledger, ident = _setup(tmp_path, monkeypatch, decision="SMALL_PROBE")
+    at = _protocol_time()
     complete = route_contract(notional_usd=25, route_loss_pct=2.0,
                               network_fee_pct=0.02, method="complete_test")
     ledger.append_execution_assessment(ident, _assessment(
@@ -235,10 +308,12 @@ def test_a3_requires_every_manual_gate_and_still_disables_auto_trade(tmp_path, m
     monkeypatch.setattr(opportunity_outcomes, "actionability_gate",
                         lambda lane: _passing_edge_gate(lane))
     row = ledger.active("launch", now=at)[0]
-    assert row["action_level"] == "A3_MANUAL_PROBE"
-    assert row["actionable_now"] is True
+    assert row["action_level"] == "A2_PAPER_READY"
+    assert row["actionable_now"] is False
     assert row["auto_execution_allowed"] is False
     assert row["current_assessment"]["auto_execution_allowed"] is False
+    assert "quote_not_promotable" in row["action_reason_codes"]
+    assert "delivery_readback_verifier_unavailable" in row["action_reason_codes"]
 
 
 @pytest.mark.parametrize(("case", "reason"), [
@@ -252,14 +327,8 @@ def test_ledger_shared_a3_contract_downgrades_invalid_current_windows(
     from src.pipeline.execution_cost import route_contract
     from src.pipeline import opportunity_outcomes
 
-    ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute("UPDATE opportunities SET decision='SMALL_PROBE' WHERE id=?", (ident,))
-        c.commit()
-    finally:
-        c.close()
+    ledger, ident = _setup(tmp_path, monkeypatch, decision="SMALL_PROBE")
+    at = _protocol_time()
     assessment = _assessment(
         at,
         cost_contract=route_contract(
@@ -296,17 +365,10 @@ def test_ledger_shared_a3_contract_rejects_missing_public_plan_fields(
     from src.pipeline.execution_cost import route_contract
     from src.pipeline import opportunity_outcomes
 
-    ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute(
-            "UPDATE opportunities SET decision='SMALL_PROBE', invalidation_price=NULL "
-            "WHERE id=?", (ident,),
-        )
-        c.commit()
-    finally:
-        c.close()
+    ledger, ident = _setup(
+        tmp_path, monkeypatch, decision="SMALL_PROBE", invalidation_price=None,
+    )
+    at = _protocol_time()
     ledger.append_execution_assessment(
         ident,
         _assessment(
@@ -332,16 +394,13 @@ def test_ledger_shared_a3_contract_rejects_missing_public_plan_fields(
 
 def test_real_ledger_a3_crosses_the_public_board_contract(tmp_path, monkeypatch):
     from src.pipeline.execution_cost import route_contract
-    from src.pipeline import board_export, opportunity_outcomes
+    from src.pipeline import board_export, edge_validation, opportunity_outcomes
 
-    ledger, ident = _setup(tmp_path, monkeypatch)
-    at = datetime.now(timezone.utc)
-    c = ledger._conn()
-    try:
-        c.execute("UPDATE opportunities SET decision='SMALL_PROBE' WHERE id=?", (ident,))
-        c.commit()
-    finally:
-        c.close()
+    at = datetime.now(timezone.utc).replace(microsecond=0)
+    monkeypatch.setattr(
+        edge_validation, "PROTOCOL_START_AT", (at - timedelta(hours=1)).isoformat()
+    )
+    ledger, ident = _setup(tmp_path, monkeypatch, decision="SMALL_PROBE")
     complete = route_contract(
         notional_usd=25, route_loss_pct=2.0, network_fee_pct=0.02,
         method="complete_public_contract_test",

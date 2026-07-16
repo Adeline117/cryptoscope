@@ -10,6 +10,9 @@ ACTIONABLE_LAUNCH_CHAINS = frozenset({"solana"})
 MIN_PROBE_NOTIONAL_USD = 25.0
 MAX_PROBE_NOTIONAL_USD = 500.0
 MAX_POOL_LIQUIDITY_FRACTION = 0.003
+# A3 remains intentionally unreachable until one append-only public read-back
+# verifier binds a specific assessment payload to what users could actually fetch.
+DELIVERY_READBACK_VERIFIER_VERSION = None
 
 
 def _aware(value: Any) -> datetime | None:
@@ -42,7 +45,9 @@ def launch_manual_probe_failures(
         row: Mapping[str, Any], assessment: Any, evidence: Any,
         *, now: datetime) -> list[str]:
     """Return every reason a candidate cannot be published as a live A3 window."""
-    from src.pipeline.edge_validation import LOOK_SIZES, PROTOCOL_ID, is_protocol_event
+    from src.pipeline.edge_validation import (
+        LAUNCH_COST_METHOD, LOOK_SIZES, PROTOCOL_ID, is_protocol_event,
+    )
     from src.pipeline.launch_execution import (
         MAX_ROUNDTRIP_LOSS_PCT, QUOTE_TTL_SECONDS, SECURITY_TTL_SECONDS,
     )
@@ -102,10 +107,12 @@ def launch_manual_probe_failures(
     if assessment.get("route_state") != "quoted":
         fail("route_not_quoted")
     quote_source = str(assessment.get("quote_source") or "").strip()
-    if (not quote_source or quote_source.lower() == "unknown"
-            or row.get("chain") == "solana"
-            and not quote_source.lower().startswith("jupiter")):
+    if not quote_source or quote_source.lower() == "unknown":
         fail("quote_source_missing")
+    elif (row.get("chain") == "solana"
+          and (quote_source != "Jupiter Swap v2 order"
+               or assessment.get("quote_mode") != "keyed_v2")):
+        fail("quote_not_promotable")
 
     quote_at = _aware(assessment.get("quote_at"))
     quote_expires_at = _aware(assessment.get("quote_expires_at"))
@@ -177,15 +184,19 @@ def launch_manual_probe_failures(
     if discovery_contract is not None:
         discovery_notional = _positive(discovery_contract.get("notional_usd"))
         frozen_cost = _nonnegative(row.get("cost_pct_est"))
-        known_cost = _nonnegative(discovery_contract.get("known_total_pct"))
+        all_in_cost = _nonnegative(discovery_contract.get("all_in_total_pct"))
         if (public_limit is None or discovery_notional is None
                 or not math.isclose(discovery_notional, public_limit, abs_tol=1e-9)):
             fail("discovery_cost_notional_mismatch")
-        if (frozen_cost is None or known_cost is None
-                or not math.isclose(frozen_cost, known_cost, abs_tol=1e-9)):
+        if (frozen_cost is None or all_in_cost is None
+                or not math.isclose(frozen_cost, all_in_cost, abs_tol=1e-9)):
             fail("discovery_cost_total_mismatch")
-        if (discovery_contract.get("completeness") != "partial"
-                or discovery_contract.get("all_in_total_pct") is not None
+        if (discovery_contract.get("purpose") != "discovery_outcome"
+                or discovery_contract.get("method") != LAUNCH_COST_METHOD
+                or discovery_contract.get("measurement_kind") != "paper_model"
+                or discovery_contract.get("cost_policy")
+                != "preregistered_full_paper_ceiling"
+                or discovery_contract.get("completeness") != "complete"
                 or discovery_contract.get("is_real_fill") is not False):
             fail("discovery_cost_semantics_invalid")
 
@@ -239,7 +250,14 @@ def launch_manual_probe_failures(
             or evidence.get("protocol_id") != PROTOCOL_ID
             or evidence.get("protocol_state") != "pass"
             or evidence.get("cost_is_real_fill") is not False
-            or evidence.get("edge_verdict") != "有前向纸面edge迹象"
+            or evidence.get("edge_verdict") != "有前向纸面selector edge迹象"
+            or evidence.get("sample_kind") != "forward_paper_selector"
+            or evidence.get("selection_stage")
+            != "discovery_rule_before_security_and_route"
+            or evidence.get("real_edge_n") != 0
+            or evidence.get("real_edge_eligible") is not False
+            or evidence.get("execution_edge_eligible") is not False
+            or evidence.get("auto_execution_allowed") is not False
             or evidence.get("minimum_n") != LOOK_SIZES[0]
             or isinstance(look_n, bool) or look_n not in LOOK_SIZES
             or isinstance(measured_n, bool) or not isinstance(measured_n, int)
@@ -249,6 +267,8 @@ def launch_manual_probe_failures(
         fail("evidence_gate_not_pass")
     if assessment.get("delivery_sla_state") != "pass":
         fail("delivery_sla_unverified")
+    if DELIVERY_READBACK_VERIFIER_VERSION is None:
+        fail("delivery_readback_verifier_unavailable")
     security_gate = assessment.get("security_gate")
     if (not isinstance(security_gate, Mapping) or security_gate.get("state") != "pass"
             or security_gate.get("chain") != row.get("chain")
@@ -280,11 +300,32 @@ def launch_manual_probe_failures(
                            if isinstance(execution_probe, Mapping) else None)
     expected_route_loss = (max(0.0, (notional - back_usd) / notional * 100)
                            if notional is not None and back_usd is not None else None)
+    provider_contract = (execution_probe.get("provider_contract")
+                         if isinstance(execution_probe, Mapping) else None)
+    provider_contract_valid = (
+        isinstance(provider_contract, Mapping)
+        and provider_contract.get("version") == 1
+        and provider_contract.get("provider") == "jupiter"
+        and provider_contract.get("api_version") == "v2"
+        and provider_contract.get("operation") == "order"
+        and provider_contract.get("endpoint")
+        == "https://api.jup.ag/swap/v2/order"
+        and provider_contract.get("auth_mode") == "x_api_key"
+        and provider_contract.get("slippage_bps") == 100
+        and provider_contract.get("swap_mode") == "ExactIn"
+        and provider_contract.get("read_only") is True
+        and provider_contract.get("taker_supplied") is False
+        and provider_contract.get("transaction_built") is False
+    )
     if (not isinstance(execution_probe, Mapping)
             or execution_probe.get("state") != "quoted"
             or execution_probe.get("chain") != row.get("chain")
             or execution_probe.get("token") != row.get("token")
             or execution_probe.get("source") != assessment.get("quote_source")
+            or execution_probe.get("api_mode") != "keyed_v2"
+            or execution_probe.get("promotion_eligible") is not True
+            or execution_probe.get("quote_contract_verified") is not True
+            or not provider_contract_valid
             or _aware(execution_probe.get("checked_at")) != quote_at
             or execution_probe.get("read_only") is not True
             or execution_probe.get("is_real_fill") is not False

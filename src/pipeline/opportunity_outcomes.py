@@ -29,8 +29,12 @@ from src.pipeline.edge_validation import (
     COHORT_VERSION,
     LAUNCH_COST_METHOD,
     LOOK_SIZES as EDGE_LOOK_SIZES,
+    is_protocol_enrollment_candidate,
     is_protocol_event,
     launch_forward_validation,
+    protocol_exclusion_reasons,
+    protocol_point_state,
+    protocol_snapshot,
 )
 
 logger = structlog.get_logger()
@@ -59,11 +63,31 @@ def _direction(row: dict) -> str | None:
     return None
 
 
+def _is_current_launch_window(row: dict) -> bool:
+    """Identify post-boundary v6 rows even when their snapshot is malformed.
+
+    A malformed current row must not escape strict settlement merely because its
+    entry observation cannot be normalized.  Pre-boundary v6 rows were emitted
+    during deployment quarantine and remain explicitly descriptive.
+    """
+    return is_protocol_enrollment_candidate(row)
+
+
 def _cost(row: dict) -> tuple[float, str]:
-    """Return the discovery-time paper cost estimate, with a legacy fallback."""
+    """Return frozen cost evidence, failing closed for the current protocol."""
+    if row.get("lane") == "launch":
+        snapshot = protocol_snapshot(row)
+        if snapshot is not None:
+            return float(snapshot["all_in_cost_pct"]), LAUNCH_COST_METHOD
+        if _is_current_launch_window(row):
+            reasons = protocol_exclusion_reasons(row) or ["protocol_snapshot_invalid"]
+            raise ValueError("launch_v6_cost_evidence_rejected:" + ",".join(reasons))
+
+    # Only legacy/descriptive rows may use their historical frozen percentage or a
+    # labelled reconstruction.  This fallback is forbidden after the v6 boundary.
     try:
         frozen = float(row.get("cost_pct_est"))
-        if frozen >= 0:
+        if math.isfinite(frozen) and frozen >= 0:
             return frozen, str(row.get("cost_model") or "discovery_snapshot")
     except (TypeError, ValueError):
         pass
@@ -162,6 +186,9 @@ def _settled(entry: float, price: float, direction: str, cost_pct: float, *,
 
 def _next_due_task(row: dict, now: datetime) -> dict | None:
     """Choose one due horizon for an event, prioritizing the 24h evidence gate."""
+    blocked = (row.get("outcome") or {}).get("settlement_blocked")
+    if isinstance(blocked, dict) and blocked.get("permanent") is True:
+        return None
     try:
         t0 = _outcome_anchor(row)
     except (TypeError, ValueError, KeyError):
@@ -228,7 +255,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
     price_at = price_at or _default_price_at
     rows = opportunity_ledger.outcome_rows(open_only=True)
     tasks = _select_due_tasks(rows, now, max_lookups)
-    lookups = settled = retired = 0
+    lookups = settled = retired = cost_rejected = 0
     source_backoff = None
     by_lane: dict[str, int] = {}
     by_horizon: dict[str, int] = {}
@@ -244,7 +271,29 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         outcome = dict(row.get("outcome") or {})
         horizons = dict(outcome.get("horizons") or {})
         unavailable = set(outcome.get("unavailable_horizons") or [])
-        cost_pct, cost_model = _cost(row)
+        try:
+            cost_pct, cost_model = _cost(row)
+        except ValueError as exc:
+            reasons = protocol_exclusion_reasons(row) or ["protocol_snapshot_invalid"]
+            rejection = {
+                "at": now.isoformat(),
+                "horizon": name,
+                "reason_code": "launch_v6_cost_evidence_rejected",
+                "reasons": reasons,
+                "detail": str(exc)[:240],
+                "permanent": True,
+            }
+            outcome.update({
+                "version": 1,
+                "direction": _direction(row),
+                "cost_is_real_fill": False,
+                "cost_evidence_rejected": rejection,
+                "settlement_blocked": rejection,
+                "updated_at": now.isoformat(),
+            })
+            opportunity_ledger.save_outcome(row["id"], outcome, "open")
+            cost_rejected += 1
+            continue
         outcome.update({"version": 1, "direction": _direction(row),
                         "cost_pct_est": cost_pct, "cost_model": cost_model,
                         "cost_is_real_fill": False, "horizons": horizons})
@@ -326,6 +375,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         outcome["updated_at"] = now.isoformat()
         opportunity_ledger.save_outcome(row["id"], outcome, state)
     result = {"lookups": lookups, "settled": settled, "retired": retired,
+              "cost_evidence_rejected": cost_rejected,
               "lookups_by_lane": by_lane, "lookups_by_horizon": by_horizon,
               "source_backoff": source_backoff,
               "pending_events": sum(1 for r in rows if r.get("lane") in SUPPORTED_LANES)}
@@ -339,19 +389,42 @@ def _percentile(values: list[float], p: float) -> float | None:
     xs = sorted(values)
     pos = (len(xs) - 1) * p
     lo, hi = int(pos), min(int(pos) + 1, len(xs) - 1)
-    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
+    weight = pos - lo
+    value = xs[lo] * (1.0 - weight) + xs[hi] * weight
+    return value if math.isfinite(value) else None
+
+
+def _stable_median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    xs = sorted(values)
+    middle = len(xs) // 2
+    if len(xs) % 2:
+        value = xs[middle]
+    else:
+        value = xs[middle - 1] / 2.0 + xs[middle] / 2.0
+    return value if math.isfinite(value) else None
 
 
 def _cohort(rows: list[dict], decision: str) -> dict:
     vals = []
+    states = {"pending": 0, "unavailable": 0, "invalid": 0}
+    eligible = 0
     for row in rows:
         if row.get("decision") != decision or not is_protocol_event(row):
             continue
-        point = ((row.get("outcome") or {}).get("horizons") or {}).get("24h")
-        if point and point.get("net_return_pct_est") is not None:
-            vals.append(float(point["net_return_pct_est"]))
+        eligible += 1
+        state, value = protocol_point_state(row)
+        if state == "resolved" and value is not None:
+            vals.append(float(value))
+        elif state in states:
+            states[state] += 1
     positives = sum(v > 0 for v in vals)
-    return {"n": len(vals), "positives": positives,
+    return {"n": len(vals), "eligible_n": eligible, "resolved_n": len(vals),
+            "pending_n": states["pending"],
+            "unavailable_n": states["unavailable"],
+            "invalid_n": states["invalid"],
+            "positives": positives,
             "positive_rate": positives / len(vals) if vals else None,
             "median_net_24h": statistics.median(vals) if vals else None}
 
@@ -634,6 +707,183 @@ def _horizon_24h_progress(rows: list[dict], *, now: datetime | None = None) -> d
     return progress
 
 
+def _strict_launch_24h(rows: list[dict], *, now: datetime | None = None) -> tuple[list[float], dict]:
+    """Summarize v6 from the append-only point validator, never mutable outcomes."""
+    now = now or datetime.now(timezone.utc)
+    points: list[float] = []
+    progress = {
+        "resolved_24h": 0, "not_due_24h": 0, "due_24h": 0,
+        "attempted_unpriced_24h": 0, "unavailable_24h": 0,
+        "invalid_24h": 0, "oldest_due_24h_hours": None,
+    }
+    overdue: list[float] = []
+    for row in rows:
+        if not is_protocol_event(row):
+            continue
+        snapshot = protocol_snapshot(row)
+        if snapshot is None:
+            # Defensive only: is_protocol_event and protocol_snapshot share the same
+            # validator, but a future refactor must still fail closed here.
+            progress["invalid_24h"] += 1
+            continue
+        state, value = protocol_point_state(row)
+        if state == "resolved" and value is not None:
+            points.append(float(value))
+            progress["resolved_24h"] += 1
+            continue
+        if state == "unavailable":
+            progress["unavailable_24h"] += 1
+            continue
+        if state == "invalid":
+            progress["invalid_24h"] += 1
+            continue
+        due_at = _aware(snapshot["anchor_at"]) + timedelta(hours=24)
+        if now < due_at:
+            progress["not_due_24h"] += 1
+            continue
+        progress["due_24h"] += 1
+        overdue.append((now - due_at).total_seconds() / 3600)
+        outcome = row.get("outcome") if isinstance(row.get("outcome"), dict) else {}
+        if int((outcome.get("attempts") or {}).get("24h") or 0) > 0:
+            progress["attempted_unpriced_24h"] += 1
+    if overdue:
+        progress["oldest_due_24h_hours"] = round(max(overdue), 1)
+    return points, progress
+
+
+def _legacy_launch_distribution(rows: list[dict]) -> dict:
+    """Keep pre-v6 mutable outcomes visible but explicitly non-evidentiary."""
+    legacy = [row for row in rows if not is_protocol_enrollment_candidate(row)]
+    points: list[float] = []
+    invalid = 0
+    for row in legacy:
+        point = ((row.get("outcome") or {}).get("horizons") or {}).get("24h")
+        raw = point.get("net_return_pct_est") if isinstance(point, dict) else None
+        if raw is None:
+            continue
+        if isinstance(raw, bool):
+            invalid += 1
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            invalid += 1
+            continue
+        if not math.isfinite(value):
+            invalid += 1
+            continue
+        points.append(value)
+    positives = sum(value > 0 for value in points)
+    result = {
+        "sample_kind": "legacy_mutable_outcome_descriptive_only",
+        "n_events": len(legacy), "n": len(points), "hits": positives,
+        "invalid_n": invalid,
+        "pending": sum(row.get("outcome_state") == "open" for row in legacy),
+        "unresolvable": sum(
+            row.get("outcome_state") == "unresolvable" for row in legacy
+        ),
+        "edge_eligible": False, "real_edge_n": 0,
+        "real_edge_eligible": False, "execution_edge_eligible": False,
+        "auto_execution_allowed": False,
+        "note": "历史可变 outcome 仅作描述，不进入当前协议分母或优势判决",
+        **_horizon_24h_progress(legacy),
+    }
+    if points:
+        median = _stable_median(points)
+        p90 = _percentile(points, 0.90)
+        p99 = _percentile(points, 0.99)
+        result.update({
+            "rate": round(positives / len(points), 3),
+            "median_net_24h": round(median, 3) if median is not None else None,
+            "p90_net_24h": round(p90, 3) if p90 is not None else None,
+            "p99_net_24h": round(p99, 3) if p99 is not None else None,
+            "max_net_24h": round(max(points), 3),
+        })
+    return result
+
+
+def _launch_stats(rows: list[dict]) -> dict:
+    """Build the Launch headline exclusively from the strict append-only protocol."""
+    from src.pipeline.evidence import wilson
+
+    validation = launch_forward_validation(rows)
+    points, progress = _strict_launch_24h(rows)
+    probe = _cohort(rows, "SMALL_PROBE")
+    control = _cohort(rows, "WATCH")
+    n = len(points)
+    positives = sum(value > 0 for value in points)
+    version_counts: dict[str, int] = {}
+    for row in rows:
+        raw_version = row.get("cohort_version")
+        if raw_version is None:
+            label = "unversioned"
+        elif isinstance(raw_version, bool) or not isinstance(raw_version, int):
+            label = "invalid"
+        else:
+            label = f"v{raw_version}"
+        version_counts[label] = version_counts.get(label, 0) + 1
+
+    legacy = _legacy_launch_distribution(rows)
+    common = {
+        "n": n, "hits": positives,
+        "pending": progress["not_due_24h"] + progress["due_24h"],
+        "unresolvable": progress["unavailable_24h"],
+        "metric": "append_only_exact_pool_24h_positive_after_frozen_full_paper_cost",
+        "cost_is_real_fill": False,
+        **progress,
+        "legacy_distribution": legacy,
+        "legacy_unfrozen_n": sum((row.get("cohort_version") or 0) < 2 for row in rows),
+        "legacy_v2_descriptive_n": sum(row.get("cohort_version") == 2 for row in rows),
+        "legacy_v3_descriptive_n": sum(row.get("cohort_version") == 3 for row in rows),
+        "legacy_v4_descriptive_n": sum(row.get("cohort_version") == 4 for row in rows),
+        "legacy_v5_descriptive_n": sum(row.get("cohort_version") == 5 for row in rows),
+        "cohorts_by_version": dict(sorted(version_counts.items())),
+        f"v{COHORT_VERSION}_cost_method": LAUNCH_COST_METHOD,
+        "probe": probe, "control": control,
+        "edge_validation": validation,
+        "edge_verdict": validation["edge_verdict"],
+        "edge_note": validation["reason"],
+        "sample_kind": validation["sample_kind"],
+        "selection_stage": validation["selection_stage"],
+        "real_edge_n": 0, "real_edge_eligible": False,
+        "execution_edge_eligible": False, "auto_execution_allowed": False,
+        "current_protocol": {
+            "protocol_id": validation["protocol_id"],
+            "cohort_version": validation["cohort_version"],
+            "protocol_start_at": validation["protocol_start_at"],
+            "eligible_n": validation["eligible_n"],
+            "excluded_n": validation["excluded_n"],
+            "excluded_by_reason": validation["excluded_by_reason"],
+            "integrity_candidate_n": sum(
+                is_protocol_enrollment_candidate(row) for row in rows
+            ),
+            "integrity_invalid_n": validation.get("integrity_invalid_n", 0),
+            "integrity_invalid_by_reason": validation.get(
+                "integrity_invalid_by_reason", {}
+            ),
+        },
+    }
+    if n < MIN_N:
+        return {
+            **common, "verdict": "不可判",
+            "note": (f"当前协议追加式24h样本 {n}/{MIN_N};到期待结算 "
+                     f"{progress['due_24h']}；历史可变样本另列且不入分母"),
+        }
+    rate = positives / n
+    lo, hi = wilson(positives, n)
+    median = _stable_median(points)
+    p90 = _percentile(points, 0.90)
+    p99 = _percentile(points, 0.99)
+    return {
+        **common, "verdict": "measured", "rate": round(rate, 3),
+        "lo": round(lo, 3), "hi": round(hi, 3),
+        "median_net_24h": round(median, 3) if median is not None else None,
+        "p90_net_24h": round(p90, 3) if p90 is not None else None,
+        "p99_net_24h": round(p99, 3) if p99 is not None else None,
+        "max_net_24h": round(max(points), 3),
+    }
+
+
 def actionability_gate(lane: str) -> dict:
     """Translate measured evidence into a fail-closed live action gate.
 
@@ -651,23 +901,44 @@ def actionability_gate(lane: str) -> dict:
                 "reason": f"evidence read failed: {str(exc)[:80]}"}
     edge = stat.get("edge_verdict") or "不可判"
     validation = stat.get("edge_validation") or {}
+    probe, control = stat.get("probe") or {}, stat.get("control") or {}
+    strict_measured_n = (
+        int(probe.get("resolved_n") or 0) + int(control.get("resolved_n") or 0)
+        if lane == "launch" else int(stat.get("n") or 0)
+    )
     common = {"lane": lane, "edge_verdict": edge,
               "minimum_n": EDGE_LOOK_SIZES[0] if lane == "launch" else MIN_N,
-              "measured_n": int(stat.get("n") or 0),
-              "cost_is_real_fill": stat.get("cost_is_real_fill", False)}
+              "measured_n": strict_measured_n,
+              "cost_is_real_fill": stat.get("cost_is_real_fill", False),
+              "real_edge_n": 0, "real_edge_eligible": False,
+              "execution_edge_eligible": False,
+              "auto_execution_allowed": False}
     if lane == "launch":
         validation_state = validation.get("state")
         detail = {"protocol_id": validation.get("protocol_id"),
                   "protocol_state": validation_state,
                   "look_n_per_arm": validation.get("look_n_per_arm"),
-                  "next_look_n_per_arm": validation.get("next_look_n_per_arm")}
+                  "next_look_n_per_arm": validation.get("next_look_n_per_arm"),
+                  "integrity_invalid_n": validation.get("integrity_invalid_n", 0),
+                  "integrity_invalid_by_reason": validation.get(
+                      "integrity_invalid_by_reason", {}),
+                  "sample_kind": validation.get("sample_kind"),
+                  "selection_stage": validation.get("selection_stage"),
+                  "cost_evidence_policy": validation.get("cost_evidence_policy"),
+                  "price_evidence_policy": validation.get("price_evidence_policy")}
         if validation_state == "pass":
             return {**common, **detail, "state": "pass",
                     "reason": validation.get("reason")}
         if validation_state == "no_edge_observed":
             return {**common, **detail, "state": "blocked",
                     "reason": validation.get("reason")}
-        probe, control = stat.get("probe") or {}, stat.get("control") or {}
+        if validation_state in {
+            "protocol_integrity_blocked", "coverage_blocked",
+            "invalid_evidence", "regime_overlap_blocked",
+            "validator_unavailable",
+        }:
+            return {**common, **detail, "state": "blocked",
+                    "reason": validation.get("reason")}
         return {**common, **detail, "state": "collecting",
                 "probe_n": int(probe.get("n") or 0),
                 "control_n": int(control.get("n") or 0),
@@ -686,8 +957,11 @@ def lane_stats() -> dict:
     # A configured-but-empty workbench is still a measurable state. Always expose
     # Airdrop's zero-event scorecard so the UI cannot hide missing discovery behind
     # an absent JSON key.
-    for lane in sorted({r["lane"] for r in rows} | {"airdrop"}):
+    for lane in sorted({r["lane"] for r in rows} | {"airdrop", "launch"}):
         lane_rows = [r for r in rows if r["lane"] == lane]
+        if lane == "launch":
+            out[lane] = _launch_stats(lane_rows)
+            continue
         if lane == "carry":
             out[lane] = _carry_stats(lane_rows)
             continue
@@ -713,21 +987,6 @@ def lane_stats() -> dict:
                   "unresolvable": unresolvable, "metric": "positive_after_estimated_cost",
                   "cost_is_real_fill": False}
         common.update(_horizon_24h_progress(measurable))
-        if lane == "launch":
-            common["legacy_unfrozen_n"] = sum((r.get("cohort_version") or 0) < 2
-                                                for r in measurable)
-            common["legacy_v2_descriptive_n"] = sum(r.get("cohort_version") == 2
-                                                     for r in measurable)
-            common["legacy_v3_descriptive_n"] = sum(r.get("cohort_version") == 3
-                                                     for r in measurable)
-            common["legacy_v4_descriptive_n"] = sum(r.get("cohort_version") == 4
-                                                     for r in measurable)
-            common[f"v{COHORT_VERSION}_cost_method"] = LAUNCH_COST_METHOD
-            common["probe"] = _cohort(measurable, "SMALL_PROBE")
-            common["control"] = _cohort(measurable, "WATCH")
-            common["edge_validation"] = launch_forward_validation(measurable)
-            common["edge_verdict"] = common["edge_validation"]["edge_verdict"]
-            common["edge_note"] = common["edge_validation"]["reason"]
         if n < MIN_N:
             out[lane] = {**common, "verdict": "不可判",
                          "edge_verdict": common.get("edge_verdict", "不可判"),
@@ -744,11 +1003,6 @@ def lane_stats() -> dict:
                 "max_net_24h": round(max(points), 3),
                 "edge_verdict": common.get("edge_verdict", "不可判"),
                 "edge_note": common.get("edge_note", "缺少同期可比对照")}
-        if lane == "launch":
-            # Wilson intervals remain descriptive for the overall hit-rate card.
-            # They are intentionally forbidden from promoting the action gate; only
-            # the pre-registered sequential SPA result above can do that.
-            stat["edge_validation"] = common["edge_validation"]
         out[lane] = stat
     return out
 

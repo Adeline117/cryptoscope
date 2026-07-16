@@ -6,12 +6,56 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _explicit_test_source_authorities(monkeypatch):
+    """Unit rows use deterministic authorities; SQLite integration is separate."""
+    from src.pipeline import edge_validation as ev
+
+    monkeypatch.setattr(
+        ev, "_candidate_source_proof",
+        lambda _row, snapshot: dict(snapshot["reconciliation_proof"]),
+    )
+    monkeypatch.setattr(
+        ev, "_protocol_admission_state",
+        lambda: {"state": "open", "enrollment_open": True, "reason_codes": []},
+    )
+
+
 @pytest.fixture
 def ledger(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ol
 
     monkeypatch.setattr(ol, "DB", tmp_path / "opportunities.db")
     return ol
+
+
+def _freeze_test_source_snapshot(*, signature: str, token: str,
+                                 detected_at: str, decision_at: str,
+                                 slot: int = 1) -> dict:
+    from src.contract.launch_selector import freeze_source_snapshot
+
+    proof = {
+        "version": 1, "epoch_id": "1" * 32,
+        "from_slot": 0, "to_slot": max(1_000, slot),
+        "status": "sealed_clean", "checked_at": detected_at,
+        "live_provider": "solana_rpc:live.example",
+        "archive_provider": "solana_rpc:archive.example",
+        "genesis_hash": "mainnet-genesis", "evidence_hash": "e" * 64,
+        "finalized_head": max(1_000, slot),
+        "live_captured_at": detected_at,
+        "live_observation_hash": "a" * 64,
+        "archive_observation_hash": "a" * 64,
+        "hydration_identity_hash": "b" * 64,
+    }
+    return freeze_source_snapshot(
+        signature=signature, slot=slot, event_type="pump_fun_createv2",
+        detected_at=detected_at, captured_at=detected_at,
+        decision_at=decision_at, mint=token, raw_payload_hash="a" * 64,
+        hydration_payload_hash="b" * 64, capture_mode="live_ws",
+        source_provider="solana_rpc:live.example",
+        reconciliation_state="verified_live", reconciled_at=detected_at,
+        reconciliation_proof=proof,
+    )
 
 
 def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE",
@@ -21,16 +65,72 @@ def _launch(detected_at: str, token: str = "token", decision: str = "SMALL_PROBE
             "state": "live", "max_notional_usd": 50,
             "roundtrip_cost_pct_est": 1.0, "cost_model": "test_frozen_cost"}
     if protocol:
-        from src.pipeline.execution_cost import discovery_contract
+        from src.contract.launch_selector import (
+            evaluate_selector_snapshot, freeze_selector_snapshot,
+        )
+        from src.pipeline.execution_cost import solana_launch_full_paper_contract
         from src.pipeline.edge_validation import COHORT_VERSION, LAUNCH_COST_METHOD
-        item.update({"cohort_version": COHORT_VERSION, "cost_contract": discovery_contract(
-            notional_usd=50, modeled_roundtrip_pct=1.0,
-            method=LAUNCH_COST_METHOD)})
+        decision_clock = datetime.fromisoformat(detected_at)
+        event_clock = decision_clock - timedelta(minutes=30)
+        selector_snapshot = freeze_selector_snapshot(
+            pool_created_at=event_clock.isoformat(), liquidity_usd=8_000,
+            fdv_usd=100_000,
+            volume_m5_usd=500 if decision == "SMALL_PROBE" else 0,
+            buys_m5=5 if decision == "SMALL_PROBE" else 1, sells_m5=2,
+        )
+        selector = evaluate_selector_snapshot(
+            selector_snapshot, event_at=event_clock.isoformat(),
+            decision_at=detected_at,
+        )
+        contract = solana_launch_full_paper_contract(
+            notional_usd=selector["max_notional_usd"],
+            modeled_route_roundtrip_pct=selector["modeled_route_roundtrip_pct"],
+            method=LAUNCH_COST_METHOD,
+        )
+        item.update({
+            "cohort_version": COHORT_VERSION,
+            "source": "Pump.fun standard logs + DEX Screener pool",
+            "event_at": event_clock.isoformat(),
+            "decision_at": detected_at,
+            "max_notional_usd": selector["max_notional_usd"],
+            "liquidity_usd": selector["liquidity_usd"],
+            "entry_observation": {
+                "version": 1, "provider": "dexscreener_token_pairs_v1",
+                "observed_at": detected_at, "chain": "solana",
+                "base_token": token, "quote_token": "SOL",
+                "pair": f"pool-{token}", "price": 100.0,
+                "currency": "usd", "field": "priceUsd",
+                "identity_verified": True,
+                "selector_snapshot": selector_snapshot,
+                "source_snapshot": _freeze_test_source_snapshot(
+                    signature=f"signature-{token}", token=token,
+                    detected_at=detected_at, decision_at=detected_at,
+                ),
+            },
+            "roundtrip_cost_pct_est": contract["all_in_total_pct"],
+            "cost_model": LAUNCH_COST_METHOD,
+            "cost_contract": contract,
+        })
     return item
+
+
+def _record_with_clock(ledger, monkeypatch, candidate: dict, created_at: datetime):
+    real_datetime = ledger.datetime
+
+    class FrozenDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return created_at.astimezone(tz or timezone.utc)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(ledger, "datetime", FrozenDatetime)
+        return ledger.record(candidate)
 
 
 def _launch_with_entry(detected_at: str, observed_at: str, token: str = "token") -> dict:
     item = _launch(detected_at, token, protocol=True)
+    selector_snapshot = item["entry_observation"]["selector_snapshot"]
+    source_snapshot = item["entry_observation"]["source_snapshot"]
     item.update({
         "decision_at": observed_at,
         "entry_observation": {
@@ -45,6 +145,8 @@ def _launch_with_entry(detected_at: str, observed_at: str, token: str = "token")
             "currency": "usd",
             "field": "priceUsd",
             "identity_verified": True,
+            "selector_snapshot": selector_snapshot,
+            "source_snapshot": source_snapshot,
         },
     })
     return item
@@ -55,9 +157,11 @@ def _observed_price(row: dict, target: datetime, *, price: float = 110.0,
     item = {
         "version": 1,
         "provider": "geckoterminal_public_v2",
+        "network": row["chain"],
         "chain": row["chain"],
         "token": row["token"],
         "token_side": "base",
+        "pair": row["entry_observation"]["pair"],
         "pool": row["entry_observation"]["pair"],
         "currency": "usd",
         "field": "close",
@@ -367,10 +471,12 @@ def test_stats_expose_due_and_unpriced_24h_backlog(ledger):
     stat = oo.lane_stats()["launch"]
 
     assert stat["resolved_24h"] == 0
-    assert stat["not_due_24h"] == 1
-    assert stat["due_24h"] == 1
-    assert stat["attempted_unpriced_24h"] == 1
-    assert stat["oldest_due_24h_hours"] >= 1.9
+    assert stat["not_due_24h"] == stat["due_24h"] == 0
+    legacy = stat["legacy_distribution"]
+    assert legacy["not_due_24h"] == 1
+    assert legacy["due_24h"] == 1
+    assert legacy["attempted_unpriced_24h"] == 1
+    assert legacy["oldest_due_24h_hours"] >= 1.9
 
 
 def test_stats_refuse_rate_below_minimum_sample(ledger):
@@ -381,7 +487,9 @@ def test_stats_refuse_rate_below_minimum_sample(ledger):
     stat = oo.lane_stats()["launch"]
     assert stat["verdict"] == "不可判"
     assert "rate" not in stat
-    assert stat["n"] == 1
+    assert stat["n"] == 0
+    assert stat["legacy_distribution"]["n"] == 1
+    assert stat["legacy_distribution"]["edge_eligible"] is False
     assert stat["probe"]["n"] == 0 and stat["control"]["n"] == 0
     gate = oo.actionability_gate("launch")
     assert gate["state"] == "collecting"
@@ -401,11 +509,15 @@ def test_legacy_mutable_decision_is_excluded_from_cohort(ledger):
     assert oo.lane_stats()["launch"]["legacy_unfrozen_n"] == 1
 
 
-def test_old_twenty_sample_wilson_separation_cannot_pass_edge_gate(ledger):
+def test_old_twenty_sample_wilson_separation_cannot_pass_edge_gate(
+        ledger, monkeypatch):
     from src.pipeline import opportunity_outcomes as oo
     from src.pipeline import edge_validation as ev
 
-    ts = (datetime.fromisoformat(ev.PROTOCOL_START_AT) + timedelta(days=1)).isoformat()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    boundary = (now - timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(ev, "PROTOCOL_START_AT", boundary)
+    ts = now.isoformat()
     for i in range(oo.MIN_N):
         ident, _ = ledger.record(_launch(
             ts, f"probe-{i}", "SMALL_PROBE", protocol=True
@@ -420,12 +532,131 @@ def test_old_twenty_sample_wilson_separation_cannot_pass_edge_gate(ledger):
                             "resolved")
 
     stat = oo.lane_stats()["launch"]
-    assert stat["verdict"] == "measured"
+    assert stat["verdict"] == "不可判"
+    assert stat["n"] == 0
+    assert stat["legacy_distribution"]["n"] == 0
     assert stat["edge_verdict"] == "不可判"
-    assert stat["probe"]["n"] == stat["control"]["n"] == oo.MIN_N
+    assert stat["probe"]["eligible_n"] == stat["control"]["eligible_n"] == oo.MIN_N
+    assert stat["probe"]["n"] == stat["control"]["n"] == 0
+    assert stat["probe"]["invalid_n"] == stat["control"]["invalid_n"] == oo.MIN_N
     assert stat["edge_validation"]["state"] == "collecting"
     assert stat["edge_validation"]["next_look_n_per_arm"] == 100
-    assert oo.actionability_gate("launch")["state"] == "collecting"
+    gate = oo.actionability_gate("launch")
+    assert gate["state"] == "collecting"
+    assert gate["measured_n"] == 0
+    assert gate["real_edge_n"] == 0
+    assert gate["execution_edge_eligible"] is False
+
+
+def test_malformed_current_launch_row_cannot_hide_from_integrity_denominator(
+        monkeypatch):
+    from src.pipeline import edge_validation as ev
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    monkeypatch.setattr(
+        ev, "PROTOCOL_START_AT", (now - timedelta(hours=1)).isoformat()
+    )
+    row = _launch_with_entry(
+        (now - timedelta(minutes=31)).isoformat(),
+        (now - timedelta(minutes=1)).isoformat(),
+        "broken-current",
+    )
+    row.update({"id": "broken-current", "entry_price": 0})
+    row.pop("entry_observation")
+    monkeypatch.setattr(oo.opportunity_ledger, "outcome_rows", lambda *args, **kwargs: [row])
+
+    stat = oo.lane_stats()["launch"]
+    gate = oo.actionability_gate("launch")
+
+    assert stat["n"] == 0
+    assert stat["legacy_distribution"]["n_events"] == 0
+    assert stat["edge_validation"]["state"] == "protocol_integrity_blocked"
+    assert stat["current_protocol"]["integrity_candidate_n"] == 1
+    assert stat["current_protocol"]["integrity_invalid_n"] == 1
+    assert gate["state"] == "blocked"
+    assert gate["integrity_invalid_n"] == 1
+
+
+def test_v6_resolver_uses_complete_cost_and_strict_append_truth(ledger, monkeypatch):
+    from src.pipeline import edge_validation as ev
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    boundary = (now - timedelta(days=3)).isoformat()
+    monkeypatch.setattr(ev, "PROTOCOL_START_AT", boundary)
+    observed = now - timedelta(hours=25)
+    ident, _ = _record_with_clock(ledger, monkeypatch, _launch_with_entry(
+        (observed - timedelta(minutes=2)).isoformat(),
+        observed.isoformat(),
+        "v6-cost",
+    ), observed + timedelta(seconds=1))
+
+    got = oo.resolve(
+        now=now,
+        price_at=lambda row, when: _observed_price(row, when, price=110.0),
+    )
+    row = ledger.outcome_rows()[0]
+    point = row["outcome"]["horizons"]["24h"]
+
+    assert got["settled"] == 1
+    assert row["outcome"]["cost_model"] == ev.LAUNCH_COST_METHOD
+    expected_cost = row["cost_contract"]["all_in_total_pct"]
+    assert row["outcome"]["cost_pct_est"] == pytest.approx(expected_cost)
+    assert point["net_return_pct_est"] == pytest.approx(10.0 - expected_cost)
+    assert oo._cohort([row], "SMALL_PROBE")["n"] == 1
+
+    tampered = dict(row["outcome"])
+    tampered["horizons"] = dict(tampered["horizons"])
+    tampered["horizons"]["24h"] = {
+        **tampered["horizons"]["24h"], "net_return_pct_est": 999_999,
+    }
+    ledger.save_outcome(ident, tampered, "open")
+    cohort = oo._cohort(ledger.outcome_rows(), "SMALL_PROBE")
+    assert cohort["n"] == 0
+    assert cohort["invalid_n"] == 1
+
+
+def test_v6_invalid_frozen_cost_is_permanently_rejected_without_lookup(
+        ledger, monkeypatch):
+    from src.pipeline import edge_validation as ev
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    boundary = (now - timedelta(days=3)).isoformat()
+    monkeypatch.setattr(ev, "PROTOCOL_START_AT", boundary)
+    observed = now - timedelta(hours=25)
+    ident, _ = _record_with_clock(ledger, monkeypatch, _launch_with_entry(
+        (observed - timedelta(minutes=2)).isoformat(),
+        observed.isoformat(),
+        "v6-bad-cost",
+    ), observed + timedelta(seconds=1))
+    c = ledger._conn()
+    c.execute("DROP TRIGGER launch_v6_snapshot_no_update")
+    c.execute("DROP TRIGGER launch_v6_snapshot_no_update_v2")
+    c.execute("UPDATE opportunities SET cost_model='tampered' WHERE id=?", (ident,))
+    c.commit()
+    c.close()
+    calls = []
+
+    first = oo.resolve(
+        now=now,
+        price_at=lambda row, when: calls.append((row, when)) or 110.0,
+    )
+    row = ledger.outcome_rows()[0]
+    rejection = row["outcome"]["cost_evidence_rejected"]
+
+    assert first["lookups"] == first["settled"] == 0
+    assert first["cost_evidence_rejected"] == 1
+    assert calls == []
+    assert row["outcome_state"] == "open"
+    assert rejection["reason_code"] == "launch_v6_cost_evidence_rejected"
+    assert "row_cost_model_mismatch" in rejection["reasons"]
+    assert rejection["permanent"] is True
+
+    second = oo.resolve(now=now + timedelta(minutes=1), price_at=lambda *_: calls.append(1))
+    assert second["cost_evidence_rejected"] == 0
+    assert calls == []
 
 
 def test_cascade_has_no_action_gate_without_matched_control(ledger):
