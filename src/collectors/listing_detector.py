@@ -52,6 +52,49 @@ MIN_INVENTORY_RETAIN_RATIO = 0.75
 _LAST_FAILURE_LOG: dict[str, float] = {}
 
 
+class _SourcePayloadError(ValueError):
+    """A successful HTTP response that cannot prove a complete source snapshot."""
+
+    def __init__(self, error_kind: str, detail: str, *,
+                 upstream_code: int | None = None) -> None:
+        super().__init__(detail)
+        self.error_kind = error_kind
+        self.upstream_code = upstream_code
+
+
+def _response_excerpt(response: httpx.Response | None) -> str:
+    """Return a finite response hint for evidence-based HTTP classification."""
+    if response is None:
+        return ""
+    try:
+        return " ".join(response.text.split())[:240]
+    except (httpx.HTTPError, RuntimeError):
+        return ""
+
+
+def _http_error_kind(exchange: str, status: int | None, body: str) -> str:
+    """Classify only what the HTTP status/body proves; never guess geography."""
+    body_lower = body.lower()
+    if status in (408, 504):
+        return "request_timeout"
+    if status == 429:
+        return "rate_limited"
+    if status == 451:
+        return "geo_blocked"
+    if status == 403:
+        if exchange == "bybit" and any(marker in body_lower for marker in (
+                "block access from your country", "country is restricted",
+                "region is restricted")):
+            return "geo_blocked"
+        if any(marker in body_lower for marker in (
+                "access too frequent", "too many visits", "rate limit")):
+            return "rate_limited"
+        return "forbidden"
+    if status is not None and status >= 500:
+        return "upstream_http_error"
+    return "http_error"
+
+
 def _log_fetch_failure(exchange: str, error: str, *, now: float | None = None) -> None:
     """Keep per-scan health evidence while rate-limiting expected geo-block noise."""
     now = time.monotonic() if now is None else now
@@ -86,12 +129,60 @@ def _parse_okx(data: dict) -> set[str]:
 
 
 def _parse_bybit(data: dict) -> set[str]:
-    """Extract symbols from Bybit instruments response."""
+    """Extract a schema-verified Bybit spot inventory.
+
+    Bybit reports API failures inside HTTP-200 JSON through ``retCode``.  Treating
+    those envelopes, or a missing/wrong ``result.list``, as an empty inventory would
+    make an unavailable source look like a completed scan and could poison the next
+    listing delta.  A real spot venue inventory is also never expected to be empty.
+    """
+    if not isinstance(data, dict):
+        raise _SourcePayloadError(
+            "invalid_response_schema", "Bybit response must be an object")
+    ret_code = data.get("retCode")
+    # bool and string "0" are not valid API evidence even though False == 0.
+    if not isinstance(ret_code, int) or isinstance(ret_code, bool):
+        raise _SourcePayloadError(
+            "invalid_response_schema", "Bybit retCode is missing or invalid")
+    if ret_code != 0:
+        ret_msg = str(data.get("retMsg") or "Bybit API rejected the request")[:160]
+        kind = {
+            429: "rate_limited",
+            10000: "request_timeout",
+            10006: "rate_limited",
+            10009: "geo_blocked",
+        }.get(ret_code, "upstream_api_error")
+        raise _SourcePayloadError(kind, ret_msg, upstream_code=ret_code)
+    result = data.get("result")
+    if not isinstance(result, dict):
+        raise _SourcePayloadError(
+            "invalid_response_schema", "Bybit result must be an object")
+    if result.get("category") != "spot":
+        raise _SourcePayloadError(
+            "unexpected_market_category", "Bybit result category is not spot")
+    rows = result.get("list")
+    if not isinstance(rows, list):
+        raise _SourcePayloadError(
+            "invalid_response_schema", "Bybit result.list must be an array")
+    if not rows:
+        raise _SourcePayloadError(
+            "suspicious_empty_inventory", "Bybit returned an empty spot inventory")
+
     symbols: set[str] = set()
-    result = data.get("result", {})
-    for item in result.get("list", []):
-        if item.get("status") == "Trading":
-            symbols.add(item["symbol"])
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            raise _SourcePayloadError(
+                "malformed_instrument_rows", f"Bybit row {index} is not an object")
+        symbol, status = item.get("symbol"), item.get("status")
+        if (not isinstance(symbol, str) or not symbol.strip()
+                or not isinstance(status, str)):
+            raise _SourcePayloadError(
+                "malformed_instrument_rows", f"Bybit row {index} lacks symbol/status")
+        if status == "Trading":
+            symbols.add(symbol.strip())
+    if not symbols:
+        raise _SourcePayloadError(
+            "suspicious_empty_inventory", "Bybit returned no Trading spot instruments")
     return symbols
 
 
@@ -172,20 +263,21 @@ def check_exchange_result(
     result: dict[str, Any] = {
         "exchange": exchange, "checked_at": checked_at, "status": "failed",
         "symbol_count": None, "baseline_ready": False, "new_count": 0,
-        "alerts": [],
+        "alerts": [], "error_kind": None,
     }
     config = EXCHANGES.get(exchange)
     if config is None:
         logger.warning("unknown_exchange", exchange=exchange)
         result["error"] = "unknown exchange"
+        result["error_kind"] = "unknown_exchange"
         return result
 
     urls = config.get("urls") or [config["url"]]
     parser_name = config["parser"]
     parser_fn = _PARSERS[parser_name]
 
-    data = None
-    errors = []
+    data: object | None = None
+    errors: list[dict[str, Any]] = []
     selected_url = None
     for url in urls:
         try:
@@ -194,20 +286,57 @@ def check_exchange_result(
             data = resp.json()
             selected_url = url
             break
-        except (httpx.HTTPError, json.JSONDecodeError) as exc:
-            errors.append(f"{url}: {str(exc)[:100]}")
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            body = _response_excerpt(exc.response)
+            errors.append({
+                "endpoint": url,
+                "error_kind": _http_error_kind(exchange, status, body),
+                "http_status": status,
+                "detail": body or str(exc)[:160],
+            })
+        except httpx.TimeoutException as exc:
+            errors.append({"endpoint": url, "error_kind": "request_timeout",
+                           "detail": str(exc)[:160]})
+        except httpx.HTTPError as exc:
+            errors.append({"endpoint": url, "error_kind": "transport_error",
+                           "detail": str(exc)[:160]})
+        except (json.JSONDecodeError, ValueError) as exc:
+            errors.append({"endpoint": url, "error_kind": "invalid_json",
+                           "detail": str(exc)[:160]})
     result["attempted_endpoints"] = len(errors) + int(selected_url is not None)
     if data is None:
-        error = " | ".join(errors)[:300]
+        error = " | ".join(
+            f"{item['endpoint']}: {item['detail']}" for item in errors)[:300]
         _log_fetch_failure(exchange, error)
-        result["error"] = error
+        result["error"] = error or "source returned no response payload"
+        result["error_kind"] = (
+            errors[-1]["error_kind"] if errors else "empty_response_payload")
+        if errors and errors[-1].get("http_status") is not None:
+            result["http_status"] = errors[-1]["http_status"]
+        if len(errors) > 1:
+            result["endpoint_errors"] = errors
         return result
     result["endpoint"] = selected_url
 
-    current_symbols = parser_fn(data)
+    try:
+        current_symbols = parser_fn(data)
+    except _SourcePayloadError as exc:
+        result["error"] = str(exc)[:200]
+        result["error_kind"] = exc.error_kind
+        if exc.upstream_code is not None:
+            result["upstream_code"] = exc.upstream_code
+        _log_fetch_failure(exchange, result["error"])
+        return result
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        result["error"] = f"response schema invalid: {str(exc)[:160]}"
+        result["error_kind"] = "invalid_response_schema"
+        _log_fetch_failure(exchange, result["error"])
+        return result
     if not current_symbols:
         logger.warning("no_symbols_parsed", exchange=exchange)
         result["error"] = "response parsed zero live symbols"
+        result["error_kind"] = "suspicious_empty_inventory"
         return result
 
     previous_symbols = _load_snapshot(exchange)
@@ -220,11 +349,13 @@ def check_exchange_result(
             and len(current_symbols) < len(previous_symbols) * MIN_INVENTORY_RETAIN_RATIO):
         result["error"] = (f"inventory truncated: {len(current_symbols)} current vs "
                            f"{len(previous_symbols)} previous")
+        result["error_kind"] = "inventory_truncated"
         return result
     try:
         _save_snapshot(exchange, current_symbols)
     except OSError as exc:
         result["error"] = f"snapshot write failed: {str(exc)[:120]}"
+        result["error_kind"] = "snapshot_write_failed"
         return result
     result.update({"status": "ok", "symbol_count": len(current_symbols),
                    "baseline_ready": bool(previous_symbols)})
@@ -280,6 +411,7 @@ def check_all_exchanges_with_status(timeout: float = 25.0) -> dict[str, Any]:
                 "checked_at": datetime.now(timezone.utc).isoformat(),
                 "status": "failed", "symbol_count": None,
                 "baseline_ready": False, "new_count": 0, "alerts": [],
+                "error_kind": "unexpected_source_failure",
                 "error": f"unexpected source failure: {str(exc)[:160]}",
             })
     return {
