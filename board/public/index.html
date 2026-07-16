@@ -187,6 +187,43 @@
   .fact .fv{display:block;font:700 20px/1.25 var(--mono);color:var(--text)}
   .fact .fs{display:block;margin-top:4px;font-size:10.5px;line-height:1.35;color:var(--dim)}
   .fact.warn .fv{color:var(--warn)}.fact.good .fv{color:var(--good)}.fact.danger .fv{color:var(--danger)}
+  .funnel-panel{min-width:0;padding:14px;border:1px solid var(--border);border-radius:13px;background:color-mix(in srgb,var(--s1) 91%,transparent)}
+  .funnel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px}
+  .funnel-head .fh-title{font-size:11px;font-weight:760;letter-spacing:.055em;color:var(--text)}
+  .funnel-head .fh-sub{display:block;margin-top:2px;font-size:9.5px;font-weight:500;letter-spacing:0;color:var(--dim)}
+  .funnel-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .funnel-step{position:relative;min-width:0;padding:10px 11px;border:1px solid var(--border);border-radius:9px;background:var(--s2)}
+  .funnel-step .fi{display:block;font:700 9px/1.2 var(--mono);letter-spacing:.08em;color:var(--dim)}
+  .funnel-step .fk{display:block;margin-top:4px;font-size:10px;font-weight:700;color:var(--muted)}
+  .funnel-step .fv{display:block;margin-top:3px;font:720 18px/1.2 var(--mono);color:var(--text);overflow-wrap:anywhere}
+  .funnel-step .fs{display:block;margin-top:4px;font-size:9.5px;line-height:1.35;color:var(--dim)}
+  .funnel-step.pass{border-color:var(--good-b);background:color-mix(in srgb,var(--good-bg) 42%,var(--s2))}.funnel-step.pass .fv{color:var(--good)}
+  .funnel-step.warn{border-color:var(--warn-b);background:color-mix(in srgb,var(--warn-bg) 36%,var(--s2))}.funnel-step.warn .fv{color:var(--warn)}
+  .funnel-status{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;padding-top:9px;border-top:1px solid var(--border)}
+  .funnel-note{margin-top:8px;font-size:9.5px;line-height:1.45;color:var(--dim);overflow-wrap:anywhere}
+  .opportunity-queue{grid-column:1/-1;padding:20px 22px;border:1px solid var(--border);border-radius:14px;background:var(--s1);box-shadow:var(--shadow);min-width:0}
+  .opportunity-queue-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:13px}
+  .opportunity-queue-head h3{margin:0;font-size:15px;line-height:1.35;color:var(--text)}
+  .opportunity-queue-head p{margin:4px 0 0;max-width:780px;font-size:11px;line-height:1.5;color:var(--dim)}
+  .opportunity-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .opportunity-card{min-width:0;padding:15px;border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:11px;background:var(--s2)}
+  .opportunity-card.actionable{border-left-color:var(--good)}.opportunity-card.paper{border-left-color:var(--accent)}.opportunity-card.blocked,.opportunity-card.expired{border-left-color:var(--danger)}.opportunity-card.tracked{border-left-color:var(--violet)}
+  .opportunity-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .opportunity-card-id{min-width:0}.opportunity-card-id b{display:block;font-size:14px;color:var(--text);overflow-wrap:anywhere}.opportunity-card-id small{display:block;margin-top:2px;color:var(--dim);font:10px/1.35 var(--mono);overflow-wrap:anywhere}
+  .opportunity-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:12px}
+  .opportunity-metric{min-width:0;padding:9px;border:1px solid var(--border);border-radius:8px;background:color-mix(in srgb,var(--s1) 82%,transparent)}
+  .opportunity-metric .mk{display:block;font-size:9px;letter-spacing:.055em;text-transform:uppercase;color:var(--dim)}
+  .opportunity-metric .mv{display:block;margin-top:3px;font:650 11.5px/1.4 var(--mono);color:var(--text);overflow-wrap:anywhere}
+  .opportunity-metric .ms{display:block;margin-top:2px;font-size:9.5px;line-height:1.35;color:var(--dim);overflow-wrap:anywhere}
+  .gate-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px}
+  .gate-summary b{font-size:10.5px;color:var(--muted)}.gate-summary small{font-size:9.5px;color:var(--dim)}
+  .gate-list{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+  .gate-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid var(--border2);border-radius:999px;font-size:9.5px;color:var(--muted);background:var(--s1)}
+  .gate-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--dim)}
+  .gate-pill.pass{color:var(--good);border-color:var(--good-b);background:var(--good-bg)}.gate-pill.pass::before{background:var(--good)}
+  .gate-pill.block{color:var(--danger);border-color:var(--danger-b);background:var(--danger-bg)}.gate-pill.block::before{background:var(--danger)}
+  .risk-line{display:flex;align-items:flex-start;justify-content:space-between;gap:9px;margin-top:11px;padding-top:9px;border-top:1px solid var(--border);font-size:10px;line-height:1.4;color:var(--dim)}
+  .risk-line span:first-child{overflow-wrap:anywhere}.risk-line .jump{flex:none;padding:5px 8px;font-size:10px}
   .evidence-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
   .evidence-card{padding:16px 18px;border:1px solid var(--border);border-radius:13px;background:var(--s1)}
   .evidence-card .ek{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:var(--text)}
@@ -267,7 +304,7 @@
   body[data-view="play"] #view{margin-top:18px}
   @media(max-width:980px){
     .wrap{padding:0 20px 56px}.lanehead{grid-template-columns:1fr;gap:18px}.stat{justify-content:flex-start}
-    .stat>div:first-child{padding-left:0}.command{grid-template-columns:1fr}.play>.play-sec,.play>.play-sec:first-child,.play>.play-sec:nth-child(2),.play-verdict{grid-column:1/-1}
+    .stat>div:first-child{padding-left:0}.command{grid-template-columns:1fr}.opportunity-grid{grid-template-columns:1fr}.play>.play-sec,.play>.play-sec:first-child,.play>.play-sec:nth-child(2),.play-verdict{grid-column:1/-1}
   }
   @media(max-width:600px){
     body{font-size:14px}.wrap{padding:0 12px 44px}header{padding:12px 2px}.brand{gap:8px}.logo{width:36px;height:36px}.hr{gap:8px}
@@ -276,6 +313,8 @@
     .stat>div{min-width:0;padding:6px 10px;border-left:1px solid var(--border)}.stat>div:nth-child(3n+1){border-left:0;padding-left:0}
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
     .command{padding:19px 17px;gap:17px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
+    .funnel-panel{padding:12px}.funnel-head{align-items:flex-start;flex-direction:column}.funnel-steps{grid-template-columns:1fr 1fr}.funnel-step{padding:9px}.funnel-step .fv{font-size:16px}
+    .opportunity-queue{padding:17px 14px}.opportunity-queue-head{flex-direction:column;gap:7px}.opportunity-grid{grid-template-columns:1fr}.opportunity-metrics{grid-template-columns:1fr}.gate-summary{align-items:flex-start;flex-direction:column;gap:2px}.risk-line{align-items:flex-start;flex-direction:column}.risk-line .jump{width:100%}
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
     .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}.coverage-strip{grid-template-columns:1fr}
     .market-coverage{padding:17px 14px}.market-coverage-head{flex-direction:column;gap:7px}.market-coverage-grid{grid-template-columns:1fr}.market-coverage-card:last-child{grid-column:auto}.market-coverage-card .mch{gap:6px}
@@ -750,11 +789,189 @@ function renderMarketCoverageMatrix(){
     </div></section>`;
 }
 
+function opportunityViewFreshness(){
+  const views=[
+    ["Launch",data.launch],
+    ["Structure",data.structure],
+    ["Airdrop",data.airdrop],
+    ["Cascade / Carry",data.perp],
+    ["Evidence",data.stats],
+  ];
+  const now=Date.now(),missing=[],stale=[],fresh=[];
+  for(const [name,payload] of views){
+    if(!payload){missing.push(name);continue}
+    const generated=new Date(payload.generated_at||"").getTime();
+    const staleAfter=new Date(payload.stale_after_at||"").getTime();
+    if(!Number.isFinite(generated)||!Number.isFinite(staleAfter)
+      ||generated>now+60_000||now>=staleAfter)stale.push(name);
+    else fresh.push(name);
+  }
+  const state=!fresh.length?"unavailable":missing.length||stale.length?"partial":"ok";
+  return{state,total:views.length,fresh:fresh.length,missing,stale};
+}
+
+function opportunitySourceHeadline(){
+  const launch=data.launch,sol=launch?.primary_sources?.solana,evm=launch?.primary_sources?.evm;
+  const streams=[...(sol?.streams||[]),...(evm?.streams||[])];
+  const live=streams.filter(x=>x.status==="live"&&!x.stale&&!(x.open_gaps||0)).length;
+  const structureHealth=data.structure?.source_health||[];
+  const structureOk=structureHealth.filter(x=>x.status==="ok").length;
+  const carry=data.perp?.carry_source_health||{};
+  const carryState=["ok","partial"].includes(carry.state)?carry.state:"unavailable";
+  return `发行流 ${live}/${streams.length||"?"} · 上币源 ${structureOk}/${structureHealth.length||"?"} · Carry ${carryState}`;
+}
+
+function launchQuoteExpiry(r){
+  const value=r?.current_assessment?.expires_at||r?.current_assessment?.quote_expires_at||r?.expires_at;
+  const ms=new Date(value||"").getTime();
+  return Number.isFinite(ms)?{value,ms}:null;
+}
+
+function launchQuoteExpired(r){
+  const expiry=launchQuoteExpiry(r);
+  return expiry?Date.now()>=expiry.ms:false;
+}
+
+function launchCostGateState(contract){
+  if(!contract||contract.version!==1||contract.purpose!=="current_action"
+    ||contract.basis!=="round_trip"||contract.currency!=="USD"
+    ||contract.completeness!=="complete"||contract.is_real_fill!==false
+    ||typeof contract.notional_usd!=="number"||!Number.isFinite(contract.notional_usd)
+    ||contract.notional_usd<=0||typeof contract.method!=="string"||!contract.method.trim()
+    ||!Array.isArray(contract.components)||!contract.components.length)return"unknown";
+  let total=0;const names=new Set();
+  for(const component of contract.components){
+    if(!component||typeof component.name!=="string"||!component.name.trim()
+      ||names.has(component.name)||!["included","not_applicable"].includes(component.status))return"unknown";
+    names.add(component.name);
+    if(component.status==="included"){
+      if(typeof component.pct!=="number"||!Number.isFinite(component.pct)||component.pct<0)return"unknown";
+      total+=component.pct;
+    }else if(component.pct!=null)return"unknown";
+  }
+  const known=contract.known_total_pct,allIn=contract.all_in_total_pct;
+  return typeof known==="number"&&Number.isFinite(known)
+    &&typeof allIn==="number"&&Number.isFinite(allIn)&&allIn>=0&&allIn<=5
+    &&Math.abs(known-total)<=1e-6&&Math.abs(allIn-total)<=1e-6?"pass":"unknown";
+}
+
+function launchGateSummary(r){
+  const ca=r?.current_assessment||{},sg=ca.security_gate||{},ep=ca.execution_probe||{};
+  const securityArrays=["hard_flags","cautions","unknown_fields"].every(k=>Array.isArray(sg[k]));
+  const hardFlags=Array.isArray(sg.hard_flags)?sg.hard_flags:[];
+  const cautions=Array.isArray(sg.cautions)?sg.cautions:[];
+  const unknownFields=Array.isArray(sg.unknown_fields)?sg.unknown_fields:[];
+  const now=Date.now(),securityAt=new Date(sg.checked_at||ca.security_at||"").getTime();
+  const securityExpiry=new Date(sg.expires_at||ca.security_expires_at||"").getTime();
+  const providers=sg.providers||{},securityProviders=["goplus","solana_rpc"].every(k=>providers?.[k]?.state==="pass");
+  const securityClock=Number.isFinite(securityAt)&&Number.isFinite(securityExpiry)
+    &&securityAt<=now&&now<securityExpiry&&securityExpiry-securityAt>0&&securityExpiry-securityAt<=300_000;
+  const securityState=sg.state==="avoid"||hardFlags.length?"block":sg.state==="pass"&&securityArrays
+    &&!cautions.length&&!unknownFields.length&&securityProviders&&securityClock&&!String(sg.reason||"").trim()?"pass":"unknown";
+  const routeState=ca.route_state||ep.state;
+  const routeNumbers=[ca.notional_usd,ca.entry_reference_price,ca.invalidation_reference_price,
+    ca.roundtrip_back_usd,ep.roundtrip_loss_pct];
+  const route=routeState==="untradeable"?"block":routeState==="quoted"&&ep.state==="quoted"
+    &&ep.read_only===true&&ep.is_real_fill===false&&ep.network_fees_included===true
+    &&routeNumbers.every((v,i)=>typeof v==="number"&&Number.isFinite(v)&&(i===4?v>=0:v>0))
+    &&ca.notional_usd<=500&&ca.invalidation_reference_price<ca.entry_reference_price
+    &&ca.roundtrip_back_usd<=ca.notional_usd&&ep.roundtrip_loss_pct<=5
+    &&typeof ca.quote_source==="string"&&ca.quote_source.trim()&&!String(ep.reason||"").trim()?"pass":"unknown";
+  const contract=ca.cost_contract||{};
+  const cost=launchCostGateState(contract);
+  const evidenceState=r?.evidence_gate?.state;
+  const evidenceGate=r?.evidence_gate||{};
+  const evidence=evidenceState==="pass"&&evidenceGate.protocol_state==="pass"
+    &&evidenceGate.lane==="launch"&&evidenceGate.cost_is_real_fill===false
+    &&evidenceGate.edge_verdict==="有前向纸面edge迹象"?"pass"
+    :["blocked","no_edge_observed","no_edge"].includes(evidenceState)?"block":"unknown";
+  const expiry=launchQuoteExpiry(r),quoteAt=new Date(ca.quote_at||"").getTime();
+  const quoteExpiryAt=new Date(ca.quote_expires_at||"").getTime();
+  const quote=expiry&&Number.isFinite(quoteAt)&&quoteAt<=now&&ca.kind==="read_only_quote"
+    &&Number.isFinite(quoteExpiryAt)&&quoteExpiryAt===expiry.ms
+    &&expiry.ms-quoteAt>0&&expiry.ms-quoteAt<=60_000
+    ?(now<expiry.ms?"pass":"block"):"unknown";
+  const delivery=ca.delivery_sla_state==="pass"?"pass":"unknown";
+  const gates=[
+    {name:"安全",state:securityState},
+    {name:"可卖路由",state:route},
+    {name:"全成本",state:cost},
+    {name:"优势证据",state:evidence},
+    {name:"报价时钟",state:quote},
+    {name:"送达 SLA",state:delivery},
+  ];
+  return{gates,passed:gates.filter(x=>x.state==="pass").length,
+         blocked:gates.filter(x=>x.state==="block").length,
+         unknown:gates.filter(x=>x.state==="unknown").length};
+}
+
+function launchRiskSummary(r){
+  const sg=r?.current_assessment?.security_gate||{};
+  const hard=Array.isArray(sg.hard_flags)?sg.hard_flags:[];
+  const cautions=Array.isArray(sg.cautions)?sg.cautions:[];
+  const unknown=Array.isArray(sg.unknown_fields)?sg.unknown_fields:[];
+  const arraysKnown=["hard_flags","cautions","unknown_fields"].every(k=>Array.isArray(sg[k]));
+  if(sg.state==="avoid"||hard.length)return{state:"block",label:"已知安全红旗",detail:hard.join("、")||sg.reason||"安全门阻断"};
+  const securityState=launchGateSummary(r).gates.find(g=>g.name==="安全")?.state;
+  if(securityState==="pass"&&arraysKnown&&!cautions.length&&!unknown.length)return{state:"pass",label:"本轮安全门通过",detail:"未见当前合同定义内的已知红旗；不等于无风险"};
+  const detail=[...cautions,...unknown].filter(Boolean).join("、");
+  return{state:"unknown",label:"风险未知 / 未齐",detail:detail||sg.reason||"缺完整安全证据"};
+}
+
+function launchCardStage(r,summary=null){
+  const level=actionLevel(r);
+  if(level==="A0_BLOCKED")return{key:"blocked",label:"A0 阻断",cls:"b-danger"};
+  if(level==="A4_REAL_FILL_VALIDATED")return{key:"tracked",label:"A4 历史成交已核验",cls:"b-violet"};
+  if(launchQuoteExpired(r))return{key:"expired",label:"报价已失效",cls:"b-danger"};
+  if(level==="A3_MANUAL_PROBE"){
+    const checked=summary||launchGateSummary(r);
+    return checked.passed===checked.gates.length&&!checked.blocked&&!checked.unknown
+      ?{key:"actionable",label:"A3 人工验证窗",cls:"b-good"}
+      :{key:"watch",label:"A3 字段待复核",cls:"b-warn"};
+  }
+  if(level==="A2_PAPER_READY")return{key:"paper",label:"A2 纸面就绪",cls:"b-accent"};
+  return{key:"watch",label:"A1 观察",cls:"b-warn"};
+}
+
+function launchOpportunityCard(r){
+  const ca=r?.current_assessment||{},summary=launchGateSummary(r),stage=launchCardStage(r,summary),risk=launchRiskSummary(r);
+  const expiry=launchQuoteExpiry(r),entry=finitePrice(ca.entry_reference_price),invalidation=finitePrice(ca.invalidation_reference_price??r?.invalidation_price);
+  const capRaw=ca.notional_usd??r?.max_notional_usd,cap=Number(capRaw);
+  const quoteClock=ca.quote_at&&expiry?`${utcClock(ca.quote_at)} → ${utcClock(expiry.value)}`:"报价时钟不完整";
+  const entryText=entry==null?"不可得":`$${chartPrice(entry)}`;
+  const invalidationText=invalidation==null?"不可判":`${String(r?.side||"LONG").toUpperCase()==="SHORT"?"≥":"≤"} $${chartPrice(invalidation)}`;
+  const capText=Number.isFinite(cap)&&cap>0?usd(cap):"未知";
+  const outcome=r?.outcome,points=outcome?.horizons||{},settled=["1h","24h","7d"].filter(k=>points[k]).length;
+  const unavailable=Array.isArray(outcome?.unavailable_horizons)?outcome.unavailable_horizons.length:0;
+  const tracking=outcome&&typeof outcome==="object"?`已结算 ${settled}/3${unavailable?` · 缺口 ${unavailable}`:""}`:"跟踪不可判";
+  const unresolved=summary.gates.filter(x=>x.state!=="pass").map(x=>x.name);
+  const gateNote=unresolved.length?`未通过或未知：${unresolved.join("、")}`:"六项证据当前明确通过；仍只允许人工小额验证";
+  const riskCls=risk.state==="pass"?"b-good":risk.state==="block"?"b-danger":"b-warn";
+  return `<article class="opportunity-card ${stage.key}">
+    <div class="opportunity-card-head"><div class="opportunity-card-id"><b>${esc(r?.symbol||"未知代币")}</b><small>${esc(r?.chain||"链未知")} · ${esc(r?.source||"来源未知")} · 首次发现 ${esc(utcClock(r?.detected_at))}</small></div><span class="chip ${stage.cls}">${esc(stage.label)}</span></div>
+    <div class="opportunity-metrics">
+      <div class="opportunity-metric"><span class="mk">入场窗口 · 只读</span><span class="mv">${esc(entryText)} · ${esc(expiryText({expires_at:expiry?.value}))}</span><span class="ms">${esc(quoteClock)}；不是成交价</span></div>
+      <div class="opportunity-metric"><span class="mk">失效 / 离场</span><span class="mv">论文失效 ${esc(invalidationText)}</span><span class="ms">系统无真实持仓，也不会自动离场</span></div>
+      <div class="opportunity-metric"><span class="mk">仓位上限</span><span class="mv">${esc(capText)}</span><span class="ms">最大名义金额；未知时不得自行补值</span></div>
+    </div>
+    <div class="gate-summary"><b>证据完整度 ${summary.passed}/${summary.gates.length} 明确通过</b><small>${summary.blocked} 阻断 · ${summary.unknown} 未知</small></div>
+    <div class="gate-list">${summary.gates.map(g=>`<span class="gate-pill ${g.state}">${esc(g.name)} · ${g.state==="pass"?"通过":g.state==="block"?"阻断":"未知"}</span>`).join("")}</div>
+    <div class="risk-line"><span><span class="chip ${riskCls}">${esc(risk.label)}</span> ${esc(risk.detail)} · ${esc(tracking)} · ${esc(gateNote)}</span><button class="jump" data-jump="launch">完整证据</button></div>
+  </article>`;
+}
+
+function launchOpportunityQueue(launches){
+  const priority={actionable:0,paper:1,watch:2,tracked:3,expired:4,blocked:5};
+  const rows=launches.slice().sort((a,b)=>priority[launchCardStage(a).key]-priority[launchCardStage(b).key]).slice(0,6);
+  const counts=launches.reduce((acc,row)=>{const key=launchCardStage(row).key;acc[key]=(acc[key]||0)+1;return acc},{});
+  const body=rows.length?`<div class="opportunity-grid">${rows.map(launchOpportunityCard).join("")}</div>`:`<div class="empty">当前没有已入账的 Launch 候选。空白不代表全市场没有机会；先检查来源覆盖与视图时钟。</div>`;
+  return `<section class="opportunity-queue" aria-label="Launch 执行与观察队列"><div class="opportunity-queue-head"><div><h3>Launch 执行与观察队列</h3><p>同一张卡同时展示当前只读入场窗、论文失效条件、仓位上限、证据完整度和未知风险。排序仅按动作等级，不按“暴涨概率”。</p></div><span class="chip ${counts.actionable?"b-good":"b-warn"}">A3 ${counts.actionable||0} · 观察/纸面 ${(counts.watch||0)+(counts.paper||0)} · 失效 ${counts.expired||0} · 阻断 ${counts.blocked||0}</span></div>${body}</section>`;
+}
+
 // 📋 打法 — the synthesis: what to consider, what to avoid, what NOT to do. Turns the
 // board from a data dashboard into a clear, honest, ranked trading thesis.
 function renderPlay(){
   const launches=data.launch?.events||[];
-  const activeLaunch=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE");
   const allCarry=data.perp?.carry||[];
   const carry=allCarry.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0);
   const singleVenueCarry=allCarry.filter(x=>x.cross!==true);
@@ -769,41 +986,63 @@ function renderPlay(){
   const sourceOk=sourceHealth.filter(x=>x.status==="ok").length;
   const dep=(data.op?.operators||[]).filter(depNow);
   const avoid=avoidRows(data.opp);
+  const structureEvents=data.structure?.events||[];
+  const airdropEvents=data.airdrop?.events||[];
+  const cascadeEvents=data.perp?.cascade_events||[];
+  const crossCarry=allCarry.filter(x=>x.cross===true);
+  const loadedLanes=(data.launch?1:0)+(data.structure?1:0)+(data.airdrop?1:0)
+    +(Array.isArray(data.perp?.cascade_events)?1:0)+(Array.isArray(data.perp?.carry)?1:0);
+  const discoveredTotal=launches.length+structureEvents.length+airdropEvents.length+cascadeEvents.length+crossCarry.length;
+  const discoveredDisplay=loadedLanes===5?String(discoveredTotal):`≥${discoveredTotal}`;
+  const launchStages=launches.reduce((acc,row)=>{const key=launchCardStage(row).key;acc[key]=(acc[key]||0)+1;return acc},{});
+  const actionCount=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE"&&launchCardStage(x).key==="actionable").length;
+  const launchWatch=(launchStages.watch||0)+(launchStages.paper||0);
+  const launchExpired=launchStages.expired||0;
+  const launchBlocked=launchStages.blocked||0;
+  const freshness=opportunityViewFreshness();
+  const freshnessClass=freshness.state==="ok"?"b-good":freshness.state==="partial"?"b-warn":"b-danger";
+  const sourceHeadline=opportunitySourceHeadline();
+  const carryValid=Number.isFinite(pp.n_proxy_closed)?pp.n_proxy_closed:(Number.isFinite(carryEvidence?.n_proxy)?carryEvidence.n_proxy:null);
+  const launchResolved=Number.isFinite(launchEvidence?.n)?launchEvidence.n:null;
+  const trackingValue=`L ${launchResolved??"?"} · C ${carryValid??"?"}`;
   let h='<div class="scroll play">';
-  const actionCount=activeLaunch.length;
-  const verdict=actionCount?`${actionCount} 个小额试探窗口仍有效`:'等待 · 当前不入场';
-  const verdictCopy=actionCount
+  const verdict=!data.launch?'不可判 · Launch 视图缺失':actionCount?`${actionCount} 个小额试探窗口仍有效`:'等待 · 当前不入场';
+  const verdictCopy=!data.launch
+    ?'Launch 当前视图未加载，不能把缺失解释成没有机会；请先检查关键视图时钟与来源覆盖。'
+    :actionCount
     ?'这些候选同时通过安全、双向路由、报价时钟与证据门。仍只能按逐行仓位上限试错，价格失效或时钟到期立即停止使用旧报价。'
     :carry.length
       ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有固定情景的部分模型代理为正，尚未证明真实成本后优势。'
       :'当前没有通过完整门禁的 Launch 或 Carry 候选；数据缺失时保持不可判，不把抓取失败说成没有机会。';
   h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
-    <div><div class="decision-kicker">当前决策 · ${actionCount?'可小额验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
+    <div><div class="decision-kicker">当前决策 · ${!data.launch?'数据缺失':actionCount?'可小额验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
       <p class="decision-copy">${verdictCopy}</p>
       <div class="command-actions"><button class="jump primary" data-jump="launch">查看入场门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
-    <div class="decision-facts">
-      <div class="fact ${actionCount?'good':'warn'}"><span class="fk">A3 人工验证窗</span><span class="fv">${actionCount}</span><span class="fs">新鲜报价+完整成本+证据门+送达SLA</span></div>
-      <div class="fact"><span class="fk">跨所纸面候选</span><span class="fv">${carry.length}</span><span class="fs">部分模型代理为正，成本组件仍不全</span></div>
-      <div class="fact danger"><span class="fk">应避开</span><span class="fv">${dep.length+avoid.length}</span><span class="fs">派发、高接盘风险或安全红旗</span></div>
-      <div class="fact warn"><span class="fk">数据覆盖</span><span class="fv">${sourceOk}/${sourceHealth.length||'?'}</span><span class="fs">仅为上币来源健康，不代表全市场覆盖</span></div>
+    <div class="funnel-panel" aria-label="机会漏斗">
+      <div class="funnel-head"><div><span class="fh-title">发现 → 证据门 → 可执行 → 跟踪验证</span><span class="fh-sub">只统计已加载记录；不是全市场机会总数</span></div><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span></div>
+      <div class="funnel-steps">
+        <div class="funnel-step"><span class="fi">01</span><span class="fk">已发现 / 入账</span><span class="fv">${esc(discoveredDisplay)}</span><span class="fs">${loadedLanes}/5 赛道已载入</span></div>
+        <div class="funnel-step ${actionCount?'pass':'warn'}"><span class="fi">02</span><span class="fk">Launch 证据门</span><span class="fv">${data.launch?`${actionCount}/${launches.length}`:'?/?'}</span><span class="fs">${data.launch?`${launchWatch} 个证据未齐`:'视图缺失，不可判'}</span></div>
+        <div class="funnel-step ${actionCount?'pass':'warn'}"><span class="fi">03</span><span class="fk">当前可执行</span><span class="fv">${data.launch?actionCount:'?'}</span><span class="fs">仅 A3：新鲜报价+完整成本+证据门+送达SLA；自动交易永不允许</span></div>
+        <div class="funnel-step"><span class="fi">04</span><span class="fk">跟踪验证样本</span><span class="fv">${esc(trackingValue)}</span><span class="fs">Launch 24h / Carry 有效代理关闭</span></div>
+      </div>
+      <div class="funnel-status"><span class="chip b-warn">Launch 观察/纸面 ${data.launch?launchWatch:'?'}</span><span class="chip ${launchExpired?'b-danger':''}">失效 ${data.launch?launchExpired:'?'}</span><span class="chip ${launchBlocked?'b-danger':''}">阻断 ${data.launch?launchBlocked:'?'}</span><span class="chip b-danger">应避开 ${dep.length+avoid.length}</span></div>
+      <div class="funnel-note">来源覆盖：${esc(sourceHeadline)}。${freshness.stale.length?`陈旧：${esc(freshness.stale.join('、'))}。`:''}${freshness.missing.length?`缺失：${esc(freshness.missing.join('、'))}。`:''}覆盖与视图按时只说明当前可判范围，不证明没有漏掉机会。</div>
     </div></section>`;
+  h+=launchOpportunityQueue(launches);
   h+=renderMarketCoverageMatrix();
-  if(activeLaunch.length){
-    h+=`<section class="play-sec" style="grid-column:1/-1"><div class="ph">A3 人工小额验证窗 <span class="pd">只读报价到期即失效 · 永不自动交易</span></div>${activeLaunch.slice(0,4).map(r=>{const ca=r.current_assessment||{};return `<div class="prow"><span class="chip b-good">${esc(expiryText(ca))}</span> <b>${esc(r.symbol)}</b> 当前只读报价参考 <span class="num">${ca.entry_reference_price!=null?'$'+esc(ca.entry_reference_price):'不可得'}</span> · 当前失效参考 ≤ <span class="num">${ca.invalidation_reference_price!=null?'$'+esc(ca.invalidation_reference_price):'不可得'}</span> · 最大 <span class="num">${usd(ca.notional_usd||r.max_notional_usd)}</span><button class="jump" data-jump="launch">看完整证据</button></div>`}).join('')}</section>`;
-  }
   h+=carryHealthHtml(carryHealth);
-  const carryValid=Number.isFinite(pp.n_proxy_closed)?pp.n_proxy_closed:(carryEvidence?.n_proxy??0);
   const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
-  const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:Math.max(0,carryTotal-carryValid);
+  const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:(carryValid!=null&&carryTotal!=null?Math.max(0,carryTotal-carryValid):null);
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
     <div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 v5 前向 24h、union UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>
-    <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal} · 排除 ${carryExcluded} · 旧协议 open 隔离 ${pp.n_quarantined_total??0}；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,carryValid/20*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid??'?'}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal??'?'} · 排除 ${carryExcluded??'?'} · 旧协议 open 隔离 ${pp.n_quarantined_total??0}；模型代理为正，成本组件仍不全时也只作纸面候选；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,(carryValid??0)/20*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
   </section>`;
   // 1) EDGE
   h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
   if(carry.length){
-    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出是报价率积分减盘口报价与费用假设的描述性代理，不是实际结算或完整 PnL；有效代理关闭 <b>${carryValid}</b> / 总关闭 ${carryTotal}，旧协议 open 隔离 <b>${pp.n_quarantined_total??0}</b>，真实优势样本 <b>${pp.real_edge_n??carryEvidence?.real_edge_n??0}</b>。</div>`;
+    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出是报价率积分减盘口报价与费用假设的描述性代理，不是实际结算或完整 PnL；有效代理关闭 <b>${carryValid??'?'}</b> / 总关闭 ${carryTotal??'?'}，旧协议 open 隔离 <b>${pp.n_quarantined_total??0}</b>，真实优势样本 <b>${pp.real_edge_n??carryEvidence?.real_edge_n??0}</b>。</div>`;
     h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛资金费差 ${esc(c.gross_funding_diff_ann_pct)} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
   } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
   h+='</div>';
