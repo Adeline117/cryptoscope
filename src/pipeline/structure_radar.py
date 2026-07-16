@@ -95,7 +95,7 @@ def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
         markets = row.get("markets")
         if row.get("event_type") != "new_listing" or (
                 isinstance(markets, list) and markets):
-            canonical.append(row)
+            canonical.append({**row, "auto_execution_allowed": False})
             continue
         source = str(row.get("source") or "unknown")
         base = _base_asset(str(row.get("symbol") or row.get("token") or "?"))
@@ -119,6 +119,7 @@ def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
             "recorded_decision": "WATCH",
             "effective_decision": "WATCH",
             "actionable_now": False,
+            "auto_execution_allowed": False,
             "evidence_state": "inventory_delta_only",
             "legacy_row_count": len(group),
             "ledger_event_ids": [row.get("id") for row in group if row.get("id")],

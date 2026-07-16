@@ -1155,6 +1155,10 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
         item["recorded_decision"] = recorded_decision
         if evidence_gate is not None:
             item["evidence_gate"] = evidence_gate
+        # Every public lane is permanently manual-only.  Older Structure/Airdrop/
+        # Cascade rows predate this explicit field, and refreshable payloads must not
+        # be able to opt themselves into automatic execution.
+        item["auto_execution_allowed"] = False
         if lane == "launch":
             action = _launch_action(item, latest_assessments.get(item["id"]),
                                     evidence_gate, now)

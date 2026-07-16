@@ -15,6 +15,7 @@ def test_listing_is_recorded_once_as_watch_only(tmp_path, monkeypatch):
     assert sr.record_listings([_listing()]) == 0
     event = ol.active("structure")[0]
     assert event["decision"] == "WATCH"
+    assert event["auto_execution_allowed"] is False
     assert event["event_type"] == "new_listing"
     assert event["source"] == "okx"
     assert event["symbol"] == "ABC"
@@ -227,6 +228,7 @@ def test_legacy_pair_rows_are_collapsed_and_never_labeled_as_new_listings():
     assert abc["markets"] == ["ABC-USDC", "ABC-USDT"]
     assert abc["ledger_event_ids"] == ["old-1", "old-2"]
     assert abc["actionable_now"] is False
+    assert abc["auto_execution_allowed"] is False
     assert any("未独立核验为官方上币公告" in reason for reason in abc["reasons"])
 
 
