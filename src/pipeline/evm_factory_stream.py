@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import sqlite3
+import stat
 import threading
 import time
 import urllib.error
@@ -1496,26 +1497,39 @@ def _coverage_key(spec: FactorySpec) -> tuple[str, str, str, str]:
     return spec.chain, spec.venue, spec.address, spec.topic
 
 
-def coverage_snapshot(spec: FactorySpec) -> dict:
-    """Return the persisted finalized-range proof for one exact factory filter."""
-    c = _conn()
-    try:
-        row = c.execute(
-            """SELECT s.coverage_started_block,s.verified_through_block,
-                      s.safe_head_block,s.verified_through_hash,s.safe_head_hash,
-                      s.safe_head_at,s.audit_duration_ms,s.verified_at,
-                      s.ws_provider_id,s.http_provider_id,s.provider_independent,
-                      s.status,s.consecutive_failures,s.next_retry_at,
-                      s.last_error_kind,s.updated_at,
-                      (SELECT MIN(e.from_block) FROM coverage_epochs AS e
-                        WHERE e.chain=s.chain AND e.venue=s.venue
-                          AND e.factory=s.factory AND e.topic=s.topic)
-                 FROM coverage_state AS s
-                WHERE s.chain=? AND s.venue=? AND s.factory=? AND s.topic=?""",
-            _coverage_key(spec),
-        ).fetchone()
-    finally:
-        c.close()
+def _empty_coverage_snapshot(*, state: str, error_kind: str) -> dict:
+    return {
+        "coverage_started_block": None, "verified_through_block": None,
+        "safe_head_block": None, "verified_through_hash": None,
+        "safe_head_hash": None, "safe_head_at": None,
+        "audit_duration_ms": None, "verified_at": None,
+        "ws_provider_id": None, "http_provider_id": None,
+        "provider_independent": False, "state": state,
+        "lag_blocks": None,
+        "consecutive_failures": 0, "next_retry_at": None,
+        "last_error_kind": error_kind, "updated_at": None,
+    }
+
+
+def _coverage_row(c: sqlite3.Connection, spec: FactorySpec) -> tuple | None:
+    return c.execute(
+        """SELECT s.coverage_started_block,s.verified_through_block,
+                  s.safe_head_block,s.verified_through_hash,s.safe_head_hash,
+                  s.safe_head_at,s.audit_duration_ms,s.verified_at,
+                  s.ws_provider_id,s.http_provider_id,s.provider_independent,
+                  s.status,s.consecutive_failures,s.next_retry_at,
+                  s.last_error_kind,s.updated_at,
+                  (SELECT MIN(e.from_block) FROM coverage_epochs AS e
+                    WHERE e.chain=s.chain AND e.venue=s.venue
+                      AND e.factory=s.factory AND e.topic=s.topic)
+             FROM coverage_state AS s
+            WHERE s.chain=? AND s.venue=? AND s.factory=? AND s.topic=?""",
+        _coverage_key(spec),
+    ).fetchone()
+
+
+def _shape_coverage_snapshot(row: tuple | None) -> dict:
+    """Validate and normalize one persisted proof row without storage access."""
     keys = (
         "coverage_started_block", "verified_through_block", "safe_head_block",
         "verified_through_hash", "safe_head_hash", "safe_head_at",
@@ -1525,17 +1539,9 @@ def coverage_snapshot(spec: FactorySpec) -> dict:
         "next_retry_at", "last_error_kind", "updated_at",
     )
     if row is None:
-        return {
-            "coverage_started_block": None, "verified_through_block": None,
-            "safe_head_block": None, "verified_through_hash": None,
-            "safe_head_hash": None, "safe_head_at": None,
-            "audit_duration_ms": None, "verified_at": None,
-            "ws_provider_id": None, "http_provider_id": None,
-            "provider_independent": False, "state": "missing",
-            "lag_blocks": None,
-            "consecutive_failures": 0, "next_retry_at": None,
-            "last_error_kind": "coverage_not_initialized", "updated_at": None,
-        }
+        return _empty_coverage_snapshot(
+            state="missing", error_kind="coverage_not_initialized",
+        )
     item = dict(zip(keys, row[:-1]))
     retained_epoch_start = row[-1] if type(row[-1]) is int else None
     error_kind = item.get("last_error_kind")
@@ -1685,6 +1691,163 @@ def coverage_snapshot(spec: FactorySpec) -> dict:
     return item
 
 
+def coverage_snapshot(spec: FactorySpec) -> dict:
+    """Read one public proof without application writes or schema changes.
+
+    Active WAL and stable rollback-journal stores use normal
+    ``mode=ro``/``query_only`` readers. Conditional ``immutable=1`` is restricted
+    to an explicit WAL-format header with no WAL or rollback sidecars, plus
+    before/after race checks; it can never expose an uncommitted DELETE spill.
+    An active WAL reader may coordinate through already-existing SHM read marks;
+    both WAL sidecars are required before that reader is opened. Final-component
+    file symlinks, sidecar symlinks, hardlinked databases, and identity retargeting
+    are rejected because SQLite binds WAL evidence to a pathname.
+    """
+    requested_db = DB
+    try:
+        requested_lstat = requested_db.lstat()
+    except FileNotFoundError:
+        return _empty_coverage_snapshot(
+            state="missing", error_kind="coverage_not_initialized",
+        )
+    except OSError:
+        return _empty_coverage_snapshot(
+            state="blocked", error_kind="coverage_store_unreadable",
+        )
+    if not stat.S_ISREG(requested_lstat.st_mode):
+        return _empty_coverage_snapshot(
+            state="blocked", error_kind="coverage_store_unreadable",
+        )
+    try:
+        # A final-component symlink splits sidecar discovery from SQLite's target
+        # pathname and can hide an active WAL. Refuse it; resolve parent symlinks
+        # once, then bind every stat/header/sidecar/URI operation to that identity.
+        resolved_db = requested_db.resolve(strict=True)
+        if not resolved_db.is_file():
+            raise sqlite3.OperationalError("coverage store is not a regular file")
+        requested_stat = requested_db.stat()
+        resolved_stat = resolved_db.lstat()
+        requested_identity = (requested_lstat.st_dev, requested_lstat.st_ino)
+        if (requested_identity != (resolved_stat.st_dev, resolved_stat.st_ino)
+                or requested_identity != (requested_stat.st_dev, requested_stat.st_ino)
+                or requested_lstat.st_nlink != 1
+                or requested_stat.st_nlink != 1 or resolved_stat.st_nlink != 1
+                or not stat.S_ISREG(resolved_stat.st_mode)):
+            raise sqlite3.OperationalError("coverage store identity is ambiguous")
+
+        def requested_identity_is_stable() -> bool:
+            try:
+                current_lstat = requested_db.lstat()
+                current_resolved = requested_db.resolve(strict=True)
+                current = requested_db.stat()
+                target = resolved_db.lstat()
+                return bool(
+                    stat.S_ISREG(current_lstat.st_mode)
+                    and stat.S_ISREG(target.st_mode)
+                    and current_resolved == resolved_db
+                    and (current_lstat.st_dev, current_lstat.st_ino)
+                        == requested_identity
+                    and (current.st_dev, current.st_ino) == requested_identity
+                    and (target.st_dev, target.st_ino) == requested_identity
+                    and current_lstat.st_nlink == 1
+                    and current.st_nlink == 1 and target.st_nlink == 1
+                )
+            except (OSError, RuntimeError):
+                return False
+
+        wal = resolved_db.with_name(resolved_db.name + "-wal")
+        shm = resolved_db.with_name(resolved_db.name + "-shm")
+        journal = resolved_db.with_name(resolved_db.name + "-journal")
+        sidecars = (wal, shm, journal)
+
+        def sidecars_are_unambiguous() -> bool:
+            try:
+                for path in sidecars:
+                    try:
+                        info = path.lstat()
+                    except FileNotFoundError:
+                        continue
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        return False
+                return True
+            except OSError:
+                return False
+
+        for _attempt in range(2):
+            if not sidecars_are_unambiguous():
+                raise sqlite3.OperationalError("coverage sidecar identity is ambiguous")
+            if journal.exists():
+                raise sqlite3.OperationalError("rollback journal is active")
+            has_wal, has_shm = wal.exists(), shm.exists()
+            if has_wal != has_shm:
+                raise sqlite3.OperationalError("incomplete WAL sidecar set")
+            if has_wal:
+                uri = f"{resolved_db.as_uri()}?mode=ro"
+                c = sqlite3.connect(uri, uri=True, timeout=5)
+                try:
+                    c.execute("PRAGMA query_only=ON")
+                    row = _coverage_row(c, spec)
+                finally:
+                    c.close()
+                if (journal.exists()
+                        or not sidecars_are_unambiguous()
+                        or not requested_identity_is_stable()):
+                    raise sqlite3.OperationalError("rollback journal appeared")
+                return _shape_coverage_snapshot(row)
+
+            # A stable rollback-journal database must use normal locking.  Only a
+            # WAL-format main file with no sidecars may use immutable to prevent
+            # SQLite from creating empty -wal/-shm files after a checkpoint.
+            before = resolved_db.stat()
+            with resolved_db.open("rb") as handle:
+                header = handle.read(20)
+            if len(header) < 20:
+                raise sqlite3.DatabaseError("coverage header is truncated")
+            journal_format = header[18:20]
+            if journal_format == b"\x02\x02":
+                uri = f"{resolved_db.as_uri()}?mode=ro&immutable=1"
+            elif journal_format == b"\x01\x01":
+                uri = f"{resolved_db.as_uri()}?mode=ro"
+            else:
+                raise sqlite3.DatabaseError("coverage journal format is invalid")
+            c = sqlite3.connect(uri, uri=True, timeout=5)
+            try:
+                c.execute("PRAGMA query_only=ON")
+                row = _coverage_row(c, spec)
+            finally:
+                c.close()
+            after = resolved_db.stat()
+            stable = (
+                (before.st_dev, before.st_ino, before.st_size,
+                 before.st_mtime_ns)
+                == (after.st_dev, after.st_ino, after.st_size,
+                    after.st_mtime_ns)
+                and not wal.exists() and not shm.exists()
+                and not journal.exists()
+                and sidecars_are_unambiguous()
+                and requested_identity_is_stable()
+            )
+            if stable:
+                return _shape_coverage_snapshot(row)
+            if journal.exists():
+                raise sqlite3.OperationalError("rollback journal appeared")
+        raise sqlite3.OperationalError("coverage store changed during read")
+    except Exception:
+        return _empty_coverage_snapshot(
+            state="blocked", error_kind="coverage_store_unreadable",
+        )
+
+
+def _coverage_snapshot_writable(spec: FactorySpec) -> dict:
+    """Open/migrate the proof store for an authorized evidence-write workflow."""
+    c = _conn()
+    try:
+        row = _coverage_row(c, spec)
+    finally:
+        c.close()
+    return _shape_coverage_snapshot(row)
+
+
 def _coverage_details(spec: FactorySpec, state: dict) -> dict:
     return {
         "schema_version": 2,
@@ -1781,7 +1944,7 @@ def _coverage_failure(spec: FactorySpec, *, error_kind: str,
                       at: datetime | None = None,
                       connection_generation: str | None = None) -> dict:
     now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    previous = coverage_snapshot(spec)
+    previous = _coverage_snapshot_writable(spec)
     failures = int(previous.get("consecutive_failures") or 0) + 1
     delay = min(
         COVERAGE_RETRY_MAX_SECONDS,
@@ -1828,7 +1991,7 @@ def _coverage_failure(spec: FactorySpec, *, error_kind: str,
         c.commit()
     finally:
         c.close()
-    state = coverage_snapshot(spec)
+    state = _coverage_snapshot_writable(spec)
     _report_coverage(
         spec, state, connection_generation=connection_generation,
     )
@@ -1892,7 +2055,7 @@ def _freeze_coverage_boundary(
         raise
     finally:
         c.close()
-    return coverage_snapshot(spec)
+    return _coverage_snapshot_writable(spec)
 
 
 def _validated_coverage_events(logs: object, *, spec: FactorySpec,
@@ -2060,7 +2223,7 @@ def audit_finalized_coverage(
             connection_generation=connection_generation,
         )
 
-    previous = coverage_snapshot(spec)
+    previous = _coverage_snapshot_writable(spec)
     next_retry_at = previous.get("next_retry_at")
     if next_retry_at:
         try:
@@ -2116,7 +2279,7 @@ def audit_finalized_coverage(
         if chain_id != CHAIN_IDS.get(spec.chain):
             raise RuntimeError("EVM HTTP provider returned the wrong chain")
 
-        previous = coverage_snapshot(spec)
+        previous = _coverage_snapshot_writable(spec)
         if previous.get("coverage_started_block") is None:
             previous = _freeze_coverage_boundary(
                 spec, safe_head=safe_head, lookback=lookback,
@@ -2375,7 +2538,7 @@ def audit_finalized_coverage(
             connection_generation=connection_generation,
         )
 
-    state = coverage_snapshot(spec)
+    state = _coverage_snapshot_writable(spec)
     _report_coverage(
         spec, state, connection_generation=connection_generation,
     )

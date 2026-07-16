@@ -153,6 +153,29 @@ def _install_legacy_coverage_schema(evm, *, with_epoch=False,
         c.close()
 
 
+def _seed_verified_coverage(evm, c, spec, now, *, start=90, through=100):
+    ws_provider, http_provider = _pid("ws.example"), _pid("audit.example")
+    epoch_start = (start // evm.COVERAGE_EPOCH_BLOCKS) * evm.COVERAGE_EPOCH_BLOCKS
+    c.execute("""INSERT INTO coverage_epochs(
+        chain,venue,factory,topic,epoch_start_block,from_block,to_block,
+        checked_at,ws_provider_id,http_provider_id,provider_independent,
+        log_count,evidence_digest,segment_count,status
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,1,0,?,1,'open')""",
+              (*evm._coverage_key(spec), epoch_start, start, through,
+               now.isoformat(), ws_provider, http_provider,
+               hashlib.sha256(b"coverage-read-fixture").hexdigest()))
+    c.execute("""INSERT INTO coverage_state(
+        chain,venue,factory,topic,coverage_started_block,
+        verified_through_block,verified_through_hash,safe_head_block,
+        safe_head_hash,safe_head_at,audit_duration_ms,verified_at,
+        ws_provider_id,http_provider_id,provider_independent,status,
+        consecutive_failures,next_retry_at,last_error_kind,updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'verified',0,NULL,NULL,?)""",
+              (*evm._coverage_key(spec), start, through, "0x" + "ab" * 32,
+               through, "0x" + "ab" * 32, now.isoformat(), 1,
+               now.isoformat(), ws_provider, http_provider, now.isoformat()))
+
+
 def test_empty_legacy_coverage_schema_rebuilds_atomically(evm):
     _install_legacy_coverage_schema(evm)
     evm._conn().close()
@@ -946,6 +969,442 @@ def test_corrupt_same_provider_persisted_claim_fails_closed(evm):
     assert state["state"] == "blocked"
     assert state["provider_independent"] is False
     assert state["last_error_kind"] == "invalid_coverage_proof"
+
+
+def test_public_coverage_snapshot_missing_store_creates_no_paths(
+        evm, tmp_path, monkeypatch):
+    db = tmp_path / "absent" / "nested" / "coverage.db"
+    monkeypatch.setattr(evm, "DB", db)
+    assert not db.parent.exists()
+
+    state = evm.coverage_snapshot(evm.bsc_pancake_v2_spec())
+
+    assert state["state"] == "missing"
+    assert state["last_error_kind"] == "coverage_not_initialized"
+    assert not db.parent.exists()
+    assert not db.exists()
+    assert not db.with_name(db.name + "-wal").exists()
+    assert not db.with_name(db.name + "-shm").exists()
+
+
+def test_public_coverage_snapshot_old_schema_is_unreadable_without_migration(
+        evm, monkeypatch):
+    secret = "https://tenant:key@rpc.example/private/token"
+    legacy = sqlite3.connect(str(evm.DB))
+    try:
+        legacy.execute("""CREATE TABLE coverage_state(
+            chain TEXT,venue TEXT,factory TEXT,topic TEXT,status TEXT)""")
+        legacy.execute(
+            "INSERT INTO coverage_state VALUES (?,?,?,?,?)",
+            (*evm._coverage_key(evm.bsc_pancake_v2_spec()), secret),
+        )
+        legacy.commit()
+        before_names = legacy.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()
+        before_mode = legacy.execute("PRAGMA journal_mode").fetchone()[0]
+    finally:
+        legacy.close()
+    before_stat = (evm.DB.stat().st_size, evm.DB.stat().st_mtime_ns)
+    monkeypatch.setattr(
+        evm, "_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+    )
+
+    state = evm.coverage_snapshot(evm.bsc_pancake_v2_spec())
+
+    assert state["state"] == "blocked"
+    assert state["last_error_kind"] == "coverage_store_unreadable"
+    assert secret not in repr(state)
+    assert (evm.DB.stat().st_size, evm.DB.stat().st_mtime_ns) == before_stat
+    assert not evm.DB.with_name(evm.DB.name + "-wal").exists()
+    assert not evm.DB.with_name(evm.DB.name + "-shm").exists()
+    check = sqlite3.connect(str(evm.DB))
+    try:
+        assert check.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall() == before_names
+        assert check.execute("PRAGMA journal_mode").fetchone()[0] == before_mode
+    finally:
+        check.close()
+
+
+def test_public_coverage_snapshot_current_store_is_read_only(evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    now = datetime.now(timezone.utc)
+    writer = evm._conn()
+    try:
+        _seed_verified_coverage(evm, writer, spec, now)
+        writer.commit()
+    finally:
+        writer.close()
+    check = sqlite3.connect(str(evm.DB))
+    try:
+        mode_before = check.execute("PRAGMA journal_mode").fetchone()[0]
+    finally:
+        check.close()
+    sidecars_before = tuple(
+        path.exists() for path in (
+            evm.DB.with_name(evm.DB.name + "-wal"),
+            evm.DB.with_name(evm.DB.name + "-shm"),
+        )
+    )
+    before_stat = (evm.DB.stat().st_size, evm.DB.stat().st_mtime_ns)
+    monkeypatch.setattr(
+        evm, "_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+    )
+
+    state = evm.coverage_snapshot(spec)
+
+    assert state["state"] == "verified"
+    assert state["coverage_started_block"] == 90
+    assert state["verified_through_block"] == 100
+    assert (evm.DB.stat().st_size, evm.DB.stat().st_mtime_ns) == before_stat
+    assert tuple(
+        path.exists() for path in (
+            evm.DB.with_name(evm.DB.name + "-wal"),
+            evm.DB.with_name(evm.DB.name + "-shm"),
+        )
+    ) == sidecars_before
+    check = sqlite3.connect(str(evm.DB))
+    try:
+        assert check.execute("PRAGMA journal_mode").fetchone()[0] == mode_before
+    finally:
+        check.close()
+
+
+def test_public_coverage_snapshot_stable_delete_store_uses_locked_read_only(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    now = datetime.now(timezone.utc)
+    writer = evm._conn()
+    try:
+        _seed_verified_coverage(evm, writer, spec, now)
+        writer.commit()
+        assert writer.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+    finally:
+        writer.close()
+    sidecars = tuple(
+        evm.DB.with_name(evm.DB.name + suffix)
+        for suffix in ("-wal", "-shm", "-journal")
+    )
+    assert not any(path.exists() for path in sidecars)
+    monkeypatch.setattr(
+        evm, "_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+    )
+
+    state = evm.coverage_snapshot(spec)
+
+    assert state["state"] == "verified"
+    assert state["verified_through_block"] == 100
+    assert not any(path.exists() for path in sidecars)
+    check = sqlite3.connect(str(evm.DB))
+    try:
+        assert check.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    finally:
+        check.close()
+
+
+@pytest.mark.parametrize("suffix", ("-wal", "-shm", "-journal"))
+def test_public_coverage_snapshot_incomplete_sidecars_fail_closed(
+        evm, monkeypatch, suffix):
+    spec = evm.bsc_pancake_v2_spec()
+    writer = evm._conn()
+    try:
+        _seed_verified_coverage(evm, writer, spec, datetime.now(timezone.utc))
+        writer.commit()
+    finally:
+        writer.close()
+    secret = "https://tenant:key@rpc.example/private/token"
+    artifact = evm.DB.with_name(evm.DB.name + suffix)
+    artifact.write_bytes(secret.encode())
+    monkeypatch.setattr(
+        evm, "_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+    )
+
+    state = evm.coverage_snapshot(spec)
+
+    assert state["state"] == "blocked"
+    assert state["last_error_kind"] == "coverage_store_unreadable"
+    assert secret not in repr(state)
+
+
+def test_public_coverage_snapshot_broken_final_symlink_is_unreadable(
+        evm, tmp_path, monkeypatch):
+    link = tmp_path / "broken-coverage.db"
+    link.symlink_to(tmp_path / "missing-target.db")
+    monkeypatch.setattr(evm, "DB", link)
+
+    state = evm.coverage_snapshot(evm.bsc_pancake_v2_spec())
+
+    assert state["state"] == "blocked"
+    assert state["last_error_kind"] == "coverage_store_unreadable"
+
+
+def test_public_coverage_snapshot_final_symlink_cannot_hide_target_wal(
+        evm, tmp_path, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    setup = evm._conn()
+    try:
+        _seed_verified_coverage(evm, setup, spec, datetime.now(timezone.utc))
+        setup.commit()
+    finally:
+        setup.close()
+    target = evm.DB
+    writer = evm._conn()
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute(
+            """UPDATE coverage_state SET status='blocked',provider_independent=0,
+                      last_error_kind='maintenance_failed'
+                WHERE chain=? AND venue=? AND factory=? AND topic=?""",
+            evm._coverage_key(spec),
+        )
+        writer.commit()
+        stale = sqlite3.connect(
+            f"{target.resolve().as_uri()}?mode=ro&immutable=1", uri=True,
+        )
+        try:
+            assert stale.execute(
+                "SELECT status FROM coverage_state WHERE chain=? AND venue=? "
+                "AND factory=? AND topic=?", evm._coverage_key(spec),
+            ).fetchone()[0] == "verified"
+        finally:
+            stale.close()
+        actual = evm.coverage_snapshot(spec)
+        assert actual["state"] == "blocked"
+        assert actual["provider_independent"] is False
+
+        link = tmp_path / "coverage-link.db"
+        link.symlink_to(target)
+        monkeypatch.setattr(evm, "DB", link)
+        linked = evm.coverage_snapshot(spec)
+        assert linked["state"] == "blocked"
+        assert linked["last_error_kind"] == "coverage_store_unreadable"
+        assert linked["provider_independent"] is False
+    finally:
+        writer.close()
+
+
+def test_public_coverage_snapshot_parent_symlink_sees_target_wal_latest(
+        evm, tmp_path, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    target_dir = tmp_path / "target-dir"
+    target_dir.mkdir()
+    target = target_dir / "coverage.db"
+    monkeypatch.setattr(evm, "DB", target)
+    setup = evm._conn()
+    try:
+        _seed_verified_coverage(evm, setup, spec, datetime.now(timezone.utc))
+        setup.commit()
+    finally:
+        setup.close()
+    writer = evm._conn()
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute(
+            "UPDATE coverage_state SET verified_through_block=101,"
+            "safe_head_block=101 WHERE chain=? AND venue=? AND factory=? AND topic=?",
+            evm._coverage_key(spec),
+        )
+        writer.commit()
+        parent_link = tmp_path / "parent-link"
+        parent_link.symlink_to(target_dir, target_is_directory=True)
+        monkeypatch.setattr(evm, "DB", parent_link / target.name)
+
+        state = evm.coverage_snapshot(spec)
+
+        assert state["state"] == "verified"
+        assert state["verified_through_block"] == 101
+    finally:
+        writer.close()
+
+
+def test_public_coverage_snapshot_hardlinked_database_is_unreadable(
+        evm, tmp_path, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    setup = evm._conn()
+    try:
+        _seed_verified_coverage(evm, setup, spec, datetime.now(timezone.utc))
+        setup.commit()
+    finally:
+        setup.close()
+    alias = tmp_path / "hardlink-coverage.db"
+    try:
+        alias.hardlink_to(evm.DB)
+    except OSError as exc:
+        pytest.skip(f"hardlinks unavailable: {type(exc).__name__}")
+    monkeypatch.setattr(evm, "DB", alias)
+
+    state = evm.coverage_snapshot(spec)
+
+    assert state["state"] == "blocked"
+    assert state["last_error_kind"] == "coverage_store_unreadable"
+
+
+@pytest.mark.parametrize("alias_kind", ("symlink", "hardlink"))
+def test_public_coverage_snapshot_sidecar_alias_is_rejected_before_sqlite_open(
+        evm, tmp_path, monkeypatch, alias_kind):
+    spec = evm.bsc_pancake_v2_spec()
+    setup = evm._conn()
+    try:
+        _seed_verified_coverage(evm, setup, spec, datetime.now(timezone.utc))
+        setup.commit()
+    finally:
+        setup.close()
+    wal = evm.DB.with_name(evm.DB.name + "-wal")
+    shm = evm.DB.with_name(evm.DB.name + "-shm")
+    source = tmp_path / "sidecar-source"
+    source.write_bytes(b"not sqlite evidence")
+    if alias_kind == "symlink":
+        wal.symlink_to(source)
+    else:
+        wal.write_bytes(b"not sqlite evidence")
+        alias = tmp_path / "sidecar-hardlink"
+        try:
+            alias.hardlink_to(wal)
+        except OSError as exc:
+            pytest.skip(f"hardlinks unavailable: {type(exc).__name__}")
+    shm.write_bytes(b"not sqlite evidence")
+    opens = []
+
+    def sqlite_open_forbidden(*_args, **_kwargs):
+        opens.append(True)
+        raise AssertionError("SQLite opened ambiguous sidecars")
+
+    monkeypatch.setattr(evm.sqlite3, "connect", sqlite_open_forbidden)
+    state = evm.coverage_snapshot(spec)
+    assert state["state"] == "blocked"
+    assert state["last_error_kind"] == "coverage_store_unreadable"
+    assert opens == []
+
+
+def test_public_coverage_snapshot_blocks_uncommitted_delete_page_spill(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    now = datetime.now(timezone.utc)
+    setup = evm._conn()
+    try:
+        _seed_verified_coverage(evm, setup, spec, now)
+        setup.commit()
+        assert setup.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+        setup.execute(
+            "CREATE TABLE spill_filler(id INTEGER PRIMARY KEY,payload BLOB)"
+        )
+        setup.commit()
+    finally:
+        setup.close()
+
+    writer = sqlite3.connect(str(evm.DB), timeout=1)
+    try:
+        writer.execute("PRAGMA cache_size=1")
+        writer.execute("PRAGMA cache_spill=ON")
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "UPDATE coverage_state SET verified_through_block=101,"
+            "safe_head_block=101 WHERE chain=? AND venue=? AND factory=? AND topic=?",
+            evm._coverage_key(spec),
+        )
+        for index in range(128):
+            writer.execute(
+                "INSERT INTO spill_filler(id,payload) VALUES (?,zeroblob(8192))",
+                (index,),
+            )
+        journal = evm.DB.with_name(evm.DB.name + "-journal")
+        assert journal.exists()
+        dirty_reader = sqlite3.connect(
+            f"{evm.DB.resolve().as_uri()}?mode=ro&immutable=1", uri=True,
+        )
+        try:
+            # This proves the old unconditional immutable branch could expose the
+            # uncommitted page already spilled into the main database.
+            assert dirty_reader.execute(
+                "SELECT verified_through_block FROM coverage_state WHERE "
+                "chain=? AND venue=? AND factory=? AND topic=?",
+                evm._coverage_key(spec),
+            ).fetchone()[0] == 101
+        finally:
+            dirty_reader.close()
+        monkeypatch.setattr(
+            evm, "_conn",
+            lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+        )
+
+        blocked = evm.coverage_snapshot(spec)
+        assert blocked["state"] == "blocked"
+        assert blocked["last_error_kind"] == "coverage_store_unreadable"
+    finally:
+        writer.rollback()
+        writer.close()
+
+    restored = evm.coverage_snapshot(spec)
+    assert restored["state"] == "verified"
+    assert restored["verified_through_block"] == 100
+
+
+def test_public_coverage_snapshot_observes_latest_active_wal_commit(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    now = datetime.now(timezone.utc)
+    writer = evm._conn()
+    try:
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        _seed_verified_coverage(evm, writer, spec, now)
+        writer.commit()
+        assert evm.DB.with_name(evm.DB.name + "-wal").exists()
+        assert evm.DB.with_name(evm.DB.name + "-shm").exists()
+        paths = (
+            evm.DB, evm.DB.with_name(evm.DB.name + "-wal"),
+            evm.DB.with_name(evm.DB.name + "-shm"),
+        )
+
+        def fingerprints():
+            return tuple(
+                (path.stat().st_size, path.stat().st_mtime_ns,
+                 hashlib.sha256(path.read_bytes()).hexdigest())
+                for path in paths
+            )
+
+        def assert_read_only(before, after):
+            # DB and WAL are durable evidence and must remain byte-identical.
+            assert after[:2] == before[:2]
+            # SQLite may update transient read-marks inside the existing SHM
+            # mapping; the public reader must not create or resize that sidecar.
+            assert after[2][0] == before[2][0]
+
+        monkeypatch.setattr(
+            evm, "_conn",
+            lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+        )
+        before_read = fingerprints()
+        assert evm.coverage_snapshot(spec)["verified_through_block"] == 100
+        assert_read_only(before_read, fingerprints())
+
+        later = now + timedelta(seconds=1)
+        writer.execute(
+            "UPDATE coverage_epochs SET to_block=101,checked_at=? WHERE "
+            "chain=? AND venue=? AND factory=? AND topic=?",
+            (later.isoformat(), *evm._coverage_key(spec)),
+        )
+        writer.execute(
+            """UPDATE coverage_state SET verified_through_block=101,
+                      safe_head_block=101,safe_head_at=?,verified_at=?,updated_at=?
+                WHERE chain=? AND venue=? AND factory=? AND topic=?""",
+            (later.isoformat(), later.isoformat(), later.isoformat(),
+             *evm._coverage_key(spec)),
+        )
+        writer.commit()
+        before_read = fingerprints()
+        latest = evm.coverage_snapshot(spec)
+        assert_read_only(before_read, fingerprints())
+        assert latest["state"] == "verified"
+        assert latest["verified_through_block"] == 101
+        assert writer.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    finally:
+        writer.close()
 
 
 def test_persisted_coverage_resumes_exactly_after_restart(evm):

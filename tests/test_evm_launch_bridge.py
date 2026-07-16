@@ -174,6 +174,10 @@ def test_only_fresh_independent_finalized_coverage_allows_live(tmp_path, monkeyp
                  "http_provider_id": _pid("audit.example"),
                  "connection_generation": "a" * 32},
     )
+    monkeypatch.setattr(
+        evm, "_conn",
+        lambda: (_ for _ in ()).throw(AssertionError("writable open attempted")),
+    )
     row = next(item for item in configured_stream_health()
                if item["chain"] == spec.chain and item["venue"] == spec.venue)
     assert row["transport_status"] == "live"
