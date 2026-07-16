@@ -114,6 +114,61 @@ def test_worker_details_are_structured_and_omission_clears_previous_run(health):
     assert health.snapshot(now=t0 + timedelta(seconds=1))[0]["details"] is None
 
 
+def test_generation_heartbeat_is_an_atomic_compare_and_set(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    health.report_worker(
+        "bsc", "factory_coverage", status="degraded", at=t0,
+        details={"connection_generation": "new", "outcome": "reaudit_required"},
+    )
+
+    assert health.report_worker_if_connection_generation(
+        "bsc", "factory_coverage", expected_generation="old", status="live",
+        at=t0 + timedelta(seconds=1),
+        details={"connection_generation": "old", "outcome": "verified"},
+    ) is False
+    unchanged = health.snapshot(now=t0 + timedelta(seconds=1))[0]
+    assert unchanged["status"] == "degraded"
+    assert unchanged["details"] == {
+        "connection_generation": "new", "outcome": "reaudit_required",
+    }
+
+    replacement = {
+        "connection_generation": "new", "outcome": "verified",
+        "provider_independent": True,
+    }
+    assert health.report_worker_if_connection_generation(
+        "bsc", "factory_coverage", expected_generation="new", status="live",
+        at=t0 + timedelta(seconds=2), details=replacement,
+    ) is True
+    updated = health.snapshot(now=t0 + timedelta(seconds=2))[0]
+    assert updated["status"] == "live"
+    assert updated["details"] == replacement
+
+
+def test_generation_heartbeat_fails_closed_on_missing_or_corrupt_binding(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    assert health.report_worker_if_connection_generation(
+        "bsc", "missing", expected_generation="new", status="live", at=t0,
+        details={"connection_generation": "new"},
+    ) is False
+
+    health.report_worker(
+        "bsc", "factory_coverage", status="degraded", at=t0,
+        details={"outcome": "legacy_without_generation"},
+    )
+    assert health.report_worker_if_connection_generation(
+        "bsc", "factory_coverage", expected_generation="new", status="live",
+        at=t0 + timedelta(seconds=1),
+        details={"connection_generation": "new"},
+    ) is False
+
+    with pytest.raises(ValueError, match="preserve the expected generation"):
+        health.report_worker_if_connection_generation(
+            "bsc", "factory_coverage", expected_generation="new", status="live",
+            details={"connection_generation": "different"},
+        )
+
+
 def test_legacy_stream_table_adds_worker_details_without_rebuild(health):
     legacy = sqlite3.connect(health.DB)
     legacy.execute("""CREATE TABLE streams(

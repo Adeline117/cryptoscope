@@ -221,6 +221,64 @@ def report_worker(source: str, stream: str, *, status: str,
         c.close()
 
 
+def report_worker_if_connection_generation(
+    source: str, stream: str, *, expected_generation: str, status: str,
+    error: str | None = None, details: dict | None = None,
+    at: datetime | str | None = None,
+) -> bool:
+    """Atomically heartbeat only the websocket generation that began the work.
+
+    A finalized-coverage audit can overlap a reconnect.  The reconnect first
+    persists its new generation as degraded; this compare-and-set prevents the
+    older audit from overwriting that row with a stale live claim.
+    """
+    if not source or not stream:
+        raise ValueError("source and stream are required")
+    if not isinstance(expected_generation, str) or not expected_generation:
+        raise ValueError("expected connection generation is required")
+    if status not in {"live", "degraded"}:
+        raise ValueError("worker status must be live or degraded")
+    if (not isinstance(details, dict)
+            or details.get("connection_generation") != expected_generation):
+        raise ValueError("worker details must preserve the expected generation")
+    details_json = (json.dumps(
+        details, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ) if details is not None else None)
+    if details_json is not None and len(details_json.encode("utf-8")) > 16_384:
+        raise ValueError("worker details exceed 16384 bytes")
+    now = _iso(at)
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT details FROM streams WHERE source=? AND stream=?",
+            (source, stream),
+        ).fetchone()
+        try:
+            current_details = json.loads(row[0]) if row and row[0] else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            current_details = None
+        if (not isinstance(current_details, dict)
+                or current_details.get("connection_generation")
+                != expected_generation):
+            c.rollback()
+            return False
+        c.execute(
+            """UPDATE streams
+                  SET last_received_at=?,status=?,last_error=?,updated_at=?,details=?
+                WHERE source=? AND stream=?""",
+            (now, status, str(error)[:240] if error else None, now,
+             details_json, source, stream),
+        )
+        c.commit()
+        return True
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
+
+
 def resolve_gap(gap_id: int, *, details: dict | None = None,
                 at: datetime | str | None = None) -> bool:
     now = _iso(at)
