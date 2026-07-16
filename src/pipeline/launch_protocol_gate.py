@@ -118,6 +118,7 @@ def _result(row: tuple, readiness: dict) -> dict:
         "armed_at": item["armed_at"], "opened_at": item["opened_at"],
         "breached_at": item["breached_at"], "reason_codes": reasons,
         "readiness_hash": item["readiness_hash"],
+        "created_at": item["created_at"], "updated_at": item["updated_at"],
         "source_readiness": readiness,
         "auto_execution_allowed": False,
     }

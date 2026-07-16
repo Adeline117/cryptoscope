@@ -649,6 +649,40 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     assert "archive_provider_not_configured" in solana["source_readiness"]["reason_codes"]
     assert solana["protocol_admission"]["state"] == "scheduled"
     assert solana["protocol_admission"]["enrollment_open"] is False
+    protocol = payload["research_protocol"]
+    assert protocol["protocol_id"] == "launch-forward-spa-v3"
+    assert protocol["cohort_version"] == 6
+    assert protocol["enrollment_open"] is False
+    assert protocol["enrollment_state"] == "scheduled"
+    assert "source_readiness_not_ready" in protocol["reason_codes"]
+    assert protocol["execution_edge_eligible"] is False
+    assert protocol["auto_execution_allowed"] is False
+
+
+def test_public_protocol_requires_current_readiness_even_if_latch_says_open():
+    from src.pipeline import launch_radar as lr
+
+    admission = {
+        "protocol_id": lr.PROTOCOL_ID, "cohort_version": lr.COHORT_VERSION,
+        "protocol_start_at": lr.PROTOCOL_START_AT,
+        "state": "open", "enrollment_open": True, "reason_codes": [],
+    }
+    blocked = lr._public_research_protocol(
+        {"state": "blocked", "ready": False,
+         "reason_codes": ["reconciliation_evidence_stale"]},
+        admission,
+    )
+    ready = lr._public_research_protocol(
+        {"state": "ready", "ready": True, "reason_codes": []}, admission,
+    )
+
+    assert blocked["enrollment_state"] == "blocked"
+    assert blocked["persistent_admission_state"] == "open"
+    assert blocked["enrollment_open"] is False
+    assert "reconciliation_evidence_stale" in blocked["reason_codes"]
+    assert ready["enrollment_state"] == "open"
+    assert ready["enrollment_open"] is True
+    assert ready["reason_codes"] == []
 
 
 def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):

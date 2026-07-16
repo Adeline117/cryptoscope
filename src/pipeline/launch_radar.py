@@ -70,6 +70,69 @@ def _protocol_admission(
     return value
 
 
+def _public_research_protocol(readiness: object, admission: object) -> dict:
+    """Derive an effective public enrollment gate from the same view snapshot."""
+    readiness = readiness if isinstance(readiness, dict) else {}
+    admission = admission if isinstance(admission, dict) else {}
+    reasons: list[str] = []
+
+    def add(value: object) -> None:
+        if isinstance(value, str) and value.strip() and value not in reasons:
+            reasons.append(value)
+
+    for value in readiness.get("reason_codes") or []:
+        add(value)
+    for value in admission.get("reason_codes") or []:
+        add(value)
+    identity_ok = True
+    for field, expected in (
+        ("protocol_id", PROTOCOL_ID),
+        ("cohort_version", COHORT_VERSION),
+        ("protocol_start_at", PROTOCOL_START_AT),
+    ):
+        if admission.get(field) != expected:
+            identity_ok = False
+            add(f"protocol_admission_{field}_mismatch")
+    source_ready = (
+        readiness.get("state") == "ready" and readiness.get("ready") is True
+    )
+    admission_open = (
+        identity_ok and admission.get("state") == "open"
+        and admission.get("enrollment_open") is True
+    )
+    enrollment_open = source_ready and admission_open
+    persistent_state = str(admission.get("state") or "unavailable")
+    if not source_ready:
+        add("source_readiness_not_ready")
+    if not admission_open:
+        add("protocol_admission_not_open")
+    if enrollment_open:
+        state = "open"
+        reasons = []
+    elif persistent_state == "breached":
+        state = "breached"
+    elif persistent_state in {"scheduled", "armed"}:
+        state = persistent_state
+    else:
+        state = "blocked"
+    return {
+        "protocol_id": PROTOCOL_ID,
+        "cohort_version": COHORT_VERSION,
+        "protocol_start_at": PROTOCOL_START_AT,
+        "enrollment_state": state,
+        "persistent_admission_state": persistent_state,
+        "enrollment_open": enrollment_open,
+        "reason_codes": reasons,
+        "source_readiness_state": readiness.get("state") or "blocked",
+        "sample_kind": "forward_paper_selector",
+        "selection_stage": "discovery_rule_before_security_and_route",
+        "real_edge_n": 0,
+        "real_edge_eligible": False,
+        "execution_edge_eligible": False,
+        "auto_execution_allowed": False,
+    }
+
+
 def _num(value, default=0.0) -> float:
     try:
         return float(value)
@@ -868,6 +931,18 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
 
 def view() -> dict:
     """Read-only board payload; scanning belongs to a scheduled ingestion path."""
+    source_readiness = {
+        "state": "blocked", "ready": False,
+        "reason_codes": ["source_readiness_unavailable"],
+    }
+    protocol_admission = {
+        "protocol_id": PROTOCOL_ID,
+        "cohort_version": COHORT_VERSION,
+        "protocol_start_at": PROTOCOL_START_AT,
+        "state": "scheduled", "enrollment_open": False,
+        "reason_codes": ["protocol_gate_not_initialized"],
+        "auto_execution_allowed": False,
+    }
     try:
         from src.pipeline import (
             launch_protocol_gate, solana_launch_reconcile,
@@ -882,14 +957,10 @@ def view() -> dict:
              if item["stream"] == solana_launch_stream.MAINTENANCE_STREAM),
             None,
         )
-        protocol_admission = launch_protocol_gate.read(protocol_id=PROTOCOL_ID) or {
-            "protocol_id": PROTOCOL_ID,
-            "cohort_version": COHORT_VERSION,
-            "protocol_start_at": PROTOCOL_START_AT,
-            "state": "scheduled", "enrollment_open": False,
-            "reason_codes": ["protocol_gate_not_initialized"],
-            "auto_execution_allowed": False,
-        }
+        protocol_admission = (
+            launch_protocol_gate.read(protocol_id=PROTOCOL_ID) or protocol_admission
+        )
+        source_readiness = solana_launch_reconcile.source_readiness()
         primary = {"available": True,
                    "qualification": solana_launch_stream.qualification_summary(
                        ledger_readback=lambda ident, mint: event_id_readback_matches(
@@ -897,12 +968,14 @@ def view() -> dict:
                    "streams": streams,
                    "maintenance": maintenance,
                    "market_provider": solana_launch_stream.qualification_provider_health(),
-                   "source_readiness": solana_launch_reconcile.source_readiness(),
+                   "source_readiness": source_readiness,
                    "protocol_admission": protocol_admission,
                    }
     except Exception as exc:
         primary = {"available": False, "reason": str(exc)[:120],
-                   "streams": [], "maintenance": None}
+                   "streams": [], "maintenance": None,
+                   "source_readiness": source_readiness,
+                   "protocol_admission": protocol_admission}
     try:
         from src.pipeline import evm_factory_stream
         from src.pipeline.evm_launch_bridge import configured_stream_health
@@ -915,6 +988,9 @@ def view() -> dict:
     except Exception as exc:
         evm_primary = {"available": False, "reason": str(exc)[:120], "streams": []}
     return {"events": active("launch"),
+            "research_protocol": _public_research_protocol(
+                source_readiness, protocol_admission,
+            ),
             "primary_sources": {"solana": primary, "evm": evm_primary},
             "source": "Launch event ledger + primary chain stream health"}
 
