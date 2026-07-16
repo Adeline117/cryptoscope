@@ -260,6 +260,20 @@ def test_breached_global_admission_blocks_entire_edge_verdict(monkeypatch):
     assert "admission" in got["reason"]
 
 
+def test_post_boundary_wrong_cohort_label_cannot_escape_integrity_denominator():
+    from src.pipeline import edge_validation as ev
+
+    row = _row(0, "SMALL_PROBE", 5.0)
+    row["cohort_version"] = ev.COHORT_VERSION - 1
+
+    assert ev.is_protocol_enrollment_candidate(row) is True
+    assert "cohort_version_mismatch" in ev.protocol_exclusion_reasons(row)
+    got = ev.launch_forward_validation([row])
+    assert got["state"] == "protocol_integrity_blocked"
+    assert got["integrity_invalid_n"] == 1
+    assert got["integrity_invalid_by_reason"]["cohort_version_mismatch"] == 1
+
+
 def test_protocol_rejects_v5_preboundary_partial_wrong_ceiling_and_snapshot_drift():
     from src.pipeline import edge_validation as ev
     from src.pipeline.execution_cost import (
@@ -617,6 +631,9 @@ def test_collecting_result_exposes_exclusions_and_all_fixed_safety_fields():
     rows = [_row(index, "SMALL_PROBE", 5.0) for index in range(3)]
     legacy = _row(9, "WATCH", 5.0)
     legacy["cohort_version"] = 5
+    before = datetime.fromisoformat(ev.PROTOCOL_START_AT) - timedelta(seconds=1)
+    legacy["detected_at"] = legacy["decision_at"] = before.isoformat()
+    legacy["entry_observation"]["observed_at"] = before.isoformat()
     rows.append(legacy)
 
     got = ev.launch_forward_validation(rows)

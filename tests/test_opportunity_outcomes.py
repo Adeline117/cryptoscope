@@ -659,6 +659,47 @@ def test_v6_invalid_frozen_cost_is_permanently_rejected_without_lookup(
     assert calls == []
 
 
+def test_v6_source_authority_outage_defers_then_retries_settlement(
+        ledger, monkeypatch):
+    from src.pipeline import edge_validation as ev
+    from src.pipeline import opportunity_outcomes as oo
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    monkeypatch.setattr(ev, "PROTOCOL_START_AT", (now - timedelta(days=3)).isoformat())
+    observed = now - timedelta(hours=25)
+    _record_with_clock(ledger, monkeypatch, _launch_with_entry(
+        (observed - timedelta(minutes=2)).isoformat(), observed.isoformat(),
+        "v6-source-retry",
+    ), observed + timedelta(seconds=1))
+
+    def unavailable(*_args, **_kwargs):
+        raise OSError("source database locked")
+
+    monkeypatch.setattr(ev, "_candidate_source_proof", unavailable)
+    first = oo.resolve(now=now, price_at=lambda *_: pytest.fail("price lookup ran"))
+    deferred = ledger.outcome_rows()[0]["outcome"]["settlement_deferred"]
+
+    assert first["lookups"] == first["cost_evidence_rejected"] == 0
+    assert first["source_evidence_deferred"] == 1
+    assert deferred["reason_code"] == "launch_v6_source_authority_deferred"
+    assert deferred["reasons"] == ["source_proof_unverifiable"]
+    assert deferred["permanent"] is False
+
+    monkeypatch.setattr(
+        ev, "_candidate_source_proof",
+        lambda _row, snapshot: dict(snapshot["reconciliation_proof"]),
+    )
+    second = oo.resolve(
+        now=now + timedelta(minutes=1),
+        price_at=lambda row, when: _observed_price(row, when, price=110.0),
+    )
+    row = ledger.outcome_rows()[0]
+    assert second["settled"] == 1
+    assert second["source_evidence_deferred"] == 0
+    assert "settlement_blocked" not in row["outcome"]
+    assert "settlement_deferred" not in row["outcome"]
+
+
 def test_cascade_has_no_action_gate_without_matched_control(ledger):
     from src.pipeline import opportunity_outcomes as oo
 

@@ -255,7 +255,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
     price_at = price_at or _default_price_at
     rows = opportunity_ledger.outcome_rows(open_only=True)
     tasks = _select_due_tasks(rows, now, max_lookups)
-    lookups = settled = retired = cost_rejected = 0
+    lookups = settled = retired = cost_rejected = source_deferred = 0
     source_backoff = None
     by_lane: dict[str, int] = {}
     by_horizon: dict[str, int] = {}
@@ -275,25 +275,39 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
             cost_pct, cost_model = _cost(row)
         except ValueError as exc:
             reasons = protocol_exclusion_reasons(row) or ["protocol_snapshot_invalid"]
+            permanent = any(reason != "source_proof_unverifiable" for reason in reasons)
             rejection = {
                 "at": now.isoformat(),
                 "horizon": name,
-                "reason_code": "launch_v6_cost_evidence_rejected",
+                "reason_code": (
+                    "launch_v6_cost_evidence_rejected" if permanent
+                    else "launch_v6_source_authority_deferred"
+                ),
                 "reasons": reasons,
                 "detail": str(exc)[:240],
-                "permanent": True,
+                "permanent": permanent,
             }
             outcome.update({
                 "version": 1,
                 "direction": _direction(row),
                 "cost_is_real_fill": False,
-                "cost_evidence_rejected": rejection,
                 "settlement_blocked": rejection,
                 "updated_at": now.isoformat(),
             })
+            if permanent:
+                outcome["cost_evidence_rejected"] = rejection
+                outcome.pop("settlement_deferred", None)
+                cost_rejected += 1
+            else:
+                outcome["settlement_deferred"] = rejection
+                outcome.pop("cost_evidence_rejected", None)
+                source_deferred += 1
             opportunity_ledger.save_outcome(row["id"], outcome, "open")
-            cost_rejected += 1
             continue
+        blocked = outcome.get("settlement_blocked")
+        if isinstance(blocked, dict) and blocked.get("permanent") is False:
+            outcome.pop("settlement_blocked", None)
+            outcome.pop("settlement_deferred", None)
         outcome.update({"version": 1, "direction": _direction(row),
                         "cost_pct_est": cost_pct, "cost_model": cost_model,
                         "cost_is_real_fill": False, "horizons": horizons})
@@ -376,6 +390,7 @@ def resolve(*, now: datetime | None = None, price_at: PriceAt | None = None,
         opportunity_ledger.save_outcome(row["id"], outcome, state)
     result = {"lookups": lookups, "settled": settled, "retired": retired,
               "cost_evidence_rejected": cost_rejected,
+              "source_evidence_deferred": source_deferred,
               "lookups_by_lane": by_lane, "lookups_by_horizon": by_horizon,
               "source_backoff": source_backoff,
               "pending_events": sum(1 for r in rows if r.get("lane") in SUPPORTED_LANES)}
@@ -917,6 +932,7 @@ def actionability_gate(lane: str) -> dict:
         validation_state = validation.get("state")
         detail = {"protocol_id": validation.get("protocol_id"),
                   "protocol_state": validation_state,
+                  "protocol_admission": validation.get("protocol_admission"),
                   "look_n_per_arm": validation.get("look_n_per_arm"),
                   "next_look_n_per_arm": validation.get("next_look_n_per_arm"),
                   "integrity_invalid_n": validation.get("integrity_invalid_n", 0),

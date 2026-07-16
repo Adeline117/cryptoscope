@@ -291,7 +291,7 @@ def is_protocol_enrollment_candidate(row: dict) -> bool:
     """
     if (not isinstance(row, dict) or row.get("lane") != "launch"
             or row.get("chain") != "solana"
-            or row.get("cohort_version") != COHORT_VERSION):
+            or row.get("source") != "Pump.fun standard logs + DEX Screener pool"):
         return False
     boundary = datetime.fromisoformat(PROTOCOL_START_AT)
     detected = _aware(row.get("detected_at"))

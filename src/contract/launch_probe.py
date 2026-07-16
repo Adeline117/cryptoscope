@@ -265,6 +265,9 @@ def launch_manual_probe_failures(
             or not isinstance(evidence.get("reason"), str)
             or not evidence.get("reason", "").strip()):
         fail("evidence_gate_not_pass")
+    if (isinstance(evidence, Mapping)
+            and evidence.get("protocol_state") == "protocol_integrity_blocked"):
+        fail("protocol_integrity_blocked")
     if assessment.get("delivery_sla_state") != "pass":
         fail("delivery_sla_unverified")
     if DELIVERY_READBACK_VERIFIER_VERSION is None:

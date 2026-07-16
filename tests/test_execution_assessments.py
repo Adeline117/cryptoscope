@@ -316,6 +316,28 @@ def test_manual_probe_stays_a2_until_quote_and_delivery_verifiers_exist(
     assert "delivery_readback_verifier_unavailable" in row["action_reason_codes"]
 
 
+def test_protocol_integrity_block_downgrades_current_quote_to_watch(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_outcomes
+
+    ledger, ident = _setup(tmp_path, monkeypatch, decision="SMALL_PROBE")
+    at = _protocol_time()
+    ledger.append_execution_assessment(ident, _assessment(at))
+    blocked = {
+        **_passing_edge_gate("launch"),
+        "state": "blocked", "protocol_state": "protocol_integrity_blocked",
+        "reason": "independent source admission is blocked",
+    }
+    monkeypatch.setattr(
+        opportunity_outcomes, "actionability_gate", lambda _lane: blocked,
+    )
+
+    row = ledger.active("launch", now=at)[0]
+    assert row["action_level"] == "A1_WATCH"
+    assert row["actionable_now"] is False
+    assert "protocol_integrity_blocked" in row["action_reason_codes"]
+
+
 @pytest.mark.parametrize(("case", "reason"), [
     ("long_quote_ttl", "quote_clock_invalid"),
     ("long_security_ttl", "security_clock_invalid"),

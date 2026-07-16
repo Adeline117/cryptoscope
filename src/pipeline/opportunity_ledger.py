@@ -1008,6 +1008,7 @@ def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | No
         watch_reasons = {
             "assessment_not_read_only_quote", "security_not_pass", "route_not_quoted",
             "quote_source_missing", "quote_clock_invalid", "security_clock_invalid",
+            "protocol_integrity_blocked",
         }
         level = "A1_WATCH" if any(reason in watch_reasons for reason in reasons) \
             else "A2_PAPER_READY"
