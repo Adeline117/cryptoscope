@@ -964,6 +964,70 @@ def test_stats_view_quarantines_legacy_and_rejects_execution_edge_claims(
         assert (tmp_path / "stats.json").read_bytes() == before
 
 
+def test_stats_open_admission_requires_complete_frozen_pass_proof(
+        tmp_path, monkeypatch):
+    from src.pipeline import (
+        board_export, board_outcomes, edge_validation, opportunity_ledger,
+    )
+    from tests.test_edge_validation import _complete_cohort
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    monkeypatch.setattr(board_outcomes, "lane_stats", lambda: {})
+    rows = _complete_cohort()
+    monkeypatch.setattr(opportunity_ledger, "outcome_rows", lambda **_kwargs: rows)
+    monkeypatch.setattr(
+        edge_validation, "_candidate_source_proof",
+        lambda row, _snapshot: deepcopy(row["_expected_reconciliation_proof"]),
+    )
+    admission = _protocol_admission(state="open")
+    monkeypatch.setattr(
+        edge_validation, "_protocol_admission_state", lambda: deepcopy(admission),
+    )
+
+    good = board_export.render_stats(None)
+    launch = good["lanes"]["launch"]
+    assert launch["n"] == 200
+    assert launch["edge_validation"]["state"] == "pass"
+    assert launch["edge_validation"]["look_n_per_arm"] == 100
+    board_export.write_views(stats=good)
+    before = (tmp_path / "stats.json").read_bytes()
+
+    def zero_samples(candidate):
+        candidate["n"] = 0
+        candidate["probe"]["resolved_n"] = 0
+        candidate["control"]["resolved_n"] = 0
+
+    def short_control(candidate):
+        candidate["n"] = 199
+        candidate["control"]["resolved_n"] = 99
+
+    def non_frozen_look(candidate):
+        candidate["edge_validation"]["look_n_per_arm"] = 99
+
+    def spa_misses_alpha(candidate):
+        candidate["edge_validation"]["spa_pvalues"]["upper"] = (
+            edge_validation.LOOK_ALPHA + 0.001
+        )
+
+    def effect_misses_threshold(candidate):
+        candidate["edge_validation"]["mean_daily_log_utility_lift"] = (
+            edge_validation.MIN_MEAN_UTILITY_LIFT - 0.001
+        )
+
+    def positive_non_pass(candidate):
+        candidate["edge_validation"]["state"] = "inconclusive"
+
+    for mutate in (
+        zero_samples, short_control, non_frozen_look,
+        spa_misses_alpha, effect_misses_threshold, positive_non_pass,
+    ):
+        bad = deepcopy(good)
+        mutate(bad["lanes"]["launch"])
+        with pytest.raises(ValueError):
+            board_export.write_views(stats=bad)
+        assert (tmp_path / "stats.json").read_bytes() == before
+
+
 def test_full_export_render_failure_never_replaces_last_good_launch(tmp_path, monkeypatch):
     from src.pipeline import board_export
 

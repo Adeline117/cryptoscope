@@ -471,7 +471,10 @@ def _validate_launch_stats(value: Any, *, path: str) -> None:
     """Prevent descriptive or real-execution claims from entering the edge card."""
     if not isinstance(value, Mapping):
         raise BoardViewContractError(f"{path} must be an object")
-    from src.pipeline.edge_validation import COHORT_VERSION, PROTOCOL_ID, PROTOCOL_START_AT
+    from src.pipeline.edge_validation import (
+        COHORT_VERSION, LOOK_ALPHA, LOOK_SIZES, MIN_MEAN_UTILITY_LIFT,
+        MIN_OUTCOME_COVERAGE, PROTOCOL_ID, PROTOCOL_START_AT,
+    )
 
     exact = {
         "metric": "append_only_exact_pool_24h_positive_after_frozen_full_paper_cost",
@@ -493,10 +496,13 @@ def _validate_launch_stats(value: Any, *, path: str) -> None:
     probe, control = value.get("probe"), value.get("control")
     if not isinstance(probe, Mapping) or not isinstance(control, Mapping):
         raise BoardViewContractError(f"{path} must expose both frozen protocol arms")
-    strict_n = sum(
-        _exact_nonnegative_int(arm.get("resolved_n"), path=f"{path}.{name}.resolved_n")
+    strict_resolved = {
+        name: _exact_nonnegative_int(
+            arm.get("resolved_n"), path=f"{path}.{name}.resolved_n",
+        )
         for name, arm in (("probe", probe), ("control", control))
-    )
+    }
+    strict_n = sum(strict_resolved.values())
     if n != strict_n:
         raise BoardViewContractError(f"{path}.n must equal strict resolved arm truth")
 
@@ -523,6 +529,13 @@ def _validate_launch_stats(value: Any, *, path: str) -> None:
     state = validation.get("state")
     if not isinstance(state, str) or not state.strip():
         raise BoardViewContractError(f"{path}.edge_validation.state is required")
+    allowed_states = {
+        "protocol_integrity_blocked", "collecting", "awaiting_outcomes",
+        "coverage_blocked", "regime_overlap_blocked", "invalid_evidence",
+        "no_edge_observed", "validator_unavailable", "pass", "inconclusive",
+    }
+    if state not in allowed_states:
+        raise BoardViewContractError(f"{path}.edge_validation.state is invalid")
     if not isinstance(validation.get("reason"), str) or not validation.get("reason", "").strip():
         raise BoardViewContractError(f"{path}.edge_validation.reason is required")
     if validation.get("source_membership_policy") != exact["source_membership_policy"]:
@@ -539,6 +552,93 @@ def _validate_launch_stats(value: Any, *, path: str) -> None:
         raise BoardViewContractError(
             f"{path}.edge_validation hides a blocked protocol admission"
         )
+
+    positive_verdict = "有前向纸面selector edge迹象"
+    if state != "pass" and validation.get("edge_verdict") == positive_verdict:
+        raise BoardViewContractError(
+            f"{path}.edge_validation cannot claim positive edge outside pass"
+        )
+    if state == "pass":
+        if validation.get("edge_verdict") != positive_verdict:
+            raise BoardViewContractError(
+                f"{path}.edge_validation.pass must carry the frozen paper verdict"
+            )
+        look_n = _exact_nonnegative_int(
+            validation.get("look_n_per_arm"),
+            path=f"{path}.edge_validation.look_n_per_arm",
+        )
+        if look_n not in LOOK_SIZES:
+            raise BoardViewContractError(
+                f"{path}.edge_validation.pass is not a frozen look"
+            )
+        eligible_n = validation.get("eligible_n")
+        prefix_arms = validation.get("arms")
+        if not isinstance(eligible_n, Mapping) or not isinstance(prefix_arms, Mapping):
+            raise BoardViewContractError(
+                f"{path}.edge_validation.pass must expose eligible and prefix arms"
+            )
+        for public_name, protocol_name in (
+            ("probe", "SMALL_PROBE"), ("control", "WATCH"),
+        ):
+            if strict_resolved[public_name] < look_n:
+                raise BoardViewContractError(
+                    f"{path}.{public_name} has fewer resolved rows than the frozen look"
+                )
+            eligible_count = _exact_nonnegative_int(
+                eligible_n.get(protocol_name),
+                path=f"{path}.edge_validation.eligible_n.{protocol_name}",
+            )
+            if eligible_count < look_n:
+                raise BoardViewContractError(
+                    f"{path}.edge_validation.eligible_n.{protocol_name} is below the look"
+                )
+            prefix = prefix_arms.get(protocol_name)
+            if not isinstance(prefix, Mapping):
+                raise BoardViewContractError(
+                    f"{path}.edge_validation.arms.{protocol_name} is required for pass"
+                )
+            for field, expected in (
+                ("eligible_n", look_n), ("resolved_n", look_n),
+                ("pending_n", 0), ("unavailable_n", 0), ("invalid_n", 0),
+            ):
+                actual = _exact_nonnegative_int(
+                    prefix.get(field),
+                    path=f"{path}.edge_validation.arms.{protocol_name}.{field}",
+                )
+                if actual != expected:
+                    raise BoardViewContractError(
+                        f"{path}.edge_validation.arms.{protocol_name}.{field} "
+                        "contradicts a complete frozen look"
+                    )
+            coverage = _finite_nonnegative(
+                prefix.get("coverage"),
+                path=f"{path}.edge_validation.arms.{protocol_name}.coverage",
+            )
+            if coverage != MIN_OUTCOME_COVERAGE:
+                raise BoardViewContractError(
+                    f"{path}.edge_validation.arms.{protocol_name} lacks full coverage"
+                )
+        pvalues = validation.get("spa_pvalues")
+        if (validation.get("spa_pvalue_used") != "upper"
+                or not isinstance(pvalues, Mapping)):
+            raise BoardViewContractError(
+                f"{path}.edge_validation.pass must use the SPA upper p-value"
+            )
+        p_upper = _finite_nonnegative(
+            pvalues.get("upper"), path=f"{path}.edge_validation.spa_pvalues.upper",
+        )
+        if p_upper > LOOK_ALPHA:
+            raise BoardViewContractError(
+                f"{path}.edge_validation SPA upper p-value misses the frozen alpha"
+            )
+        mean_lift = _finite_nonnegative(
+            validation.get("mean_daily_log_utility_lift"),
+            path=f"{path}.edge_validation.mean_daily_log_utility_lift",
+        )
+        if mean_lift < MIN_MEAN_UTILITY_LIFT:
+            raise BoardViewContractError(
+                f"{path}.edge_validation mean lift misses the frozen threshold"
+            )
 
     current = value.get("current_protocol")
     if not isinstance(current, Mapping):
