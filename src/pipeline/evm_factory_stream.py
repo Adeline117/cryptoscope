@@ -105,6 +105,7 @@ class RawEvidenceConflict(RuntimeError):
 
 _ACTIVE_WS_PROVIDERS: dict[tuple[str, str], tuple[str, str]] = {}
 _ACTIVE_WS_PROVIDERS_LOCK = threading.Lock()
+_ANY_WS_CONNECTION = object()
 _PROVIDER_FINGERPRINT_RE = re.compile(r"provider:[0-9a-f]{64}\Z")
 
 
@@ -217,12 +218,11 @@ def active_ws_provider(spec: "FactorySpec") -> str | None:
 def _clear_active_ws_provider(
     spec: "FactorySpec", expected_identity: str, expected_generation: str,
 ) -> None:
-    key = (spec.chain, spec.stream)
-    with _ACTIVE_WS_PROVIDERS_LOCK:
-        if _ACTIVE_WS_PROVIDERS.get(key) == (
-            expected_identity, expected_generation,
-        ):
-            _ACTIVE_WS_PROVIDERS.pop(key, None)
+    _revoke_ws_connection_coverage(
+        spec,
+        expected_connection=(expected_identity, expected_generation),
+        error_kind="ws_connection_closed_reaudit_required",
+    )
 
 
 def _invalidate_connect_health(spec: "FactorySpec") -> None:
@@ -257,6 +257,24 @@ def _mark_coverage_reaudit_required(
             "last_error_kind": "ws_provider_changed_reaudit_required",
         },
     )
+
+
+def _publish_active_ws_provider(
+    spec: "FactorySpec", *, identity: str, generation: str,
+) -> None:
+    """Atomically bind a post-handshake socket to its degraded health epoch."""
+    if not generation:
+        raise ValueError("websocket connection generation is required")
+    key = (spec.chain, spec.stream)
+    with _ACTIVE_WS_PROVIDERS_LOCK:
+        # A socket handshake can outlive the first disk sample.  Recheck while
+        # holding the generation-transition lock so CRITICAL cannot be followed
+        # by a late health/active publication from this connection attempt.
+        stream_disk_guard.GUARD.require_evidence_write(spec.chain)
+        _mark_coverage_reaudit_required(
+            spec, identity=identity, generation=generation,
+        )
+        _ACTIVE_WS_PROVIDERS[key] = (identity, generation)
 
 
 @dataclass(frozen=True)
@@ -1873,7 +1891,7 @@ def _coverage_details(spec: FactorySpec, state: dict) -> dict:
     }
 
 
-def _report_coverage(
+def _write_coverage_health(
     spec: FactorySpec, state: dict, *, connection_generation: str | None = None,
 ) -> bool:
     verified = (
@@ -1911,9 +1929,85 @@ def _report_coverage(
         return False
 
 
+def _report_coverage(
+    spec: FactorySpec, state: dict, *, connection_generation: str | None = None,
+) -> bool:
+    """Publish coverage only while its websocket generation is still active."""
+    if connection_generation is None:
+        return _write_coverage_health(spec, state)
+    key = (spec.chain, spec.stream)
+    with _ACTIVE_WS_PROVIDERS_LOCK:
+        connection = _ACTIVE_WS_PROVIDERS.get(key)
+        if connection is None or connection[1] != connection_generation:
+            return False
+        # Keep the active-generation check and the health-store CAS in one
+        # transition domain.  A close or disk revocation must therefore either
+        # precede this write (and reject it) or follow it (and overwrite it with
+        # a generation-free tombstone).
+        return _write_coverage_health(
+            spec, state, connection_generation=connection_generation,
+        )
+
+
+def _connection_revoked_state(error_kind: str) -> dict:
+    return {
+        "coverage_started_block": None, "verified_through_block": None,
+        "safe_head_block": None, "safe_head_hash": None, "safe_head_at": None,
+        "audit_duration_ms": None, "verified_at": None,
+        "ws_provider_id": None, "http_provider_id": None,
+        "lag_blocks": None, "consecutive_failures": 0,
+        "next_retry_at": None, "updated_at": None,
+        "state": "blocked", "provider_independent": False,
+        "last_error_kind": error_kind,
+    }
+
+
+def _revoke_ws_connection_coverage(
+    spec: FactorySpec, *, error_kind: str,
+    expected_connection: tuple[str, str] | object = _ANY_WS_CONNECTION,
+    state: dict | None = None, write_if_missing: bool = False,
+) -> bool:
+    """Atomically tombstone coverage and revoke one active WS generation.
+
+    Tombstones deliberately carry no ``connection_generation``.  Consequently
+    an audit belonging to the revoked generation can never pass the health CAS,
+    even if it completed after the socket closed.  The optional exact match keeps
+    an old socket's late close from revoking its replacement.
+    """
+    key = (spec.chain, spec.stream)
+    with _ACTIVE_WS_PROVIDERS_LOCK:
+        current = _ACTIVE_WS_PROVIDERS.get(key)
+        if (expected_connection is not _ANY_WS_CONNECTION
+                and current != expected_connection):
+            return False
+        if current is None and not write_if_missing:
+            return False
+        health_written = _write_coverage_health(
+            spec, dict(state or _connection_revoked_state(error_kind)),
+        )
+        if not health_written:
+            # Revocation remains safety-first even when the richer tombstone cannot
+            # be stored.  A second, smaller status downgrade prevents a previously
+            # persisted live generation from remaining actionable in the board.
+            try:
+                stream_health.mark_disconnected(
+                    spec.chain,
+                    coverage_stream(spec),
+                    "coverage_generation_revoked_health_write_failed",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "evm_coverage_health_revoke_fallback_failed",
+                    chain=spec.chain,
+                    venue=spec.venue,
+                    error_kind=type(exc).__name__,
+                )
+        _ACTIVE_WS_PROVIDERS.pop(key, None)
+        return True
+
+
 def _disk_blocked_coverage(
-    spec: FactorySpec, previous: dict | None = None, *,
-    connection_generation: str | None = None,
+    spec: FactorySpec, previous: dict | None = None,
 ) -> dict:
     """Report disk shedding without touching the coverage evidence database."""
     state = dict(previous or {
@@ -1928,8 +2022,8 @@ def _disk_blocked_coverage(
         "state": "blocked", "provider_independent": False,
         "last_error_kind": "disk_critical",
     })
-    _report_coverage(
-        spec, state, connection_generation=connection_generation,
+    _revoke_ws_connection_coverage(
+        spec, error_kind="disk_critical", state=state, write_if_missing=True,
     )
     return state
 
@@ -2205,9 +2299,7 @@ def audit_finalized_coverage(
         # must not even open the coverage DB or spend an RPC request.
         stream_disk_guard.GUARD.require_evidence_write(spec.chain)
     except stream_disk_guard.StreamDiskCritical:
-        return _disk_blocked_coverage(
-            spec, connection_generation=connection_generation,
-        )
+        return _disk_blocked_coverage(spec)
     if not ws_provider_id:
         return _coverage_failure(
             spec, error_kind="missing_ws_provider", ws_provider_id=None, at=current,
@@ -2519,10 +2611,7 @@ def audit_finalized_coverage(
         finally:
             c.close()
     except stream_disk_guard.StreamDiskCritical:
-        return _disk_blocked_coverage(
-            spec, locals().get("previous"),
-            connection_generation=connection_generation,
-        )
+        return _disk_blocked_coverage(spec, locals().get("previous"))
     except Exception as exc:
         return _coverage_failure(
             spec, error_kind=type(exc).__name__, ws_provider_id=normalized_ws,
@@ -2600,6 +2689,13 @@ class _EvmSocket:
         self.generation = generation
         self._provider_cleared = False
 
+    def _require_active_generation(self) -> None:
+        if active_ws_connection(self.spec) != (self.identity, self.generation):
+            raise ConnectionError(
+                "EVM websocket generation revoked; "
+                "error_kind=ConnectionGenerationRevoked"
+            )
+
     def _clear_provider(self):
         if not self._provider_cleared:
             self._provider_cleared = True
@@ -2617,26 +2713,36 @@ class _EvmSocket:
         )
 
     def recv(self):
+        self._require_active_generation()
         try:
-            return self.socket.recv()
+            result = self.socket.recv()
         except (TimeoutError, socket.timeout, WebSocketTimeoutException):
             # StreamRunner consumes receive timeouts as heartbeat ticks; they are
-            # never persisted or logged and therefore must retain their type.
+            # never persisted or logged and therefore must retain their type while
+            # this generation is active.  A revocation during the blocking receive
+            # instead forces the runner through close/reconnect immediately.
+            self._require_active_generation()
             raise
         except Exception as exc:
             raise self._transport_error("receive", exc) from None
+        self._require_active_generation()
+        return result
 
     def ping(self):
+        self._require_active_generation()
         try:
             self.socket.ping()
         except Exception as exc:
             raise self._transport_error("heartbeat", exc) from None
+        self._require_active_generation()
 
     def send_json(self, payload: dict):
+        self._require_active_generation()
         try:
             self.socket.send(json.dumps(payload, separators=(",", ":")))
         except Exception as exc:
             raise self._transport_error("send", exc) from None
+        self._require_active_generation()
 
     def close(self):
         try:
@@ -2682,7 +2788,30 @@ def build_runner(*, spec: FactorySpec | None = None, rpc: JsonRpc | None = None,
                     pass
 
     def connect():
-        _set_active_ws_provider(spec, None)
+        try:
+            # This must precede health reads, schema migration, RPC selection,
+            # and socket construction. Unknown disk measurements fail open in
+            # the guard; CRITICAL performs only one bounded health downgrade.
+            stream_disk_guard.GUARD.require_evidence_write(spec.chain)
+        except stream_disk_guard.StreamDiskCritical:
+            _disk_blocked_coverage(spec)
+            raise ConnectionError(
+                "EVM websocket connection blocked; error_kind=disk_critical"
+            ) from None
+        try:
+            # Main may have started while disk shedding skipped all migrations.
+            # The first post-recovery connection owns that deferred initialization
+            # before it spends a socket or publishes an active provider.
+            _conn().close()
+        except Exception as exc:
+            raise ConnectionError(
+                "EVM coverage store initialization failed; "
+                f"error_kind={_bounded_error_kind(exc)}"
+            ) from None
+        _revoke_ws_connection_coverage(
+            spec, error_kind="ws_connection_revalidation_required",
+            write_if_missing=True,
+        )
         try:
             _invalidate_connect_health(spec)
         except Exception as exc:
@@ -2709,10 +2838,17 @@ def build_runner(*, spec: FactorySpec | None = None, rpc: JsonRpc | None = None,
             try:
                 # This is the one coverage-health write for the new connection.
                 # It must commit before the active provider can be published or
-                # the parser can acknowledge a subscription.
-                _mark_coverage_reaudit_required(
+                # the parser can acknowledge a subscription.  Publication also
+                # owns the post-handshake disk recheck under the generation lock.
+                _publish_active_ws_provider(
                     spec, identity=identity, generation=generation,
                 )
+            except stream_disk_guard.StreamDiskCritical:
+                dispose_raw_socket(raw_socket)
+                _disk_blocked_coverage(spec)
+                raise ConnectionError(
+                    "EVM websocket connection blocked; error_kind=disk_critical"
+                ) from None
             except Exception as exc:
                 dispose_raw_socket(raw_socket)
                 raise ConnectionError(
@@ -2723,7 +2859,6 @@ def build_runner(*, spec: FactorySpec | None = None, rpc: JsonRpc | None = None,
                 raw_socket, spec=spec, identity=identity,
                 generation=generation,
             )
-            _set_active_ws_provider(spec, identity, generation)
             return socket
         raise ConnectionError(
             f"all {spec.chain} factory websockets failed; "
@@ -2751,11 +2886,7 @@ def _maintenance(stop: threading.Event,
             try:
                 disk = stream_disk_guard.GUARD.snapshot()
                 if disk.get("state") == "critical":
-                    connection = active_ws_connection(spec)
-                    generation = connection[1] if connection is not None else None
-                    _disk_blocked_coverage(
-                        spec, connection_generation=generation,
-                    )
+                    _disk_blocked_coverage(spec)
                     continue
                 # ``unknown`` remains fail-open: the guard owns measurement
                 # validation, while source liveness stays visible here.
@@ -2799,12 +2930,23 @@ def main() -> None:
     from src.config import PROJECT_ROOT
 
     load_dotenv(PROJECT_ROOT / ".env")
-    _conn().close()
-    bindings = tuple((spec, JsonRpc(spec.rpc_urls)) for spec in configured_specs())
-    for spec, rpc in bindings:
-        initial = retry_open_gaps(spec, rpc)
-        if initial["attempted"]:
-            logger.info("evm_factory_initial_gap_retry", chain=spec.chain, **initial)
+    try:
+        stream_disk_guard.GUARD.require_evidence_write("evm_factory_startup")
+        startup_critical = False
+    except stream_disk_guard.StreamDiskCritical:
+        startup_critical = True
+    specs = configured_specs()
+    if startup_critical:
+        for spec in specs:
+            _disk_blocked_coverage(spec)
+    else:
+        _conn().close()
+    bindings = tuple((spec, JsonRpc(spec.rpc_urls)) for spec in specs)
+    if not startup_critical:
+        for spec, rpc in bindings:
+            initial = retry_open_gaps(spec, rpc)
+            if initial["attempted"]:
+                logger.info("evm_factory_initial_gap_retry", chain=spec.chain, **initial)
     stop = threading.Event()
     worker = threading.Thread(target=_maintenance, args=(stop, bindings), daemon=True)
     worker.start()

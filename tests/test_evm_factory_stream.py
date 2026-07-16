@@ -2357,12 +2357,14 @@ def test_generation_health_write_failure_closes_socket_and_never_publishes_activ
 
 def test_old_audit_generation_cannot_overwrite_new_generation_health(evm):
     spec = evm.bsc_pancake_v2_spec()
+    identity = _pid("ws.example")
     evm._mark_coverage_reaudit_required(
-        spec, identity=_pid("ws.example"), generation="a" * 32,
+        spec, identity=identity, generation="a" * 32,
     )
     evm._mark_coverage_reaudit_required(
-        spec, identity=_pid("ws.example"), generation="b" * 32,
+        spec, identity=identity, generation="b" * 32,
     )
+    evm._set_active_ws_provider(spec, identity, "b" * 32)
     state = {
         "state": "verified", "provider_independent": True,
         "coverage_started_block": 100, "verified_through_block": 100,
@@ -2370,7 +2372,7 @@ def test_old_audit_generation_cannot_overwrite_new_generation_health(evm):
         "safe_head_block": 100, "safe_head_hash": "0x" + "ab" * 32,
         "safe_head_at": datetime.now(timezone.utc).isoformat(),
         "audit_duration_ms": 1, "verified_at": datetime.now(timezone.utc).isoformat(),
-        "lag_blocks": 0, "ws_provider_id": _pid("ws.example"),
+        "lag_blocks": 0, "ws_provider_id": identity,
         "http_provider_id": _pid("audit.example"),
     }
     assert evm._report_coverage(
@@ -2414,7 +2416,7 @@ def test_generation_cas_requires_outgoing_details_to_preserve_generation(evm):
     assert updated["details"]["connection_generation"] == current
 
 
-def test_connection_gate_writes_coverage_once_and_rejects_redirect_handshake(
+def test_connection_gate_tombstones_before_socket_and_rejects_redirect_handshake(
         evm, monkeypatch):
     spec = evm.bsc_pancake_v2_spec()
     writes = []
@@ -2440,7 +2442,13 @@ def test_connection_gate_writes_coverage_once_and_rejects_redirect_handshake(
         runner.connect()
     assert redirected.closed and redirected.shutdown_called
     assert evm.active_ws_connection(spec) is None
-    assert writes == []
+    coverage_writes = [call for call in writes
+                       if call[0][1] == evm.coverage_stream(spec)]
+    assert len(coverage_writes) == 1
+    assert coverage_writes[0][1]["details"]["last_error_kind"] == (
+        "ws_connection_revalidation_required"
+    )
+    assert "connection_generation" not in coverage_writes[0][1]["details"]
 
     class Upgraded(RawSocket):
         handshake_response = type("Handshake", (), {"status": 101})()
@@ -2449,9 +2457,44 @@ def test_connection_gate_writes_coverage_once_and_rejects_redirect_handshake(
         spec=spec, rpc=object(), socket_factory=lambda _url: Upgraded(),
     )
     socket = runner.connect()
-    assert len([call for call in writes
-                if call[0][1] == evm.coverage_stream(spec)]) == 1
+    coverage_writes = [call for call in writes
+                       if call[0][1] == evm.coverage_stream(spec)]
+    assert len(coverage_writes) == 3
+    assert coverage_writes[-1][1]["details"]["last_error_kind"] == (
+        "ws_provider_changed_reaudit_required"
+    )
+    assert coverage_writes[-1][1]["details"]["connection_generation"]
     socket.close()
+
+
+def test_restart_stale_live_health_is_tombstoned_when_all_sockets_fail(evm):
+    spec = evm.bsc_pancake_v2_spec()
+    stale_generation = "f" * 32
+    evm.stream_health.report_worker(
+        spec.chain, evm.coverage_stream(spec), status="live",
+        details={
+            "state": "verified", "provider_independent": True,
+            "connection_generation": stale_generation,
+        },
+    )
+    assert evm.active_ws_connection(spec) is None
+
+    def socket_failure(_endpoint):
+        raise OSError("endpoint unavailable")
+
+    runner = evm.build_runner(
+        spec=spec, rpc=object(), socket_factory=socket_failure,
+    )
+    with pytest.raises(ConnectionError, match="all bsc factory websockets failed"):
+        runner.connect()
+
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert health["status"] == "degraded"
+    assert health["details"]["last_error_kind"] == (
+        "ws_connection_revalidation_required"
+    )
+    assert "connection_generation" not in health["details"]
 
 
 def test_combined_legacy_migration_preserves_quarantine_and_recovers(evm):
@@ -2683,7 +2726,8 @@ def test_provider_switch_requires_persisted_reaudit_and_ack_before_live(evm):
     new_socket = new_runner.connect()
     new_identity, new_generation = evm.active_ws_connection(new_spec)
     assert new_identity == _pid("audit.example")
-    evm._ACTIVE_WS_PROVIDERS.clear()  # board process has no in-memory provider map
+    # The board projection reads only persisted health, while the collector must
+    # retain its in-memory binding so the generation-bound audit remains eligible.
     row = next(row for row in configured_stream_health(now=now + timedelta(seconds=1))
                if row["chain"] == "bsc" and row["venue"] == "pancakeswap_v2")
     assert row["status"] != "live" and row["coverage_verified"] is False
@@ -2800,7 +2844,7 @@ def test_maintenance_isolates_bindings_and_never_logs_exception_text(
     })]
 
 
-def test_maintenance_critical_skips_gap_coverage_and_rpc_before_generic_cas(
+def test_maintenance_critical_skips_io_and_revokes_with_generation_free_tombstone(
         evm, monkeypatch):
     spec = evm.bsc_pancake_v2_spec()
     identity, generation = _pid("ws.example"), "a" * 32
@@ -2810,7 +2854,7 @@ def test_maintenance_critical_skips_gap_coverage_and_rpc_before_generic_cas(
         spec.chain, evm.coverage_stream(spec), status="live",
         details={"connection_generation": generation},
     )
-    original_cas = evm.stream_health.report_worker_if_connection_generation
+    original_direct = evm.stream_health.report_worker
     touched = {"guard": 0, "gap": 0, "coverage_db": 0,
                "rpc": 0, "cas": 0, "direct_health": 0}
 
@@ -2842,30 +2886,614 @@ def test_maintenance_critical_skips_gap_coverage_and_rpc_before_generic_cas(
         touched["coverage_db"] += 1
         raise AssertionError("coverage DB touched")
 
-    def direct_health_forbidden(*_args, **_kwargs):
+    def record_direct(*args, **kwargs):
         touched["direct_health"] += 1
-        raise AssertionError("generation CAS was bypassed")
+        assert "connection_generation" not in (kwargs.get("details") or {})
+        return original_direct(*args, **kwargs)
 
-    def record_cas(*args, **kwargs):
+    def cas_forbidden(*_args, **_kwargs):
         touched["cas"] += 1
-        assert kwargs["expected_generation"] == generation
-        return original_cas(*args, **kwargs)
+        raise AssertionError("revoked generation remained CAS-eligible")
 
     monkeypatch.setattr(evm.stream_disk_guard, "GUARD", CriticalGuard())
     monkeypatch.setattr(evm, "retry_open_gaps", gap_forbidden)
     monkeypatch.setattr(evm, "_conn", coverage_db_forbidden)
-    monkeypatch.setattr(evm.stream_health, "report_worker", direct_health_forbidden)
+    monkeypatch.setattr(evm.stream_health, "report_worker", record_direct)
     monkeypatch.setattr(
-        evm.stream_health, "report_worker_if_connection_generation", record_cas,
+        evm.stream_health, "report_worker_if_connection_generation", cas_forbidden,
     )
     evm._maintenance(OneRoundStop(), ((spec, Rpc()),))
 
     assert touched == {"guard": 1, "gap": 0, "coverage_db": 0,
-                       "rpc": 0, "cas": 1, "direct_health": 0}
+                       "rpc": 0, "cas": 0, "direct_health": 1}
+    assert evm.active_ws_connection(spec) is None
     row = next(item for item in evm.stream_health.snapshot()
                if item["stream"] == evm.coverage_stream(spec))
     assert row["status"] == "degraded"
     assert row["last_error"] == "disk_critical"
     assert row["details"]["last_error_kind"] == "disk_critical"
-    assert row["details"]["connection_generation"] == generation
+    assert "connection_generation" not in row["details"]
     assert secret not in repr(row)
+
+
+def test_runner_connect_disk_gate_is_first_and_recovers_with_deferred_migration(
+        evm, monkeypatch):
+    from src.ops.stream_disk_guard import StreamDiskCritical
+
+    secret = "wss://tenant:key@ws.example/private/token"
+    spec = evm.FactorySpec(
+        chain="bsc", venue="pancakeswap_v2", address=evm.PANCAKE_V2_FACTORY,
+        event_kind="pair_v2", topic=evm.PAIR_CREATED_TOPIC,
+        ws_urls=(secret,), rpc_urls=("https://tenant:key@rpc.example/private/token",),
+    )
+    touched = {"guard": 0, "coverage_db": 0, "rpc": 0, "socket": 0}
+
+    class Guard:
+        state = "critical"
+
+        def require_evidence_write(self, source):
+            touched["guard"] += 1
+            if self.state == "critical":
+                raise StreamDiskCritical(source, {"state": "critical", "secret": secret})
+            return {"state": self.state}
+
+    class Rpc:
+        def call(self, *_args, **_kwargs):
+            touched["rpc"] += 1
+            raise AssertionError(secret)
+
+        call_with_provider = call
+        call_from_provider = call
+
+    class RawSocket:
+        def close(self): pass
+        def shutdown(self): pass
+
+    guard = Guard()
+    original_conn = evm._conn
+
+    def counted_conn():
+        touched["coverage_db"] += 1
+        return original_conn()
+
+    def socket_factory(_endpoint):
+        touched["socket"] += 1
+        return RawSocket()
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", guard)
+    monkeypatch.setattr(evm, "_conn", counted_conn)
+    runner = evm.build_runner(spec=spec, rpc=Rpc(), socket_factory=socket_factory)
+
+    with pytest.raises(ConnectionError) as failure:
+        runner.connect()
+    assert str(failure.value) == (
+        "EVM websocket connection blocked; error_kind=disk_critical"
+    )
+    assert secret not in str(failure.value)
+    assert touched == {"guard": 1, "coverage_db": 0, "rpc": 0, "socket": 0}
+    assert not evm.DB.exists()
+    blocked = next(row for row in evm.stream_health.snapshot()
+                   if row["stream"] == evm.coverage_stream(spec))
+    assert blocked["status"] == "degraded"
+    assert blocked["last_error"] == "disk_critical"
+    assert blocked["details"]["last_error_kind"] == "disk_critical"
+    assert secret not in repr(blocked)
+
+    guard.state = "ok"
+    socket = runner.connect()
+    try:
+        assert touched == {"guard": 3, "coverage_db": 1,
+                           "rpc": 0, "socket": 1}
+        assert evm.DB.exists()
+    finally:
+        socket.close()
+
+
+def test_runner_connect_unknown_disk_state_remains_fail_open(evm, monkeypatch):
+    touched = {"coverage_db": 0, "socket": 0}
+
+    class UnknownGuard:
+        def require_evidence_write(self, _source):
+            return {"state": "unknown", "measurement_failed": True}
+
+    class RawSocket:
+        def close(self): pass
+        def shutdown(self): pass
+
+    original_conn = evm._conn
+
+    def counted_conn():
+        touched["coverage_db"] += 1
+        return original_conn()
+
+    def socket_factory(_endpoint):
+        touched["socket"] += 1
+        return RawSocket()
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", UnknownGuard())
+    monkeypatch.setattr(evm, "_conn", counted_conn)
+    socket = evm.build_runner(
+        spec=evm.bsc_pancake_v2_spec(), rpc=object(),
+        socket_factory=socket_factory,
+    ).connect()
+    try:
+        assert touched == {"coverage_db": 1, "socket": 1}
+    finally:
+        socket.close()
+
+
+@pytest.mark.parametrize(
+    ("disk_state", "expected_conn", "expected_gap"),
+    (("critical", 0, 0), ("unknown", 1, 1)),
+)
+def test_main_disk_gate_skips_startup_io_but_keeps_recovery_workers(
+        evm, monkeypatch, disk_state, expected_conn, expected_gap):
+    from src.ops.stream_disk_guard import StreamDiskCritical
+
+    secret = "https://tenant:key@rpc.example/private/token"
+    spec = evm.bsc_pancake_v2_spec()
+    touched = {"guard": 0, "coverage_db": 0, "gap": 0, "rpc": 0,
+               "socket": 0, "runner": 0, "thread": 0}
+
+    class Guard:
+        def require_evidence_write(self, source):
+            touched["guard"] += 1
+            if disk_state == "critical":
+                raise StreamDiskCritical(source, {"state": "critical", "secret": secret})
+            return {"state": "unknown", "measurement_failed": True}
+
+    class Handle:
+        def close(self): pass
+
+    class Rpc:
+        def __init__(self, _urls): pass
+
+        def call(self, *_args, **_kwargs):
+            touched["rpc"] += 1
+            raise AssertionError(secret)
+
+        call_with_provider = call
+        call_from_provider = call
+
+    class Runner:
+        source = spec.chain
+
+        def run_forever(self, _stop):
+            touched["runner"] += 1
+
+    class Thread:
+        def __init__(self, *args, **kwargs):
+            self.target = kwargs.get("target", args[0] if args else None)
+
+        def start(self):
+            touched["thread"] += 1
+
+        def join(self, timeout=None): pass
+
+    def open_coverage():
+        touched["coverage_db"] += 1
+        return Handle()
+
+    def retry(*_args, **_kwargs):
+        touched["gap"] += 1
+        return {"attempted": 0, "advanced": 0, "recovered": 0, "failed": 0}
+
+    def build(*_args, **_kwargs):
+        touched["socket"] += 0  # Construction must not spend a socket.
+        return Runner()
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", Guard())
+    monkeypatch.setattr(evm, "configured_specs", lambda: (spec,))
+    monkeypatch.setattr(evm, "_conn", open_coverage)
+    monkeypatch.setattr(evm, "retry_open_gaps", retry)
+    monkeypatch.setattr(evm, "JsonRpc", Rpc)
+    monkeypatch.setattr(evm, "build_runner", build)
+    monkeypatch.setattr(evm.threading, "Thread", Thread)
+
+    evm.main()
+
+    assert touched["guard"] == 1
+    assert touched["coverage_db"] == expected_conn
+    assert touched["gap"] == expected_gap
+    assert touched["rpc"] == 0 and touched["socket"] == 0
+    assert touched["runner"] == 1 and touched["thread"] == 1
+    if disk_state == "critical":
+        health = next(row for row in evm.stream_health.snapshot()
+                      if row["stream"] == evm.coverage_stream(spec))
+        assert health["status"] == "degraded"
+        assert health["last_error"] == "disk_critical"
+        assert health["details"]["last_error_kind"] == "disk_critical"
+        assert secret not in repr(health)
+
+
+def _verified_generation_state(identity):
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "state": "verified", "provider_independent": True,
+        "coverage_started_block": 100, "verified_through_block": 100,
+        "verified_through_hash": "0x" + "ab" * 32,
+        "safe_head_block": 100, "safe_head_hash": "0x" + "ab" * 32,
+        "safe_head_at": now, "audit_duration_ms": 1, "verified_at": now,
+        "lag_blocks": 0, "ws_provider_id": identity,
+        "http_provider_id": _pid("independent.example"),
+    }
+
+
+def test_disk_tombstone_cannot_overwrite_a_later_generation_publish(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    identity, generation = _pid("ws.example"), "c" * 32
+    disk_write_entered = threading.Event()
+    release_disk_write = threading.Event()
+    publish_started = threading.Event()
+    publish_guard_called = threading.Event()
+    disk_timed_out = threading.Event()
+    failures = []
+    original_report = evm.stream_health.report_worker
+
+    class OkGuard:
+        def require_evidence_write(self, _source):
+            publish_guard_called.set()
+            return {"state": "ok"}
+
+    def pause_disk_tombstone(*args, **kwargs):
+        details = kwargs.get("details") or {}
+        if details.get("last_error_kind") == "disk_critical":
+            disk_write_entered.set()
+            if not release_disk_write.wait(5):
+                disk_timed_out.set()
+        return original_report(*args, **kwargs)
+
+    def disk_revoke():
+        try:
+            evm._disk_blocked_coverage(spec)
+        except BaseException as exc:  # surface thread failures to the test
+            failures.append(exc)
+
+    def publish():
+        publish_started.set()
+        try:
+            evm._publish_active_ws_provider(
+                spec, identity=identity, generation=generation,
+            )
+        except BaseException as exc:  # surface thread failures to the test
+            failures.append(exc)
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", OkGuard())
+    monkeypatch.setattr(evm.stream_health, "report_worker", pause_disk_tombstone)
+    disk_thread = threading.Thread(target=disk_revoke)
+    publish_thread = threading.Thread(target=publish)
+    disk_thread.start()
+    assert disk_write_entered.wait(5)
+    publish_thread.start()
+    assert publish_started.wait(5)
+    # The publish transition cannot sample disk or mutate health while the
+    # generation-free tombstone is being committed under the same lock.
+    assert not publish_guard_called.wait(0.1)
+    release_disk_write.set()
+    disk_thread.join(5)
+    publish_thread.join(5)
+
+    assert not disk_thread.is_alive() and not publish_thread.is_alive()
+    assert not disk_timed_out.is_set() and failures == []
+    assert evm.active_ws_connection(spec) == (identity, generation)
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert health["status"] == "degraded"
+    assert health["details"]["connection_generation"] == generation
+    assert health["details"]["last_error_kind"] == (
+        "ws_provider_changed_reaudit_required"
+    )
+
+
+def test_disk_revoke_serializes_after_inflight_audit_and_rejects_old_generation(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    identity, generation = _pid("ws.example"), "d" * 32
+    evm._publish_active_ws_provider(
+        spec, identity=identity, generation=generation,
+    )
+    state = _verified_generation_state(identity)
+    audit_write_entered = threading.Event()
+    release_audit_write = threading.Event()
+    disk_started = threading.Event()
+    disk_done = threading.Event()
+    audit_timed_out = threading.Event()
+    results = []
+    failures = []
+    original_cas = evm.stream_health.report_worker_if_connection_generation
+
+    def pause_audit_cas(*args, **kwargs):
+        audit_write_entered.set()
+        if not release_audit_write.wait(5):
+            audit_timed_out.set()
+        return original_cas(*args, **kwargs)
+
+    def audit():
+        try:
+            results.append(evm._report_coverage(
+                spec, state, connection_generation=generation,
+            ))
+        except BaseException as exc:
+            failures.append(exc)
+
+    def disk_revoke():
+        disk_started.set()
+        try:
+            evm._disk_blocked_coverage(spec)
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            disk_done.set()
+
+    monkeypatch.setattr(
+        evm.stream_health, "report_worker_if_connection_generation",
+        pause_audit_cas,
+    )
+    audit_thread = threading.Thread(target=audit)
+    disk_thread = threading.Thread(target=disk_revoke)
+    audit_thread.start()
+    assert audit_write_entered.wait(5)
+    disk_thread.start()
+    assert disk_started.wait(5)
+    assert not disk_done.wait(0.1)
+    release_audit_write.set()
+    audit_thread.join(5)
+    disk_thread.join(5)
+
+    assert not audit_thread.is_alive() and not disk_thread.is_alive()
+    assert not audit_timed_out.is_set() and failures == [] and results == [True]
+    assert evm.active_ws_connection(spec) is None
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert health["status"] == "degraded"
+    assert health["details"]["last_error_kind"] == "disk_critical"
+    assert "connection_generation" not in health["details"]
+    assert evm._report_coverage(
+        spec, state, connection_generation=generation,
+    ) is False
+    unchanged = next(row for row in evm.stream_health.snapshot()
+                     if row["stream"] == evm.coverage_stream(spec))
+    assert unchanged["status"] == "degraded"
+    assert "connection_generation" not in unchanged["details"]
+
+
+def test_normal_socket_close_tombstones_generation_and_rejects_late_audit(evm):
+    spec = evm.bsc_pancake_v2_spec()
+
+    class RawSocket:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+        def shutdown(self):
+            pass
+
+    raw = RawSocket()
+    socket = evm.build_runner(
+        spec=spec, rpc=object(), socket_factory=lambda _url: raw,
+    ).connect()
+    identity, generation = evm.active_ws_connection(spec)
+    state = _verified_generation_state(identity)
+    socket.close()
+
+    assert raw.closed and evm.active_ws_connection(spec) is None
+    assert evm._report_coverage(
+        spec, state, connection_generation=generation,
+    ) is False
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert health["status"] == "degraded"
+    assert health["details"]["last_error_kind"] == (
+        "ws_connection_closed_reaudit_required"
+    )
+    assert "connection_generation" not in health["details"]
+
+
+@pytest.mark.parametrize("operation", ("recv", "ping", "send"))
+def test_socket_io_rechecks_generation_after_underlying_operation(
+        evm, operation):
+    spec = evm.bsc_pancake_v2_spec()
+
+    class RevokingRawSocket:
+        def _revoke(self):
+            evm._disk_blocked_coverage(spec)
+
+        def recv(self):
+            self._revoke()
+            return "payload-that-must-not-reach-parser"
+
+        def ping(self):
+            self._revoke()
+
+        def send(self, _payload):
+            self._revoke()
+
+        def close(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    socket = evm.build_runner(
+        spec=spec, rpc=object(), socket_factory=lambda _url: RevokingRawSocket(),
+    ).connect()
+    expected = (
+        "EVM websocket generation revoked; "
+        "error_kind=ConnectionGenerationRevoked"
+    )
+    with pytest.raises(ConnectionError) as failure:
+        if operation == "recv":
+            socket.recv()
+        elif operation == "ping":
+            socket.ping()
+        else:
+            socket.send_json({"jsonrpc": "2.0"})
+    assert str(failure.value) == expected
+    assert evm.active_ws_connection(spec) is None
+    socket.close()
+
+
+def test_quiet_revoked_socket_forces_reconnect_after_disk_recovery(evm):
+    spec = evm.bsc_pancake_v2_spec()
+    stop = threading.Event()
+
+    class QuietSocket:
+        def __init__(self):
+            self.recv_entered = threading.Event()
+            self.release_recv = threading.Event()
+            self.closed = False
+            self.shutdown_called = False
+            self.sent = []
+
+        def send(self, payload):
+            self.sent.append(payload)
+
+        def recv(self):
+            self.recv_entered.set()
+            if not self.release_recv.wait(5):
+                raise AssertionError("quiet receive was not released")
+            raise TimeoutError()
+
+        def ping(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+        def shutdown(self):
+            self.shutdown_called = True
+
+    first, second = QuietSocket(), QuietSocket()
+    available = [first, second]
+    runner = evm.build_runner(
+        spec=spec, rpc=object(), socket_factory=lambda _url: available.pop(0),
+    )
+    runner.backoff_base_seconds = 0
+    runner.backoff_max_seconds = 0
+    worker = threading.Thread(target=runner.run_forever, args=(stop,))
+    worker.start()
+    assert first.recv_entered.wait(5)
+    first_connection = evm.active_ws_connection(spec)
+    assert first_connection is not None
+
+    # Simulate maintenance observing CRITICAL while no market message arrives.
+    evm._disk_blocked_coverage(spec)
+    assert evm.active_ws_connection(spec) is None
+    first.release_recv.set()
+
+    assert second.recv_entered.wait(5)
+    second_connection = evm.active_ws_connection(spec)
+    assert second_connection is not None
+    assert second_connection[1] != first_connection[1]
+    assert first.closed and first.shutdown_called
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert health["status"] == "degraded"
+    assert health["details"]["connection_generation"] == second_connection[1]
+
+    stop.set()
+    second.release_recv.set()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert second.closed and second.shutdown_called
+
+
+def test_revoke_health_tombstone_failure_falls_back_to_disconnected(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    identity, generation = _pid("ws.example"), "e" * 32
+    evm._publish_active_ws_provider(
+        spec, identity=identity, generation=generation,
+    )
+    state = _verified_generation_state(identity)
+    assert evm._report_coverage(
+        spec, state, connection_generation=generation,
+    ) is True
+    before = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert before["status"] == "live"
+
+    monkeypatch.setattr(
+        evm.stream_health,
+        "report_worker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            sqlite3.OperationalError("locked")
+        ),
+    )
+    evm._disk_blocked_coverage(spec)
+
+    assert evm.active_ws_connection(spec) is None
+    assert evm._report_coverage(
+        spec, state, connection_generation=generation,
+    ) is False
+    after = next(row for row in evm.stream_health.snapshot()
+                 if row["stream"] == evm.coverage_stream(spec))
+    assert after["status"] == "disconnected"
+    assert after["last_error"] == (
+        "coverage_generation_revoked_health_write_failed"
+    )
+
+
+def test_disk_turns_critical_after_handshake_closes_socket_before_publish(
+        evm, monkeypatch):
+    from src.ops.stream_disk_guard import StreamDiskCritical
+
+    secret = "wss://tenant:key@ws.example/private/token"
+    spec = evm.FactorySpec(
+        chain="bsc", venue="pancakeswap_v2", address=evm.PANCAKE_V2_FACTORY,
+        event_kind="pair_v2", topic=evm.PAIR_CREATED_TOPIC,
+        ws_urls=(secret,), rpc_urls=("https://audit.example",),
+    )
+    touched = {"guard": 0, "socket": 0, "mark": 0}
+
+    class TransitionGuard:
+        def require_evidence_write(self, source):
+            touched["guard"] += 1
+            if touched["guard"] == 2:
+                raise StreamDiskCritical(
+                    source, {"state": "critical", "secret": secret},
+                )
+            return {"state": "ok"}
+
+    class RawSocket:
+        closed = shutdown_called = False
+
+        def close(self):
+            self.closed = True
+
+        def shutdown(self):
+            self.shutdown_called = True
+
+    raw = RawSocket()
+
+    def socket_factory(_endpoint):
+        touched["socket"] += 1
+        return raw
+
+    def mark_forbidden(*_args, **_kwargs):
+        touched["mark"] += 1
+        raise AssertionError(secret)
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", TransitionGuard())
+    monkeypatch.setattr(evm, "_mark_coverage_reaudit_required", mark_forbidden)
+    runner = evm.build_runner(
+        spec=spec, rpc=object(), socket_factory=socket_factory,
+    )
+    with pytest.raises(ConnectionError) as failure:
+        runner.connect()
+
+    assert str(failure.value) == (
+        "EVM websocket connection blocked; error_kind=disk_critical"
+    )
+    assert secret not in str(failure.value)
+    assert touched == {"guard": 2, "socket": 1, "mark": 0}
+    assert raw.closed and raw.shutdown_called
+    assert evm.active_ws_connection(spec) is None
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(spec))
+    assert health["status"] == "degraded"
+    assert health["details"]["last_error_kind"] == "disk_critical"
+    assert "connection_generation" not in health["details"]
+    assert secret not in repr(health)
