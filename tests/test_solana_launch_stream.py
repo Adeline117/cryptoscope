@@ -1166,6 +1166,13 @@ def test_maintenance_budgets_fit_the_cycle_and_reserve_hydration_time(sol):
     assert sol.MAINTENANCE_WORK_BUDGET_SECONDS < 60.0
     assert sol.MAINTENANCE_WORK_BUDGET_SECONDS - sol.GAP_WORK_BUDGET_SECONDS \
         >= 10.0
+    # Exact values are pinned deliberately: the 16-unit drain ceiling was
+    # sized against a 20s gap lane, so shrinking the lane back to 10s makes
+    # every ramped cycle deadline-exhaust against multi-MB getBlock calls.
+    # Retune these three constants together, never one alone.
+    assert sol.GAP_WORK_BUDGET_SECONDS == 20.0
+    assert sol.MAINTENANCE_WORK_BUDGET_SECONDS == 30.0
+    assert sol.GAP_RETRY_MAX_SLOT_BUDGET == 16
 
 
 def test_small_gaps_are_served_before_a_large_backlog_gap(sol):
