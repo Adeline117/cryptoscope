@@ -15,6 +15,7 @@ from typing import Callable
 import structlog
 
 from src.config import DATA_DIR
+from src.ops import stream_disk_guard
 from src.pipeline import stream_health
 from src.pipeline.stream_runner import StreamEvent, StreamRunner
 
@@ -659,11 +660,20 @@ def persist(payload: object, *, rpc: JsonRpc | None = None) -> None:
                            f"{payload['transaction_hash']}:{payload['log_index']}"))
 
 
+def _persist_stream_event(payload: object, *, spec: FactorySpec, rpc: JsonRpc) -> None:
+    """Block before the writer so StreamRunner cannot advance its health cursor."""
+    stream_disk_guard.GUARD.require_evidence_write(spec.chain)
+    persist(payload, rpc=rpc)
+
+
 def _backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -> None:
     if end < start:
         return
     if end - start + 1 > MAX_BACKFILL_BLOCKS:
         raise ValueError("EVM backfill range exceeds bounded block budget")
+    # Gap repair is evidence persistence too.  Refuse before the first RPC so a
+    # full volume cannot turn recovery into more in-memory data or DB writes.
+    stream_disk_guard.GUARD.require_evidence_write(spec.chain)
     logs = rpc.call("eth_getLogs", [{
         "address": spec.address, "topics": [spec.topic],
         "fromBlock": hex(start), "toBlock": hex(end),
@@ -676,7 +686,7 @@ def _backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -
         if event:
             if not start <= event.payload["block_number"] <= end:
                 raise RuntimeError("eth_getLogs returned an event outside requested range")
-            persist(event.payload, rpc=rpc)
+            _persist_stream_event(event.payload, spec=spec, rpc=rpc)
 
 
 def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) -> bool:
@@ -766,7 +776,7 @@ def build_runner(*, spec: FactorySpec | None = None, rpc: JsonRpc | None = None,
     return StreamRunner(
         source=spec.chain, stream=spec.stream, connect=connect, subscribe=subscribe,
         parse=lambda raw: parse_message(raw, spec=spec),
-        on_event=lambda payload: persist(payload, rpc=rpc),
+        on_event=lambda payload: _persist_stream_event(payload, spec=spec, rpc=rpc),
         heartbeat_seconds=30, health_interval_seconds=1, expect_contiguous=True,
         backfill=lambda start, end: backfill_blocks(start, end, spec=spec, rpc=rpc),
     )

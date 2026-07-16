@@ -15,11 +15,16 @@ import pytest
 
 @pytest.fixture
 def sol(tmp_path, monkeypatch):
+    from src.ops.stream_disk_guard import DiskStateGuard
     from src.pipeline import solana_launch_stream
     from src.pipeline import stream_health
 
     monkeypatch.setattr(solana_launch_stream, "DB", tmp_path / "launches.db")
     monkeypatch.setattr(stream_health, "DB", tmp_path / "stream-health.db")
+    monkeypatch.setattr(
+        solana_launch_stream.stream_disk_guard, "GUARD",
+        DiskStateGuard(probe=lambda: {"state": "ok"}),
+    )
     return solana_launch_stream
 
 
@@ -155,6 +160,70 @@ def test_subscriptions_use_standard_solana_methods(sol):
     assert requests[0]["params"][0] == {"mentions": [sol.PUMP_FUN_PROGRAM]}
     assert requests[1]["method"] == "slotSubscribe"
     assert all(request["method"] != "transactionSubscribe" for request in requests)
+
+
+def test_critical_disk_guard_blocks_runner_before_solana_persist(sol, monkeypatch):
+    from src.ops.stream_disk_guard import DiskStateGuard, StreamDiskCritical
+
+    monkeypatch.setattr(
+        sol.stream_disk_guard, "GUARD",
+        DiskStateGuard(probe=lambda: {"state": "critical"}),
+    )
+    persisted = []
+    monkeypatch.setattr(sol, "persist", lambda payload: persisted.append(payload))
+    runner = sol.build_runner(rpc=object(), socket_factory=lambda: None)
+
+    with pytest.raises(StreamDiskCritical):
+        runner.on_event({"kind": "slot", "slot": 123})
+    assert persisted == []
+
+
+def test_critical_disk_guard_pauses_maintenance_before_rpc_or_db_work(
+        sol, monkeypatch):
+    from src.ops.stream_disk_guard import DiskStateGuard
+
+    monkeypatch.setattr(
+        sol.stream_disk_guard, "GUARD",
+        DiskStateGuard(probe=lambda: {"state": "critical"}),
+    )
+    monkeypatch.setattr(
+        sol, "retry_open_gaps",
+        lambda *args, **kwargs: pytest.fail("critical maintenance read gap DB"),
+    )
+    monkeypatch.setattr(
+        sol, "rehydrate_pending",
+        lambda *args, **kwargs: pytest.fail("critical maintenance touched launch DB"),
+    )
+    reports = []
+    monkeypatch.setattr(
+        sol, "_report_maintenance",
+        lambda status, error=None: reports.append((status, error)),
+    )
+
+    class Rpc:
+        calls = 0
+
+        def call(self, method, params):
+            self.calls += 1
+            raise AssertionError("critical maintenance called RPC")
+
+    class StopAfterOneTick:
+        waits = []
+
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            self.waits.append(timeout)
+            return True
+
+    stop = StopAfterOneTick()
+    rpc = Rpc()
+    sol._rehydrate_loop(stop, rpc, interval_seconds=1, monotonic=lambda: 0.0)
+
+    assert rpc.calls == 0
+    assert reports == [("degraded", "workspace disk critical; maintenance paused")]
+    assert stop.waits == [1.0]
 
 
 def test_concurrent_legacy_hydration_migration_is_idempotent(sol):

@@ -8,13 +8,20 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import structlog
+
 from src.config import DATA_DIR
+from src.ops import stream_disk_guard
+from src.pipeline import stream_health
 from src.pipeline.stream_runner import StreamEvent, StreamRunner
+
+logger = structlog.get_logger()
 
 WSS_URL = "wss://api.hyperliquid.xyz/ws"
 DB = DATA_DIR / "hyperliquid_realtime.db"
 DEFAULT_COINS = ("BTC", "ETH", "SOL")
 CHANNELS = ("bbo", "l2Book", "trades", "activeAssetCtx")
+DISK_POLICY_HEARTBEAT_SECONDS = 60.0
 
 
 def _conn(db_path=None) -> sqlite3.Connection:
@@ -140,18 +147,74 @@ def persist(message: object) -> None:
 class HyperliquidStore:
     """One WAL connection with bounded-loss, sub-second batch commits."""
     def __init__(self, db_path=None, *, batch_size: int = 100,
-                 flush_seconds: float = 0.5, monotonic=time.monotonic):
+                 flush_seconds: float = 0.5, monotonic=time.monotonic,
+                 disk_guard=None, health_reporter=None):
         self.connection = _conn(db_path)
         self.batch_size = max(1, batch_size)
         self.flush_seconds = max(0, flush_seconds)
         self.monotonic = monotonic
+        self.disk_guard = (
+            disk_guard if disk_guard is not None else stream_disk_guard.GUARD
+        )
+        self.health_reporter = (
+            health_reporter
+            if health_reporter is not None else stream_health.report_worker
+        )
+        self.last_disk_policy = None
+        self.last_disk_report_at = None
         self.pending = 0
         self.last_flush = monotonic()
 
     def persist(self, message: object) -> None:
+        retain_raw, disk = self.disk_guard.retain_optional_raw()
+        now = self.monotonic()
+        state = disk.get("state", "unknown")
+        degraded = state in {"warn", "critical", "unknown"}
+        policy = (
+            "raw_trades_shed" if not retain_raw
+            else "disk_probe_unknown_fail_open" if state == "unknown"
+            else "all_channels_retained"
+        )
+        disk_policy = (state, policy)
+        heartbeat_due = (
+            self.last_disk_report_at is None
+            or now - self.last_disk_report_at >= DISK_POLICY_HEARTBEAT_SECONDS
+        )
+        if disk_policy != self.last_disk_policy or heartbeat_due:
+            # Advance the limiter before writing so a failing reporter cannot
+            # become a per-message write/log storm on an already-full volume.
+            self.last_disk_policy = disk_policy
+            self.last_disk_report_at = now
+            try:
+                self.health_reporter(
+                    "hyperliquid", "raw_trade_retention",
+                    status="degraded" if degraded else "live",
+                    error=(policy if degraded else None),
+                    details={
+                        "schema_version": 1, "disk_state": state,
+                        "raw_trades_policy": policy,
+                        "raw_trades_retained": retain_raw,
+                        "free_gib": disk.get("free_gib"),
+                        "free_percent": disk.get("free_percent"),
+                        "measurement_failed": bool(
+                            disk.get("measurement_failed", False)
+                        ),
+                        "error_kind": disk.get("error_kind"),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "hyperliquid_disk_guard_health_write_failed",
+                    disk_state=state, measurement_failed=True,
+                    error_kind=type(exc).__name__,
+                )
+        if (isinstance(message, dict) and message.get("channel") == "trades"
+                and not retain_raw):
+            if self.pending and now - self.last_flush >= self.flush_seconds:
+                self.flush(now=now)
+            return
         _persist(self.connection, message, datetime.now(timezone.utc).isoformat())
         self.pending += 1
-        now = self.monotonic()
         if self.pending >= self.batch_size or now - self.last_flush >= self.flush_seconds:
             self.flush(now=now)
 

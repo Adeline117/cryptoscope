@@ -9,10 +9,15 @@ import pytest
 
 @pytest.fixture
 def evm(tmp_path, monkeypatch):
+    from src.ops.stream_disk_guard import DiskStateGuard
     from src.pipeline import evm_factory_stream, stream_health
 
     monkeypatch.setattr(evm_factory_stream, "DB", tmp_path / "pools.db")
     monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
+    monkeypatch.setattr(
+        evm_factory_stream.stream_disk_guard, "GUARD",
+        DiskStateGuard(probe=lambda: {"state": "ok"}),
+    )
     return evm_factory_stream
 
 
@@ -121,6 +126,47 @@ def test_aerodrome_pool_decodes_stable_flag_pool_and_index(evm):
 def test_new_head_supplies_contiguous_block_cursor_and_time(evm):
     event = evm.parse_message(_notification({"number": "0x64", "timestamp": "0x5"}))
     assert event.cursor == 100 and event.event_at.isoformat() == "1970-01-01T00:00:05+00:00"
+
+
+def test_critical_disk_guard_blocks_runner_before_factory_persist(evm, monkeypatch):
+    from src.ops.stream_disk_guard import DiskStateGuard, StreamDiskCritical
+
+    monkeypatch.setattr(
+        evm.stream_disk_guard, "GUARD",
+        DiskStateGuard(probe=lambda: {"state": "critical"}),
+    )
+    persisted = []
+    monkeypatch.setattr(evm, "persist", lambda payload, **kwargs: persisted.append(payload))
+    spec = evm.bsc_pancake_v2_spec()
+    runner = evm.build_runner(spec=spec, rpc=object(), socket_factory=lambda _url: None)
+
+    with pytest.raises(StreamDiskCritical):
+        runner.on_event({"kind": "head", "block_number": 100})
+    assert persisted == []
+
+
+def test_critical_disk_guard_blocks_backfill_before_rpc_or_persist(evm, monkeypatch):
+    from src.ops.stream_disk_guard import DiskStateGuard, StreamDiskCritical
+
+    monkeypatch.setattr(
+        evm.stream_disk_guard, "GUARD",
+        DiskStateGuard(probe=lambda: {"state": "critical"}),
+    )
+    persisted = []
+    monkeypatch.setattr(evm, "persist", lambda payload, **kwargs: persisted.append(payload))
+
+    class Rpc:
+        calls = 0
+
+        def call(self, method, params):
+            self.calls += 1
+            return []
+
+    rpc = Rpc()
+    with pytest.raises(StreamDiskCritical):
+        evm._backfill_blocks(100, 101, spec=evm.bsc_pancake_v2_spec(), rpc=rpc)
+    assert rpc.calls == 0
+    assert persisted == []
 
 
 def test_complete_pool_stays_raw_unqualified(evm):

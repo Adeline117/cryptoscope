@@ -26,6 +26,7 @@ from typing import Callable
 import structlog
 
 from src.config import DATA_DIR
+from src.ops import stream_disk_guard
 from src.pipeline import stream_health
 from src.pipeline.stream_runner import StreamEvent, StreamRunner
 
@@ -1702,6 +1703,12 @@ def persist(payload: object, *, rpc: JsonRpc | None = None,
     _set_hydration(payload["signature"], tx, None, source_provider=provider)
 
 
+def _persist_stream_event(payload: object) -> None:
+    """Block before the writer so StreamRunner cannot advance its health cursor."""
+    stream_disk_guard.GUARD.require_evidence_write("solana")
+    persist(payload)
+
+
 def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
                       include_incomplete: bool = False,
                       now: datetime | None = None,
@@ -1939,6 +1946,16 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
         )
         maintenance_status = "live"
         maintenance_error = None
+        try:
+            stream_disk_guard.GUARD.require_evidence_write("solana")
+        except stream_disk_guard.StreamDiskCritical:
+            # Do not start gap-store, launch DB, or RPC work while the evidence
+            # volume is critical.  Keep the worker alive and retry next cycle.
+            _report_maintenance("degraded", "workspace disk critical; maintenance paused")
+            elapsed = monotonic() - cycle_started
+            if stop.wait(max(1.0, float(interval_seconds) - elapsed)):
+                break
+            continue
         try:
             cycle_now = monotonic()
             if circuit_open_until and cycle_now < circuit_open_until:
@@ -2305,7 +2322,7 @@ def build_runner(*, rpc: JsonRpc | None = None,
         subscribe=subscribe, parse=parse_message,
         # The websocket reader only records immutable raw evidence.  RPC
         # hydration and gap recovery belong to the bounded maintenance worker.
-        on_event=persist,
+        on_event=_persist_stream_event,
         heartbeat_seconds=30, health_interval_seconds=1,
         expect_contiguous=True,
         backfill=None,
