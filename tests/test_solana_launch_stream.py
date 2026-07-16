@@ -188,8 +188,11 @@ def test_concurrent_legacy_hydration_migration_is_idempotent(sol):
         "qualification_attempted_at", "qualification_error", "qualified_at",
         "ledger_event_id", "hydration_retry_count", "hydration_next_retry_at",
         "hydration_attempted_at", "hydration_last_rpc_error",
+        "qualification_attempt_count", "qualification_lease_token",
+        "qualification_lease_started_at", "qualification_lease_expires_at",
+        "qualification_next_retry_at", "qualification_last_outcome_kind",
     )
-    assert all(schema[-8:] == expected for schema in schemas)
+    assert all(schema[-len(expected):] == expected for schema in schemas)
 
 
 def test_creation_is_parsed_and_hydrated_as_raw_unqualified(sol):
@@ -1832,6 +1835,251 @@ def test_qualification_batch_only_returns_recent_due_complete_rows(sol):
     sol.set_qualification("sig-1", "market_pending", error="pair not indexed", at=now)
     assert sol.qualification_batch(now=now + timedelta(seconds=299)) == []
     assert len(sol.qualification_batch(now=now + timedelta(seconds=301))) == 1
+
+
+def test_qualification_claim_reserves_capacity_for_virgin_and_retry_rows(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    c = sol._conn()
+    try:
+        for index in range(8):
+            signature = f"virgin-{index}"
+            c.execute(
+                """INSERT INTO raw_launches(
+                       signature,slot,program,event_type,creator,mint,detected_at,
+                       raw_payload_hash,hydration_payload_hash,logs,evidence_state,
+                       qualification_state)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'complete','raw_unqualified')""",
+                (signature, index, sol.PUMP_FUN_PROGRAM, "pump_fun_createv2",
+                 "creator", f"mint-{signature}",
+                 (now - timedelta(minutes=9, seconds=index)).isoformat(),
+                 "a" * 64, "b" * 64, "[]"),
+            )
+        for index in range(8):
+            signature = f"retry-{index}"
+            c.execute(
+                """INSERT INTO raw_launches(
+                       signature,slot,program,event_type,creator,mint,detected_at,
+                       raw_payload_hash,hydration_payload_hash,logs,evidence_state,
+                       qualification_state,qualification_attempted_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,'complete','market_pending',?)""",
+                (signature, index + 20, sol.PUMP_FUN_PROGRAM, "pump_fun_createv2",
+                 "creator", f"mint-{signature}",
+                 (now - timedelta(minutes=9, seconds=index)).isoformat(),
+                 "c" * 64, "d" * 64, "[]",
+                 (now - timedelta(minutes=6)).isoformat()),
+            )
+        c.commit()
+    finally:
+        c.close()
+
+    rows = sol.claim_qualification_batch(
+        now=now, limit=4, virgin_fraction=0.5,
+        protocol_start_at=(now - timedelta(hours=1)).isoformat(),
+        max_source_to_decision_seconds=600,
+    )
+
+    assert sum(row["signature"].startswith("virgin-") for row in rows) == 2
+    assert sum(row["signature"].startswith("retry-") for row in rows) == 2
+    assert len({row["qualification_lease_token"] for row in rows}) == 4
+
+
+def test_claim_quarantines_preboundary_and_late_rows_before_limit(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    boundary = now - timedelta(minutes=20)
+    c = sol._conn()
+    try:
+        for signature, detected in (
+            ("historical", boundary - timedelta(seconds=1)),
+            ("late", now - timedelta(minutes=11)),
+            ("live", now - timedelta(minutes=2)),
+        ):
+            c.execute(
+                """INSERT INTO raw_launches(
+                       signature,slot,program,event_type,creator,mint,detected_at,
+                       raw_payload_hash,hydration_payload_hash,logs,evidence_state,
+                       qualification_state)
+                   VALUES (?,1,?,?,?,?,?,?,?,'[]','complete','raw_unqualified')""",
+                (signature, sol.PUMP_FUN_PROGRAM, "pump_fun_createv2", "creator",
+                 f"mint-{signature}", detected.isoformat(), "a" * 64, "b" * 64),
+            )
+        c.commit()
+    finally:
+        c.close()
+
+    rows = sol.claim_qualification_batch(
+        now=now, limit=1, protocol_start_at=boundary.isoformat(),
+        max_source_to_decision_seconds=600,
+    )
+
+    assert [row["signature"] for row in rows] == ["live"]
+    c = sol._conn()
+    try:
+        states = dict(c.execute(
+            "SELECT signature,qualification_state FROM raw_launches"
+        ).fetchall())
+    finally:
+        c.close()
+    assert states == {
+        "historical": "historical_raw_only",
+        "late": "qualification_expired",
+        "live": "raw_unqualified",
+    }
+
+
+def test_qualification_lease_is_exclusive_and_crash_retries_after_cooldown(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+    c = sol._conn()
+    try:
+        c.execute(
+            "UPDATE raw_launches SET detected_at=?",
+            ((now - timedelta(minutes=1)).isoformat(),),
+        )
+        c.commit()
+    finally:
+        c.close()
+
+    def claim():
+        return sol.claim_qualification_batch(
+            now=now, limit=1, protocol_start_at=(now - timedelta(hours=1)).isoformat(),
+            max_source_to_decision_seconds=600,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        claims = list(pool.map(lambda _index: claim(), range(2)))
+    winners = [rows[0] for rows in claims if rows]
+    assert len(winners) == 1
+    first = winners[0]
+    assert sol.set_qualification(
+        "sig-1", "market_pending", error="late result",
+        lease_token=first["qualification_lease_token"],
+        at=now + timedelta(seconds=121),
+    ) is False
+    retried = sol.claim_qualification_batch(
+        now=now + timedelta(seconds=121), limit=1,
+        protocol_start_at=(now - timedelta(hours=1)).isoformat(),
+        max_source_to_decision_seconds=600,
+    )
+    assert len(retried) == 1
+    assert retried[0]["qualification_lease_token"] != first["qualification_lease_token"]
+
+
+def test_terminal_qualification_cannot_be_overwritten_by_stale_worker(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+    c = sol._conn()
+    try:
+        c.execute(
+            "UPDATE raw_launches SET detected_at=?",
+            ((now - timedelta(minutes=1)).isoformat(),),
+        )
+        c.commit()
+    finally:
+        c.close()
+    row = sol.claim_qualification_batch(
+        now=now, limit=1, protocol_start_at=(now - timedelta(hours=1)).isoformat(),
+        max_source_to_decision_seconds=600,
+    )[0]
+    token = row["qualification_lease_token"]
+
+    assert sol.set_qualification(
+        "sig-1", "qualified_recorded", ledger_event_id="ledger-1",
+        lease_token=token, at=now,
+    ) is True
+    assert sol.set_qualification(
+        "sig-1", "market_error", error="slow worker failed",
+        lease_token=token, at=now + timedelta(seconds=1),
+    ) is False
+    assert sol.set_qualification(
+        "sig-1", "qualified_recorded", ledger_event_id="ledger-1",
+        at=now + timedelta(seconds=2),
+    ) is True
+    assert sol.set_qualification(
+        "sig-1", "qualified_recorded", ledger_event_id="different",
+        at=now + timedelta(seconds=2),
+    ) is False
+    c = sol._conn()
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="terminal qualification"):
+            c.execute(
+                "UPDATE raw_launches SET qualification_state='market_error' "
+                "WHERE signature='sig-1'"
+            )
+    finally:
+        c.close()
+
+
+def test_claim_is_not_a_market_attempt_and_valid_empty_is_append_only(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+    c = sol._conn()
+    try:
+        c.execute(
+            "UPDATE raw_launches SET detected_at=?",
+            ((now - timedelta(minutes=1)).isoformat(),),
+        )
+        c.commit()
+    finally:
+        c.close()
+    row = sol.claim_qualification_batch(
+        now=now, limit=1, protocol_start_at=(now - timedelta(hours=1)).isoformat(),
+        max_source_to_decision_seconds=600,
+    )[0]
+    c = sol._conn()
+    try:
+        assert c.execute(
+            "SELECT qualification_attempt_count,qualification_attempted_at "
+            "FROM raw_launches"
+        ).fetchone() == (0, None)
+    finally:
+        c.close()
+
+    empty_hash = sol.hashlib.sha256(b"[]").hexdigest()
+    assert sol.set_qualification(
+        "sig-1", "market_pending", error="DEX pool not indexed yet",
+        lease_token=row["qualification_lease_token"], outcome_kind="valid_empty",
+        response_hash=empty_hash, at=now,
+    ) is True
+    c = sol._conn()
+    try:
+        state = c.execute(
+            """SELECT qualification_attempt_count,qualification_attempted_at,
+                      qualification_next_retry_at,qualification_last_outcome_kind
+               FROM raw_launches"""
+        ).fetchone()
+        observation = c.execute(
+            """SELECT attempt_id,outcome_kind,response_hash
+               FROM qualification_observations"""
+        ).fetchone()
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            c.execute("UPDATE qualification_observations SET outcome_kind='qualified'")
+    finally:
+        c.close()
+    assert state == (
+        1, now.isoformat(), (now + timedelta(seconds=300)).isoformat(), "valid_empty",
+    )
+    assert observation == (
+        row["qualification_lease_token"], "valid_empty", empty_hash,
+    )
+
+
+def test_provider_circuit_is_persistent_and_half_opens(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    failed = sol.report_qualification_provider("error", error="bad schema", at=now)
+    assert failed["ready"] is False and failed["circuit_state"] == "open"
+    assert sol.qualification_provider_health(
+        now=now + timedelta(seconds=59)
+    )["ready"] is False
+    half_open = sol.qualification_provider_health(now=now + timedelta(seconds=60))
+    assert half_open["ready"] is True and half_open["circuit_state"] == "half_open"
+    recovered = sol.report_qualification_provider(
+        "ok", response_hash="a" * 64, at=now + timedelta(seconds=60),
+    )
+    assert recovered["circuit_state"] == "closed"
+    assert recovered["failure_count"] == 0
 
 
 def test_qualification_state_keeps_raw_evidence_and_ledger_link(sol):

@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Callable
@@ -52,6 +53,9 @@ GAP_WORK_BUDGET_SECONDS = 10.0
 RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS = 60
 RPC_PRESSURE_MAX_COOLDOWN_SECONDS = 3600
 MAINTENANCE_STREAM = "pump_fun_maintenance"
+QUALIFICATION_LEASE_SECONDS = 120
+QUALIFICATION_RETRY_SECONDS = 300
+QUALIFICATION_VIRGIN_FRACTION = 0.75
 DB = DATA_DIR / "solana_launch_events.db"
 
 
@@ -315,6 +319,12 @@ def _conn() -> sqlite3.Connection:
             ("hydration_next_retry_at", "TEXT"),
             ("hydration_attempted_at", "TEXT"),
             ("hydration_last_rpc_error", "TEXT"),
+            ("qualification_attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("qualification_lease_token", "TEXT"),
+            ("qualification_lease_started_at", "TEXT"),
+            ("qualification_lease_expires_at", "TEXT"),
+            ("qualification_next_retry_at", "TEXT"),
+            ("qualification_last_outcome_kind", "TEXT"),
         )
         columns = {row[1] for row in c.execute("PRAGMA table_info(raw_launches)")}
         if any(name not in columns for name, _kind in migrations):
@@ -333,6 +343,57 @@ def _conn() -> sqlite3.Connection:
                   "ON raw_launches(evidence_state,qualification_state,detected_at DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_solana_launch_hydration_queue "
                   "ON raw_launches(evidence_state,hydration_next_retry_at,detected_at,slot)")
+        c.execute("""CREATE INDEX IF NOT EXISTS idx_solana_launch_qualification_due
+                     ON raw_launches(
+                       qualification_state,qualification_next_retry_at,
+                       qualification_lease_expires_at,detected_at,slot,signature
+                     ) WHERE evidence_state='complete' AND mint IS NOT NULL""")
+        c.execute("""CREATE TABLE IF NOT EXISTS qualification_observations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signature TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            endpoint_contract TEXT NOT NULL,
+            outcome_kind TEXT NOT NULL,
+            response_hash TEXT,
+            pair_address TEXT,
+            error_kind TEXT,
+            error TEXT,
+            UNIQUE(signature,attempt_id),
+            FOREIGN KEY(signature) REFERENCES raw_launches(signature))""")
+        c.execute("""CREATE TRIGGER IF NOT EXISTS trg_qualification_observation_no_update
+                     BEFORE UPDATE ON qualification_observations BEGIN
+                       SELECT RAISE(ABORT, 'qualification observation is append-only');
+                     END""")
+        c.execute("""CREATE TRIGGER IF NOT EXISTS trg_qualification_observation_no_delete
+                     BEFORE DELETE ON qualification_observations BEGIN
+                       SELECT RAISE(ABORT, 'qualification observation is append-only');
+                     END""")
+        c.execute("""CREATE TABLE IF NOT EXISTS qualification_provider_health(
+            provider TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            checked_at TEXT NOT NULL,
+            last_error TEXT,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            circuit_open_until TEXT,
+            response_hash TEXT)""")
+        c.execute("""CREATE TRIGGER IF NOT EXISTS trg_solana_terminal_qualification_immutable
+                     BEFORE UPDATE OF qualification_state,qualification_error,
+                                      ledger_event_id,qualified_at ON raw_launches
+                     WHEN OLD.qualification_state IN (
+                       'screened_out','qualified_recorded','ledger_orphan',
+                       'historical_raw_only','qualification_expired',
+                       'provenance_conflict'
+                     ) AND (
+                       NEW.qualification_state IS NOT OLD.qualification_state OR
+                       NEW.qualification_error IS NOT OLD.qualification_error OR
+                       NEW.ledger_event_id IS NOT OLD.ledger_event_id OR
+                       NEW.qualified_at IS NOT OLD.qualified_at
+                     )
+                     BEGIN
+                       SELECT RAISE(ABORT, 'terminal qualification is immutable');
+                     END""")
         c.commit()
         return c
     except Exception:
@@ -344,10 +405,114 @@ def _conn() -> sqlite3.Connection:
 QUALIFICATION_STATES = {
     "raw_unqualified", "market_pending", "market_error",
     "screened_out", "qualified_recorded", "ledger_orphan",
+    "historical_raw_only", "qualification_expired", "provenance_conflict",
 }
 RETRYABLE_QUALIFICATION_STATES = {
     "raw_unqualified", "market_pending", "market_error",
 }
+QUALIFICATION_OUTCOME_KINDS = {
+    "valid_empty", "exact_pool_pending", "below_threshold",
+    "screened_out", "qualified", "ledger_orphan", "deadline_exceeded",
+}
+QUALIFICATION_PROVIDER = "dexscreener"
+QUALIFICATION_ENDPOINT_CONTRACT = (
+    "tokens_v1_batch_prefilter_then_token_pairs_v1_exact_entry_v1"
+)
+
+
+def _sha256_or_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value)
+    if (len(normalized) != 64
+            or any(character not in "0123456789abcdef" for character in normalized)):
+        raise ValueError("response_hash must be a lowercase sha256")
+    return normalized
+
+
+def report_qualification_provider(
+    status: str, *, error: str | None = None, response_hash: str | None = None,
+    at: datetime | None = None,
+) -> dict:
+    """Persist one batch-level provider result and an exponential circuit."""
+    if status not in {"ok", "error"}:
+        raise ValueError("provider status must be ok or error")
+    now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    response_hash = _sha256_or_none(response_hash)
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        previous = c.execute(
+            "SELECT failure_count FROM qualification_provider_health WHERE provider=?",
+            (QUALIFICATION_PROVIDER,),
+        ).fetchone()
+        failures = 0 if status == "ok" else int((previous or (0,))[0] or 0) + 1
+        open_until = None
+        if status == "error":
+            open_until = (
+                now + timedelta(seconds=_circuit_cooldown_seconds(None, failures))
+            ).isoformat()
+        c.execute(
+            """INSERT INTO qualification_provider_health(
+                   provider,status,checked_at,last_error,failure_count,
+                   circuit_open_until,response_hash)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(provider) DO UPDATE SET
+                 status=excluded.status,checked_at=excluded.checked_at,
+                 last_error=excluded.last_error,
+                 failure_count=excluded.failure_count,
+                 circuit_open_until=excluded.circuit_open_until,
+                 response_hash=excluded.response_hash""",
+            (QUALIFICATION_PROVIDER, status, now.isoformat(),
+             str(error)[:240] if error else None, failures, open_until,
+             response_hash),
+        )
+        c.commit()
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
+    return qualification_provider_health(now=now)
+
+
+def qualification_provider_health(*, now: datetime | None = None) -> dict:
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    c = _conn()
+    try:
+        row = c.execute(
+            """SELECT status,checked_at,last_error,failure_count,
+                      circuit_open_until,response_hash
+               FROM qualification_provider_health WHERE provider=?""",
+            (QUALIFICATION_PROVIDER,),
+        ).fetchone()
+    finally:
+        c.close()
+    if row is None:
+        return {
+            "provider": QUALIFICATION_PROVIDER, "status": "unknown",
+            "ready": True, "circuit_state": "closed", "checked_at": None,
+            "last_error": None, "failure_count": 0,
+            "circuit_open_until": None, "response_hash": None,
+        }
+    status, checked_at, last_error, failures, open_until, response_hash = row
+    open_clock = None
+    try:
+        if open_until:
+            open_clock = datetime.fromisoformat(str(open_until)).astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        open_clock = datetime.max.replace(tzinfo=timezone.utc)
+    circuit_open = open_clock is not None and open_clock > now
+    return {
+        "provider": QUALIFICATION_PROVIDER, "status": status,
+        "ready": not circuit_open,
+        "circuit_state": "open" if circuit_open else (
+            "half_open" if status == "error" else "closed"
+        ),
+        "checked_at": checked_at, "last_error": last_error,
+        "failure_count": int(failures or 0),
+        "circuit_open_until": open_until, "response_hash": response_hash,
+    }
 
 
 def qualification_batch(*, now: datetime | None = None, limit: int = 20,
@@ -394,24 +559,283 @@ def qualification_batch(*, now: datetime | None = None, limit: int = 20,
     return due
 
 
+def claim_qualification_batch(
+    *, now: datetime | None = None, limit: int = 20,
+    protocol_start_at: str | None = None,
+    max_source_to_decision_seconds: float | None = None,
+    retry_after_seconds: float = QUALIFICATION_RETRY_SECONDS,
+    lease_seconds: float = QUALIFICATION_LEASE_SECONDS,
+    virgin_fraction: float = QUALIFICATION_VIRGIN_FRACTION,
+) -> list[dict]:
+    """Atomically lease a fair mix of virgin and retryable launch evidence.
+
+    Historical and latency-breached rows are retained as explicit terminal
+    denominator states. They are never hidden behind a SQL LIMIT or allowed to
+    consume the forward protocol's live work capacity.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    requested = max(0, int(limit))
+    if requested == 0:
+        return []
+    try:
+        fraction = float(virgin_fraction)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("virgin_fraction must be between zero and one") from exc
+    if not math.isfinite(fraction) or not 0 <= fraction <= 1:
+        raise ValueError("virgin_fraction must be between zero and one")
+    boundary = None
+    if protocol_start_at is not None:
+        try:
+            boundary = datetime.fromisoformat(
+                str(protocol_start_at).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("protocol_start_at must be timezone-aware") from exc
+        if boundary.tzinfo is None:
+            raise ValueError("protocol_start_at must be timezone-aware")
+        boundary = boundary.astimezone(timezone.utc)
+    deadline_cutoff = None
+    if max_source_to_decision_seconds is not None:
+        try:
+            seconds = float(max_source_to_decision_seconds)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("max source-to-decision seconds must be positive") from exc
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError("max source-to-decision seconds must be positive")
+        deadline_cutoff = now - timedelta(seconds=seconds)
+    retry_cutoff = now - timedelta(seconds=max(0, float(retry_after_seconds)))
+    lease_expires = now + timedelta(seconds=max(1, float(lease_seconds)))
+    retryable_sql = "'raw_unqualified','market_pending','market_error'"
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        available_lease = (
+            "(qualification_lease_expires_at IS NULL "
+            "OR qualification_lease_expires_at<=?)"
+        )
+        if boundary is not None:
+            c.execute(
+                f"""UPDATE raw_launches
+                    SET qualification_state='historical_raw_only',
+                        qualification_error='detected before active protocol boundary',
+                        qualification_lease_token=NULL,
+                        qualification_lease_started_at=NULL,
+                        qualification_lease_expires_at=NULL,
+                        qualification_next_retry_at=NULL,
+                        qualification_last_outcome_kind='protocol_preboundary'
+                    WHERE qualification_state IN ({retryable_sql})
+                      AND detected_at<? AND {available_lease}""",
+                (boundary.isoformat(), now.isoformat()),
+            )
+        if deadline_cutoff is not None:
+            c.execute(
+                f"""UPDATE raw_launches
+                    SET qualification_state='qualification_expired',
+                        qualification_error='source-to-decision deadline exceeded',
+                        qualification_lease_token=NULL,
+                        qualification_lease_started_at=NULL,
+                        qualification_lease_expires_at=NULL,
+                        qualification_next_retry_at=NULL,
+                        qualification_last_outcome_kind='deadline_exceeded'
+                    WHERE qualification_state IN ({retryable_sql})
+                      AND detected_at<? AND {available_lease}""",
+                (deadline_cutoff.isoformat(), now.isoformat()),
+            )
+        where = f"""evidence_state='complete' AND mint IS NOT NULL
+                     AND qualification_state IN ({retryable_sql})
+                     AND (
+                       qualification_next_retry_at<=? OR
+                       (qualification_next_retry_at IS NULL AND (
+                         qualification_attempted_at IS NULL OR
+                         qualification_attempted_at<=?
+                       ))
+                     )
+                     AND {available_lease}"""
+        fields = """signature,slot,event_type,creator,mint,detected_at,
+                    raw_payload_hash,hydration_payload_hash,
+                    qualification_state,qualification_attempted_at"""
+        params = (now.isoformat(), retry_cutoff.isoformat(), now.isoformat())
+        virgin_rows = c.execute(
+            f"""SELECT {fields} FROM raw_launches WHERE {where}
+                  AND qualification_state='raw_unqualified'
+                  AND qualification_attempted_at IS NULL
+                ORDER BY detected_at ASC,slot ASC,signature ASC LIMIT ?""",
+            (*params, requested),
+        ).fetchall()
+        retry_rows = c.execute(
+            f"""SELECT {fields} FROM raw_launches WHERE {where}
+                  AND NOT (qualification_state='raw_unqualified'
+                           AND qualification_attempted_at IS NULL)
+                ORDER BY qualification_attempted_at ASC,detected_at ASC,
+                         slot ASC,signature ASC LIMIT ?""",
+            (*params, requested),
+        ).fetchall()
+        virgin_quota = min(requested, math.ceil(requested * fraction))
+        retry_quota = requested - virgin_quota
+        chosen = list(virgin_rows[:virgin_quota]) + list(retry_rows[:retry_quota])
+        chosen_signatures = {str(row[0]) for row in chosen}
+        remainder = list(virgin_rows[virgin_quota:]) + list(retry_rows[retry_quota:])
+        remainder.sort(key=lambda row: (str(row[5]), int(row[1]), str(row[0])))
+        for row in remainder:
+            if len(chosen) >= requested:
+                break
+            if str(row[0]) not in chosen_signatures:
+                chosen.append(row)
+                chosen_signatures.add(str(row[0]))
+
+        keys = (
+            "signature", "slot", "event_type", "creator", "mint", "detected_at",
+            "raw_payload_hash", "hydration_payload_hash",
+            "qualification_state", "qualification_attempted_at",
+        )
+        claimed = []
+        for row in chosen:
+            token = uuid.uuid4().hex
+            changed = c.execute(
+                f"""UPDATE raw_launches
+                    SET qualification_lease_token=?,qualification_lease_started_at=?,
+                        qualification_lease_expires_at=?
+                    WHERE signature=? AND qualification_state=?
+                      AND {available_lease}""",
+                (token, now.isoformat(), lease_expires.isoformat(),
+                 row[0], row[8], now.isoformat()),
+            ).rowcount
+            if changed:
+                item = dict(zip(keys, row))
+                item["qualification_lease_token"] = token
+                item["qualification_lease_expires_at"] = lease_expires.isoformat()
+                claimed.append(item)
+        c.commit()
+        return claimed
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
+
+
 def set_qualification(signature: str, state: str, *, error: str | None = None,
                       ledger_event_id: str | None = None,
+                      lease_token: str | None = None,
+                      outcome_kind: str | None = None,
+                      response_hash: str | None = None,
+                      pair_address: str | None = None,
+                      error_kind: str | None = None,
+                      retry_after_seconds: float = QUALIFICATION_RETRY_SECONDS,
                       at: datetime | None = None) -> bool:
-    """Persist one explicit qualification result without deleting raw evidence."""
+    """Persist one CAS-protected result without deleting raw evidence.
+
+    A terminal result is immutable. An exact replay is idempotent, while a stale
+    worker or a mismatched replay is rejected instead of regressing the row.
+    """
     if state not in QUALIFICATION_STATES:
         raise ValueError(f"unknown qualification state: {state}")
-    now = (at or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+    if outcome_kind is not None and outcome_kind not in QUALIFICATION_OUTCOME_KINDS:
+        raise ValueError(f"unknown qualification outcome: {outcome_kind}")
+    response_hash = _sha256_or_none(response_hash)
+    now_dt = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now = now_dt.isoformat()
     qualified_at = now if state == "qualified_recorded" else None
+    normalized_error = str(error)[:240] if error else None
+    normalized_ledger = str(ledger_event_id) if ledger_event_id is not None else None
+    next_retry_at = None
+    if state in RETRYABLE_QUALIFICATION_STATES:
+        try:
+            retry_seconds = max(0.0, float(retry_after_seconds))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("retry_after_seconds must be nonnegative") from exc
+        if not math.isfinite(retry_seconds):
+            raise ValueError("retry_after_seconds must be nonnegative")
+        next_retry_at = (now_dt + timedelta(seconds=retry_seconds)).isoformat()
+    c = _conn()
+    try:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            """SELECT qualification_state,qualification_error,ledger_event_id,
+                      qualification_lease_token,qualification_lease_expires_at
+               FROM raw_launches WHERE signature=?""",
+            (signature,),
+        ).fetchone()
+        if row is None:
+            c.rollback()
+            return False
+        (current_state, current_error, current_ledger, current_lease,
+         current_lease_expires_at) = row
+        if current_state not in RETRYABLE_QUALIFICATION_STATES:
+            exact_replay = (
+                current_state == state
+                and current_error == normalized_error
+                and current_ledger == normalized_ledger
+            )
+            c.commit()
+            return exact_replay
+        if current_lease is not None:
+            if not lease_token or str(lease_token) != str(current_lease):
+                c.rollback()
+                return False
+            try:
+                lease_expires_at = datetime.fromisoformat(
+                    str(current_lease_expires_at).replace("Z", "+00:00")
+                ).astimezone(timezone.utc)
+            except (TypeError, ValueError, OverflowError):
+                c.rollback()
+                return False
+            if lease_expires_at <= now_dt:
+                c.rollback()
+                return False
+        elif lease_token is not None:
+            c.rollback()
+            return False
+        changed = c.execute(
+            """UPDATE raw_launches SET qualification_state=?,
+                      qualification_attempted_at=?,
+                      qualification_attempt_count=qualification_attempt_count+1,
+                      qualification_next_retry_at=?,
+                      qualification_last_outcome_kind=COALESCE(?,qualification_last_outcome_kind),
+                      qualification_error=?,
+                      qualified_at=COALESCE(?,qualified_at),
+                      ledger_event_id=COALESCE(?,ledger_event_id),
+                      qualification_lease_token=NULL,
+                      qualification_lease_started_at=NULL,
+                      qualification_lease_expires_at=NULL
+               WHERE signature=? AND qualification_state=?""",
+            (state, now, next_retry_at, outcome_kind, normalized_error,
+             qualified_at, normalized_ledger, signature, current_state),
+        ).rowcount
+        if changed and current_lease is not None and outcome_kind is not None:
+            c.execute(
+                """INSERT INTO qualification_observations(
+                       signature,attempt_id,observed_at,provider,endpoint_contract,
+                       outcome_kind,response_hash,pair_address,error_kind,error)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (signature, str(current_lease), now, QUALIFICATION_PROVIDER,
+                 QUALIFICATION_ENDPOINT_CONTRACT, outcome_kind, response_hash,
+                 str(pair_address) if pair_address else None,
+                 str(error_kind)[:80] if error_kind else None, normalized_error),
+            )
+        c.commit()
+        return bool(changed)
+    except Exception:
+        c.rollback()
+        raise
+    finally:
+        c.close()
+
+
+def release_qualification_lease(signature: str, lease_token: str) -> bool:
+    """Release one exact claim after a batch-level provider failure."""
+    if not lease_token:
+        return False
     c = _conn()
     try:
         changed = c.execute(
-            """UPDATE raw_launches SET qualification_state=?,
-                      qualification_attempted_at=?,qualification_error=?,
-                      qualified_at=COALESCE(?,qualified_at),
-                      ledger_event_id=COALESCE(?,ledger_event_id)
-               WHERE signature=?""",
-            (state, now, str(error)[:240] if error else None,
-             qualified_at, ledger_event_id, signature),
+            """UPDATE raw_launches SET qualification_lease_token=NULL,
+                      qualification_lease_started_at=NULL,
+                      qualification_lease_expires_at=NULL
+               WHERE signature=? AND qualification_lease_token=?
+                 AND qualification_state IN
+                     ('raw_unqualified','market_pending','market_error')""",
+            (signature, str(lease_token)),
         ).rowcount
         c.commit()
         return bool(changed)
@@ -458,6 +882,29 @@ def qualification_summary(
                    WHERE evidence_state IN ('raw_only','rpc_unavailable','incomplete')""",
                 (now.isoformat(), now.isoformat()),
             ).fetchone()
+        (qualification_pending, qualification_virgin, qualification_retry,
+         qualification_leased, qualification_due, oldest_qualification_at,
+         max_qualification_attempts) = c.execute(
+            """SELECT COUNT(*),
+                      SUM(CASE WHEN qualification_attempted_at IS NULL THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN qualification_attempted_at IS NOT NULL THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN qualification_lease_expires_at>? THEN 1 ELSE 0 END),
+                      SUM(CASE WHEN (qualification_lease_expires_at IS NULL
+                                         OR qualification_lease_expires_at<=?)
+                                    AND (qualification_next_retry_at IS NULL
+                                         OR qualification_next_retry_at<=?)
+                               THEN 1 ELSE 0 END),
+                      MIN(detected_at),MAX(qualification_attempt_count)
+               FROM raw_launches
+               WHERE evidence_state='complete' AND mint IS NOT NULL
+                 AND qualification_state IN
+                     ('raw_unqualified','market_pending','market_error')""",
+            (now.isoformat(), now.isoformat(), now.isoformat()),
+        ).fetchone()
+        qualification_outcomes = dict(c.execute(
+            """SELECT outcome_kind,COUNT(*) FROM qualification_observations
+               GROUP BY outcome_kind"""
+        ).fetchall())
     finally:
         c.close()
     traceable_ids: set[str] = set()
@@ -517,6 +964,18 @@ def qualification_summary(
         },
         "qualification": qualification,
         "raw_qualification_states": raw_qualification,
+        "qualification_queue": {
+            "state": "backlogged" if qualification_pending else "ok",
+            "pending_total": int(qualification_pending or 0),
+            "virgin": int(qualification_virgin or 0),
+            "retry": int(qualification_retry or 0),
+            "leased": int(qualification_leased or 0),
+            "due": int(qualification_due or 0),
+            "oldest_at": oldest_qualification_at,
+            "max_attempt_count": int(max_qualification_attempts or 0),
+            "outcomes": qualification_outcomes,
+            "provider": qualification_provider_health(now=now),
+        },
         "traceability": {
             "state": ("unavailable" if readback_error_rows else
                       "ok" if not orphan_rows and not quarantined_state_rows else "partial"),
