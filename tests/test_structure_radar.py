@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 def _listing(ts="2026-07-13T12:00:00+00:00"):
     return {"exchange": "okx", "symbol": "ABC-USDT", "detected_at": ts,
-            "message": "[新上币] OKX 新增交易对: ABC-USDT"}
+            "event_type": "instrument_inventory_addition",
+            "message": "[Instrument inventory] OKX 新增可交易产品: ABC-USDT"}
 
 
 def test_listing_is_recorded_once_as_watch_only(tmp_path, monkeypatch):
@@ -16,10 +17,15 @@ def test_listing_is_recorded_once_as_watch_only(tmp_path, monkeypatch):
     event = ol.active("structure")[0]
     assert event["decision"] == "WATCH"
     assert event["auto_execution_allowed"] is False
-    assert event["event_type"] == "new_listing"
+    assert event["event_type"] == "instrument_inventory_addition"
     assert event["source"] == "okx"
     assert event["symbol"] == "ABC"
     assert event["markets"] == ["ABC-USDT"]
+    assert event["inventory_detected_at"] == _listing()["detected_at"]
+    assert event["scheduled_open_at"] is None
+    assert event["time_semantics"] == "inventory_detection_not_listing_open"
+    assert event["listing_verification"]["state"] == "unverified"
+    assert event["instrument_class"] == "unclassified_spot"
 
 
 def test_structure_scan_uses_public_detector_and_returns_ledger(tmp_path, monkeypatch):
@@ -138,6 +144,133 @@ def test_coinbase_is_an_official_fail_closed_listing_source(tmp_path, monkeypatc
     assert result["alerts"] == []
 
 
+def test_inventory_delta_retains_okx_taxonomy_and_unverified_schedule(
+        tmp_path, monkeypatch):
+    import src.collectors.listing_detector as ld
+
+    monkeypatch.setattr(ld, "SNAPSHOT_DIR", tmp_path)
+    ld._save_snapshot("okx", {"BTC-USDT"})
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [
+                {"instId": "BTC-USDT", "instType": "SPOT", "state": "live",
+                 "baseCcy": "BTC", "quoteCcy": "USDT", "instCategory": "1"},
+                {"instId": "XAAPL-USDT", "instType": "SPOT", "state": "live",
+                 "baseCcy": "XAAPL", "quoteCcy": "USDT", "instCategory": "3",
+                 "listTime": "1784181600000", "contTdSwTime": "1784185200000",
+                 "openType": "pre_quote"},
+            ]}
+
+    monkeypatch.setattr(ld.httpx, "get", lambda *_args, **_kwargs: Response())
+    result = ld.check_exchange_result("okx")
+
+    assert result["status"] == "ok" and result["new_count"] == 1
+    alert = result["alerts"][0]
+    assert alert["event_type"] == "instrument_inventory_addition"
+    assert alert["listing_verification"] == {
+        "state": "unverified", "reason_code": "official_announcement_not_collected",
+    }
+    metadata = alert["product_metadata"]
+    assert metadata["base_asset"] == "XAAPL"
+    assert metadata["quote_asset"] == "USDT"
+    assert metadata["source_fields"]["instCategory"] == "3"
+    assert metadata["source_fields"]["contTdSwTime"] == "1784185200000"
+
+
+def test_okx_stock_taxonomy_is_conservatively_stock_or_etf(tmp_path, monkeypatch):
+    import src.pipeline.opportunity_ledger as ol
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    row = {
+        **_listing(), "symbol": "XAAPL-USDT",
+        "product_metadata": {
+            "version": 1, "source": "okx", "instrument_id": "XAAPL-USDT",
+            "market_type": "spot", "base_asset": "XAAPL", "quote_asset": "USDT",
+            "source_fields": {
+                "instCategory": "3", "contTdSwTime": "1784185200000",
+            },
+        },
+    }
+
+    assert sr.record_listings([row]) == 1
+    event = ol.active("structure")[0]
+    assert event["instrument_class"] == "tokenized_equity_or_etf"
+    assert event["products"][0]["classification"] == {
+        "category": "tokenized_equity_or_etf",
+        "basis": "official_instrument_metadata",
+        "source_field": "instCategory",
+        "source_value": "3",
+    }
+    schedule = event["products"][0]["source_reported_schedule"]
+    assert schedule["basis"] == "instrument_metadata_only"
+    assert schedule["official_announcement_verified"] is False
+    assert event["scheduled_open_at"] is None
+
+
+def test_untrusted_or_incomplete_announcement_never_promotes_inventory(
+        tmp_path, monkeypatch):
+    import src.pipeline.opportunity_ledger as ol
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    row = {
+        **_listing(),
+        "official_announcement_evidence": {
+            "version": 1, "kind": "official_exchange_listing_announcement",
+            "exchange": "okx", "url": "https://okx.example/listing/abc",
+            "content_sha256": "0" * 64,
+            "published_at": "2026-07-13T11:00:00+00:00",
+            "retrieved_at": "2026-07-13T11:30:00+00:00",
+            "scheduled_open_at": "2026-07-14T12:00:00+00:00",
+            "scheduled_open_text": "Trading opens 12:00 UTC", "markets": ["ABC-USDT"],
+        },
+    }
+
+    assert sr.record_listings([row]) == 1
+    event = ol.active("structure")[0]
+    assert event["event_type"] == "instrument_inventory_addition"
+    assert event["listing_verification"]["state"] == "unverified"
+    assert event["scheduled_open_at"] is None
+
+
+def test_self_reported_official_url_and_hash_cannot_label_verified_listing(
+        tmp_path, monkeypatch):
+    import src.pipeline.opportunity_ledger as ol
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    row = {
+        **_listing(),
+        "official_announcement_evidence": {
+            "version": 1, "kind": "official_exchange_listing_announcement",
+            "exchange": "okx", "url": "https://www.okx.com/help/listing-abc",
+            "content_sha256": "a" * 64,
+            "published_at": "2026-07-13T11:00:00+00:00",
+            "retrieved_at": "2026-07-13T11:30:00+00:00",
+            "scheduled_open_at": "2026-07-14T12:00:00+00:00",
+            "scheduled_open_text": "Trading opens at 12:00 UTC",
+            "markets": ["ABC-USDT"],
+        },
+    }
+
+    assert sr.record_listings([row]) == 1
+    event = ol.active("structure")[0]
+    assert event["event_type"] == "instrument_inventory_addition"
+    assert event["listing_verification"] == {
+        "state": "unverified",
+        "reason_code": "independent_announcement_artifact_verifier_unavailable",
+    }
+    assert event["scheduled_open_at"] is None
+    assert event["event_at"] == event["detected_at"]
+    assert event["decision"] == "WATCH"
+    assert event["auto_execution_allowed"] is False
+
+
 def test_truncated_inventory_never_replaces_healthy_snapshot(tmp_path, monkeypatch):
     import json
     import src.collectors.listing_detector as ld
@@ -216,8 +349,10 @@ def test_legacy_pair_rows_are_collapsed_and_never_labeled_as_new_listings():
 
     assert summary == {
         "canonical_events": 1,
-        "canonical_listings": 1,
+        "instrument_inventory_additions": 1,
+        "verified_listings": 0,
         "legacy_inventory_deltas": 2,
+        "recorded_new_listing_labels_downgraded": 1,
         "legacy_rows": 3,
         "legacy_rows_collapsed": 1,
         "raw_open_rows": 4,
@@ -230,6 +365,13 @@ def test_legacy_pair_rows_are_collapsed_and_never_labeled_as_new_listings():
     assert abc["actionable_now"] is False
     assert abc["auto_execution_allowed"] is False
     assert any("未独立核验为官方上币公告" in reason for reason in abc["reasons"])
+
+    xyz = next(row for row in events if row["symbol"] == "XYZ")
+    assert xyz["event_type"] == "instrument_inventory_addition"
+    assert xyz["recorded_event_type"] == "new_listing"
+    assert xyz["listing_verification"]["state"] == "unverified"
+    assert xyz["scheduled_open_at"] is None
+    assert any("公开读模型已降级" in reason for reason in xyz["reasons"])
 
 
 def test_listing_source_failure_is_warned_hourly_without_hiding_health(monkeypatch):

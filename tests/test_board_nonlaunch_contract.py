@@ -17,6 +17,28 @@ def _structure_event() -> dict:
         "id": "structure-1", "lane": "structure", "chain": "cex",
         "token": "ABC", "symbol": "ABC", "source": "okx",
         "event_at": now, "detected_at": now, "decision_at": now,
+        "inventory_detected_at": now, "scheduled_open_at": None,
+        "time_semantics": "inventory_detection_not_listing_open",
+        "event_type": "instrument_inventory_addition",
+        "evidence_state": "instrument_inventory_delta_only",
+        "listing_verification": {
+            "state": "unverified",
+            "reason_code": "official_announcement_and_open_time_not_verified",
+        },
+        "markets": ["ABC-USDT"],
+        "instrument_class": "unclassified_spot",
+        "instrument_classes": ["unclassified_spot"],
+        "products": [{
+            "market": "ABC-USDT",
+            "metadata": {
+                "version": 1, "source": "okx", "instrument_id": "ABC-USDT",
+                "market_type": "spot", "source_fields": {},
+            },
+            "classification": {
+                "category": "unclassified_spot",
+                "basis": "no_explicit_product_taxonomy",
+            },
+        }],
         "effective_decision": "WATCH", "actionable_now": False,
         "auto_execution_allowed": False,
     }
@@ -133,14 +155,95 @@ def test_nonlaunch_event_requires_bound_identity_and_aware_clocks(field, value):
         _validate("structure", body)
 
 
-def test_structure_event_at_may_describe_a_future_public_schedule():
+def test_inventory_detection_cannot_be_relabelled_as_a_future_open_time():
+    from src.contract.board_view import BoardViewContractError
+
     body = _valid_body("structure")
     scheduled = datetime.now(timezone.utc) + timedelta(days=1)
     body["events"][0]["event_at"] = scheduled.isoformat()
 
+    with pytest.raises(BoardViewContractError, match="inventory detection time"):
+        _validate("structure", body)
+
+
+def test_self_reported_official_announcement_cannot_publish_verified_listing():
+    from src.contract.board_view import BoardViewContractError
+
+    body = _valid_body("structure")
+    row = body["events"][0]
+    detected = datetime.fromisoformat(row["detected_at"])
+    scheduled = detected + timedelta(days=1)
+    evidence = {
+        "version": 1,
+        "kind": "official_exchange_listing_announcement",
+        "exchange": "okx",
+        "url": "https://www.okx.com/help/listing-abc",
+        "content_sha256": "a" * 64,
+        "published_at": (detected - timedelta(minutes=1)).isoformat(),
+        "retrieved_at": detected.isoformat(),
+        "scheduled_open_at": scheduled.isoformat(),
+        "scheduled_open_text": "Trading opens at 12:00 UTC",
+        "markets": ["ABC-USDT"],
+    }
+    row.update({
+        "event_type": "verified_listing",
+        "event_at": scheduled.isoformat(),
+        "scheduled_open_at": scheduled.isoformat(),
+        "time_semantics": "official_scheduled_open",
+        "evidence_state": "official_announcement_and_open_time_verified",
+        "listing_verification": {
+            "state": "verified",
+            "basis": "official_announcement_and_bound_open_time",
+            "evidence": evidence,
+        },
+    })
+
+    with pytest.raises(BoardViewContractError, match="event_type is invalid"):
+        _validate("structure", body)
+
+
+def test_legacy_inventory_row_is_allowed_but_cannot_claim_verified_listing():
+    body = _valid_body("structure")
+    row = body["events"][0]
+    row.update({
+        "event_type": "legacy_inventory_delta",
+        "recorded_event_type": "new_listing",
+        "listing_verification": {
+            "state": "unverified",
+            "reason_code": "legacy_inventory_rows_have_no_announcement_evidence",
+        },
+    })
+
     payload = _validate("structure", body)
 
-    assert payload["events"][0]["event_at"] == scheduled.isoformat()
+    assert payload["events"][0]["event_type"] == "legacy_inventory_delta"
+    assert payload["events"][0]["listing_verification"]["state"] == "unverified"
+
+
+def test_inventory_metadata_schedule_cannot_promote_public_listing_semantics():
+    body = _valid_body("structure")
+    row = body["events"][0]
+    row["products"][0]["source_reported_schedule"] = {
+        "reported_open_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        "source_field": "contTdSwTime",
+        "basis": "instrument_metadata_only",
+        "official_announcement_verified": False,
+    }
+
+    payload = _validate("structure", body)
+
+    assert payload["events"][0]["event_type"] == "instrument_inventory_addition"
+    assert payload["events"][0]["scheduled_open_at"] is None
+
+
+def test_structure_product_taxonomy_must_be_bound_to_source_metadata():
+    from src.contract.board_view import BoardViewContractError
+
+    body = _valid_body("structure")
+    body["events"][0]["instrument_class"] = "tokenized_equity"
+
+    with pytest.raises(BoardViewContractError, match="instrument_class contradicts"):
+        _validate("structure", body)
 
 
 @pytest.mark.parametrize("view", ["structure", "airdrop", "perps"])

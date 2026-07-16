@@ -84,14 +84,29 @@ def test_structure_view_discloses_per_source_coverage_failures():
     assert "失败源不会计入覆盖" in html
 
 
-def test_structure_view_separates_legacy_inventory_deltas_from_new_listings():
+def test_structure_view_separates_inventory_deltas_from_verified_listings():
     html = BOARD.read_text()
 
     assert "legacy_inventory_deltas" in html
     assert "legacy_inventory_delta" in html
+    assert "instrument_inventory_additions" in html
+    assert "instrument_inventory_addition" in html
     assert "旧库存差分" in html
-    assert "不算独立新上币" in html
-    assert "未独立核验为官方上币公告" in html
+    assert "接口首次出现只叫<b>库存新增</b>" in html
+    assert "服务端契约直接拒绝 `verified_listing`" in html
+    assert "const structureListingVerified=()=>false" in html
+    assert "检测时间 ≠ 上币/开盘时间" in html
+    assert "公告核验开盘" in html
+    assert "自动交易: 永不允许" in html
+
+
+def test_structure_view_exposes_conservative_tokenized_product_taxonomy():
+    html = BOARD.read_text()
+
+    assert 'tokenized_equity_or_etf:"代币化股票/ETF"' in html
+    assert "按产品接口显式 taxonomy；不按 ticker 猜" in html
+    assert "产品接口报告时间（不是公告核验）" in html
+    assert "仅 instruments 字段，未由公告核验" in html
 
 
 def test_airdrop_view_exposes_source_coverage_cost_and_risk_without_guessing():

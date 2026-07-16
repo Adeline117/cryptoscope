@@ -1,7 +1,9 @@
-"""Exchange new-listing detector.
+"""Exchange instrument-inventory detector.
 
-Polls official Binance, OKX, Bybit, and Coinbase instrument endpoints every cycle, compares
-against the previous snapshot, and emits alerts for newly listed trading pairs.
+Poll official Binance, OKX, Bybit, and Coinbase instrument endpoints, compare the
+tradable inventory with the previous complete snapshot, and emit *inventory
+addition* observations.  An instrument appearing in an API response is not, by
+itself, proof of an official listing announcement or its scheduled open time.
 """
 
 from __future__ import annotations
@@ -50,6 +52,43 @@ POLL_INTERVAL_SECONDS = 60
 FAILURE_LOG_INTERVAL_SECONDS = 3600
 MIN_INVENTORY_RETAIN_RATIO = 0.75
 _LAST_FAILURE_LOG: dict[str, float] = {}
+
+# Preserve the useful, source-declared product taxonomy and schedule fields without
+# copying huge order filters or arbitrary upstream objects into the event ledger.
+# The raw field names are intentional evidence: consumers can distinguish an
+# exchange declaration from a CryptoScope inference.
+_PRODUCT_METADATA_FIELDS: dict[str, tuple[str, ...]] = {
+    "binance": (
+        "symbol", "status", "baseAsset", "quoteAsset", "baseAssetPrecision",
+        "quoteAssetPrecision", "isSpotTradingAllowed", "isMarginTradingAllowed",
+        "permissions", "permissionSets", "orderTypes",
+    ),
+    "okx": (
+        "instId", "instIdCode", "instType", "instCategory", "category",
+        "baseCcy", "quoteCcy", "tradeQuoteCcyList", "state", "listTime",
+        "contTdSwTime", "auctionEndTime", "preMktSwTime", "openType", "ruleType",
+        "tickSz", "lotSz", "minSz", "upcChg",
+    ),
+    "bybit": (
+        "symbol", "status", "baseCoin", "quoteCoin", "innovation", "stTag",
+        "launchTime", "marginTrading", "priceScale",
+    ),
+    "coinbase": (
+        "id", "status", "status_message", "base_currency", "quote_currency",
+        "display_name", "product_type", "type", "base_name", "quote_name",
+        "trading_disabled", "view_only", "auction_mode", "fx_stablecoin",
+        "margin_enabled", "limit_only", "post_only", "cancel_only",
+    ),
+}
+
+_PRODUCT_ID_FIELDS = {
+    "binance": "symbol", "okx": "instId", "bybit": "symbol", "coinbase": "id",
+}
+
+_PRODUCT_ROW_PATHS = {
+    "binance": ("symbols",), "okx": ("data",),
+    "bybit": ("result", "list"), "coinbase": (),
+}
 
 
 class _SourcePayloadError(ValueError):
@@ -207,6 +246,87 @@ _PARSERS = {
 }
 
 
+def _product_rows(exchange: str, data: object) -> list[dict[str, Any]]:
+    """Return product objects from one already schema-checked source envelope."""
+    value = data
+    for key in _PRODUCT_ROW_PATHS.get(exchange, ()):
+        if not isinstance(value, dict):
+            return []
+        value = value.get(key)
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, dict)]
+
+
+def _bounded_json_value(value: object) -> object | None:
+    """Copy a small JSON value, rejecting NaN and unexpectedly large metadata."""
+    try:
+        encoded = json.dumps(
+            value, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        return None
+    if len(encoded.encode("utf-8")) > 8192:
+        return None
+    return json.loads(encoded)
+
+
+def _extract_product_metadata(
+    exchange: str,
+    data: object,
+    current_symbols: set[str],
+) -> dict[str, dict[str, Any]]:
+    """Keep bounded official product metadata for every accepted instrument.
+
+    Snapshot compatibility deliberately stays unchanged: the baseline remains a
+    sorted string array, while metadata travels only with a newly observed delta.
+    """
+    ident_field = _PRODUCT_ID_FIELDS.get(exchange)
+    allowed = _PRODUCT_METADATA_FIELDS.get(exchange)
+    if not ident_field or not allowed:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for row in _product_rows(exchange, data):
+        ident = row.get(ident_field)
+        if not isinstance(ident, str) or ident not in current_symbols:
+            continue
+        source_fields: dict[str, Any] = {}
+        for field in allowed:
+            if field not in row:
+                continue
+            copied = _bounded_json_value(row[field])
+            if copied is not None:
+                source_fields[field] = copied
+        base_field = {
+            "binance": "baseAsset", "okx": "baseCcy", "bybit": "baseCoin",
+            "coinbase": "base_currency",
+        }[exchange]
+        quote_field = {
+            "binance": "quoteAsset", "okx": "quoteCcy", "bybit": "quoteCoin",
+            "coinbase": "quote_currency",
+        }[exchange]
+        status_field = {
+            "binance": "status", "okx": "state", "bybit": "status",
+            "coinbase": "status",
+        }[exchange]
+        metadata: dict[str, Any] = {
+            "version": 1,
+            "source": exchange,
+            "instrument_id": ident,
+            "market_type": "spot",
+            "source_fields": source_fields,
+        }
+        for normalized, field in (
+            ("base_asset", base_field), ("quote_asset", quote_field),
+            ("status", status_field),
+        ):
+            value = row.get(field)
+            if isinstance(value, str) and value.strip():
+                metadata[normalized] = value.strip()
+        out[ident] = metadata
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Snapshot persistence
 # ---------------------------------------------------------------------------
@@ -256,8 +376,10 @@ def check_exchange_result(
         timeout: HTTP timeout in seconds.
 
     Returns a dict with ``status`` (``ok`` or ``failed``), source evidence and an
-    ``alerts`` list.  ``baseline_ready`` is false on the first successful scan,
-    because that scan can establish inventory but cannot detect a delta.
+    ``alerts`` list.  Alerts prove only a newly observed instrument-inventory row;
+    they retain bounded product metadata but never claim an announcement-backed
+    listing. ``baseline_ready`` is false on the first successful scan because that
+    scan can establish inventory but cannot detect a delta.
     """
     checked_at = datetime.now(timezone.utc).isoformat()
     result: dict[str, Any] = {
@@ -338,6 +460,7 @@ def check_exchange_result(
         result["error"] = "response parsed zero live symbols"
         result["error_kind"] = "suspicious_empty_inventory"
         return result
+    product_metadata = _extract_product_metadata(exchange, data, current_symbols)
 
     previous_symbols = _load_snapshot(exchange)
     # A non-empty response can still be truncated by a gateway or upstream partial
@@ -380,10 +503,24 @@ def check_exchange_result(
             "exchange": exchange,
             "symbol": sym,
             "detected_at": now,
-            "message": f"[新上币] {exchange.upper()} 新增交易对: {sym}",
+            "event_type": "instrument_inventory_addition",
+            "evidence_state": "instrument_inventory_delta_only",
+            "product_metadata": product_metadata.get(sym, {
+                "version": 1, "source": exchange, "instrument_id": sym,
+                "market_type": "spot", "source_fields": {},
+            }),
+            "listing_verification": {
+                "state": "unverified",
+                "reason_code": "official_announcement_not_collected",
+            },
+            "message": (
+                f"[Instrument inventory] {exchange.upper()} 新增可交易产品: {sym}"
+            ),
         }
         alerts.append(alert)
-        logger.info("new_listing_detected", exchange=exchange, symbol=sym)
+        logger.info(
+            "instrument_inventory_addition_detected", exchange=exchange, symbol=sym,
+        )
 
     result.update({"alerts": alerts, "new_count": len(alerts)})
     return result

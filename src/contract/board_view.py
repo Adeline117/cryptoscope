@@ -55,6 +55,14 @@ _ADMISSION_SAFETY_FIELDS = (
     "state", "enrollment_open", "armed_at", "opened_at", "breached_at",
     "auto_execution_allowed",
 )
+_STRUCTURE_EVENT_TYPES = {
+    "instrument_inventory_addition", "legacy_inventory_delta",
+}
+_STRUCTURE_INSTRUMENT_CLASSES = {
+    "crypto_asset", "tokenized_equity", "tokenized_etf",
+    "tokenized_equity_or_etf", "tokenized_commodity", "tokenized_forex",
+    "tokenized_bond", "unclassified_spot", "mixed",
+}
 
 
 def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
@@ -640,6 +648,154 @@ def _validate_nested_manual_only(row: Mapping[str, Any], *, path: str) -> None:
             )
 
 
+def _same_clock(left: Any, right: Any, *, path: str) -> bool:
+    return _aware_clock(left, path=f"{path}.left") == _aware_clock(
+        right, path=f"{path}.right",
+    )
+
+
+def _validate_structure_products(row: Mapping[str, Any], *, path: str) -> None:
+    markets = row.get("markets")
+    if (not isinstance(markets, list) or not markets
+            or any(not isinstance(item, str) or not item.strip() for item in markets)
+            or len(set(markets)) != len(markets)):
+        raise BoardViewContractError(f"{path}.markets must be unique non-empty strings")
+    products = row.get("products")
+    if not isinstance(products, list) or len(products) != len(markets):
+        raise BoardViewContractError(f"{path}.products must bind every market exactly once")
+    product_markets: list[str] = []
+    categories: set[str] = set()
+    for index, product in enumerate(products):
+        product_path = f"{path}.products[{index}]"
+        if not isinstance(product, Mapping):
+            raise BoardViewContractError(f"{product_path} must be an object")
+        market = _required_text(product.get("market"), path=f"{product_path}.market")
+        product_markets.append(market)
+        metadata = product.get("metadata")
+        if not isinstance(metadata, Mapping) or metadata.get("version") != 1:
+            raise BoardViewContractError(f"{product_path}.metadata must be version 1")
+        if (metadata.get("source") != row.get("source")
+                or metadata.get("instrument_id") != market
+                or metadata.get("market_type") != "spot"
+                or not isinstance(metadata.get("source_fields"), Mapping)):
+            raise BoardViewContractError(f"{product_path}.metadata identity is unbound")
+        classification = product.get("classification")
+        if not isinstance(classification, Mapping):
+            raise BoardViewContractError(f"{product_path}.classification must be an object")
+        category = classification.get("category")
+        if category not in _STRUCTURE_INSTRUMENT_CLASSES - {"mixed"}:
+            raise BoardViewContractError(f"{product_path}.classification category is invalid")
+        _required_text(
+            classification.get("basis"), path=f"{product_path}.classification.basis",
+        )
+        if category == "unclassified_spot":
+            if classification.get("basis") not in {
+                    "no_explicit_product_taxonomy", "legacy_row_has_no_product_taxonomy"}:
+                raise BoardViewContractError(
+                    f"{product_path}.classification has an invalid unknown basis"
+                )
+        else:
+            if classification.get("basis") != "official_instrument_metadata":
+                raise BoardViewContractError(
+                    f"{product_path}.classification lacks official metadata basis"
+                )
+            source_field = classification.get("source_field")
+            source_value = classification.get("source_value")
+            raw_value = metadata["source_fields"].get(source_field)
+            if (not isinstance(source_field, str) or not isinstance(source_value, str)
+                    or not isinstance(raw_value, str)
+                    or raw_value.strip().lower() != source_value):
+                raise BoardViewContractError(
+                    f"{product_path}.classification is not bound to source_fields"
+                )
+            if source_field == "instCategory":
+                expected_category = {
+                    "1": "crypto_asset", "3": "tokenized_equity_or_etf",
+                    "4": "tokenized_commodity", "5": "tokenized_forex",
+                    "6": "tokenized_bond",
+                }.get(source_value) if metadata.get("source") == "okx" else None
+            else:
+                value = source_value
+                if "etf" in value or "exchange traded fund" in value:
+                    expected_category = "tokenized_etf"
+                elif any(word in value for word in ("equity", "stock", "share")):
+                    expected_category = "tokenized_equity"
+                elif "commodit" in value:
+                    expected_category = "tokenized_commodity"
+                elif value in {"fx", "forex", "foreign_exchange"}:
+                    expected_category = "tokenized_forex"
+                elif any(word in value for word in ("bond", "fixed_income")):
+                    expected_category = "tokenized_bond"
+                elif value in {"crypto", "cryptocurrency", "digital_asset"}:
+                    expected_category = "crypto_asset"
+                else:
+                    expected_category = None
+            if expected_category != category:
+                raise BoardViewContractError(
+                    f"{product_path}.classification contradicts source taxonomy"
+                )
+        categories.add(category)
+        schedule = product.get("source_reported_schedule")
+        if schedule is not None:
+            if (not isinstance(schedule, Mapping)
+                    or schedule.get("basis") != "instrument_metadata_only"
+                    or schedule.get("official_announcement_verified") is not False):
+                raise BoardViewContractError(
+                    f"{product_path}.source_reported_schedule must remain unverified"
+                )
+            _required_text(
+                schedule.get("source_field"),
+                path=f"{product_path}.source_reported_schedule.source_field",
+            )
+            _aware_clock(
+                schedule.get("reported_open_at"),
+                path=f"{product_path}.source_reported_schedule.reported_open_at",
+            )
+    if set(product_markets) != set(markets) or len(set(product_markets)) != len(markets):
+        raise BoardViewContractError(f"{path}.products do not match markets")
+    declared_classes = row.get("instrument_classes")
+    if (not isinstance(declared_classes, list)
+            or set(declared_classes) != categories
+            or len(declared_classes) != len(categories)):
+        raise BoardViewContractError(f"{path}.instrument_classes contradict products")
+    expected = next(iter(categories)) if len(categories) == 1 else "mixed"
+    if row.get("instrument_class") != expected:
+        raise BoardViewContractError(f"{path}.instrument_class contradicts products")
+
+
+def _validate_structure_event(
+    row: Mapping[str, Any], *, path: str,
+) -> None:
+    event_type = row.get("event_type")
+    if event_type not in _STRUCTURE_EVENT_TYPES:
+        raise BoardViewContractError(f"{path}.event_type is invalid")
+    if not _same_clock(
+        row.get("inventory_detected_at"), row.get("detected_at"),
+        path=f"{path}.inventory_detection_binding",
+    ):
+        raise BoardViewContractError(f"{path}.inventory_detected_at is unbound")
+    _validate_structure_products(row, path=path)
+    verification = row.get("listing_verification")
+    if not isinstance(verification, Mapping):
+        raise BoardViewContractError(f"{path}.listing_verification must be an object")
+
+    if (row.get("time_semantics") != "inventory_detection_not_listing_open"
+            or row.get("scheduled_open_at") is not None
+            or verification.get("state") != "unverified"):
+        raise BoardViewContractError(f"{path} inventory observation claims a listing time")
+    if not _same_clock(
+        row.get("event_at"), row.get("detected_at"),
+        path=f"{path}.inventory_event_clock",
+    ):
+        raise BoardViewContractError(
+            f"{path}.event_at must remain the inventory detection time"
+        )
+    _required_text(
+        verification.get("reason_code"),
+        path=f"{path}.listing_verification.reason_code",
+    )
+
+
 def _trusted_https_url(value: Any, *, trust_root: str, path: str) -> str:
     url = _required_text(value, path=path)
     parsed = urlparse(url)
@@ -744,6 +900,7 @@ def _validate_nonlaunch_action(row: Mapping[str, Any], *, view: str,
     if view == "structure":
         if row.get("event_at") is None:
             raise BoardViewContractError(f"{path}.event_at is required")
+        _validate_structure_event(row, path=path)
     elif view == "airdrop":
         _validate_airdrop_event(row, generated_at=generated_at, path=path)
     else:
