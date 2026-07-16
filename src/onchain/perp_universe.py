@@ -68,9 +68,10 @@ _MAX_REFRESH_DURATION_SECONDS = 5 * 60
 # Operational completeness controls, not OKX protocol guarantees.  A catalog
 # below this floor, or more than 25% below the last still-valid snapshot, is more
 # likely a partial response than a real market event and must not replace cache.
-_MIN_OPERATIONAL_MARKET_COUNT = 100
+_MIN_OPERATIONAL_MARKET_COUNT = 300
 _MAX_OPERATIONAL_DROP_NUMERATOR = 3
 _MAX_OPERATIONAL_DROP_DENOMINATOR = 4
+_MAX_OPERATIONAL_BASELINE_AGE = timedelta(days=14)
 _MIN_MAPPING_COVERAGE_NUMERATOR = 1
 _MIN_MAPPING_COVERAGE_DENOMINATOR = 3
 _MIN_MAPPING_RETENTION_NUMERATOR = 3
@@ -470,13 +471,15 @@ def _read_cache_bytes() -> bytes:
         raise
 
 
-def _previous_inventory_counts() -> tuple[int, int] | None:
-    """Recover structurally valid prior market/mapping counts after expiry.
+def _previous_inventory_counts(
+    *,
+    publish_now: datetime | None = None,
+) -> tuple[int, int] | None:
+    """Recover one bounded-age baseline for both inventory retention gates.
 
     Freshness controls whether scanners may consume a snapshot.  It must not disable
-    the independent completeness alarm on the next refresh: otherwise a weekly run
-    could replace a 400-market snapshot with a truncated 100-row response merely
-    because the 26-hour actionable TTL had elapsed.
+    the independent completeness alarms on the next refresh.  Baselines older than
+    14 days are no longer comparable to the current market regime and are ignored.
     """
     try:
         raw = _read_cache_bytes()
@@ -488,8 +491,14 @@ def _previous_inventory_counts() -> tuple[int, int] | None:
         generated_at = _parse_utc_iso(
             payload.get("generated_at"), "cache_generated_at_invalid",
         )
-        now = _require_utc(_utc_now(), "local_time_invalid")
-        if generated_at > now:
+        now = _require_utc(
+            publish_now if publish_now is not None else _utc_now(),
+            "local_time_invalid",
+        )
+        if (
+            generated_at > now
+            or now - generated_at > _MAX_OPERATIONAL_BASELINE_AGE
+        ):
             return None
         validated = _validate_cache_payload(payload, generated_at)
         market_count = validated.get("market_count")
@@ -508,18 +517,10 @@ def _previous_inventory_counts() -> tuple[int, int] | None:
         return None
 
 
-def _previous_market_count() -> int | None:
-    counts = _previous_inventory_counts()
-    return counts[0] if counts is not None else None
-
-
-def _previous_mapped_count() -> int | None:
-    counts = _previous_inventory_counts()
-    return counts[1] if counts is not None else None
-
-
-def _reject_operational_inventory_drop(current_count: int) -> None:
-    previous_count = _previous_market_count()
+def _reject_operational_inventory_drop(
+    current_count: int,
+    previous_count: int | None,
+) -> None:
     if (
         type(previous_count) is int
         and current_count * _MAX_OPERATIONAL_DROP_DENOMINATOR
@@ -531,13 +532,13 @@ def _reject_operational_inventory_drop(current_count: int) -> None:
 def _reject_mapping_completeness(
     market_count: int,
     mapped_count: int,
+    previous_count: int | None,
 ) -> None:
     if (
         mapped_count * _MIN_MAPPING_COVERAGE_DENOMINATOR
         < market_count * _MIN_MAPPING_COVERAGE_NUMERATOR
     ):
         raise _ContractError("coingecko_mapping_coverage_below_floor")
-    previous_count = _previous_mapped_count()
     if (
         type(previous_count) is int
         and mapped_count * _MIN_MAPPING_RETENTION_DENOMINATOR
@@ -958,14 +959,22 @@ def refresh_result() -> dict[str, object]:
         return _failure("invalid", "ccxt_mode_invalid")
     try:
         market_catalog, native_source = _native_okx_snapshot()
-        _reject_operational_inventory_drop(len(market_catalog))
+        baseline_counts = _previous_inventory_counts()
+        previous_market_count, previous_mapped_count = (
+            baseline_counts if baseline_counts is not None else (None, None)
+        )
+        _reject_operational_inventory_drop(
+            len(market_catalog), previous_market_count,
+        )
         sources = [native_source]
         if mode == "shadow":
             sources.append(_validate_ccxt_shadow(
                 _ccxt_shadow_snapshot(), market_catalog,
             ))
         universe, mapping_source = _coingecko_research_mapping(market_catalog)
-        _reject_mapping_completeness(len(market_catalog), len(universe))
+        _reject_mapping_completeness(
+            len(market_catalog), len(universe), previous_mapped_count,
+        )
         generated_at = _require_utc(_utc_now(), "local_time_invalid")
         observed_times = [
             _parse_utc_iso(source["observed_at"], "source_time_invalid")
@@ -1340,6 +1349,8 @@ def _validate_cache_payload(
         or not _SHA256.fullmatch(payload["market_catalog_digest"])
     ):
         raise _ContractError("market_catalog_evidence_invalid")
+    if market_count < _MIN_OPERATIONAL_MARKET_COUNT:
+        raise _ContractError("okx_inventory_below_operational_floor")
     if (
         mapped_count * _MIN_MAPPING_COVERAGE_DENOMINATOR
         < market_count * _MIN_MAPPING_COVERAGE_NUMERATOR

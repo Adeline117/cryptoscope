@@ -81,7 +81,7 @@ def _evidence(payload: object) -> dict[str, object]:
     }
 
 
-def _market_rows(count: int = 100, *, btc_size: str = "0.01") -> list[dict]:
+def _market_rows(count: int = 300, *, btc_size: str = "0.01") -> list[dict]:
     rows = []
     for index in range(count):
         base = "BTC" if index == 0 else f"T{index:03d}"
@@ -375,7 +375,7 @@ def test_operational_floor_rejects_truncated_native_catalog_before_mapping(
 ):
     _make_valid_cache(monkeypatch)
     before = pu._CACHE.read_bytes()
-    calls = _install_sources(monkeypatch, rows=_market_rows(99))
+    calls = _install_sources(monkeypatch, rows=_market_rows(299))
 
     result = pu.refresh_result()
 
@@ -385,9 +385,9 @@ def test_operational_floor_rejects_truncated_native_catalog_before_mapping(
 
 
 def test_large_drop_from_last_valid_inventory_is_rejected(monkeypatch):
-    _make_valid_cache(monkeypatch, rows=_market_rows(140))
+    _make_valid_cache(monkeypatch, rows=_market_rows(500))
     before = pu._CACHE.read_bytes()
-    calls = _install_sources(monkeypatch, rows=_market_rows(100))
+    calls = _install_sources(monkeypatch, rows=_market_rows(374))
 
     result = pu.refresh_result()
 
@@ -396,18 +396,65 @@ def test_large_drop_from_last_valid_inventory_is_rejected(monkeypatch):
     assert pu._CACHE.read_bytes() == before
 
 
-def test_stale_valid_cache_still_protects_refresh_inventory_baseline(monkeypatch):
-    _make_valid_cache(monkeypatch, rows=_market_rows(140))
+def test_market_inventory_retention_exact_75_percent_passes(monkeypatch):
+    _make_valid_cache(monkeypatch, rows=_market_rows(500))
+    _install_sources(monkeypatch, rows=_market_rows(375))
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["market_count"] == 375
+    assert result["mapped_count"] == 375
+
+
+def test_refresh_reads_one_baseline_for_both_retention_gates(monkeypatch):
+    _install_sources(
+        monkeypatch,
+        rows=_market_rows(375),
+        mapped_count=300,
+    )
+    baseline_reads = []
+    monkeypatch.setattr(
+        pu,
+        "_previous_inventory_counts",
+        lambda: baseline_reads.append("read") or (500, 400),
+    )
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["market_count"] == 375
+    assert result["mapped_count"] == 300
+    assert baseline_reads == ["read"]
+
+
+def test_14_day_stale_cache_still_protects_both_inventory_baselines(monkeypatch):
+    _make_valid_cache(monkeypatch, rows=_market_rows(500), mapped_count=400)
     monkeypatch.setattr(
         pu, "_utc_now",
-        lambda: NOW + timedelta(seconds=pu.CACHE_TTL_SECONDS + 1),
+        lambda: NOW + timedelta(days=14),
     )
 
     assert pu.load_result()["status"] == "stale"
-    assert pu._previous_market_count() == 140
+    counts = pu._previous_inventory_counts()
+    assert counts == (500, 400)
     with pytest.raises(pu._ContractError) as caught:
-        pu._reject_operational_inventory_drop(100)
+        pu._reject_operational_inventory_drop(374, counts[0])
     assert caught.value.reason_code == "okx_inventory_operational_drop"
+    with pytest.raises(pu._ContractError) as caught:
+        pu._reject_mapping_completeness(375, 299, counts[1])
+    assert caught.value.reason_code == "coingecko_mapping_operational_drop"
+
+
+def test_baseline_older_than_14_days_or_from_future_is_ignored(monkeypatch):
+    _make_valid_cache(monkeypatch, rows=_market_rows(500), mapped_count=400)
+
+    assert pu._previous_inventory_counts(
+        publish_now=NOW + timedelta(days=14, microseconds=1),
+    ) is None
+    assert pu._previous_inventory_counts(
+        publish_now=NOW - timedelta(microseconds=1),
+    ) is None
 
 
 @pytest.mark.parametrize(
@@ -446,22 +493,22 @@ def test_coingecko_ranked_inventory_is_exact_and_preserves_old_cache(
 def test_initial_mapping_coverage_exact_third_passes(monkeypatch):
     _install_sources(
         monkeypatch,
-        rows=_market_rows(102),
-        mapped_count=34,
+        rows=_market_rows(300),
+        mapped_count=100,
     )
 
     result = pu.refresh_result()
 
     assert result["status"] == "research_only"
-    assert result["market_count"] == 102
-    assert result["mapped_count"] == 34
+    assert result["market_count"] == 300
+    assert result["mapped_count"] == 100
 
 
 def test_initial_mapping_coverage_one_below_third_is_rejected(monkeypatch):
     _install_sources(
         monkeypatch,
-        rows=_market_rows(102),
-        mapped_count=33,
+        rows=_market_rows(300),
+        mapped_count=99,
     )
 
     result = pu.refresh_result()
@@ -475,8 +522,8 @@ def test_mapping_coverage_rejection_preserves_old_cache_byte_for_byte(monkeypatc
     before = pu._CACHE.read_bytes()
     _install_sources(
         monkeypatch,
-        rows=_market_rows(102),
-        mapped_count=33,
+        rows=_market_rows(300),
+        mapped_count=99,
     )
 
     result = pu.refresh_result()
@@ -487,19 +534,19 @@ def test_mapping_coverage_rejection_preserves_old_cache_byte_for_byte(monkeypatc
 
 
 def test_mapping_retention_exact_75_percent_passes(monkeypatch):
-    _make_valid_cache(monkeypatch, mapped_count=100)
-    _install_sources(monkeypatch, mapped_count=75)
+    _make_valid_cache(monkeypatch, mapped_count=300)
+    _install_sources(monkeypatch, mapped_count=225)
 
     result = pu.refresh_result()
 
     assert result["status"] == "research_only"
-    assert result["mapped_count"] == 75
+    assert result["mapped_count"] == 225
 
 
 def test_mapping_retention_one_below_75_percent_preserves_old_cache(monkeypatch):
-    _make_valid_cache(monkeypatch, mapped_count=100)
+    _make_valid_cache(monkeypatch, mapped_count=300)
     before = pu._CACHE.read_bytes()
-    _install_sources(monkeypatch, mapped_count=74)
+    _install_sources(monkeypatch, mapped_count=224)
 
     result = pu.refresh_result()
 
@@ -607,9 +654,24 @@ def test_native_accepts_only_live_linear_standard_usdt_rows():
     catalog = pu._validate_okx_instruments(_evidence({
         "code": "0", "msg": "", "data": rows,
     }))
-    assert len(catalog) == 100
+    assert len(catalog) == 300
     assert "ETH-USD-SWAP" not in catalog
     assert "SOL-USDT-SWAP" not in catalog
+
+
+def test_cache_load_enforces_the_same_300_market_floor(monkeypatch):
+    payload = _make_valid_cache(monkeypatch)
+    assert pu.load_result()["market_count"] == 300
+
+    payload["universe"].pop(next(reversed(payload["universe"])))
+    payload["market_count"] = 299
+    payload["mapped_count"] = 299
+    _write_cache(payload)
+
+    assert pu.load_result()["reason_codes"] == [
+        "okx_inventory_below_operational_floor",
+    ]
+    assert pu.load() == {}
 
 
 def test_legacy_plain_cache_is_untrusted_and_not_actionable():
