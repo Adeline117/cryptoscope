@@ -113,6 +113,24 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
         "live_provider": "solana_rpc:live.example",
         "archive_provider": "solana_rpc:archive.example",
         "genesis_hash": "genesis-mainnet", "evidence_hash": got["evidence_hash"],
+        "finalized_head": 200,
+    }
+    candidate = module.candidate_reconciliation_proof(
+        "sig-create", slot=100, mint="mint", creator="creator",
+    )
+    connection = stream._conn()
+    try:
+        raw_hash, identity_hash = connection.execute(
+            "SELECT raw_payload_hash,hydration_payload_hash FROM raw_launches"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert candidate == {
+        **proof,
+        "live_captured_at": now.isoformat(),
+        "live_observation_hash": raw_hash,
+        "archive_observation_hash": raw_hash,
+        "hydration_identity_hash": identity_hash,
     }
 
 
@@ -207,6 +225,12 @@ def test_same_provider_or_incomplete_signature_page_fails_closed(reconcile):
             FakeRpc("https://same.example"), FakeRpc("https://same.example"),
             epoch_slots=4, safety_slots=0, start_slot=100,
         )
+    with pytest.raises(module.ReconciliationError, match="different hosts"):
+        module.reconcile_next_epoch(
+            FakeRpc("https://same.example:8899"),
+            FakeRpc("https://same.example:9900"),
+            epoch_slots=4, safety_slots=0, start_slot=100,
+        )
 
     malformed = FakeRpc("https://archive.example", signatures={"result": []})
     with pytest.raises(module.ReconciliationError, match="non-list"):
@@ -251,6 +275,66 @@ def test_readiness_is_scoped_to_configured_archive_and_recent_evidence(
     )
     assert unconfigured["archive_provider"] is None
     assert "archive_provider_not_configured" in unconfigured["reason_codes"]
+
+
+def test_recent_checks_cannot_hide_a_large_finalized_slot_lag(reconcile):
+    module, stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    stream.persist(
+        _payload(), transaction=_transaction(), capture_mode="live_ws",
+        captured_at=now, source_provider="solana_rpc:live.example",
+    )
+    module.reconcile_next_epoch(
+        FakeRpc("https://live.example", head=1_000),
+        FakeRpc("https://archive.example", head=1_000),
+        now=now, epoch_slots=4, safety_slots=0, start_slot=100,
+    )
+
+    got = module.source_readiness(
+        now=now, required_clean_epochs=1, require_runtime_health=False,
+        max_finalized_lag_slots=256,
+    )
+
+    assert got["latest_age_seconds"] == 0
+    assert got["latest_sealed_lag_slots"] == 897
+    assert got["ready"] is False
+    assert "reconciliation_slot_lag_exceeded" in got["reason_codes"]
+
+
+def test_fabricated_mutable_flags_do_not_prove_candidate_membership(reconcile):
+    module, stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    stream.persist(
+        _payload(), transaction=_transaction(), capture_mode="live_ws",
+        captured_at=now, source_provider="solana_rpc:live.example",
+    )
+    sealed = module.reconcile_next_epoch(
+        FakeRpc("https://live.example"), FakeRpc("https://archive.example"),
+        now=now, epoch_slots=4, safety_slots=0, start_slot=100,
+    )
+    connection = stream._conn()
+    try:
+        connection.execute(
+            """INSERT INTO raw_launches(
+                   signature,slot,program,event_type,creator,mint,detected_at,
+                   captured_at,source_provider,raw_payload_hash,
+                   hydration_payload_hash,logs,evidence_state,qualification_state,
+                   capture_mode,reconciliation_state,reconciliation_epoch_id,
+                   reconciled_at)
+               VALUES ('fabricated',101,?,?,?,?,?,?,?,?,?,'[]','complete',
+                       'raw_unqualified','live_ws','verified_live',?,?)""",
+            (stream.PUMP_FUN_PROGRAM, "pump_fun_createv2", "creator", "fake-mint",
+             now.isoformat(), now.isoformat(), "solana_rpc:live.example",
+             "a" * 64, "b" * 64, sealed["epoch_id"], sealed["checked_at"]),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(module.ReconciliationError, match="immutable"):
+        module.candidate_reconciliation_proof(
+            "fabricated", slot=101, mint="fake-mint", creator="creator",
+        )
 
 
 def test_epoch_and_candidate_marking_commit_atomically(reconcile, monkeypatch):
