@@ -16,6 +16,7 @@ import sqlite3
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -52,6 +53,27 @@ RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS = 60
 RPC_PRESSURE_MAX_COOLDOWN_SECONDS = 3600
 MAINTENANCE_STREAM = "pump_fun_maintenance"
 DB = DATA_DIR / "solana_launch_events.db"
+
+
+def configured_rpc_endpoint() -> str:
+    """Prefer a stream override, then the project's configured provider RPC."""
+    return (os.getenv("SOLANA_STREAM_RPC_URL", "").strip()
+            or os.getenv("SOLANA_RPC_URL", "").strip()
+            or PUBLIC_SOLANA_RPC)
+
+
+def configured_ws_endpoint() -> str:
+    """Derive the matching provider websocket unless explicitly overridden."""
+    explicit = os.getenv("SOLANA_STREAM_WS_URL", "").strip()
+    if explicit:
+        return explicit
+    parsed = urllib.parse.urlsplit(configured_rpc_endpoint())
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return urllib.parse.urlunsplit((
+            "wss" if parsed.scheme == "https" else "ws",
+            parsed.netloc, parsed.path, parsed.query, parsed.fragment,
+        ))
+    return PUBLIC_SOLANA_WS
 
 
 class RpcPressureError(RuntimeError):
@@ -1473,11 +1495,11 @@ class _SolanaSocket:
 def build_runner(*, rpc: JsonRpc | None = None,
                  socket_factory: Callable[[], object] | None = None) -> StreamRunner:
     if rpc is None:
-        rpc = JsonRpc(os.getenv("SOLANA_STREAM_RPC_URL", PUBLIC_SOLANA_RPC))
+        rpc = JsonRpc(configured_rpc_endpoint())
     if socket_factory is None:
         from websocket import create_connection
 
-        endpoint = os.getenv("SOLANA_STREAM_WS_URL", PUBLIC_SOLANA_WS)
+        endpoint = configured_ws_endpoint()
         socket_factory = lambda: create_connection(endpoint, timeout=10)
 
     def connect():
@@ -1505,7 +1527,7 @@ def main() -> None:
 
     load_dotenv(PROJECT_ROOT / ".env")
     _conn().close()
-    rpc = JsonRpc(os.getenv("SOLANA_STREAM_RPC_URL", PUBLIC_SOLANA_RPC))
+    rpc = JsonRpc(configured_rpc_endpoint())
     stop = threading.Event()
     # Never hold up the live subscription on historical multi-MB RPC reads.
     worker = threading.Thread(target=_rehydrate_loop, args=(stop, rpc), daemon=True)

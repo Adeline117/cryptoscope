@@ -1782,6 +1782,26 @@ def test_subscription_error_fails_visible(sol):
                            "error": {"code": -32600, "message": "denied"}})
 
 
+def test_stream_reuses_configured_provider_instead_of_public_rpc(sol, monkeypatch):
+    monkeypatch.delenv("SOLANA_STREAM_RPC_URL", raising=False)
+    monkeypatch.delenv("SOLANA_STREAM_WS_URL", raising=False)
+    monkeypatch.setenv(
+        "SOLANA_RPC_URL", "https://mainnet.helius-rpc.com/?api-key=redacted"
+    )
+
+    assert sol.configured_rpc_endpoint() == (
+        "https://mainnet.helius-rpc.com/?api-key=redacted"
+    )
+    assert sol.configured_ws_endpoint() == (
+        "wss://mainnet.helius-rpc.com/?api-key=redacted"
+    )
+
+    monkeypatch.setenv("SOLANA_STREAM_RPC_URL", "https://stream.example/rpc")
+    monkeypatch.setenv("SOLANA_STREAM_WS_URL", "wss://stream.example/ws")
+    assert sol.configured_rpc_endpoint() == "https://stream.example/rpc"
+    assert sol.configured_ws_endpoint() == "wss://stream.example/ws"
+
+
 def test_qualification_batch_only_returns_recent_due_complete_rows(sol):
     now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
     event = sol.parse_message(_notification())
