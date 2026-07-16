@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 import resource
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -357,13 +358,14 @@ def create_scheduler() -> AsyncIOScheduler:
         name="操作者猎手 (扫BSC/SOL找隐藏控盘 → Telegram)",
     )
 
-    # Perp universe → weekly rebuild of the shortable/longable coin set (perp
-    # markets mapped to on-chain contracts) that the dump/accumulation scans run on.
+    # Perp universe → daily rebuild.  Its evidence cache expires after 26 hours, so
+    # a weekly cadence guaranteed multi-day blocked windows even when every refresh
+    # succeeded.  A daily cron remains below TTL even across a one-hour DST shift.
     scheduler.add_job(
         _run_perp_universe_refresh,
-        CronTrigger(day_of_week="sun", hour=3, minute=30),
+        CronTrigger(hour=3, minute=30),
         id="perp_universe_refresh",
-        name="永续宇宙周刷新 (可做空/做多的币 → 合约映射)",
+        name="永续宇宙日刷新 (可做空/做多的币 → 合约映射)",
     )
 
     # Operator-ID push → daily, runs the verified identify_operator on sentinels and
@@ -1188,6 +1190,186 @@ async def _run_operator_id_push():
     logger.info("operator_id_push_done", pushed=len(lines), muted=alerts_muted())
 
 
+_PERP_RESULT_STATUSES = {
+    "verified", "research_only", "blocked", "invalid", "stale", "unavailable",
+}
+_PERP_REASON_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_PERP_SYMBOL = re.compile(r"^[A-Z0-9]{1,32}$")
+_PERP_MAX_UNIVERSE_ROWS = 20_000
+_PERP_MAX_MARKET_COUNT = 100_000
+_PERP_MAX_SOURCE_COUNT = 64
+
+
+def _invalid_perp_result_metrics() -> dict[str, object]:
+    return {
+        "contract_valid": False,
+        "status": "invalid",
+        "reason_codes": ["universe_result_invalid"],
+        "research_mapped": 0,
+        "actionable": 0,
+        "independent_source_count": 0,
+        "observed_path_count": 0,
+        "cache_preserved": None,
+        "market_count": 0,
+    }
+
+
+def _perp_result_metrics(result: object) -> dict[str, object]:
+    """Project a universe envelope into bounded scheduler observability fields."""
+    if not isinstance(result, dict):
+        return _invalid_perp_result_metrics()
+
+    status = result.get("status")
+    if not isinstance(status, str) or status not in _PERP_RESULT_STATUSES:
+        return _invalid_perp_result_metrics()
+
+    raw_reasons = result.get("reason_codes")
+    if (
+        not isinstance(raw_reasons, list)
+        or len(raw_reasons) > 8
+        or any(
+            not isinstance(reason, str)
+            or _PERP_REASON_CODE.fullmatch(reason) is None
+            for reason in raw_reasons
+        )
+    ):
+        return _invalid_perp_result_metrics()
+
+    research = result.get("research_universe")
+    actionable = result.get("actionable_universe")
+    for universe in (research, actionable):
+        if (
+            not isinstance(universe, dict)
+            or len(universe) > _PERP_MAX_UNIVERSE_ROWS
+            or any(
+                not isinstance(symbol, str)
+                or _PERP_SYMBOL.fullmatch(symbol) is None
+                or not isinstance(row, dict)
+                for symbol, row in universe.items()
+            )
+        ):
+            return _invalid_perp_result_metrics()
+
+    if any(
+        row.get("actionability") != "research_only"
+        for row in research.values()
+    ):
+        return _invalid_perp_result_metrics()
+    if status == "research_only" and not research:
+        return _invalid_perp_result_metrics()
+
+    from src.pipeline.perp_scanner import validated_verified_universe
+
+    if status == "verified":
+        if not actionable or validated_verified_universe(actionable) is None:
+            return _invalid_perp_result_metrics()
+    elif actionable:
+        return _invalid_perp_result_metrics()
+
+    counts = result.get("source_counts", {})
+    if not isinstance(counts, dict):
+        return _invalid_perp_result_metrics()
+
+    def _count(name: str) -> int | None:
+        value = counts.get(name)
+        if value is None:
+            return 0
+        if (
+            type(value) is not int
+            or value < 0
+            or value > _PERP_MAX_SOURCE_COUNT
+        ):
+            return None
+        return value
+
+    independent_source_count = _count("independent_source_count")
+    observed_path_count = _count("observed_path_count")
+    if independent_source_count is None or observed_path_count is None:
+        return _invalid_perp_result_metrics()
+
+    cache_preserved = result.get("cache_preserved", None)
+    if cache_preserved is not None and type(cache_preserved) is not bool:
+        return _invalid_perp_result_metrics()
+    market_count = result.get("market_count", 0)
+    if (
+        type(market_count) is not int
+        or market_count < 0
+        or market_count > _PERP_MAX_MARKET_COUNT
+    ):
+        return _invalid_perp_result_metrics()
+    if "refresh_status" in result and result["refresh_status"] != "written":
+        return _invalid_perp_result_metrics()
+
+    return {
+        "contract_valid": True,
+        "status": status,
+        "reason_codes": list(raw_reasons),
+        "research_mapped": len(research),
+        "actionable": len(actionable),
+        "independent_source_count": independent_source_count,
+        "observed_path_count": observed_path_count,
+        "cache_preserved": cache_preserved,
+        "market_count": market_count,
+    }
+
+
+def _load_verified_perp_universe() -> tuple[dict, dict[str, object]]:
+    """Load one actionable snapshot for an entire job, or fail closed."""
+    from src.onchain.perp_universe import load_result
+
+    try:
+        result = load_result()
+    except Exception as exc:
+        # Never log exception text: transport exceptions can embed full URLs.
+        logger.warning(
+            "perp_universe_runtime_load_failed",
+            error_kind=type(exc).__name__,
+        )
+        result = {
+            "status": "unavailable",
+            "reason_codes": ["universe_load_failed"],
+            "research_universe": {},
+            "actionable_universe": {},
+            "source_counts": {},
+        }
+    metrics = _perp_result_metrics(result)
+    actionable = result.get("actionable_universe") if isinstance(result, dict) else None
+    from src.pipeline.perp_scanner import validated_verified_universe
+
+    validated = validated_verified_universe(actionable)
+    verified = validated if (
+        metrics["contract_valid"]
+        and metrics["status"] == "verified"
+        and validated
+    ) else {}
+    metadata = {
+        "universe_contract_valid": metrics["contract_valid"],
+        "universe_status": metrics["status"],
+        "universe_reason_codes": metrics["reason_codes"],
+        "research_mapped": metrics["research_mapped"],
+        "actionable": len(verified),
+        "independent_source_count": metrics["independent_source_count"],
+        "observed_path_count": metrics["observed_path_count"],
+        "cache_preserved": metrics["cache_preserved"],
+    }
+    return verified, metadata
+
+
+def _blocked_perp_job(job_id: str, metadata: dict[str, object]) -> dict[str, object]:
+    outcome = {
+        "status": "blocked",
+        "job_id": job_id,
+        "block_reason": "no_verified_actionable_universe",
+        **metadata,
+    }
+    logger.warning(
+        f"{job_id}_blocked",
+        block_reason=outcome["block_reason"],
+        **metadata,
+    )
+    return outcome
+
+
 async def _run_holder_snapshots():
     """Daily: snapshot top holders of every tracked token (sentinels + perp universe)
     into holder_snapshots.db. Builds OUR OWN history so 'who held big before a run
@@ -1198,7 +1380,6 @@ async def _run_holder_snapshots():
 
     from src.config import DATA_DIR
     from src.onchain.holder_snapshot import fetch_holders_evm, save_snapshot
-    from src.onchain.perp_universe import load as perp_load
 
     _CID = {"bsc": 56, "ethereum": 1, "base": 8453, "arbitrum": 42161}
     targets: dict[tuple, None] = {}
@@ -1209,9 +1390,25 @@ async def _run_holder_snapshots():
                 targets[(s["token"].lower(), s["chain"])] = None
     except Exception:
         pass
-    for sym, rec in perp_load().items():
-        if rec["chain"] in _CID:
-            targets[(rec["address"], rec["chain"])] = None
+    sentinel_targets = len(targets)
+
+    verified_universe, universe_meta = _load_verified_perp_universe()
+    perp_target_keys = {
+        (rec["address"], rec["chain"])
+        for rec in verified_universe.values()
+        if rec["chain"] in _CID
+    }
+    if verified_universe:
+        for key in perp_target_keys:
+            targets[key] = None
+        perp_status = "ready"
+    else:
+        perp_status = "blocked"
+        logger.warning(
+            "holder_snapshots_perp_blocked",
+            block_reason="no_verified_actionable_universe",
+            **universe_meta,
+        )
 
     saved = 0
     for (tok, chain) in targets:
@@ -1220,18 +1417,35 @@ async def _run_holder_snapshots():
             if h:
                 save_snapshot(tok, chain, h)
                 saved += 1
-        except Exception as e:
-            logger.debug("snapshot_failed", token=tok, error=str(e)[:60])
-    logger.info("holder_snapshots_done", tokens=len(targets), saved=saved)
+        except Exception as exc:
+            logger.debug(
+                "snapshot_failed",
+                token=tok,
+                reason_code="holder_snapshot_failed",
+                error_kind=type(exc).__name__,
+            )
+    outcome = {
+        "status": "partial" if perp_status == "blocked" else "complete",
+        "perp_status": perp_status,
+        "tokens": len(targets),
+        "sentinel_targets": sentinel_targets,
+        "perp_targets": len(perp_target_keys),
+        "saved": saved,
+        **universe_meta,
+    }
+    logger.info("holder_snapshots_done", **outcome)
+    return outcome
 
 
 async def _run_perp_cex_scan():
     """Daily: dump-precursor scan over the perp (shortable) universe — top holders
     moving to CEX deposits. Runs on our own validated infra (holders + cex_flow),
     not a third-party feed. ~60 min for the full EVM set; quiet baseline is normal."""
-    import asyncio
-
     logger.info("scheduled_perp_cex_scan")
+    verified_universe, universe_meta = _load_verified_perp_universe()
+    if not verified_universe:
+        return _blocked_perp_job("perp_cex_scan", universe_meta)
+
     from src.onchain.operator_id import _token_market
     from src.pipeline.operator_sentinel import alerts_muted
     from src.pipeline.outcome_tracker import log_alert
@@ -1240,7 +1454,10 @@ async def _run_perp_cex_scan():
     # This is a roughly hour-long synchronous network sweep. Running it directly in
     # an ``async def`` freezes the scheduler loop, so even the independent five-minute
     # Carry export cannot start. Keep it inside the shared bounded executor instead.
-    hits = await asyncio.to_thread(scan_cex_deposits)
+    hits = await asyncio.to_thread(
+        scan_cex_deposits,
+        verified_universe=verified_universe,
+    )
 
     # RECORD EVERY EVENT, ALWAYS. This scan used to push to Telegram and store
     # nothing — so the perp short thesis could never accumulate the ~120-150
@@ -1258,9 +1475,10 @@ async def _run_perp_cex_scan():
             log_alert(h["address"], h["chain"], h["symbol"], "CEX充值前兆",
                       "short", px, liq, phase="arm")
             logged += 1
-        except Exception as e:
+        except Exception as exc:
             logger.warning("perp_event_log_failed", symbol=h.get("symbol"),
-                           error=str(e)[:60])
+                           reason_code="event_persistence_failed",
+                           error_kind=type(exc).__name__)
 
     if hits and not alerts_muted():
         from src.distribution.telegram_sender import send_alert
@@ -1274,7 +1492,14 @@ async def _run_perp_cex_scan():
         await send_alert(msg)
     elif hits:
         logger.info("perp_alerts_suppressed_unproven", n=len(hits))
-    logger.info("perp_cex_scan_done", hits=len(hits), logged=logged)
+    outcome = {
+        "status": "complete",
+        "hits": len(hits),
+        "logged": logged,
+        **universe_meta,
+    }
+    logger.info("perp_cex_scan_done", **outcome)
+    return outcome
 
 
 async def _run_yaobi_finder():
@@ -1390,6 +1615,10 @@ async def _run_perp_mobilization():
     Escalation events (phase='arm'), not entry signals: they show capability and
     preparation, never intent or timing. Recorded always; pushed only when unmuted."""
     logger.info("scheduled_perp_mobilization")
+    verified_universe, universe_meta = _load_verified_perp_universe()
+    if not verified_universe:
+        return _blocked_perp_job("perp_mobilization", universe_meta)
+
     import json
 
     from src.config import DATA_DIR
@@ -1404,8 +1633,14 @@ async def _run_perp_mobilization():
     except Exception:
         state = {"mobil": {}, "lp": {}}
 
-    events, state["mobil"] = scan_mobilization(prev_state=state.get("mobil"))
-    lp_events, state["lp"] = scan_lp_unlock(prev_state=state.get("lp"))
+    events, state["mobil"] = scan_mobilization(
+        prev_state=state.get("mobil"),
+        verified_universe=verified_universe,
+    )
+    lp_events, state["lp"] = scan_lp_unlock(
+        prev_state=state.get("lp"),
+        verified_universe=verified_universe,
+    )
     events += lp_events
     state_file.parent.mkdir(parents=True, exist_ok=True)
     state_file.write_text(json.dumps(state))
@@ -1419,9 +1654,10 @@ async def _run_perp_mobilization():
             log_alert(e["address"], e["chain"], e["symbol"], e["kind"],
                       "short", px, liq, phase="arm")
             logged += 1
-        except Exception as ex:
+        except Exception as exc:
             logger.warning("perp_mobil_log_failed", symbol=e.get("symbol"),
-                           error=str(ex)[:60])
+                           reason_code="event_persistence_failed",
+                           error_kind=type(exc).__name__)
 
     if events and not alerts_muted():
         from src.distribution.telegram_sender import send_alert
@@ -1432,17 +1668,83 @@ async def _run_perp_mobilization():
         await send_alert(msg)
     elif events:
         logger.info("perp_mobil_suppressed_unproven", n=len(events))
-    logger.info("perp_mobilization_done", events=len(events), logged=logged)
+    outcome = {
+        "status": "complete",
+        "events": len(events),
+        "logged": logged,
+        **universe_meta,
+    }
+    logger.info("perp_mobilization_done", **outcome)
+    return outcome
 
 
 async def _run_perp_universe_refresh():
-    """Weekly: rebuild the perp→contract universe (the shortable/longable coin set
-    the dump-precursor and accumulation signals scan). Slow-changing."""
+    """Daily: refresh before the 26-hour evidence TTL can expire."""
     logger.info("scheduled_perp_universe_refresh")
-    from src.onchain.perp_universe import refresh
+    from src.onchain.perp_universe import refresh_result
 
-    m = refresh()
-    logger.info("perp_universe_done", mapped=len(m))
+    try:
+        result = await asyncio.to_thread(refresh_result)
+    except Exception as exc:
+        # As with the runtime gate, exception values can contain sensitive URLs.
+        logger.warning(
+            "perp_universe_refresh_failed",
+            error_kind=type(exc).__name__,
+            status="unavailable",
+            reason_codes=["refresh_result_failed"],
+            research_mapped=0,
+            actionable=0,
+            independent_source_count=0,
+            observed_path_count=0,
+            cache_preserved=None,
+            market_count=0,
+        )
+        return {
+            "contract_valid": False,
+            "status": "unavailable",
+            "reason_codes": ["refresh_result_failed"],
+            "research_mapped": 0,
+            "actionable": 0,
+            "independent_source_count": 0,
+            "observed_path_count": 0,
+            "cache_preserved": None,
+            "market_count": 0,
+            "refresh_status": None,
+        }
+
+    metrics = _perp_result_metrics(result)
+    raw_refresh_status = (
+        result.get("refresh_status") if isinstance(result, dict) else None
+    )
+    refresh_status = (
+        "written"
+        if metrics["contract_valid"]
+        and metrics["status"] in {"research_only", "verified"}
+        and raw_refresh_status == "written"
+        else None
+    )
+    outcome = {
+        **metrics,
+        "refresh_status": refresh_status,
+    }
+    log_fields = {
+        "status": metrics["status"],
+        "refresh_status": refresh_status,
+        "reason_codes": metrics["reason_codes"],
+        "research_mapped": metrics["research_mapped"],
+        "actionable": metrics["actionable"],
+        "independent_source_count": metrics["independent_source_count"],
+        "observed_path_count": metrics["observed_path_count"],
+        "cache_preserved": metrics["cache_preserved"],
+        "market_count": metrics["market_count"],
+    }
+    if refresh_status == "written" and metrics["status"] in {
+        "research_only", "verified",
+    }:
+        logger.info("perp_universe_refresh_written", **log_fields)
+    else:
+        logger.warning("perp_universe_refresh_failed", **log_fields)
+    return outcome
 
 
 async def _run_cluster_coverage():

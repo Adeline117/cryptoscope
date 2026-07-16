@@ -55,8 +55,13 @@ def _whales(token: str, chain: str) -> tuple[list[str], bool]:
         holders = fetch_holders_evm(token, chain_id=_CID[chain], max_pages=2) or []
         if not holders:
             return [], False
-    except Exception as e:
-        logger.debug("whales_failed", token=token, error=str(e)[:60])
+    except Exception as exc:
+        logger.debug(
+            "whales_failed",
+            token=token,
+            reason_code="holder_inventory_unavailable",
+            error_kind=type(exc).__name__,
+        )
         return [], False
 
     cex = evm_exchanges()
@@ -73,7 +78,9 @@ def _whales(token: str, chain: str) -> tuple[list[str], bool]:
 
 def scan_mobilization(limit: int | None = None,
                       chains: tuple[str, ...] = ("ethereum", "bsc", "base", "arbitrum"),
-                      prev_state: dict | None = None) -> tuple[list[dict], dict]:
+                      prev_state: dict | None = None, *,
+                      verified_universe: dict | None = None,
+) -> tuple[list[dict], dict]:
     """Router approvals + gas top-ups by perp-coin whales.
 
     `prev_state` carries per-coin cursors ({coin_key: {mobil_block, native_bal}}); the
@@ -82,10 +89,21 @@ def scan_mobilization(limit: int | None = None,
     """
     from src.onchain.mobilization import approval_scan, gas_topup_scan
     from src.onchain.perp_universe import load as perp_load
+    from src.pipeline.perp_scanner import validated_verified_universe
 
     state = dict(prev_state or {})
     events: list[dict] = []
-    universe = [(s, r) for s, r in sorted(perp_load().items())
+    candidate_universe = (
+        perp_load() if verified_universe is None else verified_universe
+    )
+    source_universe = validated_verified_universe(candidate_universe)
+    if source_universe is None:
+        logger.warning(
+            "perp_mobilization_universe_invalid",
+            reason_code="verified_universe_contract_invalid",
+        )
+        return [], state
+    universe = [(s, r) for s, r in sorted(source_universe.items())
                 if r["chain"] in chains and r["chain"] in _CID]
     if limit:
         universe = universe[:limit]
@@ -126,7 +144,9 @@ def scan_mobilization(limit: int | None = None,
 
 
 def scan_lp_unlock(limit: int | None = None,
-                   prev_state: dict | None = None) -> tuple[list[dict], dict]:
+                   prev_state: dict | None = None, *,
+                   verified_universe: dict | None = None,
+) -> tuple[list[dict], dict]:
     """LP positions transitioning locked -> unlocked (the pool CAN now be pulled).
 
     Only a transition is an event. A pool that has always been unlocked is a standing
@@ -135,10 +155,23 @@ def scan_lp_unlock(limit: int | None = None,
     """
     from src.onchain.goplus_client import token_security
     from src.onchain.perp_universe import load as perp_load
+    from src.pipeline.perp_scanner import validated_verified_universe
 
     state = dict(prev_state or {})
     events: list[dict] = []
-    universe = [(s, r) for s, r in sorted(perp_load().items()) if r["chain"] in _CID]
+    candidate_universe = (
+        perp_load() if verified_universe is None else verified_universe
+    )
+    source_universe = validated_verified_universe(candidate_universe)
+    if source_universe is None:
+        logger.warning(
+            "perp_lp_universe_invalid",
+            reason_code="verified_universe_contract_invalid",
+        )
+        return [], state
+    universe = [
+        (s, r) for s, r in sorted(source_universe.items()) if r["chain"] in _CID
+    ]
     if limit:
         universe = universe[:limit]
 

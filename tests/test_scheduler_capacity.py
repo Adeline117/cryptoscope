@@ -159,26 +159,42 @@ async def test_daily_perp_cex_sweep_and_market_reads_run_off_event_loop(monkeypa
     """The hour-long daily sweep must not freeze five-minute Carry exports."""
     import threading
 
-    from src.onchain import operator_id
+    from src.onchain import operator_id, perp_universe
     from src.pipeline import outcome_tracker, perp_scanner, operator_sentinel, scheduler
 
     loop_thread = threading.get_ident()
     call_threads = []
+    token = "0x" + "22" * 20
     hit = {
-        "address": "0xtoken", "chain": "base", "symbol": "TEST",
+        "address": token, "chain": "base", "symbol": "TEST",
         "cex_outflow": 1, "pct_of_cluster": 1,
     }
 
-    def scan_cex_deposits():
+    verified = {
+        "TEST": {"address": token, "chain": "base", "actionability": "verified"},
+    }
+
+    def scan_cex_deposits(*, verified_universe):
+        assert verified_universe == verified
         call_threads.append(("scan", threading.get_ident()))
         return [hit]
 
     def token_market(address):
-        assert address == "0xtoken"
+        assert address == token
         call_threads.append(("market", threading.get_ident()))
         return {"available": False}
 
     monkeypatch.setattr(perp_scanner, "scan_cex_deposits", scan_cex_deposits)
+    monkeypatch.setattr(perp_universe, "load_result", lambda: {
+        "status": "verified",
+        "reason_codes": [],
+        "research_universe": {},
+        "actionable_universe": verified,
+        "source_counts": {
+            "independent_source_count": 1,
+            "observed_path_count": 1,
+        },
+    })
     monkeypatch.setattr(operator_id, "_token_market", token_market)
     monkeypatch.setattr(outcome_tracker, "log_alert", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(operator_sentinel, "alerts_muted", lambda: True)

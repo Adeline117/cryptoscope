@@ -17,9 +17,75 @@ third-party feed. That is the next scanner (scan_cex_deposits, forthcoming).
 
 from __future__ import annotations
 
+import re
+
 import structlog
 
 logger = structlog.get_logger()
+
+_VERIFIED_SYMBOL = re.compile(r"^[A-Z0-9]{1,32}$")
+_VERIFIED_CHAINS = frozenset({
+    "ethereum", "bsc", "solana", "base", "arbitrum", "optimism",
+    "polygon", "avalanche",
+})
+_EVM_VERIFIED_CHAINS = _VERIFIED_CHAINS - {"solana"}
+_EVM_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+_SOLANA_ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_BASE58_INDEX = {
+    char: index
+    for index, char in enumerate(
+        "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    )
+}
+_MAX_VERIFIED_UNIVERSE_ROWS = 20_000
+
+
+def _verified_address_matches_chain(chain: object, address: object) -> bool:
+    if not isinstance(address, str):
+        return False
+    if chain in _EVM_VERIFIED_CHAINS:
+        return _EVM_ADDRESS.fullmatch(address) is not None
+    if chain != "solana" or _SOLANA_ADDRESS.fullmatch(address) is None:
+        return False
+
+    # Base58 leading ``1`` characters encode zero bytes.  Counting those plus the
+    # minimal byte length of the remaining integer avoids accepting a merely
+    # well-shaped string that is not a 32-byte Solana public key.
+    value = 0
+    for char in address:
+        value = value * 58 + _BASE58_INDEX[char]
+    leading_zero_bytes = len(address) - len(address.lstrip("1"))
+    decoded_bytes = leading_zero_bytes + (value.bit_length() + 7) // 8
+    return decoded_bytes == 32
+
+
+def validated_verified_universe(value: object) -> dict | None:
+    """Return a defensive copy only when every actionable row is verified.
+
+    ``None`` means the whole envelope is malformed.  Callers must fail closed rather
+    than silently dropping a bad row and scanning the remainder: partial acceptance
+    would make a forged asset identity indistinguishable from a verified one.
+    """
+    if (
+        not isinstance(value, dict)
+        or len(value) > _MAX_VERIFIED_UNIVERSE_ROWS
+    ):
+        return None
+    verified: dict[str, dict] = {}
+    for symbol, row in value.items():
+        if (
+            not isinstance(symbol, str)
+            or _VERIFIED_SYMBOL.fullmatch(symbol) is None
+            or not isinstance(row, dict)
+            or row.get("actionability") != "verified"
+            or row.get("chain") not in _VERIFIED_CHAINS
+            or not _verified_address_matches_chain(
+                row.get("chain"), row.get("address"),
+            )
+        ):
+            return None
+        verified[symbol] = dict(row)
+    return verified
 
 
 def scan_unlocks(within_days: int = 30, limit: int | None = None) -> list[dict]:
@@ -84,7 +150,8 @@ def scan_unlocks(within_days: int = 30, limit: int | None = None) -> list[dict]:
 
 def scan_cex_deposits(chains: tuple[str, ...] = ("ethereum", "bsc", "base", "arbitrum"),
                       top_n: int = 10, min_share: float = 2.0,
-                      limit: int | None = None) -> list[dict]:
+                      limit: int | None = None, *,
+                      verified_universe: dict | None = None) -> list[dict]:
     """Dump precursor on infrastructure WE control: for each perp coin, take its top
     non-exchange non-contract holders (team/treasury/whales) and check whether they
     are moving tokens TO a CEX deposit address (cex_flow). A confirmed
@@ -100,7 +167,15 @@ def scan_cex_deposits(chains: tuple[str, ...] = ("ethereum", "bsc", "base", "arb
     from src.onchain.perp_universe import load
 
     _CHAIN_ID = {"ethereum": 1, "bsc": 56, "base": 8453, "arbitrum": 42161}
-    universe = [(s, r) for s, r in load().items() if r["chain"] in chains]
+    candidate_universe = load() if verified_universe is None else verified_universe
+    source_universe = validated_verified_universe(candidate_universe)
+    if source_universe is None:
+        logger.warning(
+            "perp_cex_scan_universe_invalid",
+            reason_code="verified_universe_contract_invalid",
+        )
+        return []
+    universe = [(s, r) for s, r in source_universe.items() if r["chain"] in chains]
     if limit:
         universe = universe[:limit]
     cex = evm_exchanges()
