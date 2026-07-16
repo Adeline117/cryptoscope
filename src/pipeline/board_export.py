@@ -370,8 +370,10 @@ def render_structure() -> dict:
         return _envelope(view(), view="structure")
     except Exception as e:
         logger.warning("render_structure_failed", error=str(e)[:120])
-        return _envelope({"events": [], "scan_error": str(e)[:120],
-                          "source": "Public structure event ledger"}, view="structure")
+        # A ledger/read-model failure is not evidence that there are zero events.
+        # Scheduled callers preserve the prior local/Blob payload when rendering
+        # raises, so its freshness clock can expire visibly instead of being reset.
+        raise
 
 
 def render_airdrop() -> dict:
@@ -381,8 +383,9 @@ def render_airdrop() -> dict:
         return _envelope(sync(), view="airdrop")
     except Exception as e:
         logger.warning("render_airdrop_failed", error=str(e)[:120])
-        return _envelope({"events": [], "scan_error": str(e)[:120],
-                          "source": "official campaign watchlist"}, view="airdrop")
+        # A watchlist/ledger failure is unknown, never a newly observed empty set.
+        # Let the scheduler's stale-if-error path retain the last good publication.
+        raise
 
 
 def render_stats(opportunities: dict | None) -> dict:
@@ -517,28 +520,12 @@ def render_perps() -> dict:
                                    "不是买卖指令。")},
                          view="perps")
     except Exception as e:
-        attempted_at = datetime.now(timezone.utc).isoformat()
-        return _envelope({"perps": [], "carry": [], "carry_paper": {},
-                          "carry_open_status": [],
-                          "carry_source_health": {
-                              "schema_version": 1, "state": "unavailable",
-                              "scan_at": attempted_at,
-                              "hl": {"state": "unavailable", "rows": 0,
-                                     "attempted_at": attempted_at,
-                                     "error_kind": "export_failed"},
-                              "okx": {"state": "not_needed", "requested": 0,
-                                      "observed": 0, "unsupported": 0,
-                                      "request_failed": 0, "request_timeout": 0,
-                                      "rate_stale": 0,
-                                      "rate_invalid": 0, "request_cap": 0},
-                              "paper": {"state": "error",
-                                        "error_kind": "export_failed"},
-                              "open_requested": 0, "open_observed": 0,
-                              "entry_deferred_by_cap": 0,
-                          },
-                          "source": "Hyperliquid + OKX (keyless)",
-                          "scan_error": str(e)[:120]},
-                         view="perps")
+        logger.warning("render_perps_failed", error=str(e)[:120])
+        # Total render/source failure cannot prove an empty perp market.  Keep the
+        # last-good payload and let its public freshness deadline expose the outage.
+        # Component-level failures above remain explicit partial-health states when
+        # the live market rows themselves were read successfully.
+        raise
 
 
 def _dex_direction(token: str, chain: str) -> dict:
