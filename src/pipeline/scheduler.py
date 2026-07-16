@@ -803,8 +803,19 @@ async def _run_opportunity_export():
         paths = await asyncio.to_thread(
             board_export.write_views, opportunities=opportunities, stats=stats)
         pushed = await asyncio.to_thread(board_export.push_to_blob, paths)
+        gmgn_health = (opportunities.get("source_health")
+                       or opportunities.get("upstream_source_health", {}).get("gmgn", {}))
+        fallback_health = opportunities.get("fallback_source_health", {})
         logger.info("opportunity_export_done",
-                    opportunities=len(opportunities.get("opportunities", [])), pushed=pushed)
+                    opportunities=len(opportunities.get("opportunities", [])), pushed=pushed,
+                    gmgn_state=gmgn_health.get("state", "unknown"),
+                    gmgn_error=gmgn_health.get("error_kind"),
+                    gmgn_chains=(
+                        f"{gmgn_health.get('successful_chains', '?')}/"
+                        f"{gmgn_health.get('requested_chains', '?')}"),
+                    fallback_state=fallback_health.get("state"),
+                    fallback_observed=fallback_health.get("observed"),
+                    fallback_failed=fallback_health.get("failed"))
     except Exception as e:
         logger.error("opportunity_export_failed", error=str(e)[:120])
 

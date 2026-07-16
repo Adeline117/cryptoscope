@@ -18,9 +18,13 @@ def test_flare_request_deadline_stays_inside_http_timeout(monkeypatch):
         def __exit__(self, *_args):
             return False
 
-        def read(self):
+        def read(self, _limit=-1):
             return json.dumps({
-                "solution": {"status": 200, "response": '{"data": {}}'},
+                "status": "ok",
+                "solution": {
+                    "status": 200,
+                    "response": '{"code": 0, "data": {}}',
+                },
             }).encode()
 
     def fake_urlopen(request, timeout):
@@ -30,7 +34,8 @@ def test_flare_request_deadline_stays_inside_http_timeout(monkeypatch):
 
     monkeypatch.setattr(gmgn.urllib.request, "urlopen", fake_urlopen)
 
-    assert gmgn._fs_get("https://gmgn.ai/example", timeout=15) == {"data": {}}
+    assert gmgn._fs_get("https://gmgn.ai/example", timeout=15) == {
+        "code": 0, "data": {}}
     assert captured["timeout"] == 15
     assert captured["payload"]["maxTimeout"] == 14_000
 

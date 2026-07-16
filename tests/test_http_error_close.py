@@ -212,3 +212,20 @@ def test_dune_query_management_402_does_not_block_cached_execution(monkeypatch):
     assert dune_client.CREDITS_EXHAUSTED is False
     assert dune_client._CREDITS_EXHAUSTED_UNTIL == 0.0
     assert error.was_closed and error.fp.closed
+
+
+def test_gmgn_closes_flaresolverr_http_error(monkeypatch):
+    from src.onchain import gmgn
+
+    error = TrackedHTTPError("http://localhost:8191/v1", code=503)
+    monkeypatch.setattr(
+        gmgn.urllib.request, "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(error),
+    )
+
+    result = gmgn._fs_get_result("https://gmgn.ai/rank", timeout=5)
+
+    assert result["state"] == "failed"
+    assert result["error_kind"] == "flaresolverr_http_error"
+    assert result["http_status"] == 503
+    assert error.was_closed and error.fp.closed

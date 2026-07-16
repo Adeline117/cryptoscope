@@ -520,7 +520,7 @@ function renderTable(laneId, rows, cols, cfg){
 }
 
 // chip / glyph helpers
-const riskChip=lv=>lv==="high"?'<span class="chip b-danger"><span class="d"></span>接盘高</span>':lv==="med"?'<span class="chip b-warn"><span class="d"></span>接盘中</span>':'<span class="chip b-good"><span class="d"></span>接盘低</span>';
+const riskChip=lv=>lv==="high"?'<span class="chip b-danger"><span class="d"></span>接盘高</span>':lv==="med"?'<span class="chip b-warn"><span class="d"></span>接盘中</span>':lv==="low"?'<span class="chip b-good"><span class="d"></span>接盘低</span>':'<span class="chip"><span class="d"></span>接盘未知</span>';
 const rugChip=lv=>lv==="avoid"?'<span class="chip b-danger">🔴雷</span>':lv==="caution"?'<span class="chip b-warn">🟠险</span>':lv==="clean"?'<span class="chip b-good">🟢净</span>':'<span class="chip">⚪?</span>';
 const mtri=o=>`<span class="mtri">${pctc(o.pc_1m)}<span class="dim">/</span>${pctc(o.pc_5m)}<span class="dim">/</span>${pctc(o.pc_1h??o.price_chg_1h)}</span>`;
 const idc=(name,sub,glyph)=>`<div class="idc"><div class="tk">${esc((name||'?').slice(0,2))}</div><div style="min-width:0"><div class="nm">${esc(name||'?')}</div><div class="sub">${esc(sub||'')}</div></div></div>`;
@@ -613,8 +613,8 @@ const LANES={
     detail:r=>`<b>${r.n_buyers}</b> 个历史盈利钱包${r.n_buyers>=2?'同窗':''}买入。<span class="so">所以👉</span> ${r.n_buyers>=2?"提高调查优先级，但未通过统一安全门、双向路由和报价时钟，不得按此买入。":"单钱包行为只作原始线索，不作方向判断。"}<br>当前动作: <b>仅观察</b> · 需转入 Launch 账本重新发现与门禁<br>买入钱包: ${(r.buyers||[]).map((w,i)=>walletName(w,i)+" ("+short(w)+")").join(" · ")}<br>${esc(r.token||"")}`,
   },
   opp:{
-    title:d=>`旧版聪明钱筛选线索——按新鲜度与接盘风险排序，<b>不属于统一机会账本，也不是入场清单</b>。`,
-    stat:d=>{const s=(d?.opportunities||[]);return[["线索",s.length,"旧版筛选"],["确认新鲜",s.filter(x=>x.confirmed_fresh).length,"<12h"],["低接盘险",s.filter(x=>x.exit_risk?.level==="low").length,"不等于安全"],["可行动",0,"未过统一门禁"]]},
+    title:d=>{const h=d?.source_health,up=d?.upstream_source_health?.gmgn,fb=d?.fallback_source_health,src=h||up||{},state=src.state||"unknown",coverage=src.requested_chains?`${src.successful_chains??"?"}/${src.requested_chains}`:"?",fallback=!h&&up,fbCoverage=fb?.requested!=null?`${fb.observed??"?"}/${fb.requested}`:fb?.observed!=null?`${fb.observed}`:null;return `旧版聪明钱筛选线索——按新鲜度与接盘风险排序，<b>不属于统一机会账本，也不是入场清单</b>。 GMGN 源: <b>${esc(state)}</b> · 链覆盖 ${esc(coverage)}${fallback?" · 已切换备用源":""}${fbCoverage?` · 备用验证 ${esc(fbCoverage)}(${esc(fb.state||"unknown")})`:""}${state==="partial"?` <span style="color:var(--warn)">部分链/行失败，空白不代表无机会。</span>`:state==="failed"?` <span class="down">GMGN 空结果未被当真。</span>`:""}${fb?.state==="partial"?` <span style="color:var(--warn)">备用验证也有缺口。</span>`:""}`},
+    stat:d=>{const s=(d?.opportunities||[]),h=d?.source_health||d?.upstream_source_health?.gmgn||{},fb=d?.fallback_source_health,coverage=h.requested_chains?`${h.successful_chains}/${h.requested_chains}`:"?",fallbackStat=fb?[["备用验证",fb.requested!=null?`${fb.observed??"?"}/${fb.requested}`:fb.observed??"?",fb.state||"unknown"]]:[];return[["线索",s.length,"旧版筛选"],["确认新鲜",s.filter(x=>x.confirmed_fresh).length,"<12h"],["低接盘险",s.filter(x=>x.exit_risk?.level==="low").length,"不等于安全"],["GMGN 链覆盖",coverage,h.state||"unknown"],...fallbackStat, ...[["可行动",0,"未过统一门禁"]]]},
     readme:"这页保留为发现与反例素材。低接盘风险只表示当前未看到部分红旗，不证明合约安全、能卖出或报价仍有效；它缺少统一账本的首次报价、双向路由和过期时钟。<b>所有非 AVOID 行也只能观察，必须由 Launch 赛道重新发现并通过完整门禁</b>。",
     rows:d=>d?.opportunities||[],
     id:r=>r.chain+r.token, flash:r=>r.smart_money,
@@ -622,7 +622,7 @@ const LANES={
       {k:"sym",label:"代币",cell:r=>idc(r.symbol,(CHAIN[r.chain]||r.chain)+" · "+ageStr(r.age_hours)),sort:r=>r.symbol||""},
       {k:"sm",label:"聪明钱",n:1,cell:r=>`<span class="hero ${r.confirmed_fresh?'up':''}">${r.smart_money??0}</span>${r.renowned?`<span class="dim num"> +${r.renowned}名</span>`:''}`,sort:r=>r.smart_money??0},
       {k:"xr",label:"接盘险",c:1,cell:r=>riskChip(r.exit_risk?.level),sort:r=>({low:0,med:1,high:2})[r.exit_risk?.level]??0},
-      {k:"sec",label:"安全",c:1,cell:r=>rugChip(r.rug?.level)+(r.manipulation?.level!=="clean"?' <span class="chip b-warn">操纵</span>':''),sort:r=>r.rug?.level==="avoid"?2:r.rug?.level==="caution"?1:0},
+      {k:"sec",label:"安全",c:1,cell:r=>rugChip(r.rug?.level)+(["moderate","severe"].includes(r.manipulation?.level)?' <span class="chip b-warn">操纵</span>':''),sort:r=>r.rug?.level==="avoid"?2:r.rug?.level==="caution"?1:0},
       {k:"mo",label:"1m/5m/1h",n:1,cell:r=>mtri(r),sort:r=>r.pc_5m??0},
       {k:"liq",label:"流动性",n:1,cell:r=>usd(r.liq),sort:r=>r.liq||0},
       {k:"mc",label:"市值",n:1,cell:r=>usd(r.mcap),sort:r=>r.mcap||0},

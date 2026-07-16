@@ -175,6 +175,41 @@ def _cielo_smart_buys(chains: str = "eth,bsc,base,solana", list_id: int = 75168,
     return out
 
 
+def _normalize_legacy_opportunity_rows(rows: list[dict], source: str) -> list[dict]:
+    """Give heterogeneous discovery fallbacks one honest, UI-safe row contract."""
+    for row in rows:
+        row["token"] = row.get("token") or row.get("address")
+        row["address"] = row.get("address") or row.get("token")
+        actors = row.get("smart_money")
+        if actors is None:
+            actors = row.get("smart_actors") or 0
+        row["smart_money"] = actors
+        row["smart_actors"] = row.get("smart_actors", actors)
+        row["renowned"] = row.get("renowned") or 0
+        if row.get("age_hours") is None and row.get("age_days") is not None:
+            row["age_hours"] = row["age_days"] * 24
+        row["age_days"] = (
+            row["age_hours"] / 24 if row.get("age_hours") is not None
+            else row.get("age_days"))
+        row["confirmed_fresh"] = bool(
+            row.get("confirmed_fresh")
+            or (row.get("age_hours") is not None and row["age_hours"] <= 12))
+        row["liq"] = row.get("liq") if row.get("liq") is not None else row.get("liquidity")
+        if not isinstance(row.get("exit_risk"), dict):
+            row["exit_risk"] = {
+                "level": "unknown", "score": None,
+                "reasons": ["备用源未提供可验证的接盘风险字段"],
+            }
+        if not isinstance(row.get("manipulation"), dict):
+            row["manipulation"] = {
+                "level": "unknown", "reasons": [],
+            }
+        if not isinstance(row.get("rug"), dict):
+            row["rug"] = {"level": "unchecked", "facts": []}
+        row["evidence_source"] = source
+    return rows
+
+
 def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
                          max_scan: int = 30) -> dict:
     """THE offense view: fresh low-float tokens that PROVEN-PROFITABLE, INDEPENDENT
@@ -192,30 +227,43 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
 
     # #1 STRONGEST PATH: GMGN's curated smart-money rank via FlareSolverr — ALL chains
     # incl Solana, with bot/sniper reverse-tells + native honeypot/tax/LP safety, one
-    # call per chain. Far better than the slow home-grown convergence. Dormant when
-    # FlareSolverr is down (returns None → fall through).
+    # call per chain. Far better than the slow home-grown convergence. Every chain's
+    # response is status-bearing so a challenge page can never publish as "zero".
+    gm_health = {"state": "failed", "error_kind": "not_attempted", "chains": []}
     try:
         from src.onchain import gmgn
-        gm = gmgn.opportunities(chains=("sol", "bsc", "base", "eth"), min_smart=2)
+        gm_result = gmgn.opportunities_result(
+            chains=("sol", "bsc", "base", "eth"), min_smart=2)
+        gm = gm_result["opportunities"]
+        gm_health = gm_result["source_health"]
     except Exception as e:
         logger.warning("gmgn_failed", error=str(e)[:100])
-        gm = None
-    if gm is not None:
-        # normalize to the card shape (add token alias + smart_actors for the UI)
-        for o in gm:
-            o["token"] = o.get("address")
-            o["smart_actors"] = o.get("smart_money")
-            o["age_days"] = (o.get("age_hours") or 0) / 24 if o.get("age_hours") else None
-            o["liq"] = o.get("liquidity")
-        return _envelope({"opportunities": gm, "scanned": len(gm), "source": "GMGN 策展聪明钱(全链)",
-                          "note": ("GMGN 策展的聪明钱正在买的新币,按聪明钱数排,全链含 Solana。"
-                                   "同时显示狙击/机器人数(反指标)和合约安全。诚实:你看到时已落后其入场,多数会归零。")},
-                         view="opportunities")
+        gm = []
+        gm_health = {"state": "failed", "error_kind": "internal_error",
+                     "detail": str(e)[:120], "chains": []}
+    if gm_health["state"] == "ok" or (gm_health["state"] == "partial" and gm):
+        _normalize_legacy_opportunity_rows(gm, "gmgn")
+        payload = {"opportunities": gm, "scanned": len(gm),
+                   "source": ("GMGN 策展聪明钱(全链)"
+                              if gm_health["state"] == "ok"
+                              else "GMGN 策展聪明钱(部分链)"),
+                   "source_health": gm_health,
+                   "note": ("GMGN 策展的聪明钱正在买的新币,按聪明钱数排,全链含 Solana。"
+                            "同时显示狙击/机器人数(反指标)和合约安全。诚实:你看到时已落后其入场,多数会归零。")}
+        if gm_health["state"] == "partial":
+            payload["scan_error"] = gm_health["error_kind"]
+        return _envelope(payload, view="opportunities")
 
     # #1 second path: Cielo curated list (if key present).
     cielo = _cielo_smart_buys()
-    if cielo is not None:
+    if cielo:
+        _normalize_legacy_opportunity_rows(cielo, "cielo")
         return _envelope({"opportunities": cielo, "scanned": None, "source": "Cielo 策展聪明钱名单",
+                          "upstream_source_health": {"gmgn": gm_health},
+                          "fallback_source_health": {
+                              "source": "cielo", "state": "ok",
+                              "observed": len(cielo), "failed": 0,
+                          },
                           "note": ("Cielo 策展的已验证聪明钱正在买入的币,按买入钱包数排。"
                                    "已带 GoPlus 避雷。诚实边界:你看到时已落后其入场,多数会归零。")},
                          view="opportunities")
@@ -223,11 +271,24 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
     try:
         fresh = _gather_young(chains, pages=2)
     except Exception as e:
-        return _envelope({"opportunities": [], "scanned": 0, "scan_error": str(e)[:120],
-                          "source": "自建雷达"}, view="opportunities")
+        logger.warning(
+            "all_opportunity_sources_failed", gmgn_error=gm_health.get("error_kind"),
+            fallback_error=str(e)[:120])
+        # Preserve the last-good local/Blob view. A newly fresh empty payload would
+        # impersonate a verified zero after every source failed.
+        raise RuntimeError("all opportunity sources failed") from e
+    if not fresh:
+        logger.warning(
+            "opportunity_fallback_unverified_empty",
+            gmgn_error=gm_health.get("error_kind"))
+        # _gather_young's legacy HTTP helpers collapse total provider failure to [].
+        # With no candidate-level proof of a successful scan, preserve last-good.
+        raise RuntimeError("opportunity fallback returned an unverified empty result")
 
     out = []
     scanned = 0
+    convergence_available = 0
+    convergence_unavailable = 0
     for cand in fresh[:max_scan]:
         tok, ch = cand.get("address"), cand["chain"]
         if not tok:
@@ -236,7 +297,12 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
         try:
             conv = convergence(tok, ch, max_check=12)
         except Exception:
+            convergence_unavailable += 1
             continue
+        if conv.get("available") is not True:
+            convergence_unavailable += 1
+            continue
+        convergence_available += 1
         actors = conv.get("skilled_entities", 0)          # behavior-deduped
         if actors < 1:                                     # no proven-profitable buyer → skip
             continue
@@ -256,12 +322,28 @@ def render_opportunities(chains=("bsc", "base", "ethereum", "arbitrum"),
             "sample_wallets": wallets,
             "rug": _rug_flag(tok, ch),          # #5 avoid-flag folded in
         })
+    if scanned == 0 or convergence_available == 0:
+        logger.warning(
+            "opportunity_convergence_unavailable", candidates=len(fresh),
+            scanned=scanned, unavailable=convergence_unavailable)
+        raise RuntimeError("opportunity convergence source unavailable")
     out.sort(key=lambda x: (-(x["smart_actors"] or 0), x["age_days"] if x["age_days"] is not None else 999))
-    return _envelope({"opportunities": out, "scanned": scanned, "source": "自建雷达(慢/稀疏)",
-                      "note": ("聪明钱=有已实现盈利历史、且相互独立(非同一钱包农场)的钱包正在买入。"
-                               "强=≥3个独立主体收敛;弱=1-2个,只是线索。已带 GoPlus 避雷。"
-                               "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")},
-                     view="opportunities")
+    _normalize_legacy_opportunity_rows(out, "self_hosted")
+    fallback_health = {
+        "source": "self_hosted_convergence",
+        "state": "partial" if convergence_unavailable else "ok",
+        "observed": convergence_available, "failed": convergence_unavailable,
+        "requested": scanned,
+    }
+    payload = {"opportunities": out, "scanned": scanned, "source": "自建雷达(慢/稀疏)",
+               "upstream_source_health": {"gmgn": gm_health},
+               "fallback_source_health": fallback_health,
+               "note": ("聪明钱=有已实现盈利历史、且相互独立(非同一钱包农场)的钱包正在买入。"
+                        "强=≥3个独立主体收敛;弱=1-2个,只是线索。已带 GoPlus 避雷。"
+                        "接 Cielo key 可换成策展聪明钱(更强)。诚实边界:你看到时已落后其入场价,多数会归零。")}
+    if fallback_health["state"] == "partial":
+        payload["scan_error"] = "fallback_convergence_partial"
+    return _envelope(payload, view="opportunities")
 
 
 def render_launch() -> dict:
