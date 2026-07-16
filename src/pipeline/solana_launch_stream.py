@@ -729,13 +729,68 @@ def claim_qualification_batch(
                      )
                      AND {available_lease}"""
         if require_reconciled_live:
-            where += (
-                " AND capture_mode='live_ws'"
-                " AND reconciliation_state='verified_live'"
-            )
+            where += """
+                AND capture_mode='live_ws'
+                AND captured_at=detected_at
+                AND source_provider IS NOT NULL
+                AND source_conflict_at IS NULL
+                AND reconciliation_state='verified_live'
+                AND reconciliation_epoch_id IS NOT NULL
+                AND reconciled_at IS NOT NULL
+                AND EXISTS (
+                  SELECT 1 FROM reconciliation_epochs AS epoch
+                   WHERE epoch.epoch_id=raw_launches.reconciliation_epoch_id
+                     AND epoch.status='sealed_clean'
+                     AND epoch.missing_live=0 AND epoch.extra_live=0
+                     AND raw_launches.slot BETWEEN epoch.from_slot AND epoch.to_slot
+                     AND raw_launches.source_provider=epoch.live_provider
+                     AND raw_launches.reconciled_at=epoch.checked_at
+                     AND EXISTS (
+                       SELECT 1 FROM raw_launch_observations AS live_observation
+                        WHERE live_observation.signature=raw_launches.signature
+                          AND live_observation.slot=raw_launches.slot
+                          AND live_observation.capture_mode='live_ws'
+                          AND live_observation.captured_at=raw_launches.captured_at
+                          AND live_observation.source_provider=epoch.live_provider
+                          AND live_observation.payload_hash=raw_launches.raw_payload_hash
+                          AND live_observation.canonical_match=1
+                     )
+                     AND EXISTS (
+                       SELECT 1 FROM raw_launch_observations AS archive_observation
+                        WHERE archive_observation.signature=raw_launches.signature
+                          AND archive_observation.slot=raw_launches.slot
+                          AND archive_observation.capture_mode='finalized_reconciliation'
+                          AND archive_observation.captured_at=epoch.checked_at
+                          AND archive_observation.source_provider=epoch.archive_provider
+                          AND archive_observation.payload_hash=raw_launches.raw_payload_hash
+                          AND archive_observation.canonical_match=1
+                     )
+                     AND EXISTS (
+                       SELECT 1 FROM hydration_observations AS live_hydration
+                        WHERE live_hydration.signature=raw_launches.signature
+                          AND live_hydration.source_provider=epoch.live_provider
+                          AND live_hydration.identity_hash=
+                              raw_launches.hydration_payload_hash
+                          AND live_hydration.creator=raw_launches.creator
+                          AND live_hydration.mint=raw_launches.mint
+                          AND live_hydration.evidence_state='complete'
+                     )
+                     AND EXISTS (
+                       SELECT 1 FROM hydration_observations AS archive_hydration
+                        WHERE archive_hydration.signature=raw_launches.signature
+                          AND archive_hydration.source_provider=epoch.archive_provider
+                          AND archive_hydration.identity_hash=
+                              raw_launches.hydration_payload_hash
+                          AND archive_hydration.creator=raw_launches.creator
+                          AND archive_hydration.mint=raw_launches.mint
+                          AND archive_hydration.evidence_state='complete'
+                     )
+                )"""
         fields = """signature,slot,event_type,creator,mint,detected_at,
                     raw_payload_hash,hydration_payload_hash,
-                    qualification_state,qualification_attempted_at"""
+                    qualification_state,qualification_attempted_at,
+                    capture_mode,captured_at,source_provider,
+                    reconciliation_state,reconciliation_epoch_id,reconciled_at"""
         params = (now.isoformat(), retry_cutoff.isoformat(), now.isoformat())
         virgin_rows = c.execute(
             f"""SELECT {fields} FROM raw_launches WHERE {where}
@@ -769,6 +824,8 @@ def claim_qualification_batch(
             "signature", "slot", "event_type", "creator", "mint", "detected_at",
             "raw_payload_hash", "hydration_payload_hash",
             "qualification_state", "qualification_attempted_at",
+            "capture_mode", "captured_at", "source_provider",
+            "reconciliation_state", "reconciliation_epoch_id", "reconciled_at",
         )
         claimed = []
         for row in chosen:
@@ -794,6 +851,22 @@ def claim_qualification_batch(
         raise
     finally:
         c.close()
+
+
+def claim_forward_protocol_batch(
+    *, now: datetime | None = None, limit: int = 20,
+    protocol_start_at: str, max_source_to_decision_seconds: float,
+    retry_after_seconds: float = QUALIFICATION_RETRY_SECONDS,
+    lease_seconds: float = QUALIFICATION_LEASE_SECONDS,
+    virgin_fraction: float = QUALIFICATION_VIRGIN_FRACTION,
+) -> list[dict]:
+    """Lease only candidates with exact immutable clean-epoch membership."""
+    return claim_qualification_batch(
+        now=now, limit=limit, protocol_start_at=protocol_start_at,
+        max_source_to_decision_seconds=max_source_to_decision_seconds,
+        retry_after_seconds=retry_after_seconds, lease_seconds=lease_seconds,
+        virgin_fraction=virgin_fraction, require_reconciled_live=True,
+    )
 
 
 def set_qualification(signature: str, state: str, *, error: str | None = None,

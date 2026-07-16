@@ -2060,10 +2060,13 @@ def test_claim_quarantines_preboundary_and_late_rows_before_limit(sol):
     }
 
 
-def test_protocol_claim_requires_live_capture_with_finalized_reconciliation(sol):
+def test_mutable_reconciliation_flags_cannot_enter_forward_protocol(sol):
+    from src.pipeline import solana_launch_reconcile as reconcile
+
     now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
     c = sol._conn()
     try:
+        reconcile._ensure_schema(c)
         for signature, mode, reconciliation in (
             ("verified", "live_ws", "verified_live"),
             ("unverified", "live_ws", "unverified"),
@@ -2088,7 +2091,7 @@ def test_protocol_claim_requires_live_capture_with_finalized_reconciliation(sol)
         max_source_to_decision_seconds=600, require_reconciled_live=True,
     )
 
-    assert [row["signature"] for row in claimed] == ["verified"]
+    assert claimed == []
 
 
 def test_qualification_lease_is_exclusive_and_crash_retries_after_cooldown(sol):

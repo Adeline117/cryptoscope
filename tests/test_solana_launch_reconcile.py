@@ -1,6 +1,6 @@
 """Finalized archive reconciliation is the source-completeness gate."""
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -132,6 +132,16 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
         "archive_observation_hash": raw_hash,
         "hydration_identity_hash": identity_hash,
     }
+    claimed = stream.claim_forward_protocol_batch(
+        now=now + timedelta(seconds=60), limit=1,
+        protocol_start_at=(now - timedelta(seconds=1)).isoformat(),
+        max_source_to_decision_seconds=600,
+    )
+    assert [row["signature"] for row in claimed] == ["sig-create"]
+    assert claimed[0]["reconciliation_epoch_id"] == got["epoch_id"]
+    assert stream.release_qualification_lease(
+        "sig-create", claimed[0]["qualification_lease_token"],
+    ) is True
 
 
 def test_archive_only_launch_is_backfill_and_permanent_epoch_breach(reconcile):
