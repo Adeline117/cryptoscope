@@ -106,6 +106,13 @@ _ACTIVE_WS_PROVIDERS: dict[tuple[str, str], tuple[str, str]] = {}
 _ACTIVE_WS_PROVIDERS_LOCK = threading.Lock()
 _PROVIDER_FINGERPRINT_RE = re.compile(r"provider:[0-9a-f]{64}\Z")
 
+
+def _bounded_error_kind(exc: BaseException) -> str:
+    kind = type(exc).__name__
+    return (kind if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", kind)
+            else "Exception")
+
+
 _COVERAGE_EPOCH_COLUMNS = {
     "id", "chain", "venue", "factory", "topic", "epoch_start_block",
     "from_block", "to_block", "checked_at", "ws_provider_id",
@@ -2381,8 +2388,10 @@ def backfill_blocks(start: int, end: int, *, spec: FactorySpec, rpc: JsonRpc) ->
         _backfill_blocks(start, end, spec=spec, rpc=rpc)
         return True
     except Exception as exc:
-        logger.warning("evm_factory_backfill_failed", chain=spec.chain,
-                       start=start, end=end, error=str(exc)[:120])
+        logger.warning(
+            "evm_factory_backfill_failed", chain=spec.chain,
+            start=start, end=end, error_kind=_bounded_error_kind(exc),
+        )
         return False
 
 
@@ -2404,11 +2413,14 @@ def retry_open_gaps(spec: FactorySpec, rpc: JsonRpc, *, limit: int = 10) -> dict
                 advanced += 1
         except Exception as exc:
             failed += 1
-            deferred = stream_health.defer_gap(gap["id"], str(exc))
+            error_kind = _bounded_error_kind(exc)
+            deferred = stream_health.defer_gap(
+                gap["id"], f"EVM gap retry failed; error_kind={error_kind}",
+            )
             logger.warning(
                 "evm_factory_gap_retry_deferred",
                 chain=spec.chain, stream=spec.stream,
-                start=start, end=end, error=str(exc)[:120],
+                start=start, end=end, error_kind=error_kind,
                 next_retry_at=(deferred or {}).get("next_retry_at"),
             )
     return {"attempted": len(gaps), "advanced": advanced,
@@ -2573,23 +2585,49 @@ def _maintenance(stop: threading.Event,
                  bindings: tuple[tuple[FactorySpec, JsonRpc], ...]) -> None:
     while not stop.wait(60):
         for spec, rpc in bindings:
-            result = retry_open_gaps(spec, rpc)
-            if result["attempted"]:
-                logger.info("evm_factory_gap_retry", chain=spec.chain, **result)
-            connection = active_ws_connection(spec)
-            if connection is None:
-                continue
-            ws_identity, generation = connection
-            coverage = audit_finalized_coverage(
-                spec, rpc, ws_provider_id=ws_identity,
-                connection_generation=generation,
-            )
-            if coverage.get("state") != "verified":
+            try:
+                disk = stream_disk_guard.GUARD.snapshot()
+                if disk.get("state") == "critical":
+                    connection = active_ws_connection(spec)
+                    generation = connection[1] if connection is not None else None
+                    _disk_blocked_coverage(
+                        spec, connection_generation=generation,
+                    )
+                    continue
+                # ``unknown`` remains fail-open: the guard owns measurement
+                # validation, while source liveness stays visible here.
+                result = retry_open_gaps(spec, rpc)
+                if result["attempted"]:
+                    logger.info("evm_factory_gap_retry", chain=spec.chain, **result)
+                connection = active_ws_connection(spec)
+                if connection is None:
+                    continue
+                ws_identity, generation = connection
+                coverage = audit_finalized_coverage(
+                    spec, rpc, ws_provider_id=ws_identity,
+                    connection_generation=generation,
+                )
+                if coverage.get("state") != "verified":
+                    logger.warning(
+                        "evm_factory_coverage_unverified", chain=spec.chain,
+                        venue=spec.venue, state=coverage.get("state"),
+                        error_kind=coverage.get("last_error_kind"),
+                        lag_blocks=coverage.get("lag_blocks"),
+                    )
+            except Exception as exc:
+                connection = active_ws_connection(spec)
+                generation = connection[1] if connection is not None else None
+                _report_coverage(
+                    spec, {
+                        "state": "blocked", "provider_independent": False,
+                        "last_error_kind": "maintenance_failed",
+                    },
+                    connection_generation=generation,
+                )
                 logger.warning(
-                    "evm_factory_coverage_unverified", chain=spec.chain,
-                    venue=spec.venue, state=coverage.get("state"),
-                    error_kind=coverage.get("last_error_kind"),
-                    lag_blocks=coverage.get("lag_blocks"),
+                    "evm_factory_maintenance_binding_failed",
+                    chain=spec.chain, venue=spec.venue,
+                    error_kind=_bounded_error_kind(exc),
                 )
 
 

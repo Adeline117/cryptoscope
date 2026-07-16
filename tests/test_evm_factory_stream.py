@@ -1153,6 +1153,29 @@ def test_backfill_limit_counts_both_endpoints(evm):
                                spec=spec, rpc=Rpc()) is False
 
 
+def test_backfill_wrapper_never_logs_rpc_exception_text(evm, monkeypatch):
+    secret = "https://tenant:key@rpc.example/private/token"
+    logged = []
+
+    class CaptureLogger:
+        def warning(self, event, **kwargs):
+            logged.append((event, kwargs))
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(f"provider failed {secret}")
+
+    monkeypatch.setattr(evm, "logger", CaptureLogger())
+    monkeypatch.setattr(evm, "_backfill_blocks", fail)
+    assert evm.backfill_blocks(
+        10, 10, spec=evm.bsc_pancake_v2_spec(), rpc=object(),
+    ) is False
+    assert secret not in repr(logged)
+    assert logged == [("evm_factory_backfill_failed", {
+        "chain": "bsc", "start": 10, "end": 10,
+        "error_kind": "RuntimeError",
+    })]
+
+
 def test_oversized_gap_checkpoints_one_verified_prefix_per_retry(evm):
     from src.pipeline import stream_health
 
@@ -1191,10 +1214,18 @@ def test_oversized_gap_checkpoints_one_verified_prefix_per_retry(evm):
     assert stream_health.snapshot()[0]["status"] == "live"
 
 
-def test_failed_gap_prefix_does_not_advance_or_claim_recovery(evm):
+def test_failed_gap_prefix_does_not_advance_or_claim_recovery(evm, monkeypatch):
     from src.pipeline import stream_health
 
     spec = evm.base_aerodrome_spec()
+    secret = "wss://tenant:key@rpc.example/private/token"
+    logged = []
+
+    class CaptureLogger:
+        def warning(self, event, **kwargs):
+            logged.append((event, kwargs))
+
+    monkeypatch.setattr(evm, "logger", CaptureLogger())
     stream_health.observe("base", spec.stream, cursor=10, expect_contiguous=True)
     stream_health.observe("base", spec.stream,
                           cursor=evm.MAX_BACKFILL_BLOCKS + 12,
@@ -1202,7 +1233,7 @@ def test_failed_gap_prefix_does_not_advance_or_claim_recovery(evm):
 
     class Rpc:
         def call(self, method, params):
-            raise RuntimeError("temporary RPC failure")
+            raise RuntimeError(f"temporary RPC failure {secret}")
 
     before = stream_health.open_gaps("base", spec.stream)
     assert evm.retry_open_gaps(spec, Rpc()) == {
@@ -1224,7 +1255,9 @@ def test_failed_gap_prefix_does_not_advance_or_claim_recovery(evm):
     assert stored[:3] == (
         before[0]["from_cursor"], before[0]["to_cursor"], 1,
     )
-    assert "temporary RPC failure" in stored[3]
+    assert stored[3] == "EVM gap retry failed; error_kind=RuntimeError"
+    assert secret not in repr((stored, logged))
+    assert logged[0][1]["error_kind"] == "RuntimeError"
 
 
 def _persist_complete(evm):
@@ -2235,3 +2268,145 @@ def test_provider_switch_requires_persisted_reaudit_and_ack_before_live(evm):
     assert row["status"] == "live" and row["coverage_verified"] is True
     new_socket.close()
     old_socket.close()
+
+
+def test_maintenance_isolates_bindings_and_never_logs_exception_text(
+        evm, monkeypatch):
+    secret = "wss://tenant:key@rpc.example/private/token"
+    specs = (evm.bsc_pancake_v2_spec(), evm.base_aerodrome_spec())
+    identity, generation = _pid("ws.example"), "b" * 32
+    evm._set_active_ws_provider(specs[0], identity, generation)
+    evm.stream_health.report_worker(
+        specs[0].chain, evm.coverage_stream(specs[0]), status="live",
+        details={"connection_generation": generation},
+    )
+    attempted = []
+    logged = []
+    coverage_db_calls = []
+
+    class OneRoundStop:
+        waits = 0
+
+        def wait(self, _seconds):
+            self.waits += 1
+            return self.waits > 1
+
+    class UnknownGuard:
+        calls = 0
+
+        def snapshot(self):
+            self.calls += 1
+            return {"state": "unknown", "error_kind": "probe_failed"}
+
+    class CaptureLogger:
+        def info(self, event, **kwargs):
+            logged.append((event, kwargs))
+
+        def warning(self, event, **kwargs):
+            logged.append((event, kwargs))
+
+    guard = UnknownGuard()
+
+    def retry(spec, _rpc):
+        attempted.append(spec.venue)
+        if spec == specs[0]:
+            raise RuntimeError(f"provider failed {secret}")
+        return {"attempted": 0, "advanced": 0, "recovered": 0, "failed": 0}
+
+    def coverage_db_forbidden(*_args, **_kwargs):
+        coverage_db_calls.append(True)
+        raise AssertionError("coverage DB touched")
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", guard)
+    monkeypatch.setattr(evm, "retry_open_gaps", retry)
+    monkeypatch.setattr(evm, "_conn", coverage_db_forbidden)
+    monkeypatch.setattr(evm, "logger", CaptureLogger())
+    evm._maintenance(
+        OneRoundStop(), ((specs[0], object()), (specs[1], object())),
+    )
+
+    assert guard.calls == 2
+    assert attempted == [specs[0].venue, specs[1].venue]
+    assert coverage_db_calls == []
+    health = next(row for row in evm.stream_health.snapshot()
+                  if row["stream"] == evm.coverage_stream(specs[0]))
+    assert health["status"] == "degraded"
+    assert health["last_error"] == "maintenance_failed"
+    assert health["details"]["last_error_kind"] == "maintenance_failed"
+    assert health["details"]["connection_generation"] == generation
+    assert secret not in repr((logged, health))
+    assert logged == [("evm_factory_maintenance_binding_failed", {
+        "chain": specs[0].chain, "venue": specs[0].venue,
+        "error_kind": "RuntimeError",
+    })]
+
+
+def test_maintenance_critical_skips_gap_coverage_and_rpc_before_generic_cas(
+        evm, monkeypatch):
+    spec = evm.bsc_pancake_v2_spec()
+    identity, generation = _pid("ws.example"), "a" * 32
+    secret = "https://tenant:key@rpc.example/private/token"
+    evm._set_active_ws_provider(spec, identity, generation)
+    evm.stream_health.report_worker(
+        spec.chain, evm.coverage_stream(spec), status="live",
+        details={"connection_generation": generation},
+    )
+    original_cas = evm.stream_health.report_worker_if_connection_generation
+    touched = {"guard": 0, "gap": 0, "coverage_db": 0,
+               "rpc": 0, "cas": 0, "direct_health": 0}
+
+    class OneRoundStop:
+        waits = 0
+
+        def wait(self, _seconds):
+            self.waits += 1
+            return self.waits > 1
+
+    class CriticalGuard:
+        def snapshot(self):
+            touched["guard"] += 1
+            return {"state": "critical", "private": secret}
+
+    class Rpc:
+        def call(self, *_args, **_kwargs):
+            touched["rpc"] += 1
+            raise AssertionError(secret)
+
+        call_with_provider = call
+        call_from_provider = call
+
+    def gap_forbidden(*_args, **_kwargs):
+        touched["gap"] += 1
+        raise AssertionError("gap DB touched")
+
+    def coverage_db_forbidden(*_args, **_kwargs):
+        touched["coverage_db"] += 1
+        raise AssertionError("coverage DB touched")
+
+    def direct_health_forbidden(*_args, **_kwargs):
+        touched["direct_health"] += 1
+        raise AssertionError("generation CAS was bypassed")
+
+    def record_cas(*args, **kwargs):
+        touched["cas"] += 1
+        assert kwargs["expected_generation"] == generation
+        return original_cas(*args, **kwargs)
+
+    monkeypatch.setattr(evm.stream_disk_guard, "GUARD", CriticalGuard())
+    monkeypatch.setattr(evm, "retry_open_gaps", gap_forbidden)
+    monkeypatch.setattr(evm, "_conn", coverage_db_forbidden)
+    monkeypatch.setattr(evm.stream_health, "report_worker", direct_health_forbidden)
+    monkeypatch.setattr(
+        evm.stream_health, "report_worker_if_connection_generation", record_cas,
+    )
+    evm._maintenance(OneRoundStop(), ((spec, Rpc()),))
+
+    assert touched == {"guard": 1, "gap": 0, "coverage_db": 0,
+                       "rpc": 0, "cas": 1, "direct_health": 0}
+    row = next(item for item in evm.stream_health.snapshot()
+               if item["stream"] == evm.coverage_stream(spec))
+    assert row["status"] == "degraded"
+    assert row["last_error"] == "disk_critical"
+    assert row["details"]["last_error_kind"] == "disk_critical"
+    assert row["details"]["connection_generation"] == generation
+    assert secret not in repr(row)
