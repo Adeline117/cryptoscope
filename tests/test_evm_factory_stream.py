@@ -1019,9 +1019,89 @@ def test_fixed_epochs_aggregate_and_prune_to_hard_retention(evm, monkeypatch):
             "SELECT epoch_start_block,from_block,to_block,segment_count "
             "FROM coverage_epochs ORDER BY epoch_start_block"
         ).fetchall()
+        persisted_start = c.execute(
+            "SELECT coverage_started_block FROM coverage_state WHERE "
+            "chain=? AND venue=? AND factory=? AND topic=?",
+            evm._coverage_key(spec),
+        ).fetchone()[0]
     finally:
         c.close()
     assert rows == [(2, 2, 3, 2), (4, 4, 4, 1)]
+    assert persisted_start == 2
+    snapshot = evm.coverage_snapshot(spec)
+    assert snapshot["state"] == "verified"
+    assert snapshot["coverage_started_block"] == 2
+
+
+def test_legacy_retention_false_claim_blocks_immediately_and_repairs_on_audit(
+        evm, monkeypatch):
+    monkeypatch.setattr(evm, "COVERAGE_EPOCH_BLOCKS", 2)
+    monkeypatch.setattr(evm, "COVERAGE_EPOCH_RETENTION", 2)
+    spec = evm.bsc_pancake_v2_spec()
+    now = datetime.now(timezone.utc)
+    for offset, head in enumerate((0, 2, 2, 4, 4)):
+        evm.audit_finalized_coverage(
+            spec, _CoverageRpc(head=head), ws_provider_id=_pid("ws.example"),
+            now=now + timedelta(seconds=offset), initial_lookback_blocks=1,
+        )
+
+    c = evm._conn()
+    try:
+        c.execute(
+            "UPDATE coverage_state SET coverage_started_block=0 WHERE "
+            "chain=? AND venue=? AND factory=? AND topic=?",
+            evm._coverage_key(spec),
+        )
+        c.commit()
+        before_epochs = c.execute(
+            "SELECT epoch_start_block,from_block,to_block FROM coverage_epochs "
+            "ORDER BY epoch_start_block"
+        ).fetchall()
+    finally:
+        c.close()
+
+    false_claim = evm.coverage_snapshot(spec)
+    assert false_claim["state"] == "blocked"
+    assert false_claim["last_error_kind"] == "retention_boundary_mismatch"
+    assert false_claim["coverage_started_block"] == 0
+
+    rpc = _CoverageRpc(head=4)
+    repaired = evm.audit_finalized_coverage(
+        spec, rpc, ws_provider_id=_pid("ws.example"),
+        now=now + timedelta(seconds=5), initial_lookback_blocks=1,
+    )
+    assert repaired["state"] == "verified"
+    assert repaired["coverage_started_block"] == 2
+    assert not any(call[1] == "eth_getLogs" for call in rpc.calls)
+    c = evm._conn()
+    try:
+        assert c.execute(
+            "SELECT coverage_started_block FROM coverage_state WHERE "
+            "chain=? AND venue=? AND factory=? AND topic=?",
+            evm._coverage_key(spec),
+        ).fetchone()[0] == 2
+        assert c.execute(
+            "SELECT epoch_start_block,from_block,to_block FROM coverage_epochs "
+            "ORDER BY epoch_start_block"
+        ).fetchall() == before_epochs
+        c.execute(
+            "DELETE FROM coverage_epochs WHERE chain=? AND venue=? "
+            "AND factory=? AND topic=?",
+            evm._coverage_key(spec),
+        )
+        c.commit()
+    finally:
+        c.close()
+
+    missing_evidence = evm.coverage_snapshot(spec)
+    assert missing_evidence["state"] == "blocked"
+    assert missing_evidence["last_error_kind"] == "retention_boundary_mismatch"
+    refused = evm.audit_finalized_coverage(
+        spec, _CoverageRpc(head=4), ws_provider_id=_pid("ws.example"),
+        now=now + timedelta(seconds=6), initial_lookback_blocks=1,
+    )
+    assert refused["state"] == "blocked"
+    assert refused["verified_through_block"] == 4
 
 
 def test_active_websocket_provider_exists_only_for_open_connection(evm):

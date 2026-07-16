@@ -76,8 +76,19 @@ def test_configured_health_includes_never_observed_streams(tmp_path, monkeypatch
 
 def _persist_verified_coverage(evm, spec, now, *, safe_at=None, duration=5):
     safe_at = safe_at or now
+    ws_provider = _pid("ws.example")
+    http_provider = _pid("audit.example")
+    epoch_start = (90 // evm.COVERAGE_EPOCH_BLOCKS) * evm.COVERAGE_EPOCH_BLOCKS
     c = evm._conn()
     try:
+        c.execute("""INSERT INTO coverage_epochs(
+            chain,venue,factory,topic,epoch_start_block,from_block,to_block,
+            checked_at,ws_provider_id,http_provider_id,provider_independent,
+            log_count,evidence_digest,segment_count,status
+        ) VALUES (?,?,?,?,?,90,100,?,?,?,1,0,?,1,'open')""",
+                  (spec.chain, spec.venue, spec.address, spec.topic, epoch_start,
+                   now.isoformat(), ws_provider, http_provider,
+                   hashlib.sha256(b"bridge-coverage-fixture").hexdigest()))
         c.execute("""INSERT INTO coverage_state(
             chain,venue,factory,topic,coverage_started_block,
             verified_through_block,verified_through_hash,safe_head_block,
@@ -88,7 +99,7 @@ def _persist_verified_coverage(evm, spec, now, *, safe_at=None, duration=5):
                   (spec.chain, spec.venue, spec.address, spec.topic,
                    100, "0x" + "ab" * 32, "0x" + "ab" * 32,
                    safe_at.isoformat(), duration, now.isoformat(),
-                   _pid("ws.example"), _pid("audit.example"), now.isoformat()))
+                   ws_provider, http_provider, now.isoformat()))
         c.commit()
     finally:
         c.close()

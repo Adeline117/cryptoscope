@@ -1494,14 +1494,17 @@ def coverage_snapshot(spec: FactorySpec) -> dict:
     c = _conn()
     try:
         row = c.execute(
-            """SELECT coverage_started_block,verified_through_block,safe_head_block,
-                      verified_through_hash,safe_head_hash,safe_head_at,
-                      audit_duration_ms,verified_at,
-                      ws_provider_id,http_provider_id,
-                      provider_independent,status,consecutive_failures,next_retry_at,
-                      last_error_kind,updated_at
-                 FROM coverage_state
-                WHERE chain=? AND venue=? AND factory=? AND topic=?""",
+            """SELECT s.coverage_started_block,s.verified_through_block,
+                      s.safe_head_block,s.verified_through_hash,s.safe_head_hash,
+                      s.safe_head_at,s.audit_duration_ms,s.verified_at,
+                      s.ws_provider_id,s.http_provider_id,s.provider_independent,
+                      s.status,s.consecutive_failures,s.next_retry_at,
+                      s.last_error_kind,s.updated_at,
+                      (SELECT MIN(e.from_block) FROM coverage_epochs AS e
+                        WHERE e.chain=s.chain AND e.venue=s.venue
+                          AND e.factory=s.factory AND e.topic=s.topic)
+                 FROM coverage_state AS s
+                WHERE s.chain=? AND s.venue=? AND s.factory=? AND s.topic=?""",
             _coverage_key(spec),
         ).fetchone()
     finally:
@@ -1526,7 +1529,8 @@ def coverage_snapshot(spec: FactorySpec) -> dict:
             "consecutive_failures": 0, "next_retry_at": None,
             "last_error_kind": "coverage_not_initialized", "updated_at": None,
         }
-    item = dict(zip(keys, row))
+    item = dict(zip(keys, row[:-1]))
+    retained_epoch_start = row[-1] if type(row[-1]) is int else None
     error_kind = item.get("last_error_kind")
     if (not isinstance(error_kind, str)
             or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", error_kind) is None):
@@ -1604,7 +1608,13 @@ def coverage_snapshot(spec: FactorySpec) -> dict:
         and head_number >= started_number - 1
         and verified_number <= head_number
     )
-    verified_shape_valid = bool(
+    retained_shape_valid = bool(
+        proof_shape_valid
+        and (verified_number < started_number
+             or (retained_epoch_start is not None
+                 and retained_epoch_start <= started_number))
+    )
+    verified_shape_without_retention = bool(
         proof_shape_valid and item.get("state") == "verified"
         and verified_number == head_number
         and verified_number >= started_number
@@ -1612,9 +1622,20 @@ def coverage_snapshot(spec: FactorySpec) -> dict:
         and item.get("verified_through_hash") == item.get("safe_head_hash")
         and safe_head_time_valid and verified_time_valid and audit_duration_valid
     )
+    verified_shape_valid = bool(
+        verified_shape_without_retention and retained_shape_valid
+    )
     if item.get("state") not in valid_states:
         item["state"] = "blocked"
         item["last_error_kind"] = "invalid_coverage_proof"
+    elif ((item.get("state") == "verified"
+           and item["provider_independent"]
+           and verified_shape_without_retention
+           and not retained_shape_valid)
+          or (item.get("state") == "catching_up"
+              and proof_shape_valid and not retained_shape_valid)):
+        item["state"] = "blocked"
+        item["last_error_kind"] = "retention_boundary_mismatch"
     elif item.get("state") == "catching_up" and not proof_shape_valid:
         item["state"] = "blocked"
         item["last_error_kind"] = "invalid_coverage_proof"
@@ -2263,18 +2284,36 @@ def audit_finalized_coverage(
                          int(segment_count) + 1, epoch_status,
                          *_coverage_key(spec), epoch_start, int(epoch_from)),
                     )
-                # One mutable row per fixed block epoch, with a hard per-spec
-                # retention cap.  Fast chains therefore cannot create one row per
-                # head forever.
-                c.execute(
-                    """DELETE FROM coverage_epochs WHERE id IN (
-                           SELECT id FROM coverage_epochs
-                            WHERE chain=? AND venue=? AND factory=? AND topic=?
-                            ORDER BY epoch_start_block DESC
-                            LIMIT -1 OFFSET ?
-                       )""",
-                    (*_coverage_key(spec), COVERAGE_EPOCH_RETENTION),
-                )
+            # Pruning and the public start boundary are one proof mutation.  This
+            # also repairs databases written by the older implementation on an
+            # audit that has no new blocks to append.
+            c.execute(
+                """DELETE FROM coverage_epochs WHERE id IN (
+                       SELECT id FROM coverage_epochs
+                        WHERE chain=? AND venue=? AND factory=? AND topic=?
+                        ORDER BY epoch_start_block DESC
+                        LIMIT -1 OFFSET ?
+                   )""",
+                (*_coverage_key(spec), COVERAGE_EPOCH_RETENTION),
+            )
+            retained = c.execute(
+                """SELECT MIN(from_block) FROM coverage_epochs
+                    WHERE chain=? AND venue=? AND factory=? AND topic=?""",
+                _coverage_key(spec),
+            ).fetchone()[0]
+            if retained is None:
+                if next_verified >= started:
+                    raise RuntimeError(
+                        "EVM verified coverage has no retained epoch evidence"
+                    )
+                effective_started = started
+            else:
+                retained = int(retained)
+                if retained > next_verified:
+                    raise RuntimeError(
+                        "EVM retained epoch begins after the coverage watermark"
+                    )
+                effective_started = max(started, retained)
             c.execute(
                 """INSERT INTO coverage_state(
                        chain,venue,factory,topic,coverage_started_block,
@@ -2298,7 +2337,7 @@ def audit_finalized_coverage(
                        provider_independent=1,status=excluded.status,
                        consecutive_failures=0,next_retry_at=NULL,
                        last_error_kind=NULL,updated_at=excluded.updated_at""",
-                (*_coverage_key(spec), int(started), next_verified,
+                (*_coverage_key(spec), int(effective_started), next_verified,
                  next_verified_hash, safe_head,
                  safe_head_hash, safe_head_at.isoformat(), audit_duration_ms, checked_at,
                  normalized_ws, http_provider, state_name, checked_at),
