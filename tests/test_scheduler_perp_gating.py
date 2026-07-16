@@ -145,6 +145,123 @@ async def test_refresh_reports_research_actionability_and_source_counts(
 
 
 @pytest.mark.asyncio
+async def test_usable_unchanged_refresh_is_honest_info_not_written_or_failed(
+    monkeypatch,
+):
+    from src.onchain import perp_universe
+    from src.pipeline import scheduler
+
+    logs = _Logs()
+    monkeypatch.setattr(scheduler, "logger", logs)
+    monkeypatch.setattr(
+        perp_universe,
+        "refresh_result",
+        lambda: _universe_result(
+            research={"BTC": {"actionability": "research_only"}},
+            reasons=["heuristic_mapping_not_actionable"],
+            refresh_status="unchanged",
+            cache_preserved=True,
+        ),
+    )
+
+    result = await scheduler._run_perp_universe_refresh()
+
+    assert result["contract_valid"] is True
+    assert result["refresh_status"] == "unchanged"
+    level, fields = logs.event("perp_universe_refresh_unchanged")
+    assert level == "info"
+    assert fields["status"] == "research_only"
+    assert fields["cache_preserved"] is True
+    assert all(
+        event not in {"perp_universe_refresh_written", "perp_universe_refresh_failed"}
+        for _level, event, _fields in logs.rows
+    )
+
+
+@pytest.mark.asyncio
+async def test_stale_unchanged_refresh_is_warning_but_not_failed(monkeypatch):
+    from src.onchain import perp_universe
+    from src.pipeline import scheduler
+
+    logs = _Logs()
+    monkeypatch.setattr(scheduler, "logger", logs)
+    monkeypatch.setattr(
+        perp_universe,
+        "refresh_result",
+        lambda: _universe_result(
+            status="stale",
+            reasons=["cache_stale"],
+            refresh_status="unchanged",
+            cache_preserved=True,
+        ),
+    )
+
+    result = await scheduler._run_perp_universe_refresh()
+
+    assert result["contract_valid"] is True
+    assert result["status"] == "stale"
+    assert result["refresh_status"] == "unchanged"
+    assert logs.event("perp_universe_refresh_unchanged")[0] == "warning"
+    assert all(
+        event not in {"perp_universe_refresh_written", "perp_universe_refresh_failed"}
+        for _level, event, _fields in logs.rows
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "cache_preserved", "refresh_status"),
+    [
+        ("blocked", True, "unchanged"),
+        ("invalid", True, "unchanged"),
+        ("unavailable", True, "unchanged"),
+        ("research_only", False, "unchanged"),
+        ("research_only", None, "unchanged"),
+        ("research_only", True, "unchanged "),
+        ("research_only", True, []),
+        ("research_only", True, {}),
+        ("research_only", True, True),
+    ],
+)
+async def test_malformed_unchanged_claim_is_contract_invalid_and_failed(
+    monkeypatch,
+    status,
+    cache_preserved,
+    refresh_status,
+):
+    from src.onchain import perp_universe
+    from src.pipeline import scheduler
+
+    logs = _Logs()
+    research = (
+        {"BTC": {"actionability": "research_only"}}
+        if status == "research_only" else {}
+    )
+    monkeypatch.setattr(scheduler, "logger", logs)
+    monkeypatch.setattr(
+        perp_universe,
+        "refresh_result",
+        lambda: _universe_result(
+            status=status,
+            research=research,
+            reasons=["cache_publish_claim_invalid"],
+            refresh_status=refresh_status,
+            cache_preserved=cache_preserved,
+        ),
+    )
+
+    result = await scheduler._run_perp_universe_refresh()
+
+    assert result["contract_valid"] is False
+    assert result["refresh_status"] is None
+    assert logs.event("perp_universe_refresh_failed")[0] == "warning"
+    assert all(
+        event != "perp_universe_refresh_unchanged"
+        for _level, event, _fields in logs.rows
+    )
+
+
+@pytest.mark.asyncio
 async def test_failed_refresh_is_not_logged_as_done(monkeypatch):
     from src.onchain import perp_universe
     from src.pipeline import scheduler

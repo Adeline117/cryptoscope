@@ -1297,8 +1297,18 @@ def _perp_result_metrics(result: object) -> dict[str, object]:
         or market_count > _PERP_MAX_MARKET_COUNT
     ):
         return _invalid_perp_result_metrics()
-    if "refresh_status" in result and result["refresh_status"] != "written":
-        return _invalid_perp_result_metrics()
+    if "refresh_status" in result:
+        raw_refresh_status = result["refresh_status"]
+        if (
+            type(raw_refresh_status) is not str
+            or raw_refresh_status not in {"written", "unchanged"}
+        ):
+            return _invalid_perp_result_metrics()
+        if raw_refresh_status == "unchanged" and (
+            status not in {"research_only", "verified", "stale"}
+            or cache_preserved is not True
+        ):
+            return _invalid_perp_result_metrics()
 
     return {
         "contract_valid": True,
@@ -1716,13 +1726,15 @@ async def _run_perp_universe_refresh():
     raw_refresh_status = (
         result.get("refresh_status") if isinstance(result, dict) else None
     )
-    refresh_status = (
-        "written"
-        if metrics["contract_valid"]
-        and metrics["status"] in {"research_only", "verified"}
-        and raw_refresh_status == "written"
-        else None
-    )
+    refresh_status = None
+    if metrics["contract_valid"]:
+        if (
+            raw_refresh_status == "written"
+            and metrics["status"] in {"research_only", "verified"}
+        ):
+            refresh_status = "written"
+        elif raw_refresh_status == "unchanged":
+            refresh_status = "unchanged"
     outcome = {
         **metrics,
         "refresh_status": refresh_status,
@@ -1742,6 +1754,13 @@ async def _run_perp_universe_refresh():
         "research_only", "verified",
     }:
         logger.info("perp_universe_refresh_written", **log_fields)
+    elif refresh_status == "unchanged":
+        log_method = (
+            logger.info
+            if metrics["status"] in {"research_only", "verified"}
+            else logger.warning
+        )
+        log_method("perp_universe_refresh_unchanged", **log_fields)
     else:
         logger.warning("perp_universe_refresh_failed", **log_fields)
     return outcome
