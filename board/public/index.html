@@ -398,6 +398,7 @@
 
 <script src="/vendor/lightweight-charts-5.2.0.js"></script>
 <script src="/protocol-join.js"></script>
+<script src="/launch-delivery.js"></script>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
@@ -531,6 +532,7 @@ function actionLevel(r,launchPayload){
   if(["A2_PAPER_READY","A3_MANUAL_PROBE"].includes(level)&&(!expiry||Date.now()>=new Date(expiry).getTime()))return "A1_WATCH";
   if(level==="A3_MANUAL_PROBE"&&(!launchProtocolUiState(launchPayload||data?.launch).open||launchReconciliationProofState(r).state!=="pass"))return "A1_WATCH";
   if(level==="A3_MANUAL_PROBE"&&launchStatsJoinState().actionBlock)return "A1_WATCH";
+  if(level==="A3_MANUAL_PROBE"&&launchDeliveryUiState(r,launchPayload||data?.launch).state!=="pass")return "A1_WATCH";
   return level;
 }
 function actionChip(r){
@@ -586,6 +588,20 @@ function launchReconciliationProofHtml(r){
     <div class="proof-cell"><span>封存时钟 UTC</span>${esc(utcClock(proof.checked_at))}</div>
     <div class="proof-cell" title="${esc(proof.evidence_hash||"")}"><span>epoch / evidence hash</span>${esc(shortHash(proof.epoch_id))}<br>${esc(shortHash(proof.evidence_hash))}</div>
   </div><div class="proof-note">这只证明该 live_ws 事件与独立归档 RPC 的 finalized epoch 集合一致；不证明代币安全、报价可成交、存在收益或允许自动交易。</div></section>`;
+}
+function launchDeliveryProofHtml(r){
+  const state=launchDeliveryUiState(r,data.launch),descriptor=state.descriptor;
+  const label=state.state==="pass"?"浏览器回读通过":state.state==="pending"?"浏览器正在回读 · A3 已降级":state.state==="fail"?"浏览器回读失败 · A3 已降级":"证明合同无效 · A3 已降级";
+  const cls=state.state==="pass"?"b-good":state.state==="pending"?"b-warn":"b-danger";
+  const shortHash=value=>typeof value==="string"&&value.length===64?`${value.slice(0,10)}…${value.slice(-8)}`:"—";
+  const safeLink=descriptor?.ok?`<a href="${esc(descriptor.publicUrl)}" target="_blank" rel="noopener noreferrer">查看不可变送达证据</a>`:"不可变证据链接未通过安全合同";
+  const reason=state.state==="pass"?"exact bytes、公开 assessment 与当前候选均已在本浏览器重新绑定":state.reason||"等待独立公开快照回读";
+  return `<section class="reconciliation-proof ${state.state==="pass"?"":"blocked"}" aria-label="不可变 Launch 送达证明" data-delivery-state="${esc(state.state)}"><div class="reconciliation-proof-head"><b>不可变送达回读</b><span class="chip ${cls}">${esc(label)}</span></div><div class="reconciliation-proof-grid">
+    <div class="proof-cell"><span>公开快照</span>${safeLink}</div>
+    <div class="proof-cell" title="${esc(descriptor?.snapshotHash||"")}"><span>snapshot SHA-256</span>${esc(shortHash(descriptor?.snapshotHash))}</div>
+    <div class="proof-cell" title="${esc(descriptor?.assessmentHash||"")}"><span>assessment SHA-256</span>${esc(shortHash(descriptor?.assessmentHash))}</div>
+    <div class="proof-cell"><span>浏览器验证状态</span>${esc(reason)}</div>
+  </div><div class="proof-note">A3 只有在当前浏览器完成 GET 200、无重定向、官方 Blob 主机、2MB 上限、exact-byte SHA-256 与 assessment 绑定后才恢复；失败或超时一律保持 A1。证明送达不证明盈利，也绝不开放自动交易。</div></section>`;
 }
 function launchLifecycleHtml(r){
   const detected=new Date(r?.detected_at||"");
@@ -721,6 +737,51 @@ let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:nu
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 let filterState={launch:"actionable"}, searchState={};
+const launchDeliveryCache=new Map();
+let launchDeliveryPaintQueued=false;
+
+function launchDeliveryDescriptor(r,launchPayload=data.launch){
+  const guard=window.CryptoScopeLaunchDelivery;
+  if(!guard||typeof guard.inspect!=="function")return{ok:false,state:"invalid",reason:"delivery_browser_guard_unavailable"};
+  try{return guard.inspect(r,launchPayload)}catch(_error){return{ok:false,state:"invalid",reason:"delivery_proof_contract_error"}}
+}
+function launchDeliveryUiState(r,launchPayload=data.launch){
+  const descriptor=launchDeliveryDescriptor(r,launchPayload);
+  if(!descriptor.ok)return{state:"invalid",reason:descriptor.reason||"delivery_proof_invalid",descriptor};
+  const cached=launchDeliveryCache.get(descriptor.key);
+  if(!cached)return{state:"pending",reason:"等待浏览器回读",descriptor};
+  const guard=window.CryptoScopeLaunchDelivery;
+  if(!guard.semanticJsonEqual(cached.subject,descriptor.subject))return{state:"fail",reason:"当前 assessment 与已验证快照不一致",descriptor};
+  return{...cached,descriptor};
+}
+function requestLaunchDeliveryPaint(){
+  if(launchDeliveryPaintQueued)return;launchDeliveryPaintQueued=true;
+  requestAnimationFrame(()=>{launchDeliveryPaintQueued=false;if(view==="launch"||view==="play")paint()});
+}
+function trimLaunchDeliveryCache(){
+  while(launchDeliveryCache.size>100){const first=launchDeliveryCache.keys().next().value;launchDeliveryCache.delete(first)}
+}
+function queueLaunchDeliveryVerifications(launchPayload){
+  const guard=window.CryptoScopeLaunchDelivery;
+  if(!guard||typeof guard.verify!=="function"||!Array.isArray(launchPayload?.events))return;
+  for(const row of launchPayload.events){
+    if(row?.action_level!=="A3_MANUAL_PROBE")continue;
+    const descriptor=launchDeliveryDescriptor(row,launchPayload);if(!descriptor.ok)continue;
+    const cached=launchDeliveryCache.get(descriptor.key);
+    if(cached&&guard.semanticJsonEqual(cached.subject,descriptor.subject))continue;
+    const attempt={state:"pending",reason:"等待浏览器回读",subject:descriptor.subject};
+    launchDeliveryCache.set(descriptor.key,attempt);trimLaunchDeliveryCache();
+    guard.verify(row,launchPayload,{timeoutMs:5_000}).then(result=>{
+      if(launchDeliveryCache.get(descriptor.key)!==attempt)return;
+      launchDeliveryCache.set(descriptor.key,{...result,state:result?.state==="pass"&&result?.ok===true?"pass":"fail",subject:descriptor.subject});
+      requestLaunchDeliveryPaint();
+    }).catch(()=>{
+      if(launchDeliveryCache.get(descriptor.key)!==attempt)return;
+      launchDeliveryCache.set(descriptor.key,{state:"fail",reason:"delivery_browser_verify_failed",subject:descriptor.subject});
+      requestLaunchDeliveryPaint();
+    });
+  }
+}
 
 function launchStatsJoinState(){
   const guard=window.CryptoScopeProtocolJoin;
@@ -849,7 +910,7 @@ const LANES={
       {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
       {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 ≤$${esc(r.invalidation_price??"—")}</small>`,sort:r=>r.max_notional_usd||0},
     ],
-    detail:r=>{const ca=r.current_assessment||{},sg=ca.security_gate||r.security_gate||{},ep=ca.execution_probe||r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r),protocol=launchProtocolUiState(data.launch),reconciliation=launchReconciliationProofState(r);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":r.action_level==="A3_MANUAL_PROBE"&&(!protocol.open||reconciliation.state!=="pass")?"原始行声称 A3，但来源 readiness、持久化协议准入或逐行独立对账未通过；浏览器已强制降为 A1。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchReconciliationProofHtml(r)}${eventEvidenceTimelineHtml(r)}${launchLifecycleHtml(r)}`},
+    detail:r=>{const ca=r.current_assessment||{},sg=ca.security_gate||r.security_gate||{},ep=ca.execution_probe||r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r),protocol=launchProtocolUiState(data.launch),reconciliation=launchReconciliationProofState(r),delivery=launchDeliveryUiState(r,data.launch);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";const deliveryProof=r.action_level==="A3_MANUAL_PROBE"||ca.delivery_readback?launchDeliveryProofHtml(r):"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":r.action_level==="A3_MANUAL_PROBE"&&(!protocol.open||reconciliation.state!=="pass")?"原始行声称 A3，但来源 readiness、持久化协议准入或逐行独立对账未通过；浏览器已强制降为 A1。":r.action_level==="A3_MANUAL_PROBE"&&delivery.state!=="pass"?"原始行声称 A3，但不可变送达证据尚未在当前浏览器回读通过；浏览器已强制降为 A1。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchReconciliationProofHtml(r)}${deliveryProof}${eventEvidenceTimelineHtml(r)}${launchLifecycleHtml(r)}`},
   },
   structure:{
     title:d=>{const e=d?.events||[],h=d?.source_health||[],bad=h.filter(x=>x.status!=="ok"),canonical=d?.canonical_listings??e.filter(x=>x.event_type==="new_listing").length,legacy=d?.legacy_inventory_deltas??e.filter(x=>x.event_type==="legacy_inventory_delta").length;return `<b style="color:var(--violet)">公开市场结构事件</b>: ${canonical} 个资产级新增已入账；另有 ${legacy} 个旧库存差分组只观察。来源本轮可达 <b>${h.filter(x=>x.status==="ok").length}/${h.length||"?"}</b>${bad.length?`；失败: ${bad.map(x=>esc(x.exchange)+"("+esc(x.error||"unknown")+")").join(" · ")}`:""}。`},
@@ -1146,7 +1207,7 @@ function launchGateSummary(r){
     &&Number.isFinite(quoteExpiryAt)&&quoteExpiryAt===expiry.ms
     &&expiry.ms-quoteAt>0&&expiry.ms-quoteAt<=60_000
     ?(now<expiry.ms?"pass":"block"):"unknown";
-  const delivery=ca.delivery_sla_state==="pass"?"pass":"unknown";
+  const delivery=ca.delivery_sla_state==="pass"&&launchDeliveryUiState(r,data.launch).state==="pass"?"pass":"unknown";
   const gates=[
     {name:"来源准入",state:protocol.open?"pass":"block"},
     {name:"独立 finalized 对账",state:reconciliation.state},
@@ -1566,6 +1627,7 @@ async function load(){
   if(op&&op.schema_version===1)data.op=op;
   if(st&&st.schema_version===1)data.stats=st;
   if(me&&me.schema_version===1)data.meta=me;
+  queueLaunchDeliveryVerifications(data.launch);
   lastPoll=Date.now(); pt=0;
   paint();
 }
@@ -1576,7 +1638,7 @@ async function loadLaunch(){
     const b="?t="+Math.floor(Date.now()/5e3);
     const response=await fetch("/data/launch.json"+b,{cache:"no-store"});
     const launch=response.ok?await response.json():null;
-    if(launch&&launch.schema_version===1){data.launch=launch;if(view==="launch"||view==="play")paint()}
+    if(launch&&launch.schema_version===1){data.launch=launch;queueLaunchDeliveryVerifications(launch);if(view==="launch"||view==="play")paint()}
   }catch(e){}finally{launchLoading=false}
 }
 $("view").innerHTML=`<div class="scroll">${'<div class="skl"></div>'.repeat(6)}</div>`;
