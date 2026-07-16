@@ -71,6 +71,13 @@ _STRUCTURE_SCHEDULE_FIELDS = {
     "okx": frozenset({"contTdSwTime", "listTime"}),
     "bybit": frozenset({"launchTime"}),
 }
+_RUNTIME_SAFETY_REASON_CODES = frozenset({
+    "storage_pressure_warn", "storage_pressure_critical",
+    "solana_streams_unhealthy", "solana_maintenance_unhealthy",
+    "evm_streams_unhealthy",
+    "hyperliquid_raw_trade_retention_shed",
+    "runtime_health_unavailable",
+})
 
 
 def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
@@ -1353,6 +1360,144 @@ def _validate_perps_view(payload: Mapping[str, Any]) -> None:
     )
 
 
+def _exact_keys(value: Mapping[str, Any], expected: set[str], *, path: str) -> None:
+    if set(value) != expected:
+        raise BoardViewContractError(f"{path} has fields outside its exact contract")
+
+
+def _runtime_count(value: Any, *, path: str) -> int | None:
+    if value is None:
+        return None
+    return _exact_nonnegative_int(value, path=path)
+
+
+def _validate_runtime_safety(value: Any, *, path: str) -> None:
+    """Validate the exact fail-closed projection used by the public meta view."""
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    _exact_keys(value, {
+        "version", "state", "blocks_actionability", "auto_execution_allowed",
+        "storage_pressure", "reason_codes", "streams",
+        "hyperliquid_raw_trade_retention",
+    }, path=path)
+    if value.get("version") != 1 or type(value.get("version")) is not int:
+        raise BoardViewContractError(f"{path}.version must be exactly 1")
+    state = value.get("state")
+    if state not in {"healthy", "degraded", "blocked", "unknown"}:
+        raise BoardViewContractError(f"{path}.state is invalid")
+    blocks = value.get("blocks_actionability")
+    if not isinstance(blocks, bool):
+        raise BoardViewContractError(f"{path}.blocks_actionability must be boolean")
+    if value.get("auto_execution_allowed") is not False:
+        raise BoardViewContractError(
+            f"{path}.auto_execution_allowed must be exactly false"
+        )
+    storage = value.get("storage_pressure")
+    if storage not in {"ok", "warn", "critical", "unknown"}:
+        raise BoardViewContractError(f"{path}.storage_pressure is invalid")
+
+    streams = value.get("streams")
+    if not isinstance(streams, Mapping):
+        raise BoardViewContractError(f"{path}.streams must be an object")
+    _exact_keys(streams, {"solana", "evm"}, path=f"{path}.streams")
+    solana = streams.get("solana")
+    if not isinstance(solana, Mapping):
+        raise BoardViewContractError(f"{path}.streams.solana must be an object")
+    _exact_keys(
+        solana, {"state", "live", "configured", "maintenance"},
+        path=f"{path}.streams.solana",
+    )
+    solana_state = solana.get("state")
+    if solana_state not in {"healthy", "blocked", "unknown"}:
+        raise BoardViewContractError(f"{path}.streams.solana.state is invalid")
+    solana_live = _runtime_count(
+        solana.get("live"), path=f"{path}.streams.solana.live",
+    )
+    solana_configured = _runtime_count(
+        solana.get("configured"), path=f"{path}.streams.solana.configured",
+    )
+    if (solana_live is not None and solana_configured is not None
+            and solana_live > solana_configured):
+        raise BoardViewContractError(f"{path}.streams.solana live exceeds configured")
+    expected_solana = (
+        "unknown"
+        if solana_live is None or solana_configured in {None, 0}
+        else "healthy" if solana_live == solana_configured else "blocked"
+    )
+    if solana_state != expected_solana:
+        raise BoardViewContractError(f"{path}.streams.solana counts contradict state")
+    maintenance = solana.get("maintenance")
+    if maintenance not in {"healthy", "blocked", "unknown"}:
+        raise BoardViewContractError(f"{path}.streams.solana.maintenance is invalid")
+
+    evm = streams.get("evm")
+    if not isinstance(evm, Mapping):
+        raise BoardViewContractError(f"{path}.streams.evm must be an object")
+    _exact_keys(evm, {"state", "live", "configured"}, path=f"{path}.streams.evm")
+    evm_state = evm.get("state")
+    if evm_state not in {"healthy", "degraded", "blocked", "unknown"}:
+        raise BoardViewContractError(f"{path}.streams.evm.state is invalid")
+    evm_live = _runtime_count(evm.get("live"), path=f"{path}.streams.evm.live")
+    evm_configured = _runtime_count(
+        evm.get("configured"), path=f"{path}.streams.evm.configured",
+    )
+    if (evm_live is not None and evm_configured is not None
+            and evm_live > evm_configured):
+        raise BoardViewContractError(f"{path}.streams.evm live exceeds configured")
+    expected_evm = (
+        "unknown"
+        if evm_live is None or evm_configured in {None, 0}
+        else "healthy" if evm_live == evm_configured
+        else "blocked" if evm_live == 0 else "degraded"
+    )
+    if evm_state != expected_evm:
+        raise BoardViewContractError(f"{path}.streams.evm counts contradict state")
+
+    retention = value.get("hyperliquid_raw_trade_retention")
+    if retention not in {"retained", "shed", "unknown"}:
+        raise BoardViewContractError(
+            f"{path}.hyperliquid_raw_trade_retention is invalid"
+        )
+    reasons = value.get("reason_codes")
+    if (not isinstance(reasons, list)
+            or any(not isinstance(reason, str) for reason in reasons)
+            or len(reasons) != len(set(reasons))
+            or any(reason not in _RUNTIME_SAFETY_REASON_CODES for reason in reasons)):
+        raise BoardViewContractError(f"{path}.reason_codes violates its allowlist")
+    unavailable = (storage == "unknown" or solana_state == "unknown"
+                   or maintenance == "unknown" or evm_state == "unknown"
+                   or retention == "unknown")
+    expected_reasons = ["runtime_health_unavailable"] if unavailable else []
+    if storage == "warn":
+        expected_reasons.append("storage_pressure_warn")
+    elif storage == "critical":
+        expected_reasons.append("storage_pressure_critical")
+    if solana_state == "blocked":
+        expected_reasons.append("solana_streams_unhealthy")
+    if maintenance == "blocked":
+        expected_reasons.append("solana_maintenance_unhealthy")
+    if evm_state in {"degraded", "blocked"}:
+        expected_reasons.append("evm_streams_unhealthy")
+    if retention == "shed":
+        expected_reasons.append("hyperliquid_raw_trade_retention_shed")
+    if reasons != expected_reasons:
+        raise BoardViewContractError(f"{path}.reason_codes contradict runtime state")
+
+    if unavailable:
+        expected_state, expected_blocks = "unknown", True
+    elif (storage == "critical" or solana_state == "blocked"
+          or maintenance == "blocked"):
+        expected_state, expected_blocks = "blocked", True
+    elif storage == "warn" or evm_state != "healthy" or retention == "shed":
+        expected_state, expected_blocks = "degraded", False
+    else:
+        expected_state, expected_blocks = "healthy", False
+    if state != expected_state or blocks is not expected_blocks:
+        raise BoardViewContractError(
+            f"{path} top-level state contradicts its projected components"
+        )
+
+
 def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
                     generated_at: datetime, path: str) -> None:
     _required_text(row.get("id"), path=f"{path}.id")
@@ -1456,6 +1601,8 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         _validate_stats_view(payload)
     if name == "perps":
         _validate_perps_view(payload)
+    if name == "meta":
+        _validate_runtime_safety(payload.get("runtime_safety"), path="meta.runtime_safety")
     if name == "structure":
         if (payload.get("product_metadata_time_semantics")
                 != "current_inventory_metadata_not_event_time_evidence"):

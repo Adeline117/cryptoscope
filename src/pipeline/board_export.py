@@ -650,6 +650,186 @@ def _envelope(body: dict, *, view: str) -> dict:
             **body}
 
 
+def _runtime_safety() -> dict:
+    """Project only bounded runtime truth needed to gate manual actionability."""
+    from collections.abc import Mapping
+
+    from src.ops import health
+    from src.pipeline import evm_factory_stream, evm_launch_bridge, stream_health
+
+    try:
+        disk_raw = health._disk_health()
+    except Exception:
+        disk_raw = None
+    storage_pressure = (
+        disk_raw.get("state")
+        if isinstance(disk_raw, Mapping)
+        and disk_raw.get("state") in {"ok", "warn", "critical", "unknown"}
+        else "unknown"
+    )
+
+    try:
+        raw_rows = stream_health.snapshot()
+        rows = raw_rows if isinstance(raw_rows, list) else None
+    except Exception:
+        rows = None
+    try:
+        raw_specs = evm_factory_stream.configured_specs()
+        specs = tuple(raw_specs)
+    except Exception:
+        specs = None
+    try:
+        raw_evm_health = evm_launch_bridge.configured_stream_health()
+        evm_health = raw_evm_health if isinstance(raw_evm_health, list) else None
+    except Exception:
+        evm_health = None
+
+    def matches(source: str, stream: str) -> list[Mapping]:
+        if rows is None:
+            return []
+        return [
+            row for row in rows
+            if isinstance(row, Mapping)
+            and row.get("source") == source and row.get("stream") == stream
+        ]
+
+    def stream_state(row: Mapping | None) -> str:
+        if row is None:
+            return "unknown"
+        status, stale, gaps = row.get("status"), row.get("stale"), row.get("open_gaps")
+        if (status not in {"live", "degraded", "disconnected", "stale"}
+                or not isinstance(stale, bool)
+                or isinstance(gaps, bool) or not isinstance(gaps, int) or gaps < 0):
+            return "unknown"
+        return "healthy" if status == "live" and not stale and gaps == 0 else "blocked"
+
+    solana_configured = 1
+    solana_rows = matches("solana", "pump_fun_launches")
+    if rows is None or len(solana_rows) != 1:
+        solana_state, solana_live = "unknown", None
+    else:
+        solana_state = stream_state(solana_rows[0])
+        solana_live = (1 if solana_state == "healthy" else 0
+                       if solana_state == "blocked" else None)
+
+    maintenance_rows = matches("solana", "pump_fun_maintenance")
+    if rows is None or len(maintenance_rows) != 1:
+        maintenance = "unknown"
+    else:
+        maintenance = stream_state(maintenance_rows[0])
+
+    evm_live: int | None
+    evm_configured: int | None
+    if specs is None or evm_health is None:
+        evm_state, evm_live = "unknown", None
+        evm_configured = len(specs) if specs is not None else None
+    else:
+        evm_configured = len(specs)
+        evm_live = 0
+        evm_unknown = evm_configured == 0
+        seen: set[tuple[str, str]] = set()
+        for spec in specs:
+            source, stream = getattr(spec, "chain", None), getattr(spec, "stream", None)
+            identity = (source, stream)
+            if (not isinstance(source, str) or not source
+                    or not isinstance(stream, str) or not stream
+                    or identity in seen):
+                evm_unknown = True
+                continue
+            seen.add(identity)
+            observed = [
+                row for row in evm_health
+                if isinstance(row, Mapping)
+                and row.get("source") == source and row.get("stream") == stream
+            ]
+            if len(observed) > 1:
+                evm_unknown = True
+                continue
+            if not observed:
+                evm_unknown = True
+                continue
+            item = observed[0]
+            coverage = item.get("coverage_verified")
+            if not isinstance(coverage, bool):
+                evm_unknown = True
+                continue
+            observed_state = stream_state(item)
+            if observed_state == "unknown":
+                evm_unknown = True
+            elif observed_state == "healthy" and coverage:
+                evm_live += 1
+        if evm_unknown:
+            evm_state, evm_live = "unknown", None
+        elif evm_live == evm_configured:
+            evm_state = "healthy"
+        elif evm_live == 0:
+            evm_state = "blocked"
+        else:
+            evm_state = "degraded"
+
+    retention_rows = matches("hyperliquid", "raw_trade_retention")
+    retention = "unknown"
+    if rows is not None and len(retention_rows) == 1:
+        row = retention_rows[0]
+        details = row.get("details")
+        retained = details.get("raw_trades_retained") if isinstance(details, Mapping) else None
+        measurement_failed = (
+            details.get("measurement_failed") if isinstance(details, Mapping) else None
+        )
+        if (row.get("stale") is False
+                and row.get("status") in {"live", "degraded"}
+                and isinstance(retained, bool) and measurement_failed is False):
+            retention = "retained" if retained else "shed"
+
+    unavailable = (storage_pressure == "unknown" or solana_state == "unknown"
+                   or maintenance == "unknown" or evm_state == "unknown"
+                   or retention == "unknown")
+    reasons = ["runtime_health_unavailable"] if unavailable else []
+    if storage_pressure == "warn":
+        reasons.append("storage_pressure_warn")
+    elif storage_pressure == "critical":
+        reasons.append("storage_pressure_critical")
+    if solana_state == "blocked":
+        reasons.append("solana_streams_unhealthy")
+    if maintenance == "blocked":
+        reasons.append("solana_maintenance_unhealthy")
+    if evm_state in {"degraded", "blocked"}:
+        reasons.append("evm_streams_unhealthy")
+    if retention == "shed":
+        reasons.append("hyperliquid_raw_trade_retention_shed")
+
+    if unavailable:
+        state, blocks = "unknown", True
+    elif (storage_pressure == "critical" or solana_state == "blocked"
+          or maintenance == "blocked"):
+        state, blocks = "blocked", True
+    elif (storage_pressure == "warn" or evm_state != "healthy"
+          or retention == "shed"):
+        state, blocks = "degraded", False
+    else:
+        state, blocks = "healthy", False
+
+    return {
+        "version": 1,
+        "state": state,
+        "blocks_actionability": blocks,
+        "auto_execution_allowed": False,
+        "storage_pressure": storage_pressure,
+        "reason_codes": reasons,
+        "streams": {
+            "solana": {
+                "state": solana_state, "live": solana_live,
+                "configured": solana_configured, "maintenance": maintenance,
+            },
+            "evm": {
+                "state": evm_state, "live": evm_live,
+                "configured": evm_configured,
+            },
+        },
+        "hyperliquid_raw_trade_retention": retention,
+    }
+
+
 def _atomic_json(path, payload: dict) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False,
@@ -704,9 +884,6 @@ def write_views(**views: dict) -> list:
             previous = {}
         manifest = dict(previous.get("view_status") or {})
         for name, payload in prepared:
-            p = EXPORT_DIR / f"{name}.json"
-            _atomic_json(p, payload)
-            paths.append(p)
             manifest[name] = {
                 key: payload.get(key) for key in (
                     "generated_at", "next_expected_at", "stale_after_at",
@@ -715,7 +892,18 @@ def write_views(**views: dict) -> list:
         meta = _envelope({
             "views": sorted(manifest), "view_status": manifest,
             "launch_protocol_join": protocol_join,
+            "runtime_safety": _runtime_safety(),
         }, view="meta")
+        cadence_min, grace_min = VIEW_FRESHNESS["meta"]
+        validate_board_view(
+            "meta", meta, cadence_min=cadence_min, grace_min=grace_min,
+        )
+        # Runtime projection and the complete next manifest are validated before
+        # replacing any prior view, preserving the batch's fail-closed boundary.
+        for name, payload in prepared:
+            p = EXPORT_DIR / f"{name}.json"
+            _atomic_json(p, payload)
+            paths.append(p)
         _atomic_json(mp, meta)
         paths.append(mp)
     return paths
