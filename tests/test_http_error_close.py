@@ -42,6 +42,38 @@ def test_archive_rpc_closes_every_rejected_fallback_response(monkeypatch):
     assert all(error.was_closed and error.fp.closed for error in errors)
 
 
+def test_archive_rpc_rotates_from_depleted_key_to_keyless_fallback(monkeypatch):
+    from src.onchain import evm_archive
+
+    calls = []
+    rejected = TrackedHTTPError("https://keyed.invalid", code=429)
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    def respond(request, timeout):
+        calls.append(request.full_url)
+        if request.full_url == "https://keyed.invalid":
+            raise rejected
+        return Response(b'{"jsonrpc":"2.0","id":1,"result":"0x2a"}')
+
+    monkeypatch.setattr(evm_archive.urllib.request, "urlopen", respond)
+    rpc = evm_archive.ArchiveRPC("ethereum")
+    rpc.rpcs = ["https://keyed.invalid", "https://keyless.example"]
+
+    assert rpc.latest_block() == 42
+    assert rejected.was_closed and rejected.fp.closed
+    assert calls == ["https://keyed.invalid", "https://keyless.example"]
+    # Success leaves the pool on the healthy provider instead of hammering the
+    # depleted key again for every balance in the same cluster.
+    assert rpc.latest_block() == 42
+    assert calls[-1] == "https://keyless.example"
+
+
 def test_moralis_closes_rejected_response_before_key_rotation(monkeypatch):
     from src.onchain import moralis_client
 

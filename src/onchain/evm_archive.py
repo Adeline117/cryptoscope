@@ -60,7 +60,15 @@ def _default_rpcs(chain: str) -> list[str]:
         return pool
     key = os.environ.get("ALCHEMY_API_KEY", "")
     defaults = {
-        "ethereum": [f"https://eth-mainnet.g.alchemy.com/v2/{key}"] if key else [],
+        # A depleted Alchemy key must not blind every current balance read. Keep
+        # the configured archive provider first, then rotate to the same two
+        # keyless Ethereum providers already used by the independently fail-closed
+        # logs path. Historical calls can still fail UNKNOWN if a fallback does not
+        # retain the requested state; current reads remain available.
+        "ethereum": (
+            ([f"https://eth-mainnet.g.alchemy.com/v2/{key}"] if key else [])
+            + ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"]
+        ),
         "base": ["https://mainnet.base.org", "https://base.publicnode.com"],
         # Free keyless BSC archive endpoints (verified to serve historical state).
         "bsc": ["https://56.rpc.thirdweb.com", "https://bsc-mainnet.public.blastapi.io"],

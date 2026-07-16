@@ -359,8 +359,18 @@ def test_evm_archive_rpc_config(monkeypatch):
 
     monkeypatch.delenv("RPC_BSC", raising=False)
     monkeypatch.delenv("ALCHEMY_API_KEY", raising=False)
-    # ethereum needs the Alchemy key for its default; without it, empty pool
-    assert ArchiveRPC("ethereum").available() is False
+    # Current balance reads retain two independent keyless fallbacks when the
+    # optional archive key is absent or depleted.
+    assert _default_rpcs("ethereum") == [
+        "https://ethereum-rpc.publicnode.com", "https://eth.drpc.org",
+    ]
+    assert ArchiveRPC("ethereum").available() is True
+
+    monkeypatch.setenv("ALCHEMY_API_KEY", "configured-key")
+    assert _default_rpcs("ethereum") == [
+        "https://eth-mainnet.g.alchemy.com/v2/configured-key",
+        "https://ethereum-rpc.publicnode.com", "https://eth.drpc.org",
+    ]
 
 
 def test_operator_finder_evm_only():
