@@ -442,7 +442,7 @@ def test_a3_cannot_cross_until_public_delivery_readback_exists(tmp_path, monkeyp
     _enable_started_protocol(monkeypatch)
     event = _a3_event()
 
-    with pytest.raises(ValueError, match="delivery_readback_verifier_unavailable"):
+    with pytest.raises(ValueError, match="delivery_readback_missing"):
         board_export.write_views(
             launch=_view(board_export, "launch", _open_launch_body([event]))
         )

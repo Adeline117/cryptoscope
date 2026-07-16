@@ -1,18 +1,153 @@
 """One fail-closed contract shared by the Launch ledger and public board."""
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import re
 from datetime import datetime, timezone
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 SUPPORTED_LAUNCH_CHAINS = frozenset({"solana", "base", "bsc", "ethereum"})
 ACTIONABLE_LAUNCH_CHAINS = frozenset({"solana"})
 MIN_PROBE_NOTIONAL_USD = 25.0
 MAX_PROBE_NOTIONAL_USD = 500.0
 MAX_POOL_LIQUIDITY_FRACTION = 0.003
-# A3 remains intentionally unreachable until one append-only public read-back
-# verifier binds a specific assessment payload to what users could actually fetch.
-DELIVERY_READBACK_VERIFIER_VERSION = None
+# A quote may reach A3 only after its A2 payload has been fetched back from a unique
+# public HTTPS snapshot linked by the board. The stable overwritten launch.json is
+# only discovery, never delivery authority. A field supplied by the quote assessor
+# is never authoritative; the proof lives in a separate append-only ledger table.
+DELIVERY_READBACK_VERIFIER_VERSION = "public_launch_readback_v1"
+DELIVERY_READBACK_PROOF_VERSION = 1
+DELIVERY_SLA_SECONDS = 15.0
+_DELIVERY_ASSESSMENT_ID = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+_DELIVERY_NONCE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def launch_delivery_subject(assessment: Mapping[str, Any]) -> dict:
+    """Return the exact pre-proof assessment projection users must have fetched.
+
+    Adding the delivery proof changes the public assessment.  Normalising only the
+    two ledger-derived delivery fields lets the A3 projection reproduce and hash the
+    exact A2 subject without creating a self-referential hash.
+    """
+    subject = dict(assessment)
+    subject.pop("delivery_readback", None)
+    subject["delivery_sla_state"] = "unverified"
+    codes = [
+        str(code) for code in subject.get("action_reason_codes", [])
+        if str(code) != "delivery_sla_unverified"
+    ]
+    codes.append("delivery_sla_unverified")
+    subject["action_reason_codes"] = codes
+    return subject
+
+
+def launch_delivery_subject_hash(assessment: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        launch_delivery_subject(assessment), ensure_ascii=False, allow_nan=False,
+        sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def launch_delivery_readback_failures(
+        row: Mapping[str, Any], assessment: Mapping[str, Any]) -> list[str]:
+    """Validate the portable portion of an append-only public-readback proof."""
+    proof = assessment.get("delivery_readback")
+    if not isinstance(proof, Mapping):
+        return ["delivery_readback_missing"]
+    failures: list[str] = []
+
+    def fail(code: str) -> None:
+        if code not in failures:
+            failures.append(code)
+
+    exact = {
+        "version": DELIVERY_READBACK_PROOF_VERSION,
+        "verifier_version": DELIVERY_READBACK_VERIFIER_VERSION,
+        "state": "pass",
+        "assessment_id": assessment.get("assessment_id"),
+        "opportunity_id": row.get("id"),
+    }
+    for field, expected in exact.items():
+        if proof.get(field) != expected or type(proof.get(field)) is not type(expected):
+            fail("delivery_readback_identity_invalid")
+    for field in (
+        "public_snapshot_sha256", "public_assessment_sha256",
+        "ledger_assessment_sha256",
+    ):
+        value = proof.get(field)
+        if (not isinstance(value, str) or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)):
+            fail("delivery_readback_hash_invalid")
+    try:
+        expected_subject_hash = launch_delivery_subject_hash(assessment)
+    except (TypeError, ValueError):
+        expected_subject_hash = None
+        fail("delivery_readback_subject_invalid")
+    if proof.get("public_assessment_sha256") != expected_subject_hash:
+        fail("delivery_readback_subject_mismatch")
+
+    public_url = proof.get("public_url")
+    parsed = urlparse(public_url) if isinstance(public_url, str) else None
+    hostname = (parsed.hostname.lower().rstrip(".")
+                if parsed is not None and parsed.hostname else "")
+    public_blob_host = (
+        hostname == "public.blob.vercel-storage.com"
+        or hostname.endswith(".public.blob.vercel-storage.com")
+    )
+    if (parsed is None or parsed.scheme != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or not public_blob_host
+            or "/launch-snapshots/v1/" not in parsed.path
+            or parsed.query or parsed.fragment):
+        fail("delivery_readback_url_invalid")
+    snapshot_path = proof.get("snapshot_path")
+    if (parsed is None or not isinstance(snapshot_path, str)
+            or snapshot_path != parsed.path.lstrip("/")):
+        fail("delivery_readback_url_invalid")
+    assessment_id = proof.get("assessment_id")
+    assessment_hash = proof.get("public_assessment_sha256")
+    snapshot_hash = proof.get("public_snapshot_sha256")
+    if (not isinstance(assessment_id, str)
+            or not _DELIVERY_ASSESSMENT_ID.fullmatch(assessment_id)
+            or not isinstance(assessment_hash, str)
+            or not isinstance(snapshot_hash, str)):
+        fail("delivery_readback_path_binding_invalid")
+    elif isinstance(snapshot_path, str):
+        prefix = (
+            f"launch-snapshots/v1/{assessment_id}-{assessment_hash[:16]}-"
+            f"{snapshot_hash[:16]}-"
+        )
+        nonce_and_suffix = (
+            snapshot_path[len(prefix):]
+            if snapshot_path.startswith(prefix) else ""
+        )
+        if (not nonce_and_suffix.endswith(".json")
+                or not _DELIVERY_NONCE.fullmatch(nonce_and_suffix[:-5])):
+            fail("delivery_readback_path_binding_invalid")
+
+    assessed_at = _aware(assessment.get("assessed_at"))
+    expires_at = _aware(assessment.get("expires_at"))
+    generated_at = _aware(proof.get("launch_generated_at"))
+    fetched_at = _aware(proof.get("fetched_at"))
+    if (assessed_at is None or expires_at is None or generated_at is None
+            or fetched_at is None or generated_at < assessed_at
+            or fetched_at < generated_at or fetched_at >= expires_at):
+        fail("delivery_readback_clock_invalid")
+    else:
+        latency_ms = (fetched_at - generated_at).total_seconds() * 1000
+        supplied_latency = proof.get("delivery_latency_ms")
+        if (isinstance(supplied_latency, bool)
+                or not isinstance(supplied_latency, (int, float))
+                or not math.isfinite(float(supplied_latency))
+                or float(supplied_latency) < 0
+                or abs(float(supplied_latency) - latency_ms) > 1.0
+                or latency_ms > DELIVERY_SLA_SECONDS * 1000):
+            fail("delivery_readback_sla_invalid")
+    return failures
 
 
 def _aware(value: Any) -> datetime | None:
@@ -270,8 +405,8 @@ def launch_manual_probe_failures(
         fail("protocol_integrity_blocked")
     if assessment.get("delivery_sla_state") != "pass":
         fail("delivery_sla_unverified")
-    if DELIVERY_READBACK_VERIFIER_VERSION is None:
-        fail("delivery_readback_verifier_unavailable")
+    for delivery_failure in launch_delivery_readback_failures(row, assessment):
+        fail(delivery_failure)
     security_gate = assessment.get("security_gate")
     if (not isinstance(security_gate, Mapping) or security_gate.get("state") != "pass"
             or security_gate.get("chain") != row.get("chain")

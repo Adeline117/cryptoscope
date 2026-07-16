@@ -221,6 +221,33 @@ def test_assessment_table_rejects_mutation(tmp_path, monkeypatch):
         c.close()
 
 
+def test_assessment_table_rejects_insert_or_replace(tmp_path, monkeypatch):
+    import sqlite3
+
+    ledger, ident = _setup(tmp_path, monkeypatch)
+    at = _protocol_time()
+    assessment_id, _ = ledger.append_execution_assessment(ident, _assessment(at))
+    c = ledger._conn()
+    try:
+        columns = [
+            row[1] for row in c.execute(
+                "PRAGMA table_info(execution_assessments)"
+            ).fetchall()
+        ]
+        values = c.execute(
+            f"SELECT {','.join(columns)} FROM execution_assessments "
+            "WHERE assessment_id=?", (assessment_id,),
+        ).fetchone()
+        placeholders = ",".join("?" for _ in columns)
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            c.execute(
+                f"INSERT OR REPLACE INTO execution_assessments({','.join(columns)}) "
+                f"VALUES ({placeholders})", values,
+            )
+    finally:
+        c.close()
+
+
 def test_assessment_rejects_bad_clocks_notional_and_fill_claims(tmp_path, monkeypatch):
     ledger, ident = _setup(tmp_path, monkeypatch)
     at = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
@@ -294,7 +321,7 @@ def test_known_untradeable_reverse_route_is_blocked(tmp_path, monkeypatch):
     assert row["effective_decision"] == "AVOID"
 
 
-def test_manual_probe_stays_a2_until_quote_and_delivery_verifiers_exist(
+def test_manual_probe_stays_a2_until_public_delivery_proof_exists(
         tmp_path, monkeypatch):
     from src.pipeline.execution_cost import route_contract
     from src.pipeline import opportunity_outcomes
@@ -313,7 +340,7 @@ def test_manual_probe_stays_a2_until_quote_and_delivery_verifiers_exist(
     assert row["auto_execution_allowed"] is False
     assert row["current_assessment"]["auto_execution_allowed"] is False
     assert "quote_not_promotable" in row["action_reason_codes"]
-    assert "delivery_readback_verifier_unavailable" in row["action_reason_codes"]
+    assert "delivery_readback_missing" in row["action_reason_codes"]
 
 
 def test_protocol_integrity_block_downgrades_current_quote_to_watch(
@@ -439,7 +466,7 @@ def test_real_ledger_quote_crosses_only_as_paper_ready_without_delivery_readback
     row = ledger.active("launch", now=at)[0]
     assert row["action_level"] == "A2_PAPER_READY"
     assert row["actionable_now"] is False
-    assert "delivery_readback_verifier_unavailable" in row["action_reason_codes"]
+    assert "delivery_readback_missing" in row["action_reason_codes"]
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path / "board")
 
     paths = board_export.write_views(

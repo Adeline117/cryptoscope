@@ -149,6 +149,10 @@ def _conn() -> sqlite3.Connection:
     c = sqlite3.connect(str(DB), timeout=10)
     c.execute("PRAGMA busy_timeout=8000")
     c.execute("PRAGMA foreign_keys=ON")
+    # SQLite's default recursive_triggers=OFF lets INSERT OR REPLACE delete an old
+    # row without firing its DELETE trigger. Keep it ON so every append-only table's
+    # no-delete contract also covers replacement writes.
+    c.execute("PRAGMA recursive_triggers=ON")
     c.execute("""CREATE TABLE IF NOT EXISTS opportunities(
         id TEXT PRIMARY KEY, lane TEXT NOT NULL, chain TEXT, token TEXT,
         symbol TEXT, detected_at TEXT NOT NULL, event_at TEXT,
@@ -301,6 +305,34 @@ def _conn() -> sqlite3.Connection:
     c.execute("""CREATE TRIGGER IF NOT EXISTS execution_assessments_no_delete
                  BEFORE DELETE ON execution_assessments BEGIN
                    SELECT RAISE(ABORT,'execution assessments are append-only');
+                 END""")
+    c.execute("""CREATE TABLE IF NOT EXISTS launch_delivery_readbacks(
+        readback_id TEXT PRIMARY KEY,
+        assessment_id TEXT NOT NULL UNIQUE,
+        opportunity_id TEXT NOT NULL,
+        verifier_version TEXT NOT NULL,
+        public_url TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        launch_generated_at TEXT NOT NULL,
+        delivery_latency_ms REAL NOT NULL CHECK(delivery_latency_ms>=0),
+        public_snapshot_sha256 TEXT NOT NULL,
+        public_assessment_sha256 TEXT NOT NULL,
+        ledger_assessment_sha256 TEXT NOT NULL,
+        public_assessment_payload TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(assessment_id) REFERENCES execution_assessments(assessment_id),
+        FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_launch_delivery_readbacks_event "
+              "ON launch_delivery_readbacks(opportunity_id,fetched_at DESC)")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS launch_delivery_readbacks_no_update
+                 BEFORE UPDATE ON launch_delivery_readbacks BEGIN
+                   SELECT RAISE(ABORT,'launch delivery readbacks are append-only');
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS launch_delivery_readbacks_no_delete
+                 BEFORE DELETE ON launch_delivery_readbacks BEGIN
+                   SELECT RAISE(ABORT,'launch delivery readbacks are append-only');
                  END""")
     c.execute("""CREATE TABLE IF NOT EXISTS outcome_price_observations(
         observation_id TEXT PRIMARY KEY,
@@ -907,6 +939,27 @@ def latest_execution_assessment(ident: str) -> dict | None:
     return _assessment_from_row(row)
 
 
+def execution_assessment_payload_hash(
+        assessment_id: str, opportunity_id: str) -> str | None:
+    """Hash the exact immutable assessor payload for delivery-proof binding."""
+    c = _conn()
+    try:
+        row = c.execute(
+            "SELECT payload FROM execution_assessments "
+            "WHERE assessment_id=? AND opportunity_id=?",
+            (assessment_id, opportunity_id),
+        ).fetchone()
+    finally:
+        c.close()
+    if row is None:
+        return None
+    try:
+        payload = json.loads(row[0])
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return _json_hash(payload)
+
+
 def _latest_assessment_map(c: sqlite3.Connection, identities: list[str]) -> dict[str, dict]:
     if not identities:
         return {}
@@ -925,12 +978,97 @@ def _latest_assessment_map(c: sqlite3.Connection, identities: list[str]) -> dict
     return latest
 
 
-def _current_assessment(item: dict) -> dict:
+def _delivery_readback_from_row(row: tuple | None) -> dict | None:
+    if row is None:
+        return None
+    keys = (
+        "readback_id", "assessment_id", "opportunity_id", "verifier_version",
+        "public_url", "fetched_at", "launch_generated_at", "delivery_latency_ms",
+        "public_snapshot_sha256", "public_assessment_sha256",
+        "ledger_assessment_sha256", "public_assessment_payload", "payload",
+        "created_at",
+    )
+    item = dict(zip(keys, row))
+    for name in ("public_assessment_payload", "payload"):
+        try:
+            item[name] = json.loads(item[name])
+        except (TypeError, json.JSONDecodeError):
+            item[name] = None
+    proof = item.get("payload")
+    public_assessment = item.get("public_assessment_payload")
+    if (not isinstance(proof, dict) or not isinstance(public_assessment, dict)
+            or set(proof) != _DELIVERY_PROOF_FIELDS):
+        return None
+    redundant = {
+        "assessment_id": "assessment_id",
+        "opportunity_id": "opportunity_id",
+        "verifier_version": "verifier_version",
+        "public_url": "public_url",
+        "fetched_at": "fetched_at",
+        "launch_generated_at": "launch_generated_at",
+        "delivery_latency_ms": "delivery_latency_ms",
+        "public_snapshot_sha256": "public_snapshot_sha256",
+        "public_assessment_sha256": "public_assessment_sha256",
+        "ledger_assessment_sha256": "ledger_assessment_sha256",
+    }
+    if any(item[column] != proof[field] for column, field in redundant.items()):
+        return None
+    try:
+        fetched_at = datetime.fromisoformat(str(item["fetched_at"]))
+        created_at = datetime.fromisoformat(str(item["created_at"]))
+    except (TypeError, ValueError):
+        return None
+    if (fetched_at.tzinfo is None or created_at.tzinfo is None
+            or created_at + timedelta(seconds=5) < fetched_at
+            or created_at > datetime.now(timezone.utc) + timedelta(seconds=5)):
+        return None
+    expected_id = hashlib.sha256(
+        f"launch-delivery:{_canonical_json(proof)}:"
+        f"{_canonical_json(public_assessment)}".encode()
+    ).hexdigest()[:32]
+    if item.get("readback_id") != expected_id:
+        return None
+    return item
+
+
+def _delivery_readback_map(c: sqlite3.Connection,
+                           assessment_ids: list[str]) -> dict[str, dict]:
+    if not assessment_ids:
+        return {}
+    placeholders = ",".join("?" for _ in assessment_ids)
+    rows = c.execute(f"""SELECT readback_id,assessment_id,opportunity_id,
+        verifier_version,public_url,fetched_at,launch_generated_at,delivery_latency_ms,
+        public_snapshot_sha256,public_assessment_sha256,ledger_assessment_sha256,
+        public_assessment_payload,payload,created_at
+      FROM launch_delivery_readbacks WHERE assessment_id IN ({placeholders})""",
+                     assessment_ids).fetchall()
+    return {
+        item["assessment_id"]: item
+        for item in (_delivery_readback_from_row(row) for row in rows)
+        if item is not None
+    }
+
+
+def _public_delivery_proof(item: dict) -> dict:
+    payload = item.get("payload")
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _current_assessment(item: dict, delivery_readback: dict | None = None) -> dict:
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     current = {**payload, **{key: value for key, value in item.items() if key != "payload"}}
-    # Old immutable assessments predate the explicit flag. Missing meant disabled;
-    # expose that fact explicitly while preserving any contradictory stored value.
-    current.setdefault("auto_execution_allowed", False)
+    # Delivery is never accepted from the assessor's immutable payload.  Only a
+    # matching row from the dedicated append-only readback table may override this
+    # fail-closed projection after all other public fields have been normalised.
+    current["auto_execution_allowed"] = False
+    current.pop("delivery_readback", None)
+    current["delivery_sla_state"] = "unverified"
+    action_codes = [
+        str(code) for code in current.get("action_reason_codes", [])
+        if str(code) != "delivery_sla_unverified"
+    ]
+    action_codes.append("delivery_sla_unverified")
+    current["action_reason_codes"] = action_codes
     if current.get("quote_expires_at") is None and current.get("expires_at") is not None:
         current["quote_expires_at"] = current["expires_at"]
     security = (dict(current["security_gate"])
@@ -969,14 +1107,276 @@ def _current_assessment(item: dict) -> dict:
         "read_only": current.get("kind") == "read_only_quote",
     })
     current["execution_probe"] = execution
+    if delivery_readback is not None:
+        proof = _public_delivery_proof(delivery_readback)
+        observed = delivery_readback.get("public_assessment_payload")
+        try:
+            from src.contract.launch_probe import (
+                launch_delivery_readback_failures, launch_delivery_subject_hash,
+            )
+
+            ledger_hash_matches = (
+                proof.get("ledger_assessment_sha256") == _json_hash(payload)
+            )
+            public_hash_matches = (
+                proof.get("public_assessment_sha256")
+                == launch_delivery_subject_hash(current)
+            )
+            observed_matches = (
+                isinstance(observed, dict)
+                and _canonical_json(observed) == _canonical_json(current)
+            )
+            promoted = {
+                **current, "delivery_sla_state": "pass",
+                "delivery_readback": proof,
+            }
+            portable_failures = launch_delivery_readback_failures(
+                {"id": current.get("opportunity_id")}, promoted,
+            )
+        except (TypeError, ValueError):
+            ledger_hash_matches = public_hash_matches = observed_matches = False
+            portable_failures = ["delivery_readback_invalid"]
+        if (ledger_hash_matches and public_hash_matches and observed_matches
+                and not portable_failures):
+            current["delivery_sla_state"] = "pass"
+            current["delivery_readback"] = proof
+            current["action_reason_codes"] = [
+                code for code in current["action_reason_codes"]
+                if code != "delivery_sla_unverified"
+            ]
     return current
 
 
+_DELIVERY_PROOF_FIELDS = frozenset({
+    "version", "verifier_version", "state", "assessment_id", "opportunity_id",
+    "public_url", "snapshot_path", "fetched_at", "launch_generated_at",
+    "delivery_latency_ms", "public_snapshot_sha256", "public_assessment_sha256",
+    "ledger_assessment_sha256",
+})
+
+
+def _append_launch_delivery_readback(
+        proof: dict, public_assessment: dict,
+        public_snapshot_body: bytes) -> tuple[str, bool]:
+    """Append one verifier-produced immutable public assessment readback.
+
+    This function deliberately re-reads the assessment ledger and reconstructs its
+    fail-closed A2 projection.  A quote assessor cannot promote itself by supplying a
+    `delivery_sla_state` or a look-alike public payload.
+    """
+    if not isinstance(proof, dict) or set(proof) != _DELIVERY_PROOF_FIELDS:
+        raise ValueError("launch delivery proof fields are invalid")
+    if not isinstance(public_assessment, dict):
+        raise ValueError("public assessment readback must be an object")
+    if (not isinstance(public_snapshot_body, bytes)
+            or not public_snapshot_body or len(public_snapshot_body) > 2_000_000):
+        raise ValueError("public launch snapshot body is invalid")
+    normalized_proof = {
+        **proof,
+        "fetched_at": _utc_iso(proof.get("fetched_at"), field="delivery.fetched_at"),
+        "launch_generated_at": _utc_iso(
+            proof.get("launch_generated_at"), field="delivery.launch_generated_at",
+        ),
+    }
+    if (normalized_proof["fetched_at"] is None
+            or normalized_proof["launch_generated_at"] is None):
+        raise ValueError("launch delivery proof clocks are required")
+    latency = normalized_proof.get("delivery_latency_ms")
+    if (isinstance(latency, bool) or not isinstance(latency, (int, float))
+            or not math.isfinite(float(latency)) or float(latency) < 0):
+        raise ValueError("launch delivery latency must be nonnegative and finite")
+    normalized_proof["delivery_latency_ms"] = float(latency)
+    ledger_now = datetime.now(timezone.utc)
+    fetched_at = datetime.fromisoformat(normalized_proof["fetched_at"])
+    if fetched_at > ledger_now + timedelta(seconds=5):
+        raise ValueError("launch delivery fetched_at is ahead of the ledger clock")
+
+    assessment_id = normalized_proof.get("assessment_id")
+    opportunity_id = normalized_proof.get("opportunity_id")
+    if not isinstance(assessment_id, str) or not assessment_id:
+        raise ValueError("launch delivery assessment_id is required")
+    if not isinstance(opportunity_id, str) or not opportunity_id:
+        raise ValueError("launch delivery opportunity_id is required")
+
+    c = _conn()
+    try:
+        stored_row = c.execute("""SELECT assessment_id,opportunity_id,kind,assessed_at,
+            security_state,security_at,security_expires_at,route_state,quote_source,
+            quote_mode,quote_at,quote_expires_at,expires_at,notional_usd,
+            entry_reference_price,invalidation_reference_price,roundtrip_back_usd,
+            cost_contract_version,cost_contract,is_real_fill,reason_code,payload,created_at
+          FROM execution_assessments WHERE assessment_id=?""", (assessment_id,)).fetchone()
+        stored = _assessment_from_row(stored_row)
+        if stored is None or stored.get("opportunity_id") != opportunity_id:
+            raise ValueError("launch delivery proof assessment identity is unknown")
+
+        expected_public = _current_assessment(stored)
+        if _canonical_json(public_assessment) != _canonical_json(expected_public):
+            raise ValueError("public assessment disagrees with immutable ledger projection")
+        if (public_assessment.get("delivery_sla_state") != "unverified"
+                or "delivery_readback" in public_assessment
+                or public_assessment.get("auto_execution_allowed") is not False):
+            raise ValueError("public assessment is not the fail-closed A2 subject")
+
+        from src.contract.launch_probe import (
+            launch_delivery_readback_failures, launch_delivery_subject_hash,
+        )
+
+        if normalized_proof.get("public_assessment_sha256") != (
+                launch_delivery_subject_hash(public_assessment)):
+            raise ValueError("launch delivery public assessment hash mismatch")
+        if normalized_proof.get("ledger_assessment_sha256") != _json_hash(
+                stored.get("payload")
+        ):
+            raise ValueError("launch delivery ledger assessment hash mismatch")
+        if normalized_proof.get("public_snapshot_sha256") != hashlib.sha256(
+                public_snapshot_body
+        ).hexdigest():
+            raise ValueError("launch delivery public snapshot hash mismatch")
+        try:
+            public_snapshot = json.loads(public_snapshot_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("launch delivery public snapshot is not JSON") from exc
+        expected_snapshot = {
+            "schema_version": 1,
+            "kind": "cryptoscope_launch_assessment_snapshot",
+            "verifier_version": normalized_proof["verifier_version"],
+            "opportunity_id": opportunity_id,
+            "assessment_id": assessment_id,
+            "launch_generated_at": normalized_proof["launch_generated_at"],
+            "public_assessment_sha256": normalized_proof["public_assessment_sha256"],
+            "ledger_assessment_sha256": normalized_proof["ledger_assessment_sha256"],
+            "auto_execution_allowed": False,
+            "assessment": public_assessment,
+        }
+        if (_canonical_json(public_snapshot) != _canonical_json(expected_snapshot)
+                or public_snapshot_body != _canonical_json(public_snapshot).encode()):
+            raise ValueError("launch delivery snapshot envelope is not exact")
+        promoted = {
+            **public_assessment,
+            "delivery_sla_state": "pass",
+            "delivery_readback": normalized_proof,
+        }
+        failures = launch_delivery_readback_failures(
+            {"id": opportunity_id}, promoted,
+        )
+        if failures:
+            raise ValueError("invalid launch delivery proof: " + ", ".join(failures))
+
+        canonical_proof = _canonical_json(normalized_proof)
+        canonical_public = _canonical_json(public_assessment)
+        readback_id = hashlib.sha256(
+            f"launch-delivery:{canonical_proof}:{canonical_public}".encode()
+        ).hexdigest()[:32]
+        existing_row = c.execute("""SELECT readback_id,assessment_id,opportunity_id,
+            verifier_version,public_url,fetched_at,launch_generated_at,delivery_latency_ms,
+            public_snapshot_sha256,public_assessment_sha256,ledger_assessment_sha256,
+            public_assessment_payload,payload,created_at
+          FROM launch_delivery_readbacks WHERE assessment_id=?""",
+                                 (assessment_id,)).fetchone()
+        existing = _delivery_readback_from_row(existing_row)
+        if existing is not None:
+            if (existing.get("payload") == normalized_proof
+                    and existing.get("public_assessment_payload") == public_assessment):
+                return existing["readback_id"], False
+            raise ValueError("conflicting launch delivery proof cannot overwrite assessment")
+
+        created_at = ledger_now.isoformat()
+        c.execute("""INSERT INTO launch_delivery_readbacks(
+            readback_id,assessment_id,opportunity_id,verifier_version,public_url,
+            fetched_at,launch_generated_at,delivery_latency_ms,public_snapshot_sha256,
+            public_assessment_sha256,ledger_assessment_sha256,
+            public_assessment_payload,payload,created_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            readback_id, assessment_id, opportunity_id,
+            normalized_proof["verifier_version"], normalized_proof["public_url"],
+            normalized_proof["fetched_at"], normalized_proof["launch_generated_at"],
+            normalized_proof["delivery_latency_ms"],
+            normalized_proof["public_snapshot_sha256"],
+            normalized_proof["public_assessment_sha256"],
+            normalized_proof["ledger_assessment_sha256"], canonical_public,
+            canonical_proof, created_at,
+        ))
+        c.commit()
+        return readback_id, True
+    finally:
+        c.close()
+
+
+def launch_delivery_readback(assessment_id: str) -> dict | None:
+    """Read one immutable proof, including its exact observed A2 assessment."""
+    c = _conn()
+    try:
+        row = c.execute("""SELECT readback_id,assessment_id,opportunity_id,
+            verifier_version,public_url,fetched_at,launch_generated_at,delivery_latency_ms,
+            public_snapshot_sha256,public_assessment_sha256,ledger_assessment_sha256,
+            public_assessment_payload,payload,created_at
+          FROM launch_delivery_readbacks WHERE assessment_id=?""",
+                        (assessment_id,)).fetchone()
+    finally:
+        c.close()
+    return _delivery_readback_from_row(row)
+
+
+def launch_delivery_readback_matches(
+        opportunity_id: str, assessment: dict) -> bool:
+    """Re-read SQL authority before any hand-crafted board payload may claim A3."""
+    if not isinstance(assessment, dict):
+        return False
+    assessment_id = assessment.get("assessment_id")
+    if not isinstance(assessment_id, str) or not assessment_id:
+        return False
+    proof_row = launch_delivery_readback(assessment_id)
+    if proof_row is None or proof_row.get("opportunity_id") != opportunity_id:
+        return False
+    proof = _public_delivery_proof(proof_row)
+    if assessment.get("delivery_readback") != proof:
+        return False
+    try:
+        from src.contract.launch_probe import (
+            launch_delivery_readback_failures, launch_delivery_subject,
+            launch_delivery_subject_hash,
+        )
+
+        observed = proof_row.get("public_assessment_payload")
+        if (not isinstance(observed, dict)
+                or _canonical_json(observed) != _canonical_json(
+                    launch_delivery_subject(assessment)
+                )
+                or proof.get("public_assessment_sha256")
+                != launch_delivery_subject_hash(assessment)
+                or launch_delivery_readback_failures(
+                    {"id": opportunity_id}, assessment,
+                )):
+            return False
+    except (TypeError, ValueError):
+        return False
+
+    c = _conn()
+    try:
+        stored = c.execute(
+            "SELECT opportunity_id,payload FROM execution_assessments "
+            "WHERE assessment_id=?", (assessment_id,),
+        ).fetchone()
+    finally:
+        c.close()
+    if stored is None or stored[0] != opportunity_id:
+        return False
+    try:
+        ledger_payload = json.loads(stored[1])
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return proof.get("ledger_assessment_sha256") == _json_hash(ledger_payload)
+
+
 def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | None,
-                   now: datetime) -> dict:
+                   now: datetime, delivery_readback: dict | None = None) -> dict:
     """Derive the public Launch action while unverified real fills stay non-actionable."""
     common = {"auto_execution_allowed": False, "actionable_now": False,
-              "current_assessment": _current_assessment(assessment) if assessment else None}
+              "current_assessment": (
+                  _current_assessment(assessment, delivery_readback)
+                  if assessment else None
+              )}
     if item.get("decision") == "AVOID":
         return {**common, "action_level": "A0_BLOCKED",
                 "action_reason_codes": ["discovery_hard_block"]}
@@ -1061,6 +1461,14 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
         latest_assessments = _latest_assessment_map(c, [row[0] for row in rows])
+        delivery_readbacks = _delivery_readback_map(
+            c,
+            [
+                assessment["assessment_id"]
+                for assessment in latest_assessments.values()
+                if assessment.get("assessment_id")
+            ],
+        )
     finally:
         c.close()
     evidence_gate = None
@@ -1160,8 +1568,14 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
         # be able to opt themselves into automatic execution.
         item["auto_execution_allowed"] = False
         if lane == "launch":
-            action = _launch_action(item, latest_assessments.get(item["id"]),
-                                    evidence_gate, now)
+            assessment = latest_assessments.get(item["id"])
+            delivery_readback = (
+                delivery_readbacks.get(assessment["assessment_id"])
+                if assessment and assessment.get("assessment_id") else None
+            )
+            action = _launch_action(
+                item, assessment, evidence_gate, now, delivery_readback,
+            )
             item.update(action)
             effective_decision = ("AVOID" if action["action_level"] == "A0_BLOCKED"
                                   else "SMALL_PROBE" if action["action_level"] == "A3_MANUAL_PROBE"

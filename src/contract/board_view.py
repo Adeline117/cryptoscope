@@ -571,6 +571,12 @@ def _validate_launch_a3(row: Mapping[str, Any], *, assessment: Any,
     )
     if failures:
         raise BoardViewContractError(f"{path} invalid A3 manual probe: {', '.join(failures)}")
+    from src.pipeline.opportunity_ledger import launch_delivery_readback_matches
+
+    if not launch_delivery_readback_matches(str(row.get("id") or ""), dict(assessment)):
+        raise BoardViewContractError(
+            f"{path} A3 delivery proof is absent from the append-only ledger"
+        )
 
 
 def _validate_nonlaunch_identity(row: Mapping[str, Any], *, generated_at: datetime,
