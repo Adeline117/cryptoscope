@@ -397,6 +397,7 @@
 </div>
 
 <script src="/vendor/lightweight-charts-5.2.0.js"></script>
+<script src="/protocol-join.js"></script>
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
@@ -529,6 +530,7 @@ function actionLevel(r,launchPayload){
   const expiry=r?.current_assessment?.expires_at||r?.expires_at;
   if(["A2_PAPER_READY","A3_MANUAL_PROBE"].includes(level)&&(!expiry||Date.now()>=new Date(expiry).getTime()))return "A1_WATCH";
   if(level==="A3_MANUAL_PROBE"&&(!launchProtocolUiState(launchPayload||data?.launch).open||launchReconciliationProofState(r).state!=="pass"))return "A1_WATCH";
+  if(level==="A3_MANUAL_PROBE"&&launchStatsJoinState().actionBlock)return "A1_WATCH";
   return level;
 }
 function actionChip(r){
@@ -715,10 +717,16 @@ function renderLaunchCoverage(d){
   </section>`;
 }
 
-let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null}, lastPoll=0;
+let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null,meta:null}, lastPoll=0;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 let filterState={launch:"actionable"}, searchState={};
+
+function launchStatsJoinState(){
+  const guard=window.CryptoScopeProtocolJoin;
+  if(!guard||typeof guard.evaluate!=="function")return{state:"guard_unavailable",edgeUsable:false,reasonCodes:["protocol_join_guard_unavailable"],actionBlock:false,actionReasonCodes:[]};
+  try{return guard.evaluate(data.launch,data.stats,data.meta)}catch(error){return{state:"guard_error",edgeUsable:false,reasonCodes:["protocol_join_guard_error"],actionBlock:false,actionReasonCodes:[]}}
+}
 
 function launchRowId(r){return String(r?.id||`${r?.chain||""}${r?.token||""}`)}
 function expandableRowById(id){
@@ -1237,11 +1245,12 @@ function renderPlay(){
   const pp=data.perp?.carry_paper||{};
   const carryHealth=data.perp?.carry_source_health||{};
   const carryEvidence=data.stats?.lanes?.carry;
-  const launchEvidence=data.stats?.lanes?.launch;
+  const launchJoin=launchStatsJoinState();
+  const launchEvidence=launchJoin.edgeUsable?data.stats?.lanes?.launch:null;
   const launchValidation=launchEvidence?.edge_validation||{};
   const launchEligible=launchValidation.eligible_n||{};
   const launchProtocolLabel=Number.isInteger(launchValidation.cohort_version)?`v${launchValidation.cohort_version}`:"当前协议";
-  const launchTarget=launchValidation.state==="awaiting_outcomes"?(launchValidation.look_n_per_arm||100):(launchValidation.next_look_n_per_arm||launchValidation.look_n_per_arm||100);
+  const launchTarget=launchEvidence?(launchValidation.state==="awaiting_outcomes"?(launchValidation.look_n_per_arm||100):(launchValidation.next_look_n_per_arm||launchValidation.look_n_per_arm||100)):null;
   const sourceHealth=data.structure?.source_health||[];
   const sourceOk=sourceHealth.filter(x=>x.status==="ok").length;
   const dep=(data.op?.operators||[]).filter(depNow);
@@ -1297,7 +1306,7 @@ function renderPlay(){
   const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
   const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:(carryValid!=null&&carryTotal!=null?Math.max(0,carryTotal-carryValid):null);
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
-    <div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 ${esc(launchProtocolLabel)} 追加式精确池 24h、连续 UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>
+    ${launchJoin.edgeUsable?`<div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 ${esc(launchProtocolLabel)} 追加式精确池 24h、连续 UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>`:`<div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">协议同步中·不可判</span></div><div class="ev">— <small class="dim">Launch 统计 edge 已隔离</small></div><div class="es">当前 Launch 实时事件继续展示；Stats 其他赛道不受影响。跨视图状态 ${esc(launchJoin.state)} · ${esc((launchJoin.reasonCodes||[]).join(" / ")||"meta 未绑定当前快照")}。</div></div>`}
     <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid??'?'}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal??'?'} · 排除 ${carryExcluded??'?'} · 旧协议 open 隔离 ${pp.n_quarantined_total??0}；模型代理为正，成本组件仍不全时也只作纸面候选；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,(carryValid??0)/20*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
   </section>`;
@@ -1456,7 +1465,10 @@ function paint(){
   $("lanetitle").innerHTML=L.title(d);
   const st=(L.stat(d)||[]).slice();
   const ls=data.stats?.lanes?.[view];
-  if(ls){
+  const launchJoin=view==="launch"?launchStatsJoinState():null;
+  if(view==="launch"&&!launchJoin.edgeUsable){
+    st.push(["前向优势","协议同步中·不可判",`Launch 实时事件保留；统计 edge 已隔离 · ${launchJoin.state}`]);
+  }else if(ls){
     if(view==="airdrop"&&ls){
       const full=ls.n_fully_verified_claims??0;
       st.push(["链上交易执行",ls.n_transaction_verified??0,"仅证明交易成功，不证明是本活动领取"]);
@@ -1543,8 +1555,8 @@ let pt=0; setInterval(()=>{pt=(pt+1)%60;$("prog").style.width=(pt/60*100)+"%"},1
 
 async function load(){
   const b="?t="+Math.floor(Date.now()/6e4);
-  const r=await Promise.allSettled(["launch","structure","airdrop","watch","perps","opportunities","operators","stats"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
-  const [la,su,ad,wt,p,o,op,st]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  const r=await Promise.allSettled(["launch","structure","airdrop","watch","perps","opportunities","operators","stats","meta"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
+  const [la,su,ad,wt,p,o,op,st,me]=r.map(x=>x.status==="fulfilled"?x.value:null);
   if(la&&la.schema_version===1)data.launch=la;
   if(su&&su.schema_version===1)data.structure=su;
   if(ad&&ad.schema_version===1)data.airdrop=ad;
@@ -1553,6 +1565,7 @@ async function load(){
   if(o&&o.schema_version===1)data.opp=o;
   if(op&&op.schema_version===1)data.op=op;
   if(st&&st.schema_version===1)data.stats=st;
+  if(me&&me.schema_version===1)data.meta=me;
   lastPoll=Date.now(); pt=0;
   paint();
 }
