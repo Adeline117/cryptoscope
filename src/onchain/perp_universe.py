@@ -19,6 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Mapping
@@ -109,6 +110,27 @@ class _ContractError(ValueError):
     def __init__(self, reason_code: str) -> None:
         super().__init__(reason_code)
         self.reason_code = reason_code
+
+
+@dataclass(frozen=True)
+class _CachePublishState:
+    """Namespace and crash-durability milestones for one cache publication."""
+
+    namespace_replaced: bool
+    directory_synced: bool
+
+
+class _CachePublishError(_ContractError):
+    """Sanitized write failure carrying only the completed publication stages."""
+
+    def __init__(self, state: _CachePublishState) -> None:
+        reason_code = (
+            "cache_durability_unknown_after_replace"
+            if state.namespace_replaced
+            else "cache_write_failed_before_replace"
+        )
+        super().__init__(reason_code)
+        self.state = state
 
 
 def _utc_now() -> datetime:
@@ -877,31 +899,79 @@ def _contains_forbidden_cache_key(value: object) -> bool:
     return False
 
 
-def _atomic_write_cache(envelope: Mapping[str, object]) -> None:
+def _atomic_write_cache(envelope: Mapping[str, object]) -> _CachePublishState:
     if _contains_forbidden_cache_key(envelope):
         raise _ContractError("cache_contains_raw_response")
     encoded = _canonical_bytes(envelope) + b"\n"
     if len(encoded) > _MAX_CACHE_BYTES:
         raise _ContractError("cache_size_invalid")
     temporary: str | None = None
+    raw_descriptor: int | None = None
+    state = _CachePublishState(
+        namespace_replaced=False,
+        directory_synced=False,
+    )
     try:
         _CACHE.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(
+        raw_descriptor, temporary = tempfile.mkstemp(
             prefix=f".{_CACHE.name}.",
             suffix=".tmp",
             dir=_CACHE.parent,
         )
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(encoded)
+        # Until fdopen returns successfully the raw descriptor is still ours.  Keep
+        # that ownership explicit so a constructor failure cannot leak an FD.
+        handle = os.fdopen(raw_descriptor, "wb")
+        raw_descriptor = None
+        with handle:
+            if handle.write(encoded) != len(encoded):
+                raise OSError("short cache write")
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, _CACHE)
+        state = _CachePublishState(
+            namespace_replaced=True,
+            directory_synced=False,
+        )
         directory_fd = os.open(str(_CACHE.parent), os.O_RDONLY)
         try:
             os.fsync(directory_fd)
-        finally:
+        except Exception:
+            # Preserve the directory-fsync failure as the durability verdict.  A
+            # secondary close failure must neither mask it nor claim the rename is
+            # durable.
+            try:
+                os.close(directory_fd)
+            except Exception:
+                pass
+            raise
+        state = _CachePublishState(
+            namespace_replaced=True,
+            directory_synced=True,
+        )
+        try:
             os.close(directory_fd)
+        except Exception as exc:
+            # The parent-directory fsync is the commit point.  A later close error
+            # is a cleanup warning, not evidence that the acknowledged rename lost
+            # durability.  Never include exception text: it can contain paths.
+            try:
+                logger.warning(
+                    "perp_universe_cache_directory_close_failed",
+                    reason_code="cache_directory_close_failed_after_sync",
+                    error_kind=type(exc).__name__,
+                )
+            except Exception:
+                pass
+        return state
     except Exception as exc:
+        # A failed fdopen never transferred ownership.  Close the raw descriptor
+        # before unlinking its directory entry; cleanup failures are secondary and
+        # must never replace the staged publication verdict.
+        try:
+            if raw_descriptor is not None:
+                os.close(raw_descriptor)
+        except Exception:
+            pass
         try:
             if temporary is not None:
                 os.unlink(temporary)
@@ -911,14 +981,20 @@ def _atomic_write_cache(envelope: Mapping[str, object]) -> None:
             pass
         if isinstance(exc, _ContractError):
             raise
-        raise _ContractError("cache_write_failed") from None
+        raise _CachePublishError(state) from None
 
 
-def _failure(status: str, reason_code: str) -> dict[str, object]:
-    try:
-        cache_preserved = _CACHE.exists()
-    except OSError:
-        cache_preserved = False
+def _failure(
+    status: str,
+    reason_code: str,
+    *,
+    cache_preserved: bool | None = None,
+) -> dict[str, object]:
+    if cache_preserved is None:
+        try:
+            cache_preserved = _CACHE.exists()
+        except OSError:
+            cache_preserved = False
     return {
         "schema_version": CACHE_SCHEMA_VERSION,
         "status": status,
@@ -1017,12 +1093,30 @@ def refresh_result() -> dict[str, object]:
         # Recheck immediately before the temp-file write.  A transition to CRITICAL
         # may spend the completed HTTP work, but never writes into the pressured disk.
         _require_disk_write()
-        _atomic_write_cache(envelope)
+        publish_state = _atomic_write_cache(envelope)
+        if not (
+            publish_state.namespace_replaced
+            and publish_state.directory_synced
+        ):
+            raise _CachePublishError(publish_state)
         loaded = load_result(_now=generated_at)
         loaded["refresh_status"] = "written"
         return loaded
     except stream_disk_guard.StreamDiskCritical:
         return _failure("blocked", "disk_critical_before_write")
+    except _CachePublishError as exc:
+        logger.warning(
+            "perp_universe_cache_publish_failed",
+            reason_code=exc.reason_code,
+            error_kind=type(exc).__name__,
+        )
+        return _failure(
+            "unavailable",
+            exc.reason_code,
+            cache_preserved=(
+                False if exc.state.namespace_replaced else None
+            ),
+        )
     except _ContractError as exc:
         logger.warning(
             "perp_universe_refresh_rejected",

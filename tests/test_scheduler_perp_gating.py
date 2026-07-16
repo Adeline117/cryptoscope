@@ -174,6 +174,70 @@ async def test_failed_refresh_is_not_logged_as_done(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason_code", "cache_preserved"),
+    [
+        ("cache_write_failed_before_replace", True),
+        ("cache_durability_unknown_after_replace", False),
+    ],
+)
+async def test_cache_publish_failures_remain_bounded_scheduler_warnings(
+    monkeypatch,
+    reason_code,
+    cache_preserved,
+):
+    from src.onchain import perp_universe
+    from src.pipeline import scheduler
+
+    logs = _Logs()
+    raw = {
+        "schema_version": 2,
+        "status": "unavailable",
+        "reason_codes": [reason_code],
+        "cache_path": "perp_universe.json",
+        "cache_preserved": cache_preserved,
+        "universe": {},
+        "research_universe": {},
+        "actionable_universe": {},
+    }
+    assert "refresh_status" not in raw
+    monkeypatch.setattr(scheduler, "logger", logs)
+    monkeypatch.setattr(perp_universe, "refresh_result", lambda: raw)
+
+    result = await scheduler._run_perp_universe_refresh()
+
+    assert result == {
+        "contract_valid": True,
+        "status": "unavailable",
+        "reason_codes": [reason_code],
+        "research_mapped": 0,
+        "actionable": 0,
+        "independent_source_count": 0,
+        "observed_path_count": 0,
+        "cache_preserved": cache_preserved,
+        "market_count": 0,
+        "refresh_status": None,
+    }
+    level, fields = logs.event("perp_universe_refresh_failed")
+    assert level == "warning"
+    assert fields == {
+        "status": "unavailable",
+        "refresh_status": None,
+        "reason_codes": [reason_code],
+        "research_mapped": 0,
+        "actionable": 0,
+        "independent_source_count": 0,
+        "observed_path_count": 0,
+        "cache_preserved": cache_preserved,
+        "market_count": 0,
+    }
+    assert all(
+        event != "perp_universe_refresh_written"
+        for _level, event, _fields in logs.rows
+    )
+
+
+@pytest.mark.asyncio
 async def test_invalid_written_refresh_is_warning_with_bounded_fields(monkeypatch):
     from src.onchain import perp_universe
     from src.pipeline import scheduler

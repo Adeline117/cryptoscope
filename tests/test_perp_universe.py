@@ -8,6 +8,7 @@ useful for research display, but it is never an actionable scanner universe.
 from __future__ import annotations
 
 import copy
+import errno
 import hashlib
 import io
 import json
@@ -740,49 +741,341 @@ def test_cached_source_conflict_raw_data_and_timezone_fail_closed(
     assert pu.load() == {}
 
 
-def test_atomic_write_uses_unique_same_directory_temp_fsync_and_replace(
+def test_atomic_write_orders_file_fsync_replace_and_directory_fsync(
     monkeypatch,
 ):
     _install_sources(monkeypatch)
+    real_atomic_write = pu._atomic_write_cache
     real_replace = pu.os.replace
     replaced: list[tuple[str, object]] = []
     real_fsync = pu.os.fsync
-    fsync_calls: list[int] = []
+    real_open = pu.os.open
+    directory_fds: set[int] = set()
+    events: list[str] = []
+    states: list[pu._CachePublishState] = []
+
+    def atomic_write(envelope):
+        state = real_atomic_write(envelope)
+        states.append(state)
+        return state
 
     def replace(source, destination):
+        events.append("replace")
         replaced.append((source, destination))
         return real_replace(source, destination)
 
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._CACHE.parent) and flags == pu.os.O_RDONLY:
+            events.append("directory_open")
+            directory_fds.add(descriptor)
+        return descriptor
+
     def fsync(descriptor):
-        fsync_calls.append(descriptor)
+        events.append(
+            "directory_fsync"
+            if descriptor in directory_fds
+            else "file_fsync"
+        )
         return real_fsync(descriptor)
 
+    monkeypatch.setattr(pu, "_atomic_write_cache", atomic_write)
     monkeypatch.setattr(pu.os, "replace", replace)
+    monkeypatch.setattr(pu.os, "open", open_file)
     monkeypatch.setattr(pu.os, "fsync", fsync)
 
-    assert pu.refresh_result()["status"] == "research_only"
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["refresh_status"] == "written"
+    assert states == [pu._CachePublishState(
+        namespace_replaced=True,
+        directory_synced=True,
+    )]
+    assert events == [
+        "file_fsync", "replace", "directory_open", "directory_fsync",
+    ]
     source, destination = replaced[0]
     assert pu.os.path.dirname(source) == str(pu._CACHE.parent)
     assert pu.os.path.basename(source).startswith(f".{pu._CACHE.name}.")
     assert source != str(pu._CACHE) + ".tmp"
     assert destination == pu._CACHE
-    assert len(fsync_calls) >= 2
     assert list(pu._CACHE.parent.glob("*.tmp")) == []
 
 
-def test_atomic_replace_failure_keeps_previous_cache_and_cleans_temp(monkeypatch):
-    _make_valid_cache(monkeypatch)
-    before = pu._CACHE.read_bytes()
+@pytest.mark.parametrize("previous_cache", [False, True])
+@pytest.mark.parametrize("cleanup_close_raises", [False, True])
+def test_fdopen_failure_closes_raw_descriptor_and_preserves_cache_state(
+    monkeypatch,
+    previous_cache,
+    cleanup_close_raises,
+):
+    before = None
+    if previous_cache:
+        _make_valid_cache(monkeypatch)
+        before = pu._CACHE.read_bytes()
     _install_sources(monkeypatch, address="0xDef")
-    monkeypatch.setattr(
-        pu.os, "replace", lambda *_a: (_ for _ in ()).throw(OSError("replace")),
-    )
+    real_mkstemp = pu.tempfile.mkstemp
+    real_close = pu.os.close
+    descriptors: list[int] = []
+    temporary_paths: list[str] = []
+    close_calls: list[int] = []
+    secret = "https://secret.invalid/fdopen TOKEN"
+    close_secret = "https://secret.invalid/raw-close TOKEN"
+
+    def mkstemp(*args, **kwargs):
+        descriptor, path = real_mkstemp(*args, **kwargs)
+        descriptors.append(descriptor)
+        temporary_paths.append(path)
+        return descriptor, path
+
+    def fdopen(_descriptor, _mode):
+        raise OSError(secret)
+
+    def close(descriptor):
+        close_calls.append(descriptor)
+        result = real_close(descriptor)
+        if cleanup_close_raises:
+            raise OSError(close_secret)
+        return result
+
+    monkeypatch.setattr(pu.tempfile, "mkstemp", mkstemp)
+    monkeypatch.setattr(pu.os, "fdopen", fdopen)
+    monkeypatch.setattr(pu.os, "close", close)
 
     result = pu.refresh_result()
 
-    assert result["reason_codes"] == ["cache_write_failed"]
-    assert pu._CACHE.read_bytes() == before
+    assert len(descriptors) == len(temporary_paths) == 1
+    assert close_calls == descriptors
+    with pytest.raises(OSError) as caught:
+        pu.os.fstat(descriptors[0])
+    assert caught.value.errno == errno.EBADF
+    assert not pu.os.path.exists(temporary_paths[0])
     assert list(pu._CACHE.parent.glob("*.tmp")) == []
+    assert result["status"] == "unavailable"
+    assert result["reason_codes"] == ["cache_write_failed_before_replace"]
+    assert result["cache_preserved"] is previous_cache
+    assert "refresh_status" not in result
+    assert "secret.invalid" not in repr(result)
+    if previous_cache:
+        assert pu._CACHE.read_bytes() == before
+    else:
+        assert not pu._CACHE.exists()
+
+
+@pytest.mark.parametrize(
+    "phase", ["file_write", "file_flush", "file_fsync", "replace"],
+)
+def test_pre_replace_failures_preserve_previous_cache_and_clean_temp(
+    monkeypatch,
+    phase,
+):
+    _make_valid_cache(monkeypatch)
+    before = pu._CACHE.read_bytes()
+    _install_sources(monkeypatch, address="0xDef")
+    secret = "https://secret.invalid/cache-write TOKEN"
+    real_fdopen = pu.os.fdopen
+    real_fsync = pu.os.fsync
+    real_replace = pu.os.replace
+    fsync_calls = 0
+    replace_calls: list[tuple[object, object]] = []
+
+    if phase in {"file_write", "file_flush"}:
+        class PhaseFailingFile:
+            def __init__(self, descriptor, mode):
+                self._handle = real_fdopen(descriptor, mode)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self._handle.close()
+
+            def write(self, _encoded):
+                if phase == "file_write":
+                    raise OSError(secret)
+                return self._handle.write(_encoded)
+
+            def flush(self):
+                if phase == "file_flush":
+                    raise OSError(secret)
+                return self._handle.flush()
+
+            def fileno(self):
+                return self._handle.fileno()
+
+        monkeypatch.setattr(
+            pu.os, "fdopen",
+            lambda descriptor, mode: PhaseFailingFile(descriptor, mode),
+        )
+
+    def fsync(descriptor):
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if phase == "file_fsync" and fsync_calls == 1:
+            raise OSError(secret)
+        return real_fsync(descriptor)
+
+    def replace(source, destination):
+        replace_calls.append((source, destination))
+        if phase == "replace":
+            raise OSError(secret)
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(pu.os, "fsync", fsync)
+    monkeypatch.setattr(pu.os, "replace", replace)
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "unavailable"
+    assert result["reason_codes"] == ["cache_write_failed_before_replace"]
+    assert result["cache_preserved"] is True
+    assert "refresh_status" not in result
+    assert pu._CACHE.read_bytes() == before
+    assert len(replace_calls) == (1 if phase == "replace" else 0)
+    assert list(pu._CACHE.parent.glob("*.tmp")) == []
+    assert "secret.invalid" not in repr(result)
+
+
+def test_pre_replace_failure_without_previous_cache_reports_not_preserved(
+    monkeypatch,
+):
+    _install_sources(monkeypatch)
+    real_fsync = pu.os.fsync
+    fsync_calls = 0
+
+    def fsync(descriptor):
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 1:
+            raise OSError("file fsync")
+        return real_fsync(descriptor)
+
+    monkeypatch.setattr(pu.os, "fsync", fsync)
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "unavailable"
+    assert result["reason_codes"] == ["cache_write_failed_before_replace"]
+    assert result["cache_preserved"] is False
+    assert "refresh_status" not in result
+    assert not pu._CACHE.exists()
+    assert list(pu._CACHE.parent.glob("*.tmp")) == []
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["directory_open", "directory_fsync", "directory_fsync_and_close"],
+)
+def test_post_replace_failures_report_visible_but_not_durable(
+    monkeypatch,
+    phase,
+):
+    _make_valid_cache(monkeypatch)
+    before = pu._CACHE.read_bytes()
+    _install_sources(monkeypatch, address="0xDef")
+    real_open = pu.os.open
+    real_fsync = pu.os.fsync
+    real_close = pu.os.close
+    real_replace = pu.os.replace
+    directory_fds: set[int] = set()
+    replace_calls: list[tuple[object, object]] = []
+    directory_close_calls = 0
+    secret = "https://secret.invalid/directory TOKEN"
+    close_secret = "https://secret.invalid/directory-close TOKEN"
+
+    def open_file(path, flags, *args):
+        if str(path) == str(pu._CACHE.parent) and flags == pu.os.O_RDONLY:
+            if phase == "directory_open":
+                raise OSError(secret)
+            descriptor = real_open(path, flags, *args)
+            directory_fds.add(descriptor)
+            return descriptor
+        return real_open(path, flags, *args)
+
+    def fsync(descriptor):
+        if (
+            phase in {"directory_fsync", "directory_fsync_and_close"}
+            and descriptor in directory_fds
+        ):
+            raise OSError(secret)
+        return real_fsync(descriptor)
+
+    def close(descriptor):
+        nonlocal directory_close_calls
+        result = real_close(descriptor)
+        if phase == "directory_fsync_and_close" and descriptor in directory_fds:
+            directory_close_calls += 1
+            raise OSError(close_secret)
+        return result
+
+    def replace(source, destination):
+        result = real_replace(source, destination)
+        replace_calls.append((source, destination))
+        return result
+
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(pu.os, "fsync", fsync)
+    monkeypatch.setattr(pu.os, "close", close)
+    monkeypatch.setattr(pu.os, "replace", replace)
+
+    result = pu.refresh_result()
+
+    assert len(replace_calls) == 1
+    assert result["status"] == "unavailable"
+    assert result["reason_codes"] == [
+        "cache_durability_unknown_after_replace",
+    ]
+    assert result["cache_preserved"] is False
+    assert "refresh_status" not in result
+    assert pu._CACHE.read_bytes() != before
+    assert _read_cache()["universe"]["BTC"]["address"] == "0xdef"
+    assert list(pu._CACHE.parent.glob("*.tmp")) == []
+    assert "secret.invalid" not in repr(result)
+    assert directory_close_calls == (
+        1 if phase == "directory_fsync_and_close" else 0
+    )
+
+
+def test_directory_close_failure_after_sync_remains_durable(monkeypatch):
+    _install_sources(monkeypatch)
+    real_open = pu.os.open
+    real_close = pu.os.close
+    directory_fds: set[int] = set()
+    warnings = []
+
+    class Logs:
+        def warning(self, event, **fields):
+            warnings.append((event, fields))
+
+    def open_file(path, flags, *args):
+        descriptor = real_open(path, flags, *args)
+        if str(path) == str(pu._CACHE.parent) and flags == pu.os.O_RDONLY:
+            directory_fds.add(descriptor)
+        return descriptor
+
+    def close(descriptor):
+        result = real_close(descriptor)
+        if descriptor in directory_fds:
+            raise OSError("https://secret.invalid/directory-close TOKEN")
+        return result
+
+    monkeypatch.setattr(pu, "logger", Logs())
+    monkeypatch.setattr(pu.os, "open", open_file)
+    monkeypatch.setattr(pu.os, "close", close)
+
+    result = pu.refresh_result()
+
+    assert result["status"] == "research_only"
+    assert result["refresh_status"] == "written"
+    assert warnings == [(
+        "perp_universe_cache_directory_close_failed",
+        {
+            "reason_code": "cache_directory_close_failed_after_sync",
+            "error_kind": "OSError",
+        },
+    )]
+    assert "secret.invalid" not in repr(warnings)
 
 
 def test_unexpected_cache_validation_exception_is_contained(monkeypatch):
