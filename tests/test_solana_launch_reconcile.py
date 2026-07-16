@@ -155,6 +155,114 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
     ) is True
 
 
+def test_provider_keyed_pressure_circuit_survives_scheduler_restarts(reconcile):
+    module, _stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    live = FakeRpc("https://live.example")
+    archive = FakeRpc("https://archive.example")
+
+    assert module.reconciliation_circuit_state(
+        live, archive, now=now,
+    )["state"] == "closed"
+    first = module.open_reconciliation_circuit(
+        live, archive, pressure_kind="rate_limited",
+        failed_method="getTransaction", now=now,
+    )
+    assert first == {
+        "state": "open", "consecutive_pressure_failures": 1,
+        "next_retry_at": (now + timedelta(seconds=60)).isoformat(),
+        "pressure_kind": "rate_limited", "failed_method": "getTransaction",
+        "live_provider": "solana_rpc:live.example",
+        "archive_provider": "solana_rpc:archive.example",
+    }
+
+    # No process-local state is involved: a fresh read from SQLite still blocks.
+    persisted = module.reconciliation_circuit_state(
+        live, archive, now=now + timedelta(seconds=30),
+    )
+    assert persisted["state"] == "open"
+    assert persisted["consecutive_pressure_failures"] == 1
+    assert module.reconciliation_circuit_state(
+        live, FakeRpc("https://archive-2.example"), now=now,
+    )["state"] == "closed"
+
+    due = module.reconciliation_circuit_state(
+        live, archive, now=now + timedelta(seconds=60),
+    )
+    assert due["state"] == "retry_due"
+    second = module.open_reconciliation_circuit(
+        live, archive, pressure_kind="rate_limited",
+        failed_method="getTransaction", now=now + timedelta(seconds=60),
+    )
+    assert second["consecutive_pressure_failures"] == 2
+    assert second["next_retry_at"] == (
+        now + timedelta(seconds=180)
+    ).isoformat()
+
+    closed = module.clear_reconciliation_circuit(live, archive)
+    assert closed["state"] == "closed"
+    assert module.reconciliation_circuit_state(
+        live, archive, now=now + timedelta(seconds=61),
+    )["consecutive_pressure_failures"] == 0
+
+
+def test_corrupt_or_naive_pressure_circuit_fails_closed(reconcile):
+    module, stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    live = FakeRpc("https://live.example")
+    archive = FakeRpc("https://archive.example")
+    module.open_reconciliation_circuit(
+        live, archive, pressure_kind="rate_limited",
+        failed_method="getTransaction", now=now,
+    )
+    connection = stream._conn()
+    try:
+        connection.execute(
+            "UPDATE reconciliation_circuits SET circuit_open_until=?",
+            ("2026-07-20T12:01:00",),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(module.ReconciliationError, match="naive"):
+        module.reconciliation_circuit_state(live, archive, now=now)
+    with pytest.raises(module.ReconciliationError, match="timezone-aware"):
+        module.reconciliation_circuit_state(
+            live, archive, now=datetime(2026, 7, 20, 12),
+        )
+
+
+def test_public_pressure_circuit_is_allowlisted_and_secret_free(reconcile):
+    module, _stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    circuit = module.open_reconciliation_circuit(
+        FakeRpc("https://live.example"), FakeRpc("https://archive.example"),
+        pressure_kind="rate_limited", failed_method="getTransaction", now=now,
+    )
+    telemetry = module.new_rpc_run_telemetry()
+    details = module.reconciliation_worker_details(
+        telemetry, outcome="rpc_pressure", error_kind="rate_limited",
+        circuit=circuit,
+    )
+    projected = module.public_reconciliation_health({
+        "status": "degraded", "updated_at": now.isoformat(),
+        "age_seconds": 0, "stale": False, "open_gaps": 0,
+        "details": details,
+    })
+    assert projected["details"]["circuit"] == circuit
+
+    malicious = dict(circuit)
+    malicious["archive_provider"] = "solana_rpc:archive.example/private-key"
+    rejected = module.public_reconciliation_health({
+        "status": "degraded", "details": module.reconciliation_worker_details(
+            telemetry, outcome="rpc_pressure", circuit=malicious,
+        ),
+    })
+    assert rejected["details"] is None
+    assert "private-key" not in str(rejected)
+
+
 def test_real_ledger_outcome_row_rechecks_exact_source_without_payload_creator(
         reconcile, tmp_path, monkeypatch):
     """The statistics read model must prove source membership from SQLite alone."""

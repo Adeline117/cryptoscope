@@ -1,5 +1,7 @@
 """Resource-safety contracts for the long-running scheduler."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 
@@ -317,26 +319,33 @@ async def test_unconfigured_reconciliation_is_fail_visible(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_rate_pressure_opens_exponential_circuit(monkeypatch):
+async def test_reconciliation_rate_pressure_opens_persistent_circuit(
+        monkeypatch, tmp_path):
     from src.pipeline import scheduler, solana_launch_reconcile, solana_launch_stream
     from src.pipeline import stream_health
 
-    clock = [100.0]
+    clock = [datetime(2026, 7, 20, 12, tzinfo=timezone.utc)]
     calls = []
     reports = []
+    monkeypatch.setattr(solana_launch_stream, "DB", tmp_path / "launches.db")
+    monkeypatch.setenv("SOLANA_STREAM_RPC_URL", "https://live.example")
     monkeypatch.setenv("SOLANA_RECONCILIATION_RPC_URL", "https://archive.example")
-    monkeypatch.setattr(scheduler.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(scheduler, "_RECONCILIATION_PRESSURE_FAILURES", 0)
-    monkeypatch.setattr(scheduler, "_RECONCILIATION_RETRY_AT", 0.0)
-    monkeypatch.setattr(solana_launch_stream, "JsonRpc", lambda endpoint: endpoint)
+    monkeypatch.setattr(scheduler, "_utc_now", lambda: clock[0])
     monkeypatch.setattr(
         stream_health, "report_worker",
         lambda source, stream, **kwargs: reports.append((source, stream, kwargs)),
     )
 
-    def reconcile(*_args, **_kwargs):
+    def reconcile(*_args, telemetry, **_kwargs):
         calls.append(clock[0])
         if len(calls) < 3:
+            telemetry.update({
+                "rpc_calls_total": 1, "rpc_failures_total": 1,
+                "rpc_calls_by_method": {"getTransaction": 1},
+                "rpc_failures_by_method": {"getTransaction": 1},
+                "rpc_calls_by_role": {"live": 0, "archive": 1},
+                "rpc_failures_by_role": {"live": 0, "archive": 1},
+            })
             raise solana_launch_stream.RpcPressureError(
                 "429", kind="rate_limited", retry_after_seconds=None,
             )
@@ -345,44 +354,48 @@ async def test_reconciliation_rate_pressure_opens_exponential_circuit(monkeypatc
     monkeypatch.setattr(solana_launch_reconcile, "reconcile_next_epoch", reconcile)
 
     await scheduler._run_solana_launch_reconciliation()
-    assert calls == [100.0]
-    assert scheduler._RECONCILIATION_PRESSURE_FAILURES == 1
-    assert scheduler._RECONCILIATION_RETRY_AT == 160.0
+    assert calls == [clock[0]]
     assert reports[-1][2]["status"] == "degraded"
     assert reports[-1][2]["error"] == "archive RPC rate_limited; retry in 60s"
     assert reports[-1][2]["details"]["outcome"] == "rpc_pressure"
     assert reports[-1][2]["details"]["error_kind"] == "rate_limited"
+    assert reports[-1][2]["details"]["circuit"]["failed_method"] == "getTransaction"
+    assert reports[-1][2]["details"]["circuit"][
+        "consecutive_pressure_failures"
+    ] == 1
 
-    clock[0] = 159.9
+    first = calls[0]
+    clock[0] = first + timedelta(seconds=59, milliseconds=900)
     await scheduler._run_solana_launch_reconciliation()
-    assert calls == [100.0]
+    assert calls == [first]
     assert len(reports) == 1
 
-    clock[0] = 160.0
+    clock[0] = first + timedelta(seconds=60)
     await scheduler._run_solana_launch_reconciliation()
-    assert calls == [100.0, 160.0]
-    assert scheduler._RECONCILIATION_PRESSURE_FAILURES == 2
-    assert scheduler._RECONCILIATION_RETRY_AT == 280.0
+    assert calls == [first, first + timedelta(seconds=60)]
+    assert reports[-1][2]["details"]["circuit"][
+        "consecutive_pressure_failures"
+    ] == 2
 
-    clock[0] = 280.0
+    clock[0] = first + timedelta(seconds=180)
     await scheduler._run_solana_launch_reconciliation()
-    assert calls == [100.0, 160.0, 280.0]
-    assert scheduler._RECONCILIATION_PRESSURE_FAILURES == 0
-    assert scheduler._RECONCILIATION_RETRY_AT == 0.0
+    assert calls == [
+        first, first + timedelta(seconds=60), first + timedelta(seconds=180),
+    ]
     assert reports[-1][2]["details"]["outcome"] == "waiting_finality"
+    assert reports[-1][2]["details"]["circuit"]["state"] == "closed"
 
 
 @pytest.mark.asyncio
 async def test_reconciliation_generic_failure_keeps_secret_out_of_public_details(
-        monkeypatch):
+        monkeypatch, tmp_path):
     from src.pipeline import scheduler, solana_launch_reconcile, solana_launch_stream
     from src.pipeline import stream_health
 
     reports = []
+    monkeypatch.setattr(solana_launch_stream, "DB", tmp_path / "launches.db")
+    monkeypatch.setenv("SOLANA_STREAM_RPC_URL", "https://live.example")
     monkeypatch.setenv("SOLANA_RECONCILIATION_RPC_URL", "https://archive.example")
-    monkeypatch.setattr(scheduler, "_RECONCILIATION_PRESSURE_FAILURES", 0)
-    monkeypatch.setattr(scheduler, "_RECONCILIATION_RETRY_AT", 0.0)
-    monkeypatch.setattr(solana_launch_stream, "JsonRpc", lambda endpoint: endpoint)
     monkeypatch.setattr(
         stream_health, "report_worker",
         lambda source, stream, **kwargs: reports.append((source, stream, kwargs)),

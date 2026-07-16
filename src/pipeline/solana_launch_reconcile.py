@@ -7,7 +7,7 @@ import math
 import os
 import time
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.pipeline import solana_launch_stream as stream
@@ -19,6 +19,8 @@ DEFAULT_SAFETY_SLOTS = 64
 DEFAULT_REQUIRED_CLEAN_EPOCHS = 1_440
 DEFAULT_MAX_READINESS_AGE_SECONDS = 300
 DEFAULT_MAX_FINALIZED_LAG_SLOTS = 256
+DEFAULT_PRESSURE_BACKOFF_BASE_SECONDS = 60
+DEFAULT_PRESSURE_BACKOFF_MAX_SECONDS = 1_800
 MAX_SIGNATURE_PAGES = 50
 SIGNATURE_PAGE_SIZE = 1_000
 
@@ -63,6 +65,7 @@ def _finish_rpc_run_telemetry(telemetry: dict, started: float) -> None:
 
 def reconciliation_worker_details(
     telemetry: dict, *, outcome: str, error_kind: str | None = None,
+    circuit: dict | None = None,
 ) -> dict:
     """Bind metrics to a categorical outcome without publishing exception text."""
     rpc = new_rpc_run_telemetry()
@@ -72,6 +75,8 @@ def reconciliation_worker_details(
     details = {"schema_version": 1, "outcome": str(outcome), "rpc": rpc}
     if error_kind:
         details["error_kind"] = str(error_kind)[:80]
+    if circuit is not None:
+        details["circuit"] = dict(circuit)
     return details
 
 
@@ -83,7 +88,9 @@ _PUBLIC_RPC_METHODS = (
     "getGenesisHash", "getSlot", "getFirstAvailableBlock", "getBlocks",
     "getSignaturesForAddress", "getTransaction",
 )
+_PUBLIC_FAILED_METHODS = (*_PUBLIC_RPC_METHODS, "unknown")
 _PUBLIC_RPC_ROLES = ("live", "archive")
+_PUBLIC_CIRCUIT_STATES = {"closed", "open", "retry_due"}
 
 
 def _public_counter(value: object, *, maximum: int = 1_000_000_000) -> int | None:
@@ -111,6 +118,59 @@ def _public_category(value: object) -> str | None:
     if not all(character.isalnum() or character in "_.-" for character in value):
         return None
     return value
+
+
+def _aware_utc_clock(value: object, *, field: str) -> datetime:
+    if not isinstance(value, str) or not value:
+        raise ReconciliationError(f"{field} is unavailable")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ReconciliationError(f"{field} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ReconciliationError(f"{field} is naive")
+    return parsed.astimezone(timezone.utc)
+
+
+def _public_circuit(value: object) -> dict | None:
+    if not isinstance(value, dict) or value.get("state") not in _PUBLIC_CIRCUIT_STATES:
+        return None
+    state = str(value["state"])
+    failures = _public_counter(value.get("consecutive_pressure_failures"))
+    if failures is None or (state == "closed" and failures != 0):
+        return None
+    live_provider = value.get("live_provider")
+    archive_provider = value.get("archive_provider")
+    try:
+        live_host = _stored_provider_host(live_provider)
+        archive_host = _stored_provider_host(archive_provider)
+    except ReconciliationError:
+        return None
+    if live_host == archive_host:
+        return None
+    result = {
+        "state": state,
+        "consecutive_pressure_failures": failures,
+        "live_provider": str(live_provider),
+        "archive_provider": str(archive_provider),
+    }
+    if state != "closed":
+        retry_at = value.get("next_retry_at")
+        try:
+            retry_clock = _aware_utc_clock(retry_at, field="circuit retry clock")
+        except ReconciliationError:
+            return None
+        pressure_kind = _public_category(value.get("pressure_kind"))
+        failed_method = value.get("failed_method")
+        if (failures < 1 or pressure_kind is None
+                or failed_method not in _PUBLIC_FAILED_METHODS):
+            return None
+        result.update({
+            "next_retry_at": retry_clock.isoformat(),
+            "pressure_kind": pressure_kind,
+            "failed_method": failed_method,
+        })
+    return result
 
 
 def _public_reconciliation_details(value: object) -> dict | None:
@@ -171,6 +231,11 @@ def _public_reconciliation_details(value: object) -> dict | None:
     error_kind = _public_category(value.get("error_kind"))
     if error_kind:
         public["error_kind"] = error_kind
+    if "circuit" in value:
+        circuit = _public_circuit(value.get("circuit"))
+        if circuit is None:
+            return None
+        public["circuit"] = circuit
     return public
 
 
@@ -219,11 +284,14 @@ def _provider_host(rpc: object) -> str:
 
 
 def _stored_provider_host(provider: object) -> str:
-    value = str(provider or "")
+    if not isinstance(provider, str):
+        raise ReconciliationError("stored Solana provider identity is invalid")
+    value = provider
     if not value.startswith("solana_rpc:"):
         raise ReconciliationError("stored Solana provider identity is invalid")
     host = value[len("solana_rpc:"):]
-    if not host or host == "unknown":
+    if (not host or host == "unknown"
+            or any(character in host for character in "/?#@")):
         raise ReconciliationError("stored Solana provider host is unavailable")
     name, separator, port = host.rpartition(":")
     if separator and port.isdigit() and name:
@@ -260,6 +328,15 @@ def _ensure_schema(connection) -> None:
         archive_provider TEXT PRIMARY KEY,
         next_slot INTEGER NOT NULL,
         updated_at TEXT NOT NULL)""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS reconciliation_circuits(
+        live_provider TEXT NOT NULL,
+        archive_provider TEXT NOT NULL,
+        consecutive_pressure_failures INTEGER NOT NULL,
+        circuit_open_until TEXT NOT NULL,
+        pressure_kind TEXT NOT NULL,
+        failed_method TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(live_provider,archive_provider))""")
     connection.execute("""CREATE TRIGGER IF NOT EXISTS
         trg_reconciliation_epoch_no_update
         BEFORE UPDATE ON reconciliation_epochs BEGIN
@@ -286,6 +363,162 @@ def _ensure_schema(connection) -> None:
                 "ADD COLUMN finalized_head INTEGER NOT NULL DEFAULT -1"
             )
         connection.commit()
+
+
+def _circuit_identity(live_rpc: object, archive_rpc: object) -> tuple[str, str]:
+    live_provider, archive_provider = _provider(live_rpc), _provider(archive_rpc)
+    if _provider_host(live_rpc) == _provider_host(archive_rpc):
+        raise ReconciliationError("live and archive providers must be independent")
+    return live_provider, archive_provider
+
+
+def _normalized_now(value: datetime | None) -> datetime:
+    current = value or datetime.now(timezone.utc)
+    if not isinstance(current, datetime) or current.tzinfo is None:
+        raise ReconciliationError("reconciliation circuit clock must be timezone-aware")
+    return current.astimezone(timezone.utc)
+
+
+def _pressure_backoff_seconds(retry_after: int | None, failures: int) -> int:
+    exponent = max(0, min(6, int(failures) - 1))
+    exponential = DEFAULT_PRESSURE_BACKOFF_BASE_SECONDS * (2 ** exponent)
+    return min(
+        DEFAULT_PRESSURE_BACKOFF_MAX_SECONDS,
+        max(exponential, max(0, int(retry_after or 0))),
+    )
+
+
+def reconciliation_failed_method(telemetry: object) -> str | None:
+    """Return only the last allowlisted failed RPC method, never exception text."""
+    if not isinstance(telemetry, dict):
+        return None
+    failures = telemetry.get("rpc_failures_by_method")
+    if not isinstance(failures, dict):
+        return None
+    candidates = [
+        method for method in _PUBLIC_RPC_METHODS
+        if _public_counter(failures.get(method, 0)) not in {None, 0}
+    ]
+    return candidates[-1] if candidates else None
+
+
+def _closed_circuit(live_provider: str, archive_provider: str) -> dict:
+    return {
+        "state": "closed", "consecutive_pressure_failures": 0,
+        "live_provider": live_provider, "archive_provider": archive_provider,
+    }
+
+
+def reconciliation_circuit_state(
+    live_rpc: object, archive_rpc: object, *, now: datetime | None = None,
+) -> dict:
+    """Read the provider-keyed pressure circuit from durable launch storage."""
+    current = _normalized_now(now)
+    live_provider, archive_provider = _circuit_identity(live_rpc, archive_rpc)
+    connection = stream._conn()
+    try:
+        _ensure_schema(connection)
+        row = connection.execute(
+            """SELECT consecutive_pressure_failures,circuit_open_until,
+                      pressure_kind,failed_method,updated_at
+                 FROM reconciliation_circuits
+                WHERE live_provider=? AND archive_provider=?""",
+            (live_provider, archive_provider),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        return _closed_circuit(live_provider, archive_provider)
+    failures = _public_counter(row[0])
+    pressure_kind = _public_category(row[2])
+    failed_method = row[3]
+    open_until = _aware_utc_clock(row[1], field="circuit open clock")
+    updated_at = _aware_utc_clock(row[4], field="circuit update clock")
+    if (failures is None or failures < 1 or pressure_kind is None
+            or failed_method not in _PUBLIC_FAILED_METHODS
+            or open_until <= updated_at):
+        raise ReconciliationError("stored reconciliation circuit is invalid")
+    return {
+        "state": "open" if current < open_until else "retry_due",
+        "consecutive_pressure_failures": failures,
+        "next_retry_at": open_until.isoformat(),
+        "pressure_kind": pressure_kind,
+        "failed_method": failed_method,
+        "live_provider": live_provider, "archive_provider": archive_provider,
+    }
+
+
+def open_reconciliation_circuit(
+    live_rpc: object, archive_rpc: object, *, pressure_kind: str,
+    failed_method: str, retry_after_seconds: int | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Atomically extend one provider pair's pressure circuit and backoff."""
+    current = _normalized_now(now)
+    kind = _public_category(pressure_kind)
+    if kind is None or failed_method not in _PUBLIC_FAILED_METHODS:
+        raise ReconciliationError("RPC pressure category is not public-safe")
+    live_provider, archive_provider = _circuit_identity(live_rpc, archive_rpc)
+    connection = stream._conn()
+    try:
+        _ensure_schema(connection)
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            """SELECT consecutive_pressure_failures
+                 FROM reconciliation_circuits
+                WHERE live_provider=? AND archive_provider=?""",
+            (live_provider, archive_provider),
+        ).fetchone()
+        previous = _public_counter(row[0]) if row else 0
+        if previous is None:
+            raise ReconciliationError("stored reconciliation failure count is invalid")
+        failures = previous + 1
+        cooldown = _pressure_backoff_seconds(retry_after_seconds, failures)
+        open_until = current + timedelta(seconds=cooldown)
+        connection.execute(
+            """INSERT INTO reconciliation_circuits(
+                   live_provider,archive_provider,consecutive_pressure_failures,
+                   circuit_open_until,pressure_kind,failed_method,updated_at)
+               VALUES (?,?,?,?,?,?,?)
+               ON CONFLICT(live_provider,archive_provider) DO UPDATE SET
+                   consecutive_pressure_failures=excluded.consecutive_pressure_failures,
+                   circuit_open_until=excluded.circuit_open_until,
+                   pressure_kind=excluded.pressure_kind,
+                   failed_method=excluded.failed_method,
+                   updated_at=excluded.updated_at""",
+            (live_provider, archive_provider, failures, open_until.isoformat(),
+             kind, failed_method, current.isoformat()),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return {
+        "state": "open", "consecutive_pressure_failures": failures,
+        "next_retry_at": open_until.isoformat(), "pressure_kind": kind,
+        "failed_method": failed_method, "live_provider": live_provider,
+        "archive_provider": archive_provider,
+    }
+
+
+def clear_reconciliation_circuit(
+    live_rpc: object, archive_rpc: object,
+) -> dict:
+    """Close the exact provider pair only after a non-pressure attempt completes."""
+    live_provider, archive_provider = _circuit_identity(live_rpc, archive_rpc)
+    connection = stream._conn()
+    try:
+        _ensure_schema(connection)
+        connection.execute(
+            "DELETE FROM reconciliation_circuits WHERE live_provider=? AND archive_provider=?",
+            (live_provider, archive_provider),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return _closed_circuit(live_provider, archive_provider)
 
 
 def _rpc(
