@@ -379,6 +379,38 @@ def test_board_navigation_and_details_are_keyboard_accessible_and_shareable():
     assert "左右滑动查看更多" in html
 
 
+def test_board_has_an_honest_nojs_fallback_and_narrow_live_status():
+    html = BOARD.read_text()
+
+    assert html.count('<main id="main-content">') == 1
+    assert "<noscript>" in html and "看板未启动" in html
+    assert "JavaScript 未启用，CryptoScope 无法加载或验证市场 JSON" in html
+    assert "不要把空白解释为没有机会" in html
+    assert 'id="livet">等待数据</span>' in html
+    assert 'id="live" role="status" aria-live="polite" aria-atomic="true"' in html
+    assert html.count('aria-live="polite"') == 1
+    assert (
+        'function setLiveStatus(message){const node=$("livet");'
+        "if(node.textContent!==message)" in html
+    )
+    view_tag = html.split('<div id="view"', 1)[1].split(">", 1)[0]
+    assert 'role="tabpanel"' in view_tag
+    assert 'aria-labelledby="tab-play"' in view_tag
+    assert "aria-live" not in view_tag
+
+
+def test_each_tab_labels_the_shared_panel_and_critical_controls_meet_contrast_tokens():
+    html = BOARD.read_text()
+
+    for lane in ("play", "launch", "perp", "structure", "airdrop", "watch", "opp", "avoid", "op"):
+        assert f'id="tab-{lane}" data-v="{lane}" role="tab" aria-controls="view"' in html
+    assert '$("view").setAttribute("aria-labelledby",`tab-${view}`)' in html
+    assert ".tab .ct{font-family:var(--mono);font-size:10.5px;color:var(--muted)" in html
+    assert "--action:#285796" in html
+    assert html.count("--action:#0057b8") == 2
+    assert ".jump.primary{border-color:var(--accent-b);background:var(--action);color:#fff}" in html
+
+
 def test_launch_defaults_to_actionable_only_instead_of_burying_decision_in_watch_rows():
     html = BOARD.read_text()
 

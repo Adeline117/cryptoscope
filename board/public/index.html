@@ -11,7 +11,7 @@
     --bg:#080b10; --s1:#0f141c; --s2:#151b24; --s3:#1b2330; --s4:#232d3b;
     --border:#202a38; --border2:#334155;
     --text:#f5f7fa; --muted:#aeb8c6; --dim:#78869a;
-    --accent:#3b82f6; --accent-t:#7db4ff; --accent-bg:#102341; --accent-b:#285796;
+    --accent:#3b82f6; --accent-t:#7db4ff; --accent-bg:#102341; --accent-b:#285796; --action:#285796;
     --good:#71d083; --good-s:#46a758; --good-bg:#1b2a1e; --good-b:#366740;
     --danger:#ff977d; --danger-s:#e54d2e; --danger-bg:#391714; --danger-b:#853a2d;
     --warn:#ffca16; --warn-s:#ffc53d; --warn-bg:#302008; --warn-b:#714f19;
@@ -23,7 +23,7 @@
   :root[data-theme="light"]{
     --bg:#f3f6fa; --s1:#fff; --s2:#f7f9fc; --s3:#eef3f8; --s4:#e3eaf2;
     --border:#dfe6ee; --border2:#cbd5e1; --text:#172033; --muted:#536174; --dim:#7b899c;
-    --accent:#0068d6; --accent-t:#0068d6; --accent-bg:#e6f0fd; --accent-b:#8ec0f6;
+    --accent:#0068d6; --accent-t:#0068d6; --accent-bg:#e6f0fd; --accent-b:#8ec0f6; --action:#0057b8;
     --good:#2a7e3b; --good-bg:#e6f6e9; --good-b:#b4dfbb;
     --danger:#c22f16; --danger-bg:#fdeae4; --danger-b:#f3b7a3;
     --warn:#9a6700; --warn-bg:#fdf3d0; --warn-b:#e8cf8a;
@@ -32,7 +32,7 @@
   @media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
     --bg:#f3f6fa; --s1:#fff; --s2:#f7f9fc; --s3:#eef3f8; --s4:#e3eaf2;
     --border:#dfe6ee; --border2:#cbd5e1; --text:#172033; --muted:#536174; --dim:#7b899c;
-    --accent:#0068d6; --accent-t:#0068d6; --accent-bg:#e6f0fd; --accent-b:#8ec0f6;
+    --accent:#0068d6; --accent-t:#0068d6; --accent-bg:#e6f0fd; --accent-b:#8ec0f6; --action:#0057b8;
     --good:#2a7e3b; --good-bg:#e6f6e9; --good-b:#b4dfbb;
     --danger:#c22f16; --danger-bg:#fdeae4; --danger-b:#f3b7a3;
     --warn:#9a6700; --warn-bg:#fdf3d0; --warn-b:#e8cf8a;
@@ -74,7 +74,7 @@
   .tab{appearance:none;background:transparent;border:1px solid transparent;cursor:pointer;padding:9px 12px;font-size:12.5px;font-weight:620;color:var(--muted);
     border-radius:9px;display:flex;align-items:center;gap:7px;white-space:nowrap;transition:.16s ease}
   .tab:hover{color:var(--text);background:var(--s3)} .tab.on{color:var(--text);background:var(--s3);border-color:var(--border2);box-shadow:0 3px 10px rgba(0,0,0,.08)}
-  .tab .ct{font-family:var(--mono);font-size:10.5px;color:var(--dim);background:var(--s3);border-radius:999px;padding:1px 6px}
+  .tab .ct{font-family:var(--mono);font-size:10.5px;color:var(--muted);background:var(--s3);border-radius:999px;padding:1px 6px}
   .tab.on .ct{color:var(--accent-t);background:var(--accent-bg)}
   .tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
@@ -160,6 +160,8 @@
   .search{width:220px;min-width:150px;border:1px solid var(--border2);background:var(--s1);color:var(--text);border-radius:9px;padding:8px 10px;font:12px var(--sans);outline:none}
   .search:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
   .empty{padding:30px 16px;text-align:center;color:var(--dim);font-size:13px}
+  .nojs{margin:18px 0;padding:18px 20px;border:1px solid var(--danger-b);border-left:5px solid var(--danger);border-radius:12px;background:var(--danger-bg);color:var(--text)}
+  .nojs h2{margin:0 0 5px;font-size:16px}.nojs p{margin:0;color:var(--muted);line-height:1.65}
   .coverage-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 12px}
   .coverage-card{min-height:104px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--s1)}
   .coverage-card .ck{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--muted)}
@@ -203,7 +205,7 @@
   .command-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
   .jump{appearance:none;border:1px solid var(--border2);background:var(--s2);color:var(--text);border-radius:9px;padding:8px 12px;cursor:pointer;font:600 12px var(--sans);transition:.16s ease}
   .jump:hover{border-color:var(--accent);background:var(--accent-bg);transform:translateY(-1px)}
-  .jump.primary{border-color:var(--accent-b);background:var(--accent);color:#fff}
+  .jump.primary{border-color:var(--accent-b);background:var(--action);color:#fff}
   .decision-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden}
   .fact{min-height:92px;padding:15px;background:color-mix(in srgb,var(--s1) 92%,transparent)}
   .fact .fk{display:block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-bottom:5px}
@@ -355,38 +357,41 @@
     <div class="brand"><div class="logo" aria-hidden="true">◎</div>
       <div><h1>CryptoScope 机会雷达<span>Evidence-first market intelligence</span></h1></div></div>
     <div class="hr">
-      <span class="live" id="live"><span class="pulse"></span><span id="livet">LIVE</span></span>
+      <span class="live dead" id="live" role="status" aria-live="polite" aria-atomic="true"><span class="pulse" aria-hidden="true"></span><span id="livet">等待数据</span></span>
       <button class="tgl" id="tgl" title="切换主题" aria-label="切换明暗主题">◐</button>
     </div>
   </header>
   <div class="prog" id="prog"></div>
 
-  <div class="tabs" role="tablist" id="tabs">
+  <div class="tabs" role="tablist" aria-label="机会赛道" id="tabs">
     <div class="grp">
-      <button class="tab on" data-v="play" role="tab">总览</button>
+      <button class="tab on" id="tab-play" data-v="play" role="tab" aria-controls="view" aria-selected="true" tabindex="0">总览</button>
     </div>
     <div class="grp">
-      <button class="tab" data-v="launch" role="tab">早期机会 <span class="ct" id="ct-launch"></span></button>
-      <button class="tab" data-v="perp" role="tab">Carry / 永续 <span class="ct" id="ct-perp"></span></button>
-      <button class="tab" data-v="structure" role="tab">结构事件 <span class="ct" id="ct-structure"></span></button>
-      <button class="tab" data-v="airdrop" role="tab">空投任务 <span class="ct" id="ct-airdrop"></span></button>
+      <button class="tab" id="tab-launch" data-v="launch" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">早期机会 <span class="ct" id="ct-launch"></span></button>
+      <button class="tab" id="tab-perp" data-v="perp" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">Carry / 永续 <span class="ct" id="ct-perp"></span></button>
+      <button class="tab" id="tab-structure" data-v="structure" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">结构事件 <span class="ct" id="ct-structure"></span></button>
+      <button class="tab" id="tab-airdrop" data-v="airdrop" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">空投任务 <span class="ct" id="ct-airdrop"></span></button>
     </div>
     <div class="grp">
-      <button class="tab" data-v="watch" role="tab">🐋 钱包活动 <span class="ct" id="ct-watch"></span></button>
-      <button class="tab" data-v="opp" role="tab">🔎 旧版线索 <span class="ct" id="ct-opp"></span></button>
+      <button class="tab" id="tab-watch" data-v="watch" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">🐋 钱包活动 <span class="ct" id="ct-watch"></span></button>
+      <button class="tab" id="tab-opp" data-v="opp" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">🔎 旧版线索 <span class="ct" id="ct-opp"></span></button>
     </div>
     <div class="grp">
-      <button class="tab" data-v="avoid" role="tab">风险过滤 <span class="ct" id="ct-avoid"></span></button>
-      <button class="tab" data-v="op" role="tab">操盘防御 <span class="ct" id="ct-op"></span></button>
+      <button class="tab" id="tab-avoid" data-v="avoid" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">风险过滤 <span class="ct" id="ct-avoid"></span></button>
+      <button class="tab" id="tab-op" data-v="op" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">操盘防御 <span class="ct" id="ct-op"></span></button>
     </div>
   </div>
 
+  <main id="main-content">
+  <noscript><section class="nojs" aria-labelledby="nojs-title"><h2 id="nojs-title">看板未启动</h2><p>JavaScript 未启用，CryptoScope 无法加载或验证市场 JSON；当前页面没有可用的市场状态、机会、入场或离场信息。请启用 JavaScript 后重新加载，不要把空白解释为没有机会。</p></section></noscript>
   <div class="lanehead">
     <div class="lanetitle" id="lanetitle"></div>
     <div class="stat" id="lanestat"></div>
   </div>
   <details class="readme" id="readme"><summary>读我 · 这条线怎么用 / 诚实边界</summary><div class="rd" id="rd"></div></details>
-  <div id="view" role="tabpanel" aria-live="polite" tabindex="0"></div>
+  <div id="view" role="tabpanel" aria-labelledby="tab-play" tabindex="0"></div>
+  </main>
 
   <div class="foot"><span id="gen">—</span><span>Launch 报价最多每 30 秒采集/每 10 秒读取 · 其他赛道 2–60 分钟采集/每 60 秒读取 · 只是雷达不是买卖指令 · <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a></span></div>
 </div>
@@ -1474,6 +1479,7 @@ function paint(){
   // counts
   for(const [k,l] of Object.entries(LANES)){const dd=data[k==="avoid"?"opp":k];const n=dd?(l.rows?l.rows(dd).length:0):0;const el=$("ct-"+k);if(el)el.textContent=n||""}
   document.querySelectorAll(".tab").forEach(t=>{const on=t.dataset.v===view;t.classList.toggle("on",on);t.setAttribute("aria-selected",String(on));t.tabIndex=on?0:-1});
+  $("view").setAttribute("aria-labelledby",`tab-${view}`);
   wireRows();
   restoreRenderState(renderState);
   staleness();
@@ -1496,6 +1502,7 @@ function wireRows(){
     th.onclick=sort;th.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();sort()}};
   });
 }
+function setLiveStatus(message){const node=$("livet");if(node.textContent!==message)node.textContent=message}
 function staleness(){
   // A synthesis page has several independent clocks. Name the stale or missing
   // lane instead of letting one slow legacy feed impersonate the whole site's age.
@@ -1508,14 +1515,14 @@ function staleness(){
     const staleAfter=new Date(d.stale_after_at||next+15*6e4).getTime();
     return{name,d,gen,staleAfter};
   });
-  if(!available.length){el.className="live dead";$("livet").textContent="无数据";$("gen").textContent=`缺失: ${missing.join("、")||"全部"}`;return}
+  if(!available.length){el.className="live dead";setLiveStatus("无数据");$("gen").textContent=`缺失: ${missing.join("、")||"全部"}`;return}
   const newest=available.reduce((a,b)=>a.gen>b.gen?a:b),oldest=available.reduce((a,b)=>a.gen<b.gen?a:b);
   const stale=available.filter(x=>!Number.isFinite(x.staleAfter)||now>=x.staleAfter);
   $("gen").textContent=`最新 ${newest.name} ${relMs(newest.gen)} · 最老 ${oldest.name} ${relMs(oldest.gen)}${missing.length?` · 缺失 ${missing.join("、")}`:""}`;
   const bad=[...missing,...stale.map(x=>x.name)];
-  if(!bad.length){el.className="live";$("livet").textContent=`LIVE · ${available.length}/${selected.length}视图按时`}
-  else if(stale.some(x=>now-x.gen>=864e5)||missing.length){el.className="live dead";$("livet").textContent=`缺失/超期: ${bad.slice(0,2).join("、")}`}
-  else{el.className="live stale";$("livet").textContent=`${bad.length}条陈旧: ${bad.slice(0,2).join("、")}`}
+  if(!bad.length){el.className="live";setLiveStatus(`LIVE · ${available.length}/${selected.length}视图按时`)}
+  else if(stale.some(x=>now-x.gen>=864e5)||missing.length){el.className="live dead";setLiveStatus(`缺失/超期: ${bad.slice(0,2).join("、")}`)}
+  else{el.className="live stale";setLiveStatus(`${bad.length}条陈旧: ${bad.slice(0,2).join("、")}`)}
 }
 
 function setView(next,updateHash=true){
