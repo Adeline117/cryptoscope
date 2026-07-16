@@ -51,16 +51,19 @@ def test_wallet_sweep_rotates_bounded_batch_and_reuses_fresh_cache(monkeypatch, 
         "watchlist",
         lambda chain: [{"wallet": f"{chain}-{i}"} for i in range(4)],
     )
-    def fake_recent(wallet, chain, window_min, request_timeout_s):
+    def fake_recent(wallet, chain, window_min, request_timeout_s, *, now_ts):
         captured["calls"].append((wallet, chain, window_min, request_timeout_s))
-        return [{
-            "token": "token-1",
-            "symbol": "ONE",
-            "cost_usd": 25,
-            "ts": now,
-        }]
+        return {
+            "state": "ok", "error_kind": None,
+            "buys": [{
+                "token": "token-1",
+                "symbol": "ONE",
+                "cost_usd": 25,
+                "ts": now,
+            }],
+        }
 
-    monkeypatch.setattr(smart_wallets, "recent_buys", fake_recent)
+    monkeypatch.setattr(smart_wallets, "recent_buys_result", fake_recent)
 
     first = smart_wallets.fresh_smart_buys_result(
         chain_codes=("sol", "bsc"), window_min=45, now_ts=now)

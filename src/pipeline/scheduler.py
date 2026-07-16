@@ -653,8 +653,13 @@ async def _run_smart_wallet_watch():
         watch = await asyncio.to_thread(board_export.render_watch)
         paths = await asyncio.to_thread(board_export.write_views, watch=watch)
         n = await asyncio.to_thread(board_export.push_to_blob, paths)
+        health = watch.get("source_health") or {}
         logger.info("smart_wallet_watch_done", tokens=len(watch.get("watch", [])),
-                    pushed=n)
+                    source_state=health.get("state"),
+                    source_error=health.get("error_kind"),
+                    observed=health.get("observed"),
+                    request_failed=health.get("request_failed"),
+                    error_counts=health.get("error_counts"), pushed=n)
     except Exception as e:
         logger.error("smart_wallet_watch_failed", error=str(e)[:120])
 
