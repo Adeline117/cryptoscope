@@ -253,12 +253,31 @@
   .gate-pill.block{color:var(--danger);border-color:var(--danger-b);background:var(--danger-bg)}.gate-pill.block::before{background:var(--danger)}
   .risk-line{display:flex;align-items:flex-start;justify-content:space-between;gap:9px;margin-top:11px;padding-top:9px;border-top:1px solid var(--border);font-size:10px;line-height:1.4;color:var(--dim)}
   .risk-line span:first-child{overflow-wrap:anywhere}.risk-line .jump{flex:none;padding:5px 8px;font-size:10px}
-  .evidence-grid{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-  .evidence-card{padding:16px 18px;border:1px solid var(--border);border-radius:13px;background:var(--s1)}
-  .evidence-card .ek{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:var(--text)}
-  .evidence-card .ev{margin-top:8px;font:700 18px/1.3 var(--mono);color:var(--text)}
-  .evidence-card .es{margin-top:5px;color:var(--dim);font-size:11.5px;line-height:1.5}
-  .meter{height:5px;margin-top:11px;border-radius:99px;background:var(--s3);overflow:hidden}.meter>i{display:block;height:100%;background:var(--accent);border-radius:inherit}
+  .validation-overview{grid-column:1/-1;min-width:0;padding:18px 20px;border:1px solid var(--warn-b);border-left:5px solid var(--warn);border-radius:14px;background:color-mix(in srgb,var(--warn-bg) 27%,var(--s1));box-shadow:var(--shadow)}
+  .validation-overview[data-state="unverifiable"]{border-color:var(--danger-b);border-left-color:var(--danger);background:color-mix(in srgb,var(--danger-bg) 30%,var(--s1))}
+  .validation-overview-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+  .validation-overview-kicker{font-size:10px;font-weight:760;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .validation-overview-title{margin:3px 0 0;font-size:20px;line-height:1.3;color:var(--text)}
+  .validation-overview-copy{margin:5px 0 0;max-width:900px;font-size:11.5px;line-height:1.55;color:var(--muted)}
+  .validation-auto-off{flex:none;display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--danger-b);border-radius:999px;background:var(--danger-bg);color:var(--danger);font:750 11px/1.2 var(--mono);letter-spacing:.04em;white-space:nowrap}
+  .validation-auto-off::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--danger)}
+  .validation-overview-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}
+  .validation-card{min-width:0;padding:12px;border:1px solid var(--border2);border-top:3px solid var(--warn);border-radius:10px;background:var(--s2);scroll-snap-align:start}
+  .validation-card[data-verdict="unverifiable"],.validation-card[data-verdict="blocked"]{border-top-color:var(--danger)}
+  .validation-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:7px}
+  .validation-card-title{font-size:12.5px;font-weight:740;color:var(--text)}
+  .validation-verdict{flex:none;padding:2px 6px;border:1px solid var(--warn-b);border-radius:999px;background:var(--warn-bg);color:var(--warn);font-size:9.5px;font-weight:700;white-space:nowrap}
+  .validation-card[data-verdict="unverifiable"] .validation-verdict,.validation-card[data-verdict="blocked"] .validation-verdict{border-color:var(--danger-b);background:var(--danger-bg);color:var(--danger)}
+  .validation-sample{margin-top:10px;font:730 16px/1.3 var(--mono);color:var(--text)}
+  .validation-sample small{display:block;margin-top:2px;font:500 9.5px/1.4 var(--sans);color:var(--dim)}
+  .validation-arms{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px}
+  .validation-arm{padding:6px;border:1px solid var(--border);border-radius:7px;background:var(--s1);font-size:9.5px;line-height:1.45;color:var(--dim)}
+  .validation-arm b{display:block;color:var(--muted);font-size:9.5px}.validation-arm span{font-family:var(--mono);color:var(--text)}
+  .validation-field{margin-top:9px;padding-top:8px;border-top:1px solid var(--border)}
+  .validation-field .vk{display:block;font-size:9px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;color:var(--dim)}
+  .validation-field .vv{display:block;margin-top:3px;font-size:10.5px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+  .validation-field.blocker .vv{color:var(--warn)}
+  .validation-card[data-verdict="unverifiable"] .validation-field.blocker .vv,.validation-card[data-verdict="blocked"] .validation-field.blocker .vv{color:var(--danger)}
   .market-coverage{grid-column:1/-1;padding:20px 22px;border:1px solid var(--border);border-radius:14px;background:var(--s1);box-shadow:var(--shadow);min-width:0}
   .market-coverage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:13px}
   .market-coverage-head h3{margin:0;font-size:15px;line-height:1.35;color:var(--text)}
@@ -345,6 +364,7 @@
   @media(max-width:980px){
     .wrap{padding:0 20px 56px}.lanehead{grid-template-columns:1fr;gap:18px}.stat{justify-content:flex-start}
     .stat>div:first-child{padding-left:0}.command{grid-template-columns:1fr}.opportunity-grid{grid-template-columns:1fr}.play>.play-sec,.play>.play-sec:first-child,.play>.play-sec:nth-child(2),.play-verdict{grid-column:1/-1}
+    .validation-overview-grid{display:flex;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;padding:1px 1px 8px;scrollbar-width:thin}.validation-card{flex:0 0 min(42vw,360px)}
   }
   @media(max-width:600px){
     body{font-size:14px}.wrap{padding:0 12px 44px}header{padding:12px 2px}.brand{gap:8px}.logo{width:36px;height:36px}.hr{gap:8px}
@@ -355,7 +375,7 @@
     .command{padding:19px 17px;gap:17px}.runtime-safety-banner{padding:13px 14px;flex-direction:column;gap:6px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
     .funnel-panel{padding:12px}.funnel-head{align-items:flex-start;flex-direction:column}.funnel-steps{grid-template-columns:1fr 1fr}.funnel-step{padding:9px}.funnel-step .fv{font-size:16px}
     .opportunity-queue{padding:17px 14px}.opportunity-queue-head{flex-direction:column;gap:7px}.opportunity-grid{grid-template-columns:1fr}.opportunity-metrics{grid-template-columns:1fr}.gate-summary{align-items:flex-start;flex-direction:column;gap:2px}.risk-line{align-items:flex-start;flex-direction:column}.risk-line .jump{width:100%}
-    .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
+    .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.validation-overview{padding:15px 14px}.validation-overview-head{flex-direction:column;gap:9px}.validation-overview-title{font-size:18px}.validation-overview-copy{font-size:11px}.validation-card{flex:0 0 min(82vw,310px)}.validation-card-title{font-size:13px}.validation-field .vv{font-size:11.5px}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
     .exp>td{padding:0}.exp-detail{position:sticky;left:0;width:calc(100vw - 24px);max-width:calc(100vw - 24px);box-sizing:border-box;padding:12px 14px;overflow-wrap:anywhere;word-break:break-word}.exp-detail a,.exp-detail code{overflow-wrap:anywhere;word-break:break-word}
     .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}.coverage-strip{grid-template-columns:1fr}
     .launch-protocol{padding:15px 14px}.launch-protocol-head{flex-direction:column}.launch-protocol-grid{grid-template-columns:1fr}.protocol-reasons li{align-items:flex-start;flex-direction:column}.protocol-reasons code{text-align:left}.reconciliation-proof-grid{grid-template-columns:1fr}
@@ -621,14 +641,139 @@ function carryEvidenceUiState(paper,evidence){
     &&en===ep&&evidence.hits<=en&&et===en+ex
     &&evidence.verdict===(en>=20?"measured":"不可判")
     &&exclusionsValid(evidence.excluded_by_reason,ex);
-  const available=paperValid&&evidenceValid;
+  const countsJoined=paperValid&&evidenceValid
+    &&pn===en&&pt===et&&px===ex;
+  const available=paperValid&&evidenceValid&&countsJoined;
   return{
     available,
-    paper:available?paper:{},
+    // A valid perps lifecycle may remain visible on its own clock, but it cannot
+    // contribute to an evidence verdict until the stats closed counts join exactly.
+    paper:paperValid?paper:{},
     evidence:available?evidence:{edge_verdict:"合同无效·不可判"},
     realEdgeDisplay:available?0:"不可判",
-    reason:available?null:"Carry 公开优势合同缺失或无效",
+    reason:available?null:paperValid&&evidenceValid&&!countsJoined
+      ?"Carry paper/stats 关闭计数跨快照不一致"
+      :"Carry 公开优势合同缺失或无效",
   };
+}
+const VALIDATION_LANE_ORDER=Object.freeze(["launch","cascade","carry","airdrop","structure"]);
+const VALIDATION_LANE_LABELS=Object.freeze({launch:"Launch",cascade:"Cascade",carry:"Carry",airdrop:"Airdrop",structure:"Structure"});
+const VALIDATION_CONTRACT=Object.freeze({
+  launch:{verdicts:["blocked","collecting","inconclusive","no_edge_observed","paper_signal","unverifiable"],targetUnit:"per_arm",evidence:"append_only_frozen_cost_24h_paper_selector",benchmark:"contemporaneous_watch",uncertainty:"sequential_spa_upper_p",unit:"pct"},
+  cascade:{verdicts:["collecting","descriptive_only","unverifiable"],targetUnit:"events",evidence:"estimated_cost_adjusted_24h_not_real_fill",benchmark:"missing_contemporaneous_control",uncertainty:"wilson_95_positive_rate",unit:"pct"},
+  carry:{verdicts:["collecting","descriptive_only","unverifiable"],targetUnit:"valid_quote_proxy_closures",evidence:"partial_quote_rate_and_book_cost_proxy",benchmark:"missing_real_settlement_and_full_cost_control",uncertainty:"wilson_95_positive_rate",unit:"pct"},
+  airdrop:{verdicts:["descriptive_only","unverifiable"],targetUnit:"fully_verified_claims_no_edge_denominator",evidence:"fully_verified_claim_net_usd",benchmark:"missing_participation_failure_denominator",uncertainty:"not_available_without_denominator",unit:"usd"},
+  structure:{verdicts:["not_applicable","unverifiable"],targetUnit:"observed_events_not_directional_trials",evidence:"non_directional_structure_observation",benchmark:"not_applicable",uncertainty:"not_applicable",unit:"not_applicable"},
+});
+function validationOverviewFallback(reason="validation_overview_missing_or_invalid"){
+  const rows=VALIDATION_LANE_ORDER.map(lane=>({lane,verdict:"unverifiable",
+    sample:{valid_n:null,target_n:null,target_unit:"unverifiable",launch_arms:null},
+    result:{evidence_type:"unverifiable",summary:"验证投影缺失或合同无效，未发布结果",primary_value:null,comparison_value:null,unit:"not_applicable",is_real_fill:false},
+    benchmark:{kind:"unverifiable",summary:"基准合同不可验证"},
+    uncertainty:{kind:"unverifiable",state:"unavailable",summary:"不确定性合同不可验证",value:null,lower:null,upper:null,threshold:null},
+    blocking_reason:reason,real_edge_n:0,execution_edge_eligible:false,auto_execution_allowed:false}));
+  return{available:false,state:"unverifiable",reasonCodes:VALIDATION_LANE_ORDER.map(lane=>`${lane}_unverifiable`),rows};
+}
+function validationOverviewUiState(raw=data.stats?.validation_overview){
+  const object=value=>value!==null&&typeof value==="object"&&!Array.isArray(value);
+  const exact=(value,keys)=>object(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
+  const uint=value=>Number.isSafeInteger(value)&&value>=0;
+  const nullableUint=value=>value===null||uint(value);
+  const finite=value=>typeof value==="number"&&Number.isFinite(value);
+  const nullableFinite=value=>value===null||finite(value);
+  const probability=value=>finite(value)&&value>=0&&value<=1;
+  const text=value=>typeof value==="string"&&value.trim().length>0;
+  const overallKeys=["version","state","lane_order","reason_codes","real_edge_n","execution_edge_eligible","auto_execution_allowed","rows"];
+  if(!exact(raw,overallKeys)||raw.version!==1||!["no_execution_edge","unverifiable"].includes(raw.state)
+    ||raw.real_edge_n!==0||raw.execution_edge_eligible!==false||raw.auto_execution_allowed!==false
+    ||!Array.isArray(raw.lane_order)||JSON.stringify(raw.lane_order)!==JSON.stringify(VALIDATION_LANE_ORDER)
+    ||!Array.isArray(raw.rows)||raw.rows.length!==VALIDATION_LANE_ORDER.length
+    ||!Array.isArray(raw.reason_codes)||new Set(raw.reason_codes).size!==raw.reason_codes.length)return validationOverviewFallback();
+  const rowKeys=["lane","verdict","sample","result","benchmark","uncertainty","blocking_reason","real_edge_n","execution_edge_eligible","auto_execution_allowed"];
+  const sampleKeys=["valid_n","target_n","target_unit","launch_arms"];
+  const resultKeys=["evidence_type","summary","primary_value","comparison_value","unit","is_real_fill"];
+  const benchmarkKeys=["kind","summary"];
+  const uncertaintyKeys=["kind","state","summary","value","lower","upper","threshold"];
+  const normalized=[];
+  for(let index=0;index<VALIDATION_LANE_ORDER.length;index++){
+    const lane=VALIDATION_LANE_ORDER[index],cfg=VALIDATION_CONTRACT[lane],row=raw.rows[index];
+    if(!exact(row,rowKeys)||row.lane!==lane||!cfg.verdicts.includes(row.verdict)
+      ||row.real_edge_n!==0||row.execution_edge_eligible!==false||row.auto_execution_allowed!==false
+      ||!(row.blocking_reason===null||text(row.blocking_reason)))return validationOverviewFallback();
+    const sample=row.sample,result=row.result,benchmark=row.benchmark,uncertainty=row.uncertainty;
+    if(!exact(sample,sampleKeys)||!nullableUint(sample.valid_n)||!nullableUint(sample.target_n)||!text(sample.target_unit)
+      ||!exact(result,resultKeys)||!text(result.evidence_type)||!text(result.summary)||!nullableFinite(result.primary_value)||!nullableFinite(result.comparison_value)||!text(result.unit)||result.is_real_fill!==false
+      ||!exact(benchmark,benchmarkKeys)||!text(benchmark.kind)||!text(benchmark.summary)
+      ||!exact(uncertainty,uncertaintyKeys)||!text(uncertainty.kind)||!["available","not_due","unavailable","not_applicable"].includes(uncertainty.state)||!text(uncertainty.summary)
+      ||![uncertainty.value,uncertainty.lower,uncertainty.upper,uncertainty.threshold].every(nullableFinite))return validationOverviewFallback();
+    const invalid=row.verdict==="unverifiable";
+    if(invalid){
+      if(sample.valid_n!==null||sample.target_n!==null||sample.target_unit!=="unverifiable"||sample.launch_arms!==null
+        ||result.evidence_type!=="unverifiable"||result.summary!=="验证输入缺失或合同无效，未发布结果"||result.primary_value!==null||result.comparison_value!==null||result.unit!=="not_applicable"
+        ||benchmark.kind!=="unverifiable"||benchmark.summary!=="基准合同不可验证"
+        ||uncertainty.kind!=="unverifiable"||uncertainty.state!=="unavailable"||uncertainty.summary!=="不确定性合同不可验证"
+        ||[uncertainty.value,uncertainty.lower,uncertainty.upper,uncertainty.threshold].some(value=>value!==null)
+        ||!text(row.blocking_reason))return validationOverviewFallback();
+    }else{
+      if(sample.target_unit!==cfg.targetUnit||result.evidence_type!==cfg.evidence||result.unit!==cfg.unit
+        ||benchmark.kind!==cfg.benchmark||uncertainty.kind!==cfg.uncertainty)return validationOverviewFallback();
+      if(lane==="launch"){
+        const arms=sample.launch_arms,armKeys=["eligible_n","resolved_n"];
+        if(!exact(arms,["probe","control"])||!exact(arms.probe,armKeys)||!exact(arms.control,armKeys)
+          ||![arms.probe.eligible_n,arms.probe.resolved_n,arms.control.eligible_n,arms.control.resolved_n].every(uint)
+          ||arms.probe.resolved_n>arms.probe.eligible_n||arms.control.resolved_n>arms.control.eligible_n
+          ||sample.valid_n!==Math.min(arms.probe.resolved_n,arms.control.resolved_n)
+          ||![100,200,400,800,1600,3200].includes(sample.target_n))return validationOverviewFallback();
+      }else if(sample.launch_arms!==null)return validationOverviewFallback();
+      if(["cascade","carry"].includes(lane)&&(sample.target_n!==20||!uint(sample.valid_n)))return validationOverviewFallback();
+      if(["airdrop","structure"].includes(lane)&&(sample.target_n!==null||!uint(sample.valid_n)))return validationOverviewFallback();
+      if(uncertainty.kind==="wilson_95_positive_rate"){
+        if(uncertainty.state==="available"){
+          if(!probability(uncertainty.value)||!probability(uncertainty.lower)||!probability(uncertainty.upper)
+            ||uncertainty.lower>uncertainty.value||uncertainty.value>uncertainty.upper||uncertainty.threshold!==null)return validationOverviewFallback();
+        }else if(uncertainty.value!==null||uncertainty.lower!==null||uncertainty.upper!==null||uncertainty.threshold!==null)return validationOverviewFallback();
+      }else if(uncertainty.kind==="sequential_spa_upper_p"){
+        if(uncertainty.threshold!==0.00833333||uncertainty.lower!==null||uncertainty.upper!==null
+          ||uncertainty.state==="available"&&!probability(uncertainty.value)
+          ||uncertainty.state!=="available"&&uncertainty.value!==null)return validationOverviewFallback();
+      }else if([uncertainty.value,uncertainty.lower,uncertainty.upper,uncertainty.threshold].some(value=>value!==null))return validationOverviewFallback();
+      if(row.verdict==="paper_signal"&&(uncertainty.state!=="available"||uncertainty.value>uncertainty.threshold
+        ||!finite(result.primary_value)||!finite(result.comparison_value)))return validationOverviewFallback();
+      if(["cascade","carry"].includes(lane)){
+        const measured=row.verdict==="descriptive_only";
+        if(measured&&(sample.valid_n<20||uncertainty.state!=="available"||!finite(result.primary_value)
+          ||lane==="carry"&&!finite(result.comparison_value))
+          ||!measured&&(sample.valid_n>=20||uncertainty.state!=="not_due"||result.primary_value!==null||result.comparison_value!==null))return validationOverviewFallback();
+      }
+    }
+    normalized.push(row);
+  }
+  const invalidLanes=normalized.filter(row=>row.verdict==="unverifiable").map(row=>row.lane);
+  const expectedReasons=invalidLanes.map(lane=>`${lane}_unverifiable`);
+  if(JSON.stringify(raw.reason_codes)!==JSON.stringify(expectedReasons)
+    ||raw.state!==(invalidLanes.length?"unverifiable":"no_execution_edge"))return validationOverviewFallback();
+  return{available:true,state:raw.state,reasonCodes:[...raw.reason_codes],rows:normalized};
+}
+function validationVerdictLabel(value){return({blocked:"阻断",collecting:"积累中",inconclusive:"不可判",no_edge_observed:"无优势/负",paper_signal:"纸面迹象",descriptive_only:"仅描述",not_applicable:"不适用",unverifiable:"不可验证"}[value]||"不可验证")}
+function validationSampleLabel(row){
+  const sample=row.sample;if(sample.valid_n===null)return"不可验证";
+  if(sample.target_n===null)return String(sample.valid_n);
+  return `${sample.valid_n}/${sample.target_n}`;
+}
+function validationOverviewDisplayState(state=validationOverviewUiState()){
+  if(!state.available||launchStatsJoinState().edgeUsable)return state;
+  const sentinel=validationOverviewFallback("协议同步中·不可验证").rows.find(row=>row.lane==="launch");
+  return{...state,rows:state.rows.map(row=>row.lane==="launch"?sentinel:row),launchIsolated:true};
+}
+function validationOverviewHtml(state=validationOverviewDisplayState()){
+  const headline=state.available&&state.state==="no_execution_edge"?"尚无可执行优势":"优势状态不可验证｜按不可行动处理";
+  const cards=state.rows.map(row=>{
+    const sample=row.sample,arms=sample.launch_arms;
+    const armsHtml=arms?`<div class="validation-arms"><div class="validation-arm"><b>SMALL_PROBE</b><span>入组 ${esc(arms.probe.eligible_n)} · 结算 ${esc(arms.probe.resolved_n)}</span></div><div class="validation-arm"><b>WATCH</b><span>入组 ${esc(arms.control.eligible_n)} · 结算 ${esc(arms.control.resolved_n)}</span></div></div>`:"";
+    const targetNote=sample.target_n===null?esc(sample.target_unit):`${esc(sample.target_unit)} · 目标 ${esc(sample.target_n)}`;
+    return `<article class="validation-card" data-validation-lane="${esc(row.lane)}" data-verdict="${esc(row.verdict)}"><div class="validation-card-head"><span class="validation-card-title">${esc(VALIDATION_LANE_LABELS[row.lane])}</span><span class="validation-verdict">${esc(validationVerdictLabel(row.verdict))}</span></div><div class="validation-sample">${esc(validationSampleLabel(row))}<small>${targetNote}</small></div>${armsHtml}<div class="validation-field"><span class="vk">结果证据</span><span class="vv">${esc(row.result.summary)}</span></div><div class="validation-field"><span class="vk">基准 / 对照</span><span class="vv">${esc(row.benchmark.summary)}</span></div><div class="validation-field"><span class="vk">不确定性 · ${esc(row.uncertainty.kind)}</span><span class="vv">${esc(row.uncertainty.summary)}</span></div><div class="validation-field blocker"><span class="vk">阻断 / 失效</span><span class="vv">${esc(row.blocking_reason||"无当前阻断；仍不构成执行优势")}</span></div></article>`;
+  }).join("");
+  return `<section id="validation-overview" class="validation-overview" data-state="${esc(state.state)}" aria-label="优势验证总览"><div class="validation-overview-head"><div><div class="validation-overview-kicker">持续验证 · 同一 Stats 快照</div><h2 class="validation-overview-title">${headline}</h2><p class="validation-overview-copy">样本、结果、基准和不确定性只读取服务端预塑形合同；市场候选与生命周期不会被拼成优势判决。</p></div><span class="validation-auto-off">自动交易 OFF</span></div><div class="validation-overview-grid">${cards}</div></section>`;
 }
 const RUNTIME_SAFETY_REASONS=Object.freeze({
   runtime_health_unavailable:"运行健康证据缺失或不可验证",
@@ -1292,7 +1437,7 @@ const LANES={
   },
   perp:{
     title:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),single=c.filter(x=>x.cross!==true),health=d?.carry_source_health||{};const pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0);const top=pos[0],proof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry);const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos.length}/${cross.length}${top?`，最高代理 +${top.partial_model_proxy_ann_pct}%(${esc(top.symbol)})`:''}。另有单所现货对冲候选 ${single.length} 个，不进入双腿纸面账本。真实优势样本 ${esc(proof.realEdgeDisplay)}。`},
-    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],proof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry),pp=proof.paper,ev=proof.evidence;return[["跨所代理>0",`${pos.length}/${cross.length}`,`14天部分情景 · 本轮新入场盘口 ${pp.new_entry_quote_attempted??"?"}/${pp.new_entry_quote_cap??"?"} · 容量延后 ${pp.new_entry_candidates_deferred??"?"}`],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"} · 旧open隔离 ${pp.n_quarantined_total??"?"}`],["真实优势样本",proof.realEdgeDisplay,proof.available?"仍不可判":"合同无效·不可判"]]},
+    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],proof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry),pp=proof.paper,ev=proof.evidence;return[["跨所代理>0",`${pos.length}/${cross.length}`,`14天部分情景 · 本轮新入场盘口 ${pp.new_entry_quote_attempted??"?"}/${pp.new_entry_quote_cap??"?"} · 容量延后 ${pp.new_entry_candidates_deferred??"?"}`],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"} · 旧协议 open 隔离 ${pp.n_quarantined_total??"?"}`],["真实优势样本",proof.realEdgeDisplay,proof.available?"仍不可判":"合同无效·不可判"]]},
     readme:"💰资金费 Carry 是当前值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。当前关闭样本也只是报价率积分减盘口报价和费用假设的描述性代理；basis、账户费率、抵押成本、调仓和实际结算都缺失，因此真实优势样本仍为 0。下面的拥挤/点火仅作方向防御观察。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -1601,18 +1746,11 @@ function renderPlay(){
   const allCarry=data.perp?.carry||[];
   const carry=allCarry.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0);
   const singleVenueCarry=allCarry.filter(x=>x.cross!==true);
+  const validationOverview=validationOverviewDisplayState();
+  const validationByLane=Object.fromEntries(validationOverview.rows.map(row=>[row.lane,row]));
   const carryProof=carryEvidenceUiState(data.perp?.carry_paper,data.stats?.lanes?.carry);
   const pp=carryProof.paper;
   const carryHealth=data.perp?.carry_source_health||{};
-  const carryEvidence=carryProof.evidence;
-  const launchJoin=launchStatsJoinState();
-  const launchEvidence=launchJoin.edgeUsable?data.stats?.lanes?.launch:null;
-  const launchValidation=launchEvidence?.edge_validation||{};
-  const launchEligible=launchValidation.eligible_n||{};
-  const launchProtocolLabel=Number.isInteger(launchValidation.cohort_version)?`v${launchValidation.cohort_version}`:"当前协议";
-  const launchTarget=launchEvidence?(launchValidation.state==="awaiting_outcomes"?(launchValidation.look_n_per_arm||100):(launchValidation.next_look_n_per_arm||launchValidation.look_n_per_arm||100)):null;
-  const sourceHealth=data.structure?.source_health||[];
-  const sourceOk=sourceHealth.filter(x=>x.status==="ok").length;
   const dep=(data.op?.operators||[]).filter(depNow);
   const avoid=avoidRows(data.opp);
   const structureEvents=data.structure?.events||[];
@@ -1631,11 +1769,12 @@ function renderPlay(){
   const freshness=opportunityViewFreshness();
   const freshnessClass=freshness.state==="ok"?"b-good":freshness.state==="partial"?"b-warn":"b-danger";
   const sourceHeadline=opportunitySourceHeadline();
-  const carryValid=Number.isFinite(pp.n_proxy_closed)?pp.n_proxy_closed:(Number.isFinite(carryEvidence?.n_proxy)?carryEvidence.n_proxy:null);
-  const launchResolved=Number.isFinite(launchEvidence?.n)?launchEvidence.n:null;
-  const trackingValue=`L ${launchResolved??"?"} · C ${carryValid??"?"}`;
+  const trackingValue=validationOverview.available
+    ?`L ${validationSampleLabel(validationByLane.launch)} · C ${validationSampleLabel(validationByLane.carry)}`
+    :"不可验证";
   let h='<div class="scroll play">';
   h+=runtimeSafetyBanner(runtimeSafety);
+  h+=validationOverviewHtml(validationOverview);
   const verdict=runtimeSafety.blocks?'采集受阻 · 当前不可行动':!data.launch?'不可判 · Launch 视图缺失':!launchProtocol.open?'等待 · Launch 来源准入未开放':actionCount?`${actionCount} 个人工小额验证窗仍有效`:'等待 · 当前不入场';
   const verdictCopy=runtimeSafety.blocks
     ?'运行源健康证据缺失或已明确阻断，所有 A3 已强制降为 A1。先恢复采集与运行门禁，再重新验证报价、来源和证据；视图按时不代表上游完整。'
@@ -1666,17 +1805,10 @@ function renderPlay(){
   h+=launchOpportunityQueue(launches);
   h+=renderMarketCoverageMatrix();
   h+=carryHealthHtml(carryHealth);
-  const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
-  const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:(carryValid!=null&&carryTotal!=null?Math.max(0,carryTotal-carryValid):null);
-  h+=`<section class="evidence-grid" aria-label="证据与覆盖">
-    ${launchJoin.edgeUsable?`<div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 ${esc(launchProtocolLabel)} 追加式精确池 24h、连续 UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>`:`<div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">协议同步中·不可判</span></div><div class="ev">— <small class="dim">Launch 统计 edge 已隔离</small></div><div class="es">当前 Launch 实时事件继续展示；Stats 其他赛道不受影响。跨视图状态 ${esc(launchJoin.state)} · ${esc((launchJoin.reasonCodes||[]).join(" / ")||"meta 未绑定当前快照")}。</div></div>`}
-    <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid??'?'}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal??'?'} · 排除 ${carryExcluded??'?'} · 旧协议 open 隔离 ${pp.n_quarantined_total??0}；模型代理为正，成本组件仍不全时也只作纸面候选；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,(carryValid??0)/20*100)}%"></i></div></div>
-    <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
-  </section>`;
   // 1) EDGE
-  h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">尚无获证 edge · 纸面优先</span></div>';
+  h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">同快照判决见上方 · 非执行</span></div>';
   if(carry.length){
-    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。当前输出是报价率积分减盘口报价与费用假设的描述性代理，不是实际结算或完整 PnL；有效代理关闭 <b>${carryValid??'?'}</b> / 总关闭 ${carryTotal??'?'}，旧协议 open 隔离 <b>${pp.n_quarantined_total??0}</b>，真实优势样本 <b>${pp.real_edge_n??carryEvidence?.real_edge_n??0}</b>。</div>`;
+    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。优势样本与结果只认上方同一 Stats 快照：${esc(validationByLane.carry.result.summary)}。以下候选与生命周期来自市场观察，不组成优势判决，也不是实际结算或完整 PnL。</div>`;
     h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛资金费差 ${esc(c.gross_funding_diff_ann_pct)} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
   } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
   h+='</div>';
@@ -1691,7 +1823,7 @@ function renderPlay(){
   // 3) DON'T
   h+='<div class="play-sec"><div class="ph">🚫 别做:顶刊实证的散户负EV陷阱</div><div class="pnote">跟 🐋 聪明钱买入去接盘 · 追 💎 早期扫描的币做多 · 买 💰 庄吸筹跟庄 · 裸做空高资金费。这些标签是让你<b>看清结构、别当接盘侠</b>,不是让你照着买。跟买吸筹:pump 后 ~18 秒见顶、跟随者胜率 48%&lt;50%、非 insider 负回报。</div></div>';
   // VERDICT
-  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个部分模型代理为正的跨所 Carry 纸面候选`:'进攻端无跨所部分模型代理为正的候选'}，另有 ${singleVenueCarry.length} 个单所现货对冲观察项未进入双腿验证；<b>当前没有通过证据门的真 edge</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
+  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个部分模型代理为正的跨所 Carry 纸面候选`:'进攻端无跨所部分模型代理为正的候选'}，另有 ${singleVenueCarry.length} 个单所现货对冲观察项未进入双腿验证；<b>${validationOverview.available&&validationOverview.state==="no_execution_edge"?'服务端同快照结论仍是尚无可执行优势':'优势状态不可验证，按不可行动处理'}</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
   return h+'</div>';
 }
 
@@ -1719,6 +1851,7 @@ function carryHealthHtml(health){
 
 function carryEvidenceHtml(pp,evidence,scorecard){
   const proof=carryEvidenceUiState(pp,evidence);pp=proof.paper;evidence=proof.evidence;
+  if(!proof.available)return `<div class="sc-card muted"><span class="k">Carry 优势证据</span><span class="v">合同无效·不可判 <small>${esc(proof.reason||"Carry 公开优势合同缺失或无效")}；独立生命周期不组成优势判决。</small></span></div>`;
   const valid=Number.isFinite(pp?.n_proxy_closed)?pp.n_proxy_closed:(Number.isFinite(evidence?.n_proxy)?evidence.n_proxy:null);
   const total=Number.isFinite(pp?.n_closed_total)?pp.n_closed_total:valid;
   const excluded=Number.isFinite(pp?.n_closed_excluded)?pp.n_closed_excluded:(valid!=null&&total!=null?Math.max(0,total-valid):null);

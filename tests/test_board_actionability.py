@@ -184,7 +184,8 @@ def test_launch_action_requires_statistical_evidence_gate():
     assert "准入+独立对账+完整成本+报价+纸面证据+送达SLA" in html
     assert "成本后 24h 试验组相对同期 WATCH 对照的纸面证据门" in html
     assert "当前预注册协议的前向固定前缀" in html
-    assert "launchValidation.cohort_version" in html
+    assert "function validationOverviewUiState" in html
+    assert 'sample.launch_arms' in html
     assert "ev.cohort_version" in html
     assert "连续 UTC 日历" in html
     assert "sequential SPA/Reality Check" in html
@@ -217,7 +218,8 @@ def test_carry_hypothesis_never_claims_proven_edge_before_evidence():
 
     assert "它尚不是已证明的正 EV" in html
     assert "Carry 优势证据" in html
-    assert "当前没有通过证据门的真 edge" in html
+    assert "尚无可执行优势" in html
+    assert "独立生命周期不组成优势判决" in html
     assert "部分模型代理/年" in html and "纸面结构" in html
     assert "唯一「个人真能做出正EV」" not in html
     assert "唯一有结构 edge 的" not in html
@@ -358,7 +360,7 @@ def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     assert 'aria-label="当前决策"' in html
     assert "等待 · 当前不入场" in html
     assert "准入+独立对账+新鲜报价+完整成本+纸面证据+送达SLA" in html
-    assert "模型代理为正，成本组件仍不全" in html
+    assert "部分模型代理为正，尚未证明真实成本后优势" in html
     assert "不代表全市场覆盖" in html
     assert 'data-jump="launch"' in html
     assert 'data-jump="perp"' in html

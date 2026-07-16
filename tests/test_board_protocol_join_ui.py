@@ -10,6 +10,9 @@ from urllib.parse import urlparse
 
 import pytest
 
+from src.pipeline.validation_overview import build_validation_overview
+from tests.test_validation_overview import _lanes as _validation_lanes
+
 
 ROOT = Path(__file__).parents[1]
 BOARD = ROOT / "board" / "public" / "index.html"
@@ -131,7 +134,10 @@ def _launch(generated_at: str, admission: dict, symbol: str = "LIVE-EVENT") -> d
 
 
 def _stats(generated_at: str, admission: dict, edge: str = "LAUNCH-EDGE") -> dict:
-    _, carry = _carry_contract()
+    validation_lanes = _validation_lanes()
+    overview = build_validation_overview(validation_lanes)
+    launch_row = next(row for row in overview["rows"] if row["lane"] == "launch")
+    launch_row["result"]["summary"] = edge
     return {
         "schema_version": 1,
         "generated_at": generated_at,
@@ -145,8 +151,9 @@ def _stats(generated_at: str, admission: dict, edge: str = "LAUNCH-EDGE") -> dic
                     "look_n_per_arm": 100,
                 },
             },
-            "carry": carry,
+            "carry": validation_lanes["carry"],
         },
+        "validation_overview": overview,
     }
 
 
@@ -293,8 +300,9 @@ def test_board_loads_meta_and_only_quarantines_launch_stats():
 
     assert '"operators","stats","meta"' in html
     assert "if(me&&me.schema_version===1)data.meta=me" in html
-    assert "const launchEvidence=launchJoin.edgeUsable?data.stats?.lanes?.launch:null" in html
-    assert "协议同步中·不可判" in html and "Launch 统计 edge 已隔离" in html
+    assert "function validationOverviewDisplayState" in html
+    assert 'row.lane==="launch"?sentinel:row' in html
+    assert "协议同步中·不可验证" in html
     assert "carryEvidenceUiState(data.perp?.carry_paper,data.stats?.lanes?.carry)" in html
     assert "const carryEvidence=data.stats?.lanes?.carry" not in html
     assert 'if(view==="launch"&&!launchJoin.edgeUsable)' in html
@@ -354,7 +362,7 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
         phase["stats_fail"] = True
         page.evaluate("load()")
         text = body.inner_text()
-        assert "协议同步中·不可判" in text
+        assert "协议同步中·不可验证" in text
         assert "OLD-LAUNCH-EDGE-MUST-DISAPPEAR" not in text
         assert "NEW-LAUNCH-EVENT" in text
         assert "CARRY-CONTRACT-UNAFFECTED" in text
@@ -414,7 +422,7 @@ def test_fast_poll_fail_closes_on_old_meta_then_recovers_with_new_certificate():
         payloads["launch"] = new_launch
         page.evaluate("loadLaunch()")
         text = body.inner_text()
-        assert "协议同步中·不可判" in text
+        assert "协议同步中·不可验证" in text
         assert "EDGE-RETURNS-AFTER-META-JOIN" not in text
         assert "NEW-POLL-EVENT" in text
         first_poll = fast_requests.copy()
@@ -424,7 +432,7 @@ def test_fast_poll_fail_closes_on_old_meta_then_recovers_with_new_certificate():
         page.evaluate("loadLaunch()")
         text = body.inner_text()
         assert "EDGE-RETURNS-AFTER-META-JOIN" in text
-        assert "协议同步中·不可判" not in text
+        assert "协议同步中·不可验证" not in text
         second_poll = fast_requests.copy()
 
         for poll in (first_poll, second_poll):
