@@ -1145,17 +1145,28 @@ def source_readiness(
         except (TypeError, ValueError, OverflowError):
             sealed_lag = None
     runtime_lag = None
+    runtime_cursor_behind_epoch = False
     if live and live.get("cursor") is not None and epochs:
         try:
-            runtime_lag = max(0, int(live["cursor"]) - int(epochs[0][2]))
+            live_cursor = int(live["cursor"])
+            latest_epoch_end = int(epochs[0][2])
+            if live_cursor < latest_epoch_end:
+                runtime_cursor_behind_epoch = True
+            else:
+                runtime_lag = live_cursor - latest_epoch_end
         except (TypeError, ValueError, OverflowError):
             runtime_lag = None
-    lag_ok = bool(
+    sealed_lag_ok = bool(
         sealed_lag is not None and 0 <= sealed_lag <= max_finalized_lag_slots
-        and (not require_runtime_health or (
-            runtime_lag is not None and runtime_lag <= max_finalized_lag_slots
-        ))
     )
+    runtime_lag_ok = bool(
+        not require_runtime_health or (
+            not runtime_cursor_behind_epoch
+            and runtime_lag is not None
+            and runtime_lag <= max_finalized_lag_slots
+        )
+    )
+    lag_ok = sealed_lag_ok and runtime_lag_ok
     try:
         independent = bool(
             archive_endpoint
@@ -1177,7 +1188,10 @@ def source_readiness(
         reasons.append("reconciliation_epoch_breached")
     if epochs and not fresh:
         reasons.append("reconciliation_evidence_stale")
-    if epochs and not lag_ok:
+    if runtime_cursor_behind_epoch:
+        reasons.append("live_cursor_behind_reconciliation_epoch")
+    if epochs and (not sealed_lag_ok or (
+            not runtime_cursor_behind_epoch and not runtime_lag_ok)):
         reasons.append("reconciliation_slot_lag_exceeded")
     if not runtime_ok:
         reasons.append("live_stream_health_not_ready")

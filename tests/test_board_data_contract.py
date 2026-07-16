@@ -28,7 +28,8 @@ def _source_readiness(*, ready: bool = False) -> dict:
         "archive_provider": archive_provider, "checked_at": now,
         "missing_live": 0, "extra_live": 0, "finalized_head": 103,
     } if ready else None)
-    stream = {"status": "live", "open_gaps": 0}
+    live_stream = {"status": "live", "open_gaps": 0, "cursor": 103}
+    maintenance_stream = {"status": "live", "open_gaps": 0}
     return {
         "state": "ready" if ready else "blocked", "ready": ready,
         "live_provider": live_provider, "archive_provider": archive_provider,
@@ -39,8 +40,8 @@ def _source_readiness(*, ready: bool = False) -> dict:
         "latest_runtime_lag_slots": 0 if ready else None,
         "latest_epoch": epoch,
         "runtime": {
-            "live": stream if ready else None,
-            "maintenance": stream if ready else None,
+            "live": live_stream if ready else None,
+            "maintenance": maintenance_stream if ready else None,
         },
         "reason_codes": [] if ready else ["archive_provider_not_configured"],
     }
@@ -409,6 +410,8 @@ def test_open_launch_context_rejects_every_readiness_and_admission_contradiction
         lambda body: readiness(body).update(observed_epochs=1),
         lambda body: readiness(body).update(latest_age_seconds=301),
         lambda body: readiness(body).update(latest_runtime_lag_slots=257),
+        lambda body: readiness(body)["runtime"]["live"].update(cursor=102),
+        lambda body: readiness(body)["runtime"]["live"].update(cursor=104),
         lambda body: readiness(body)["latest_epoch"].update(status="sealed_breached"),
         lambda body: readiness(body)["latest_epoch"].update(missing_live=1),
         lambda body: readiness(body)["runtime"]["live"].update(open_gaps=1),

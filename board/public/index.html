@@ -445,6 +445,7 @@ const LAUNCH_PROTOCOL_REASON_LABELS=Object.freeze({
   reconciliation_epoch_breached:"finalized 对账发现漏捕或多捕",
   reconciliation_evidence_stale:"finalized 对账证据已陈旧",
   reconciliation_slot_lag_exceeded:"finalized 对账 slot 距离实时头部过远",
+  live_cursor_behind_reconciliation_epoch:"实时流 cursor 落后最新 finalized 对账 epoch",
   live_stream_health_not_ready:"实时流或维护流未达到准入健康要求",
   protocol_gate_not_initialized:"持久化协议闸门尚未初始化",
   protocol_start_not_reached:"预注册协议开始边界尚未到达",
@@ -539,9 +540,12 @@ function launchProtocolUiState(d,now=Date.now()){
   const providerHost=value=>typeof value==="string"?value.replace(/^solana_rpc:/,"").replace(/:\d+$/,"").toLowerCase():"";
   const providersValid=typeof readiness?.live_provider==="string"&&typeof readiness?.archive_provider==="string"
     &&providerHost(readiness.live_provider)&&providerHost(readiness.live_provider)!==providerHost(readiness.archive_provider);
+  const live=runtime.live,maintenance=runtime.maintenance;
   const maxLag=readiness?.max_finalized_lag_slots,sealedLag=readiness?.latest_sealed_lag_slots,runtimeLag=readiness?.latest_runtime_lag_slots;
+  const liveCursorValid=Number.isInteger(live?.cursor)&&Number.isInteger(latest?.to_slot)
+    &&live.cursor>=latest.to_slot&&runtimeLag===live.cursor-latest.to_slot;
   const lagValid=Number.isInteger(maxLag)&&maxLag>=0&&Number.isInteger(sealedLag)&&sealedLag>=0&&sealedLag<=maxLag
-    &&Number.isInteger(runtimeLag)&&runtimeLag>=0&&runtimeLag<=maxLag;
+    &&Number.isInteger(runtimeLag)&&runtimeLag>=0&&runtimeLag<=maxLag&&liveCursorValid;
   const epochValid=latest&&typeof latest==="object"&&typeof latest.epoch_id==="string"&&latest.epoch_id.length>0
     &&Number.isInteger(latest.from_slot)&&Number.isInteger(latest.to_slot)&&latest.from_slot<=latest.to_slot
     &&latest.status==="sealed_clean"&&latest.missing_live===0&&latest.extra_live===0
@@ -551,7 +555,6 @@ function launchProtocolUiState(d,now=Date.now()){
     &&Number.isFinite(new Date(latest.checked_at||"").getTime())&&typeof latestAge==="number"&&Number.isFinite(latestAge)&&latestAge>=0
     &&typeof maxAge==="number"&&Number.isFinite(maxAge)&&maxAge>0&&latestAge<=maxAge;
   if(!epochValid)add("readiness_epoch_proof_missing");
-  const live=runtime.live,maintenance=runtime.maintenance;
   const runtimeValid=live?.status==="live"&&live?.stale===false&&Number.isInteger(live?.open_gaps)&&live.open_gaps===0
     &&maintenance?.status==="live"&&maintenance?.stale===false&&Number.isInteger(maintenance?.open_gaps)&&maintenance.open_gaps===0;
   if(!runtimeValid)add("readiness_runtime_unhealthy");

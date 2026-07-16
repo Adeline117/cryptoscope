@@ -440,6 +440,40 @@ def test_one_clean_epoch_and_live_health_can_satisfy_test_burn_in(reconcile):
     assert got["ready"] is True and got["state"] == "ready"
 
 
+def test_old_out_of_order_live_cursor_behind_latest_epoch_blocks_readiness(reconcile):
+    module, stream, health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    stream.persist(
+        _payload(), transaction=_transaction(), capture_mode="live_ws",
+        captured_at=now, source_provider="solana_rpc:live.example",
+    )
+    module.reconcile_next_epoch(
+        FakeRpc("https://live.example"), FakeRpc("https://archive.example"),
+        now=now, epoch_slots=4, safety_slots=0, start_slot=100,
+    )
+    health.observe(
+        "solana", "pump_fun_launches", cursor=102, received_at=now,
+        expect_contiguous=True,
+    )
+    old = health.observe(
+        "solana", "pump_fun_launches", cursor=101, received_at=now,
+        expect_contiguous=True,
+    )
+    health.report_worker(
+        "solana", stream.MAINTENANCE_STREAM, status="live", at=now,
+    )
+
+    got = module.source_readiness(now=now, required_clean_epochs=1)
+
+    assert old["classification"] == "out_of_order" and old["cursor"] == 102
+    assert got["latest_epoch"]["to_slot"] == 103
+    assert got["latest_runtime_lag_slots"] is None
+    assert got["ready"] is False and got["state"] == "blocked"
+    assert got["reason_codes"] == [
+        "live_cursor_behind_reconciliation_epoch",
+    ]
+
+
 def test_same_provider_or_incomplete_signature_page_fails_closed(reconcile):
     module, _stream, _health = reconcile
     with pytest.raises(module.ReconciliationError, match="different hosts"):

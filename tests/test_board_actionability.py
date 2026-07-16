@@ -504,6 +504,8 @@ def test_launch_ui_fails_closed_on_source_readiness_and_protocol_admission():
         "launch_view_stale",
         "readiness_epoch_proof_missing",
         "readiness_runtime_unhealthy",
+        "live_cursor_behind_reconciliation_epoch",
+        "live.cursor>=latest.to_slot",
         "source_readiness_breached_after_open",
         "协议未开放 · 仅研究/观察",
         "为什么协议未开放",
@@ -549,5 +551,6 @@ def test_launch_protocol_reasons_render_chinese_and_raw_codes():
     assert "function launchReasonLabel(code)" in html
     assert "独立归档 RPC 未配置" in html
     assert "finalized 对账发现漏捕或多捕" in html
+    assert "实时流 cursor 落后最新 finalized 对账 epoch" in html
     assert "协议开放后来源 readiness 失守，已永久 breach" in html
     assert "<code>${esc(code)}</code>" in html

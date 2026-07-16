@@ -330,6 +330,17 @@ def _validate_source_readiness(value: Any, *, path: str) -> dict:
                 raise BoardViewContractError(
                     f"{path}.runtime.{stream_name} is not live and gap-free"
                 )
+        live_cursor = _exact_nonnegative_int(
+            runtime["live"].get("cursor"), path=f"{path}.runtime.live.cursor",
+        )
+        if live_cursor < last:
+            raise BoardViewContractError(
+                f"{path}.runtime.live.cursor is behind the latest epoch"
+            )
+        if runtime_lag != live_cursor - last:
+            raise BoardViewContractError(
+                f"{path}.latest_runtime_lag_slots contradicts the live cursor"
+            )
     return dict(value)
 
 
