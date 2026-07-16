@@ -248,6 +248,12 @@ def create_scheduler() -> AsyncIOScheduler:
         name="Launch Radar (首池/低流通事件账本)",
     )
     scheduler.add_job(
+        _run_solana_launch_reconciliation,
+        IntervalTrigger(minutes=1),
+        id="solana_launch_reconciliation",
+        name="Solana Launch 独立 finalized epoch 对账",
+    )
+    scheduler.add_job(
         _run_launch_quotes,
         IntervalTrigger(seconds=30),
         id="launch_quote_refresh",
@@ -713,6 +719,51 @@ async def _run_launch_radar():
                     active=len(res["events"]), pushed=pushed)
     except Exception as e:
         logger.error("launch_radar_failed", error=str(e)[:120])
+
+
+async def _run_solana_launch_reconciliation():
+    """Seal one bounded epoch; missing independent config remains fail-visible."""
+    import asyncio
+
+    from src.pipeline import solana_launch_reconcile as reconcile
+    from src.pipeline import solana_launch_stream as stream
+    from src.pipeline import stream_health
+
+    endpoint = reconcile.configured_archive_endpoint()
+    if not endpoint:
+        await asyncio.to_thread(
+            stream_health.report_worker,
+            "solana", "pump_fun_reconciliation", status="degraded",
+            error="SOLANA_RECONCILIATION_RPC_URL is not configured",
+        )
+        logger.warning("solana_launch_reconciliation_unconfigured")
+        return
+    try:
+        start_raw = os.getenv("SOLANA_RECONCILIATION_START_SLOT", "").strip()
+        start_slot = int(start_raw) if start_raw else None
+        result = await asyncio.to_thread(
+            reconcile.reconcile_next_epoch,
+            stream.JsonRpc(stream.configured_rpc_endpoint()),
+            stream.JsonRpc(endpoint),
+            start_slot=start_slot,
+        )
+        healthy = result.get("state") in {"sealed_clean", "waiting_finality"}
+        await asyncio.to_thread(
+            stream_health.report_worker,
+            "solana", "pump_fun_reconciliation",
+            status="live" if healthy else "degraded",
+            error=None if healthy else str(result)[:240],
+        )
+        logger.info("solana_launch_reconciliation_done", **result)
+    except Exception as exc:
+        await asyncio.to_thread(
+            stream_health.report_worker,
+            "solana", "pump_fun_reconciliation", status="degraded",
+            error=f"{type(exc).__name__}: {exc}"[:240],
+        )
+        logger.error(
+            "solana_launch_reconciliation_failed", error=str(exc)[:160],
+        )
 
 
 async def _run_launch_quotes():

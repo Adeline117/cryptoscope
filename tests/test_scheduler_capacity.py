@@ -280,6 +280,39 @@ def test_launch_quote_refresh_has_bounded_independent_fast_job():
     assert "0:00:30" in str(jobs["launch_quote_refresh"].trigger)
 
 
+def test_solana_reconciliation_has_an_independent_bounded_job():
+    from src.pipeline.scheduler import create_scheduler
+
+    scheduler = create_scheduler()
+    jobs = {job.id: job for job in scheduler.get_jobs()}
+    job = jobs["solana_launch_reconciliation"]
+    assert job.func is not jobs["launch_radar"].func
+    assert job.trigger.interval.total_seconds() == 60
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_reconciliation_is_fail_visible(monkeypatch):
+    from src.pipeline import scheduler, solana_launch_reconcile, stream_health
+
+    reports = []
+    monkeypatch.delenv("SOLANA_RECONCILIATION_RPC_URL", raising=False)
+    monkeypatch.setattr(
+        solana_launch_reconcile, "reconcile_next_epoch",
+        lambda *_args, **_kwargs: pytest.fail("unconfigured source must not run"),
+    )
+    monkeypatch.setattr(
+        stream_health, "report_worker",
+        lambda source, stream, **kwargs: reports.append((source, stream, kwargs)),
+    )
+
+    await scheduler._run_solana_launch_reconciliation()
+
+    assert reports == [("solana", "pump_fun_reconciliation", {
+        "status": "degraded",
+        "error": "SOLANA_RECONCILIATION_RPC_URL is not configured",
+    })]
+
+
 @pytest.mark.asyncio
 async def test_idle_launch_quote_refresh_keeps_liveness_local(monkeypatch):
     from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
