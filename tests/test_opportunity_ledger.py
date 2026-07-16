@@ -243,11 +243,32 @@ def test_cross_store_ledger_id_requires_exact_unique_readback(tmp_path, monkeypa
     from src.pipeline import opportunity_ledger as ledger
 
     monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
-    ident, inserted = ledger.record_if_absent(_candidate(token="MintAddress"))
+    source_snapshot = {
+        "signature": "immutable-signature",
+        "reconciliation_proof": {"epoch_id": "frozen-epoch"},
+    }
+    ident, inserted = ledger.record_if_absent(_candidate(
+        token="MintAddress", cohort_version=6,
+        entry_observation=_entry_observation(
+            base_token="MintAddress", source_snapshot=source_snapshot,
+        ),
+    ))
 
     assert inserted is True
     assert ledger.event_id_readback_matches(
         ident, lane="launch", chain="solana", token="MintAddress")
+    assert ledger.event_id_readback_matches(
+        ident, lane="launch", chain="solana", token="MintAddress",
+        cohort_version=6, source_snapshot=source_snapshot,
+    )
+    assert not ledger.event_id_readback_matches(
+        ident, lane="launch", chain="solana", token="MintAddress",
+        cohort_version=5, source_snapshot=source_snapshot,
+    )
+    assert not ledger.event_id_readback_matches(
+        ident, lane="launch", chain="solana", token="MintAddress",
+        cohort_version=6, source_snapshot={**source_snapshot, "signature": "changed"},
+    )
     assert not ledger.event_id_readback_matches(
         ident, lane="launch", chain="solana", token="different")
     assert not ledger.event_id_readback_matches(

@@ -454,7 +454,8 @@ def record_if_absent(candidate: dict) -> tuple[str, bool]:
 
 
 def event_id_readback_matches(ident: str, *, lane: str, chain: str,
-                              token: str) -> bool:
+                              token: str, cohort_version: int | None = None,
+                              source_snapshot: dict | None = None) -> bool:
     """Require one exact ledger row before another store may claim traceability.
 
     Stream databases cannot enforce a foreign key into this SQLite file.  This
@@ -464,12 +465,23 @@ def event_id_readback_matches(ident: str, *, lane: str, chain: str,
     c = _conn()
     try:
         rows = c.execute(
-            "SELECT lane,chain,token FROM opportunities WHERE id=? LIMIT 2", (ident,)
+            "SELECT lane,chain,token,cohort_version,entry_observation "
+            "FROM opportunities WHERE id=? LIMIT 2", (ident,)
         ).fetchall()
     finally:
         c.close()
-    return (len(rows) == 1
-            and rows[0] == (str(lane), str(chain), str(token)))
+    if len(rows) != 1 or rows[0][:3] != (str(lane), str(chain), str(token)):
+        return False
+    if cohort_version is not None and rows[0][3] != cohort_version:
+        return False
+    if source_snapshot is not None:
+        try:
+            entry = json.loads(rows[0][4])
+        except (TypeError, json.JSONDecodeError):
+            return False
+        if entry.get("source_snapshot") != source_snapshot:
+            return False
+    return True
 
 
 def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool]:
