@@ -73,6 +73,16 @@ def _meta(board_export, runtime):
             "cross_view_edge_usable": False, "reason_codes": [], "members": {},
         },
         "runtime_safety": runtime,
+        "perp_identity_policy": {
+            "version": 1, "status": "invalid",
+            "blocks_identity_dependent_scans": True,
+            "auto_execution_allowed": False,
+            "reason_codes": ["identity_cache_invalid"],
+            "market_count": 0, "research_mapped": 0,
+            "actionable_identity_count": 0,
+            "independent_source_count": 0, "observed_path_count": 0,
+            "cache_age_seconds": None, "cache_ttl_seconds": 26 * 60 * 60,
+        },
     }, view="meta")
 
 

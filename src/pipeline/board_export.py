@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -48,6 +49,16 @@ VIEW_FRESHNESS = {
     "traders": (24 * 60, 60), "meta": (60, 15),
 }
 _WRITE_LOCK = threading.Lock()
+
+_PERP_IDENTITY_CACHE_TTL_SECONDS = 26 * 60 * 60
+_PERP_IDENTITY_STATUSES = frozenset({
+    "verified", "research_only", "blocked", "invalid", "stale", "unavailable",
+})
+_PERP_IDENTITY_SYMBOL = re.compile(r"^[A-Z0-9]{1,32}$")
+_PERP_IDENTITY_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_PERP_IDENTITY_MAX_ROWS = 20_000
+_PERP_IDENTITY_MAX_MARKETS = 100_000
+_PERP_IDENTITY_MAX_SOURCES = 64
 
 # v1 endpoint: cross-platform in one call, flat fields, no required platform param
 # (v2 requires platform=). Verified live: max_drawdown and win_rate arrive as PERCENT
@@ -830,6 +841,186 @@ def _runtime_safety() -> dict:
     }
 
 
+def _perp_identity_fallback(status: str, reason_code: str) -> dict:
+    """Return the bounded public fail-closed shape, never source diagnostics."""
+    return {
+        "version": 1,
+        "status": status,
+        "blocks_identity_dependent_scans": True,
+        "auto_execution_allowed": False,
+        "reason_codes": [reason_code],
+        "market_count": 0,
+        "research_mapped": 0,
+        "actionable_identity_count": 0,
+        "independent_source_count": 0,
+        "observed_path_count": 0,
+        "cache_age_seconds": None,
+        "cache_ttl_seconds": _PERP_IDENTITY_CACHE_TTL_SECONDS,
+    }
+
+
+def _perp_identity_policy(*, _now: datetime | None = None) -> dict:
+    """Project one local cache read into a scoped public identity-policy gate.
+
+    This is deliberately separate from ``runtime_safety``: an unverified
+    token-to-contract join blocks only scans that depend on that identity.  It does
+    not gate direct Hyperliquid/OKX observations, Launch, or any other board lane.
+    """
+    try:
+        from src.onchain.perp_universe import CACHE_TTL_SECONDS, load_result
+
+        if CACHE_TTL_SECONDS != _PERP_IDENTITY_CACHE_TTL_SECONDS:
+            return _perp_identity_fallback("invalid", "identity_projection_invalid")
+        now = _now if _now is not None else datetime.now(timezone.utc)
+        if (
+            not isinstance(now, datetime)
+            or now.tzinfo is None
+            or now.utcoffset() != timedelta(0)
+        ):
+            return _perp_identity_fallback("invalid", "identity_projection_invalid")
+        # load_result is cache-only.  Supplying the same clock used for age
+        # projection avoids an expiry race between validation and serialization.
+        result = load_result(_now=now)
+    except Exception:
+        # Exception text can contain a URL, token, or local path.  None is public.
+        return _perp_identity_fallback("unavailable", "identity_load_failed")
+
+    if type(result) is not dict:
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+    status = result.get("status")
+    reasons = result.get("reason_codes")
+    if (
+        type(status) is not str
+        or status not in _PERP_IDENTITY_STATUSES
+        or type(reasons) is not list
+        or len(reasons) > 8
+        or any(
+            type(reason) is not str
+            or _PERP_IDENTITY_REASON.fullmatch(reason) is None
+            for reason in reasons
+        )
+        or len(reasons) != len(set(reasons))
+    ):
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+
+    research = result.get("research_universe")
+    actionable = result.get("actionable_universe")
+    if (
+        type(research) is not dict
+        or len(research) > _PERP_IDENTITY_MAX_ROWS
+        or any(
+            type(symbol) is not str
+            or _PERP_IDENTITY_SYMBOL.fullmatch(symbol) is None
+            or type(row) is not dict
+            or row.get("actionability") != "research_only"
+            for symbol, row in research.items()
+        )
+        or type(actionable) is not dict
+        or len(actionable) > _PERP_IDENTITY_MAX_ROWS
+    ):
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+
+    # The actionable side requires the full chain/address identity contract, not
+    # merely a count or an ``actionability`` string.
+    try:
+        from src.pipeline.perp_scanner import validated_verified_universe
+
+        verified = validated_verified_universe(actionable)
+    except Exception:
+        verified = None
+    if verified is None:
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+
+    if status in {"blocked", "invalid", "stale", "unavailable"}:
+        if research or verified or not reasons:
+            return _perp_identity_fallback("invalid", "identity_projection_invalid")
+        public_reason = {
+            "blocked": "identity_collection_blocked",
+            "invalid": "identity_cache_invalid",
+            "stale": "identity_cache_stale",
+            "unavailable": "identity_cache_unavailable",
+        }[status]
+        return _perp_identity_fallback(status, public_reason)
+
+    market_count = result.get("market_count")
+    source_counts = result.get("source_counts")
+    independent = (
+        source_counts.get("independent_source_count")
+        if type(source_counts) is dict else None
+    )
+    observed_paths = (
+        source_counts.get("observed_path_count")
+        if type(source_counts) is dict else None
+    )
+    if (
+        type(market_count) is not int
+        or not 0 < market_count <= _PERP_IDENTITY_MAX_MARKETS
+        or len(research) + len(verified) > market_count
+        or type(independent) is not int
+        or not 0 < independent <= _PERP_IDENTITY_MAX_SOURCES
+        or type(observed_paths) is not int
+        or not independent <= observed_paths <= _PERP_IDENTITY_MAX_SOURCES
+    ):
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+
+    try:
+        generated_raw = result["generated_at"]
+        expires_raw = result["expires_at"]
+        if type(generated_raw) is not str or type(expires_raw) is not str:
+            raise TypeError("identity cache clocks must be strings")
+        generated_at = datetime.fromisoformat(generated_raw)
+        expires_at = datetime.fromisoformat(expires_raw)
+        clocks_valid = (
+            generated_at.tzinfo is not None
+            and generated_at.utcoffset() == timedelta(0)
+            and generated_at.isoformat() == generated_raw
+            and expires_at.tzinfo is not None
+            and expires_at.utcoffset() == timedelta(0)
+            and expires_at.isoformat() == expires_raw
+            and expires_at == generated_at + timedelta(
+                seconds=_PERP_IDENTITY_CACHE_TTL_SECONDS,
+            )
+            and generated_at <= now < expires_at
+        )
+    except (KeyError, TypeError, ValueError):
+        clocks_valid = False
+    if not clocks_valid:
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+    cache_age = int((now - generated_at).total_seconds())
+    if not 0 <= cache_age < _PERP_IDENTITY_CACHE_TTL_SECONDS:
+        return _perp_identity_fallback("invalid", "identity_projection_invalid")
+
+    if status == "research_only":
+        if (
+            reasons != ["heuristic_mapping_not_actionable"]
+            or not research
+            or verified
+        ):
+            return _perp_identity_fallback("invalid", "identity_projection_invalid")
+        public_reasons = ["heuristic_mapping_not_actionable"]
+        blocks = True
+    else:  # verified
+        if reasons or research or not verified:
+            return _perp_identity_fallback("invalid", "identity_projection_invalid")
+        public_reasons = []
+        blocks = False
+
+    return {
+        "version": 1,
+        "status": status,
+        "blocks_identity_dependent_scans": blocks,
+        "auto_execution_allowed": False,
+        "reason_codes": public_reasons,
+        "market_count": market_count,
+        "research_mapped": len(research),
+        "actionable_identity_count": len(verified),
+        "independent_source_count": independent,
+        "observed_path_count": observed_paths,
+        "cache_age_seconds": cache_age,
+        "cache_ttl_seconds": _PERP_IDENTITY_CACHE_TTL_SECONDS,
+    }
+
+
 def _atomic_json(path, payload: dict) -> None:
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(payload, ensure_ascii=False, allow_nan=False,
@@ -893,6 +1084,7 @@ def write_views(**views: dict) -> list:
             "views": sorted(manifest), "view_status": manifest,
             "launch_protocol_join": protocol_join,
             "runtime_safety": _runtime_safety(),
+            "perp_identity_policy": _perp_identity_policy(),
         }, view="meta")
         cadence_min, grace_min = VIEW_FRESHNESS["meta"]
         validate_board_view(

@@ -78,6 +78,22 @@ _RUNTIME_SAFETY_REASON_CODES = frozenset({
     "hyperliquid_raw_trade_retention_shed",
     "runtime_health_unavailable",
 })
+_PERP_IDENTITY_CACHE_TTL_SECONDS = 26 * 60 * 60
+_PERP_IDENTITY_STATUSES = frozenset({
+    "verified", "research_only", "blocked", "invalid", "stale", "unavailable",
+})
+_PERP_IDENTITY_REASON_CODES = frozenset({
+    "heuristic_mapping_not_actionable",
+    "identity_collection_blocked",
+    "identity_cache_invalid",
+    "identity_cache_stale",
+    "identity_cache_unavailable",
+    "identity_projection_invalid",
+    "identity_load_failed",
+})
+_PERP_IDENTITY_MAX_ROWS = 20_000
+_PERP_IDENTITY_MAX_MARKETS = 100_000
+_PERP_IDENTITY_MAX_SOURCES = 64
 
 
 def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
@@ -1498,6 +1514,120 @@ def _validate_runtime_safety(value: Any, *, path: str) -> None:
         )
 
 
+def _validate_perp_identity_policy(value: Any, *, path: str) -> None:
+    """Validate the exact public gate for identity-dependent perp scans only."""
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    _exact_keys(value, {
+        "version", "status", "blocks_identity_dependent_scans",
+        "auto_execution_allowed", "reason_codes", "market_count",
+        "research_mapped", "actionable_identity_count",
+        "independent_source_count", "observed_path_count",
+        "cache_age_seconds", "cache_ttl_seconds",
+    }, path=path)
+    if value.get("version") != 1 or type(value.get("version")) is not int:
+        raise BoardViewContractError(f"{path}.version must be exactly 1")
+    status = value.get("status")
+    if not isinstance(status, str) or status not in _PERP_IDENTITY_STATUSES:
+        raise BoardViewContractError(f"{path}.status is invalid")
+    blocks = value.get("blocks_identity_dependent_scans")
+    if not isinstance(blocks, bool):
+        raise BoardViewContractError(
+            f"{path}.blocks_identity_dependent_scans must be boolean"
+        )
+    if value.get("auto_execution_allowed") is not False:
+        raise BoardViewContractError(
+            f"{path}.auto_execution_allowed must be exactly false"
+        )
+    reasons = value.get("reason_codes")
+    if (
+        not isinstance(reasons, list)
+        or any(
+            not isinstance(reason, str)
+            or reason not in _PERP_IDENTITY_REASON_CODES
+            for reason in reasons
+        )
+        or len(reasons) != len(set(reasons))
+    ):
+        raise BoardViewContractError(f"{path}.reason_codes violates its allowlist")
+
+    market_count = _exact_nonnegative_int(
+        value.get("market_count"), path=f"{path}.market_count",
+    )
+    research_mapped = _exact_nonnegative_int(
+        value.get("research_mapped"), path=f"{path}.research_mapped",
+    )
+    actionable = _exact_nonnegative_int(
+        value.get("actionable_identity_count"),
+        path=f"{path}.actionable_identity_count",
+    )
+    independent = _exact_nonnegative_int(
+        value.get("independent_source_count"),
+        path=f"{path}.independent_source_count",
+    )
+    observed_paths = _exact_nonnegative_int(
+        value.get("observed_path_count"), path=f"{path}.observed_path_count",
+    )
+    age = _runtime_count(
+        value.get("cache_age_seconds"), path=f"{path}.cache_age_seconds",
+    )
+    ttl = value.get("cache_ttl_seconds")
+    if type(ttl) is not int or ttl != _PERP_IDENTITY_CACHE_TTL_SECONDS:
+        raise BoardViewContractError(f"{path}.cache_ttl_seconds is invalid")
+    if (
+        market_count > _PERP_IDENTITY_MAX_MARKETS
+        or research_mapped > _PERP_IDENTITY_MAX_ROWS
+        or actionable > _PERP_IDENTITY_MAX_ROWS
+        or independent > _PERP_IDENTITY_MAX_SOURCES
+        or observed_paths > _PERP_IDENTITY_MAX_SOURCES
+    ):
+        raise BoardViewContractError(f"{path} count exceeds its public bound")
+
+    if status in {"verified", "research_only"}:
+        if (
+            market_count == 0
+            or research_mapped + actionable > market_count
+            or independent == 0
+            or observed_paths < independent
+            or age is None
+            or age >= ttl
+        ):
+            raise BoardViewContractError(
+                f"{path} usable cache counts or age are inconsistent"
+            )
+        if status == "research_only":
+            expected_reasons = ["heuristic_mapping_not_actionable"]
+            consistent = research_mapped > 0 and actionable == 0 and blocks is True
+        else:
+            expected_reasons = []
+            consistent = (
+                research_mapped == 0 and actionable > 0 and blocks is False
+            )
+    else:
+        expected_reasons_by_status = {
+            "blocked": {"identity_collection_blocked"},
+            "invalid": {"identity_cache_invalid", "identity_projection_invalid"},
+            "stale": {"identity_cache_stale"},
+            "unavailable": {"identity_cache_unavailable", "identity_load_failed"},
+        }
+        expected_reasons = reasons
+        consistent = (
+            len(reasons) == 1
+            and reasons[0] in expected_reasons_by_status[status]
+            and blocks is True
+            and market_count == 0
+            and research_mapped == 0
+            and actionable == 0
+            and independent == 0
+            and observed_paths == 0
+            and age is None
+        )
+    if reasons != expected_reasons or not consistent:
+        raise BoardViewContractError(
+            f"{path} status, reasons, counts, or gate are inconsistent"
+        )
+
+
 def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
                     generated_at: datetime, path: str) -> None:
     _required_text(row.get("id"), path=f"{path}.id")
@@ -1603,6 +1733,9 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         _validate_perps_view(payload)
     if name == "meta":
         _validate_runtime_safety(payload.get("runtime_safety"), path="meta.runtime_safety")
+        _validate_perp_identity_policy(
+            payload.get("perp_identity_policy"), path="meta.perp_identity_policy",
+        )
     if name == "structure":
         if (payload.get("product_metadata_time_semantics")
                 != "current_inventory_metadata_not_event_time_evidence"):
