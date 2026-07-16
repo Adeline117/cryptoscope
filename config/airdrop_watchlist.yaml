@@ -20,12 +20,14 @@
 #     tasks:
 #       - name: "Provide liquidity"
 #         evidence: "tx hash / dashboard screenshot / manual check"
-#     claim:                         # only after an actual claim
+#     claim:                         # operator report; not self-verifying
 #       chain: ethereum
 #       tx_url: https://etherscan.io/tx/0x<64-hex-characters>
 #       claimed_at: "2026-12-01T00:00:00+00:00"
-#       reward_usd: 100
-#       actual_cost_usd: 5
+#       reward_usd: 100              # reported value until code verifies reward semantics
+#       actual_cost_usd: 5           # reported cost until independently verified
+# Config flags can never promote this report to a settled result. A code verifier
+# must bind the tx to this campaign, beneficiary, reward amount/USD, and actual cost.
 campaigns:
   - id: starknet-strk20-shield-rush-2026
     project: STRK20 Shield Rush

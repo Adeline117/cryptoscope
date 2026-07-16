@@ -15,10 +15,12 @@ their own reward/cost and delta-neutral accounting respectively.
 from __future__ import annotations
 
 import json
+import math
 import statistics
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Callable
+from urllib.parse import urlparse
 
 import structlog
 
@@ -341,31 +343,197 @@ def _carry_stats(rows: list[dict]) -> dict:
 
 
 def _airdrop_stats(rows: list[dict]) -> dict:
-    """Sum verified claims while refusing a success-only hit rate."""
+    """Separate transaction evidence from fully verified claim economics."""
+    from src.pipeline.airdrop_radar import _transaction_url
+
+    def finite_nonnegative(value: object) -> float | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) and number >= 0 else None
+
+    def canonical_timestamp(value: object) -> str | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                return None
+            return dt.astimezone(timezone.utc).isoformat()
+        except (ValueError, OverflowError):
+            return None
+
     claims = []
+    transaction_verified = claim_semantics_verified = reward_valued = 0
     for row in rows:
-        outcome = row.get("outcome") or {}
-        if (row.get("outcome_state") == "resolved"
-                and outcome.get("kind") == "airdrop_claim"
-                and outcome.get("reward_is_claimed") is True
-                and outcome.get("cost_is_actual") is True):
-            claims.append(outcome)
+        raw_outcome = row.get("outcome")
+        outcome = raw_outcome if isinstance(raw_outcome, dict) else {}
+        verification = outcome.get("transaction_verification")
+        is_v3 = type(outcome.get("version")) is int and outcome.get("version") == 3
+        has_transaction = (
+            is_v3 and isinstance(verification, dict)
+            and verification.get("onchain_success") is True
+            and isinstance(verification.get("tx_id"), str)
+            and bool(verification.get("tx_id"))
+            and canonical_timestamp(verification.get("confirmed_at")) is not None
+        )
+        if has_transaction:
+            transaction_verified += 1
+        has_semantics = (
+            has_transaction
+            and verification.get("campaign_semantics_verified") is True
+            and isinstance(verification.get("verified_campaign_id"), str)
+            and bool(verification.get("verified_campaign_id"))
+            and verification.get("verified_campaign_id") == row.get("token")
+        )
+        if has_semantics:
+            claim_semantics_verified += 1
+        has_reward_value = (
+            has_semantics
+            and verification.get("reward_amount_verified") is True
+            and verification.get("reward_usd_verified") is True
+            and finite_nonnegative(verification.get("verified_reward_amount")) is not None
+            and finite_nonnegative(verification.get("verified_reward_usd")) is not None
+            and isinstance(verification.get("verified_reward_asset"), str)
+            and bool(verification.get("verified_reward_asset", "").strip())
+        )
+        if has_reward_value:
+            reward_valued += 1
+
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        source = (payload.get("source_verification")
+                  if isinstance(payload.get("source_verification"), dict) else {})
+        source_verified = (
+            payload.get("source_state") == "source_verified"
+            and source.get("official_page_verified") is True
+            and source.get("evidence_page_verified") is True
+            and payload.get("state") == "claimed"
+            and payload.get("decision") == "CLAIMED"
+        )
+        claim_chain = (outcome.get("chain", "").strip().lower()
+                       if isinstance(outcome.get("chain"), str) else None)
+        row_chain = (row.get("chain", "").strip().lower()
+                     if isinstance(row.get("chain"), str) else None)
+        tx_url = outcome.get("tx_url")
+        canonical_tx_url = (_transaction_url(tx_url, claim_chain)
+                            if isinstance(claim_chain, str) else None)
+        tx_id = verification.get("tx_id") if isinstance(verification, dict) else None
+        expected_tx_id = (urlparse(tx_url).path.rstrip("/").rsplit("/", 1)[-1]
+                          if isinstance(tx_url, str) else None)
+        tx_identity_matches = (
+            isinstance(tx_id, str) and isinstance(expected_tx_id, str)
+            and (tx_id == expected_tx_id if claim_chain == "solana"
+                 else tx_id.lower() == expected_tx_id.lower())
+        )
+        chain_matches = (
+            isinstance(row_chain, str) and isinstance(claim_chain, str)
+            and ((row_chain == "multi" and claim_chain != "multi")
+                 or row_chain == claim_chain)
+        )
+        verified_amount = finite_nonnegative(
+            verification.get("verified_reward_amount")
+        ) if isinstance(verification, dict) else None
+        outcome_amount = finite_nonnegative(outcome.get("verified_reward_amount"))
+        raw_verified_asset = (verification.get("verified_reward_asset")
+                              if isinstance(verification, dict) else None)
+        verified_asset = (raw_verified_asset.strip()
+                          if isinstance(raw_verified_asset, str) else None)
+        verified_confirmed_at = (verification.get("confirmed_at")
+                                 if isinstance(verification, dict) else None)
+        canonical_shape = (
+            outcome.get("campaign_id") == row.get("token")
+            and chain_matches and canonical_tx_url == tx_url
+            and tx_identity_matches
+            and canonical_timestamp(outcome.get("claimed_at"))
+            == canonical_timestamp(verified_confirmed_at)
+            and canonical_timestamp(outcome.get("claimed_at")) is not None
+            and canonical_timestamp(outcome.get("reported_claimed_at")) is not None
+            and outcome_amount is not None and outcome_amount == verified_amount
+            and isinstance(outcome.get("verified_reward_asset"), str)
+            and outcome.get("verified_reward_asset") == verified_asset
+        )
+        fully_verified = (
+            row.get("outcome_state") == "resolved"
+            and outcome.get("kind") == "airdrop_claim"
+            and outcome.get("claim_verification_state") == "fully_verified"
+            and outcome.get("reward_is_claimed") is True
+            and outcome.get("cost_is_actual") is True
+            and has_reward_value
+            and verification.get("beneficiary_verified") is True
+            and verification.get("actual_cost_usd_verified") is True
+            and isinstance(verification.get("verified_beneficiary"), str)
+            and bool(verification.get("verified_beneficiary", "").strip())
+            and outcome.get("campaign_id") == verification.get("verified_campaign_id")
+            and source_verified
+            and canonical_shape
+            and all(outcome.get(flag) is True for flag in (
+                "campaign_semantics_verified", "beneficiary_verified",
+                "reward_amount_verified", "reward_usd_verified",
+                "actual_cost_usd_verified",
+            ))
+        )
+        if not fully_verified:
+            continue
+        try:
+            gross = float(outcome["gross_reward_usd"])
+            cost = float(outcome["actual_cost_usd"])
+            net = float(outcome["net_reward_usd"])
+            verified_gross = float(verification["verified_reward_usd"])
+            verified_cost = float(verification["verified_actual_cost_usd"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if (any(isinstance(value, bool) for value in (
+                outcome.get("gross_reward_usd"), outcome.get("actual_cost_usd"),
+                outcome.get("net_reward_usd"), verification.get("verified_reward_usd"),
+                verification.get("verified_actual_cost_usd")))
+                or not all(math.isfinite(value) for value in (
+                    gross, cost, net, verified_gross, verified_cost))
+                or min(gross, cost, verified_gross, verified_cost) < 0
+                or gross != verified_gross or cost != verified_cost
+                or not math.isclose(net, gross - cost, rel_tol=0, abs_tol=1e-9)):
+            continue
+        claims.append(outcome)
     common = {
         "n_events": len(rows), "n_claimed": len(claims),
+        "n_transaction_verified": transaction_verified,
+        "n_claim_semantics_verified": claim_semantics_verified,
+        "n_reward_valued": reward_valued,
+        "n_fully_verified_claims": len(claims),
         "pending": sum(r.get("outcome_state") == "open" for r in rows),
-        "metric": "verified_claim_net_usd", "edge_verdict": "不可判",
+        "metric": "fully_verified_claim_net_usd", "edge_verdict": "不可判",
     }
     if not claims:
         return {**common, "verdict": "不可判",
-                "note": "尚无带交易证据、实际奖励和实际成本的领取结果"}
+                "note": (f"尚无完整领取与成本证据；交易执行已核验 {transaction_verified}；"
+                         f"领取语义已核验 "
+                         f"{claim_semantics_verified}；奖励已估值 {reward_valued}；"
+                         "不完整记录不计入净回报")}
     nets = [float(c["net_reward_usd"]) for c in claims]
+    try:
+        gross_total = math.fsum(float(c["gross_reward_usd"]) for c in claims)
+        cost_total = math.fsum(float(c["actual_cost_usd"]) for c in claims)
+        net_total = math.fsum(nets)
+        median_net = statistics.median(nets)
+    except (OverflowError, statistics.StatisticsError):
+        gross_total = cost_total = net_total = median_net = math.inf
+    if not all(math.isfinite(value) for value in (
+            gross_total, cost_total, net_total, median_net)):
+        return {
+            **common,
+            "verdict": "不可判",
+            "note": "完整证据记录的金额聚合非有限，已拒绝净回报汇总",
+        }
     return {
         **common, "verdict": "realized_claims",
-        "gross_reward_usd": round(sum(float(c["gross_reward_usd"]) for c in claims), 2),
-        "actual_cost_usd": round(sum(float(c["actual_cost_usd"]) for c in claims), 2),
-        "net_reward_usd": round(sum(nets), 2),
-        "median_net_reward_usd": round(statistics.median(nets), 2),
-        "note": "仅汇总已核验领取;缺参与失败/资格未命中分母,不计算命中率或edge",
+        "gross_reward_usd": round(gross_total, 2),
+        "actual_cost_usd": round(cost_total, 2),
+        "net_reward_usd": round(net_total, 2),
+        "median_net_reward_usd": round(median_net, 2),
+        "note": ("仅汇总领取语义、受益人、奖励数量/USD与实际成本全部核验的结果；"
+                 "缺参与失败/资格未命中分母，不计算命中率或edge"),
     }
 
 

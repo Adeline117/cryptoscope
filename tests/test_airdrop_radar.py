@@ -18,6 +18,28 @@ def _verified_source(_url, markers):
     return bool(markers)
 
 
+def _fully_verified_claim(tx_hash, *, campaign_id="starknet-s1",
+                          reward_usd=100, actual_cost_usd=5):
+    return {
+        "source": "test_semantic_verifier",
+        "tx_id": tx_hash,
+        "block_number": 123,
+        "confirmed_at": "2026-07-13T12:01:00+00:00",
+        "onchain_success": True,
+        "campaign_semantics_verified": True,
+        "beneficiary_verified": True,
+        "reward_amount_verified": True,
+        "reward_usd_verified": True,
+        "actual_cost_usd_verified": True,
+        "verified_campaign_id": campaign_id,
+        "verified_beneficiary": "owned-wallet",
+        "verified_reward_amount": reward_usd,
+        "verified_reward_asset": "USD",
+        "verified_reward_usd": reward_usd,
+        "verified_actual_cost_usd": actual_cost_usd,
+    }
+
+
 def test_normalize_requires_two_https_urls_under_a_code_trust_root():
     from src.pipeline.airdrop_radar import normalize
 
@@ -207,9 +229,9 @@ def test_claim_requires_complete_public_evidence_and_settles_ledger(tmp_path, mo
       actual_cost_usd: 5
 """)
     def verified(_url, _chain):
-        return {"source": "ethereum_mainnet_rpc", "tx_id": tx_hash,
-                "block_number": 123, "confirmed_at": "2026-07-13T12:01:00+00:00",
-                "onchain_success": True}
+        return _fully_verified_claim(
+            tx_hash, reward_usd=125, actual_cost_usd=5,
+        )
 
     got = ar.sync(config, now=datetime(2026, 7, 14, tzinfo=timezone.utc),
                   claim_verifier=verified, source_verifier=_verified_source)
@@ -217,11 +239,151 @@ def test_claim_requires_complete_public_evidence_and_settles_ledger(tmp_path, mo
     assert got["accepted"] == got["source_verified"] == 1
     row = ol.outcome_rows()[0]
     assert row["decision"] == "CLAIMED" and row["outcome_state"] == "resolved"
+    assert row["outcome"]["version"] == 3
+    assert row["outcome"]["claim_verification_state"] == "fully_verified"
     assert row["outcome"]["net_reward_usd"] == 120
     assert row["outcome"]["cost_is_actual"] is True
     assert row["outcome"]["claimed_at"] == "2026-07-13T12:01:00+00:00"
     assert row["outcome"]["transaction_verification"]["block_number"] == 123
     assert "wallets" not in row["payload"]
+
+
+def test_claim_builder_and_stats_share_canonical_url_asset_and_chain_rules(
+        tmp_path, monkeypatch):
+    from src.pipeline import airdrop_radar as ar
+    from src.pipeline import opportunity_outcomes as oo
+    import src.pipeline.opportunity_ledger as ol
+
+    tx_hash = "0x" + "a" * 64
+    cases = (
+        ("starknet-s1", "ethereum", "?utm_source=audit", "USD"),
+        ("starknet-s1", "ethereum", "", " USD "),
+        ("starknet-s1", " Ethereum ", "", "USD"),
+        (" starknet-s1 ", "ethereum", "", "USD"),
+    )
+    for index, (campaign_id, chain, url_suffix, reward_asset) in enumerate(cases):
+        monkeypatch.setattr(ol, "DB", tmp_path / f"ledger-{index}.db")
+        config = tmp_path / f"airdrop-{index}.yaml"
+        config.write_text(f"""campaigns:
+  - id: "{campaign_id}"
+    project: Starknet
+    chain: "{chain}"
+    official_url: https://starknet.io/claim
+    source_evidence_url: https://starknet.io/evidence
+    source_markers: [Starknet]
+    status: claimed
+    claim:
+      claimed_at: 2026-07-13T12:00:00Z
+      tx_url: https://etherscan.io/tx/{tx_hash}{url_suffix}
+      reward_usd: 100
+      actual_cost_usd: 5
+""")
+
+        def verified(_url, _chain):
+            result = _fully_verified_claim(tx_hash)
+            result["verified_reward_asset"] = reward_asset
+            return result
+
+        ar.sync(
+            config, claim_verifier=verified, source_verifier=_verified_source,
+        )
+        row = ol.outcome_rows()[0]
+        stat = oo.lane_stats()["airdrop"]
+
+        assert row["chain"] == row["outcome"]["chain"] == "ethereum"
+        assert row["outcome_state"] == "resolved"
+        assert stat["n_fully_verified_claims"] == 1
+        assert stat["net_reward_usd"] == 95
+
+
+def test_transaction_only_claim_stays_watch_open_and_reopens_legacy_resolution(
+        tmp_path, monkeypatch):
+    import src.pipeline.airdrop_radar as ar
+    import src.pipeline.opportunity_ledger as ol
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    config = tmp_path / "airdrop.yaml"
+    tx_hash = "0x" + "a" * 64
+    config.write_text(f"""campaigns:
+  - id: starknet-s1
+    project: Starknet
+    chain: ethereum
+    official_url: https://starknet.io/claim
+    source_evidence_url: https://starknet.io/evidence
+    source_markers: [Starknet]
+    status: claimed
+    claim:
+      claimed_at: 2026-07-13T12:00:00Z
+      tx_url: https://etherscan.io/tx/{tx_hash}
+      reward_usd: 100
+      actual_cost_usd: 5
+      campaign_semantics_verified: true
+      reward_usd_verified: true
+""")
+
+    def fully_verified(_url, _chain):
+        return _fully_verified_claim(tx_hash)
+
+    ar.sync(
+        config, claim_verifier=fully_verified, source_verifier=_verified_source,
+    )
+    assert ol.outcome_rows()[0]["outcome_state"] == "resolved"
+
+    def transaction_only(_url, _chain):
+        return {
+            "source": "ethereum_mainnet_rpc", "tx_id": tx_hash,
+            "block_number": 123,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+            "onchain_success": True,
+            "campaign_semantics_verified": False,
+        }
+
+    got = ar.sync(
+        config, claim_verifier=transaction_only,
+        source_verifier=_verified_source,
+    )
+
+    assert got["accepted"] == 1
+    assert len(got["events"]) == 1
+    event = got["events"][0]
+    assert event["decision"] == event["effective_decision"] == "WATCH"
+    assert event["claim_verification_state"] == "transaction_only"
+    assert event["claim_outcome"] is None
+    assert event["claim_evidence"]["reported_reward_usd"] == 100
+    row = ol.outcome_rows()[0]
+    assert row["outcome_state"] == "open"
+    assert row["outcome"]["kind"] == "airdrop_claim_evidence"
+    assert row["outcome"]["claim_verification_state"] == "transaction_only"
+
+
+def test_verified_claim_outcome_rejects_malformed_evidence_without_throwing():
+    from src.pipeline import airdrop_radar as ar
+
+    tx_hash = "0x" + "a" * 64
+    campaign = _campaign(status="claimed", claim={
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://etherscan.io/tx/" + tx_hash,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    })
+    evidence = ar._claim_evidence(
+        campaign, verifier=lambda _url, _chain: _fully_verified_claim(tx_hash),
+    )
+    assert ar._verified_claim_outcome(evidence)["net_reward_usd"] == 95
+
+    for field in (
+        "campaign_id", "claim_verification_state", "onchain_recorded_at", "reported_claimed_at",
+        "tx_url", "chain", "reported_reward_usd", "reported_actual_cost_usd",
+        "transaction_verification",
+    ):
+        malformed = {**evidence}
+        malformed.pop(field)
+        assert ar._verified_claim_outcome(malformed) is None, field
+
+    malformed = {**evidence, "reported_reward_usd": True}
+    assert ar._verified_claim_outcome(malformed) is None
+    malformed = {**evidence, "version": 3.0}
+    assert ar._verified_claim_outcome(malformed) is None
 
 
 def test_claimed_status_rejects_incomplete_or_ambiguous_claim():
@@ -235,6 +397,29 @@ def test_claimed_status_rejects_incomplete_or_ambiguous_claim():
                                   "tx_url": "https://etherscan.io/tx/0xabc",
                                   "reward_usd": 100, "actual_cost_usd": 5}), now=now,
                      source_verifier=_verified_source) is None
+
+
+def test_claim_payload_is_rejected_when_campaign_status_is_not_claimed():
+    from src.pipeline.airdrop_radar import normalize
+
+    tx_hash = "0x" + "a" * 64
+    claim = {
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://etherscan.io/tx/" + tx_hash,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    }
+    calls = []
+
+    def should_not_run(*args):
+        calls.append(args)
+        return _fully_verified_claim(tx_hash)
+
+    assert normalize(
+        _campaign(status="active", claim=claim),
+        claim_verifier=should_not_run, source_verifier=_verified_source,
+    ) is None
+    assert calls == []
 
 
 def test_claim_values_must_be_finite_nonnegative_numbers_not_booleans():
@@ -403,7 +588,9 @@ def test_multi_chain_claim_requires_an_explicit_supported_chain():
         _campaign(chain="multi", status="claimed", claim=claim),
         claim_verifier=verified, source_verifier=_verified_source,
     )
-    assert accepted["claim_outcome"]["chain"] == "base"
+    assert accepted["claim_evidence"]["chain"] == "base"
+    assert accepted["claim_verification_state"] == "transaction_only"
+    assert accepted["claim_outcome"] is None
 
     missing_chain = dict(claim)
     missing_chain.pop("chain")
@@ -493,26 +680,48 @@ def test_claimed_status_rejects_nonexistent_or_failed_onchain_transaction():
     }, source_verifier=_verified_source) is None
 
 
-def test_verified_claim_remains_auditable_but_not_actionable_when_source_is_offline():
-    from src.pipeline.airdrop_radar import normalize
+def test_verified_claim_remains_open_and_out_of_pnl_when_source_is_offline(
+        tmp_path, monkeypatch):
+    from src.pipeline import airdrop_radar as ar
+    from src.pipeline import opportunity_outcomes as oo
+    import src.pipeline.opportunity_ledger as ol
 
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
     tx_hash = "0x" + "a" * 64
-    claim = {"claimed_at": "2026-07-13T12:00:00Z", "reward_usd": 100,
-             "actual_cost_usd": 5, "tx_url": "https://etherscan.io/tx/" + tx_hash}
+    config = tmp_path / "airdrop.yaml"
+    config.write_text(f"""campaigns:
+  - id: starknet-s1
+    project: Starknet
+    chain: ethereum
+    official_url: https://starknet.io/claim
+    source_evidence_url: https://starknet.io/evidence
+    source_markers: [Starknet]
+    status: claimed
+    claim:
+      claimed_at: 2026-07-13T12:00:00Z
+      tx_url: https://etherscan.io/tx/{tx_hash}
+      reward_usd: 100
+      actual_cost_usd: 5
+""")
 
     def verified_transaction(_url, _chain):
-        return {"source": "ethereum_mainnet_rpc", "tx_id": tx_hash,
-                "block_number": 123, "confirmed_at": "2026-07-13T12:01:00+00:00",
-                "onchain_success": True}
+        return _fully_verified_claim(tx_hash)
 
-    event = normalize(
-        _campaign(status="claimed", claim=claim),
+    got = ar.sync(
+        config,
         claim_verifier=verified_transaction,
         source_verifier=lambda _url, _markers: False,
     )
-    assert event["claim_outcome"]["transaction_verification"]["onchain_success"] is True
+    event = got["events"][0]
+    assert event["claim_evidence"]["transaction_verification"]["onchain_success"] is True
+    assert event["claim_outcome"] is None
+    assert event["claim_verification_state"] == "fully_verified_source_unverified"
     assert event["decision"] == "WATCH"
     assert event["source_state"] == "source_unverified"
+    assert ol.outcome_rows()[0]["outcome_state"] == "open"
+    stat = oo.lane_stats()["airdrop"]
+    assert stat["n_fully_verified_claims"] == 0
+    assert "net_reward_usd" not in stat
 
 
 def test_default_source_verifier_reads_content_and_rejects_bad_redirect(monkeypatch):

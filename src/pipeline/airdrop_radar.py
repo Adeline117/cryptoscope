@@ -46,6 +46,13 @@ DEFAULT_RPCS = {
 STARKNET_MAINNET_CHAIN_ID = "0x534e5f4d41494e"  # felt("SN_MAIN")
 STARKNET_FELT_RE = re.compile(r"^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,62})$")
 STARKNET_ACCEPTED = {"ACCEPTED_ON_L2": 1, "ACCEPTED_ON_L1": 2}
+FULL_CLAIM_VERIFICATION_FLAGS = (
+    "campaign_semantics_verified",
+    "beneficiary_verified",
+    "reward_amount_verified",
+    "reward_usd_verified",
+    "actual_cost_usd_verified",
+)
 
 
 def _load(path: Path = WATCHLIST) -> list[dict]:
@@ -345,8 +352,8 @@ def _timestamp(value: object) -> str | None:
         return None
 
 
-def _claim_outcome(campaign: dict, verifier=_verify_transaction) -> dict | None:
-    """Accept a realized claim only with complete public evidence and actual cost."""
+def _claim_evidence(campaign: dict, verifier=_verify_transaction) -> dict | None:
+    """Record a reported claim only after its transaction execution is verified."""
     raw = campaign.get("claim")
     if not isinstance(raw, dict):
         return None
@@ -404,16 +411,114 @@ def _claim_outcome(campaign: dict, verifier=_verify_transaction) -> dict | None:
         json.dumps(safe_verification, allow_nan=False)
     except (TypeError, ValueError, RecursionError):
         return None
+    campaign_id = str(campaign.get("id") or "").strip()
+    semantics_verified = (
+        safe_verification.get("campaign_semantics_verified") is True
+        and safe_verification.get("verified_campaign_id") == campaign_id
+    )
     return {
-        "version": 2, "kind": "airdrop_claim",
-        "claimed_at": verified_at,
+        "version": 3, "kind": "airdrop_claim_evidence",
+        "campaign_id": campaign_id,
+        "claim_verification_state": (
+            "claim_semantics_only" if semantics_verified else "transaction_only"
+        ),
+        "onchain_recorded_at": verified_at,
         "reported_claimed_at": claimed_at,
-        "tx_url": tx_url, "gross_reward_usd": reward_usd,
+        "tx_url": tx_url,
         "chain": chain,
+        "reported_reward_usd": reward_usd,
+        "reported_actual_cost_usd": actual_cost_usd,
+        "campaign_semantics_verified": semantics_verified,
+        "beneficiary_verified": safe_verification.get("beneficiary_verified") is True,
+        "reward_amount_verified": safe_verification.get("reward_amount_verified") is True,
+        "reward_usd_verified": safe_verification.get("reward_usd_verified") is True,
+        "actual_cost_usd_verified": (
+            safe_verification.get("actual_cost_usd_verified") is True
+        ),
+        "transaction_verification": safe_verification,
+    }
+
+
+def _verified_claim_outcome(evidence: dict | None) -> dict | None:
+    """Settle only code-verified claim semantics, beneficiary, value, and cost."""
+    if (not isinstance(evidence, dict)
+            or type(evidence.get("version")) is not int or evidence.get("version") != 3
+            or evidence.get("kind") != "airdrop_claim_evidence"
+            or evidence.get("claim_verification_state") != "claim_semantics_only"):
+        return None
+    campaign_id = evidence.get("campaign_id")
+    chain = evidence.get("chain")
+    tx_url = evidence.get("tx_url")
+    onchain_recorded_at = _timestamp(evidence.get("onchain_recorded_at"))
+    reported_claimed_at = _timestamp(evidence.get("reported_claimed_at"))
+    if (not isinstance(campaign_id, str) or not campaign_id.strip()
+            or campaign_id != campaign_id.strip()
+            or not isinstance(chain, str) or not chain or chain != chain.strip()
+            or not isinstance(tx_url, str) or _transaction_url(tx_url, chain) != tx_url
+            or not onchain_recorded_at or not reported_claimed_at):
+        return None
+    verification = evidence.get("transaction_verification")
+    if (not isinstance(verification, dict)
+            or any(verification.get(flag) is not True
+                   for flag in FULL_CLAIM_VERIFICATION_FLAGS)
+            or verification.get("verified_campaign_id") != campaign_id
+            or verification.get("onchain_success") is not True):
+        return None
+    try:
+        json.dumps(verification, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
+        return None
+
+    def strict_number(value: object) -> float | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) and number >= 0 else None
+
+    reported_reward_usd = strict_number(evidence.get("reported_reward_usd"))
+    reported_actual_cost_usd = strict_number(evidence.get("reported_actual_cost_usd"))
+    reward_usd = strict_number(verification.get("verified_reward_usd"))
+    actual_cost_usd = strict_number(verification.get("verified_actual_cost_usd"))
+    reward_amount = strict_number(verification.get("verified_reward_amount"))
+    reward_asset = verification.get("verified_reward_asset")
+    beneficiary = verification.get("verified_beneficiary")
+    tx_id = verification.get("tx_id")
+    expected_tx_id = urlparse(tx_url).path.rstrip("/").rsplit("/", 1)[-1]
+    tx_identity_matches = (
+        isinstance(tx_id, str)
+        and (tx_id == expected_tx_id if chain == "solana"
+             else tx_id.lower() == expected_tx_id.lower())
+    )
+    if (reported_reward_usd is None or reported_actual_cost_usd is None
+            or reward_usd is None or actual_cost_usd is None or reward_amount is None
+            or not isinstance(reward_asset, str) or not reward_asset.strip()
+            or not isinstance(beneficiary, str) or not beneficiary.strip()
+            or reward_usd != reported_reward_usd
+            or actual_cost_usd != reported_actual_cost_usd
+            or not tx_identity_matches
+            or _timestamp(verification.get("confirmed_at")) != onchain_recorded_at):
+        return None
+    return {
+        "version": 3,
+        "kind": "airdrop_claim",
+        "campaign_id": campaign_id,
+        "claim_verification_state": "fully_verified",
+        "claimed_at": onchain_recorded_at,
+        "reported_claimed_at": reported_claimed_at,
+        "tx_url": tx_url,
+        "chain": chain,
+        "gross_reward_usd": reward_usd,
         "actual_cost_usd": actual_cost_usd,
         "net_reward_usd": reward_usd - actual_cost_usd,
-        "reward_is_claimed": True, "cost_is_actual": True,
-        "transaction_verification": safe_verification,
+        "verified_reward_amount": reward_amount,
+        "verified_reward_asset": reward_asset.strip(),
+        "reward_is_claimed": True,
+        "cost_is_actual": True,
+        **{flag: True for flag in FULL_CLAIM_VERIFICATION_FLAGS},
+        "transaction_verification": verification,
     }
 
 
@@ -424,7 +529,12 @@ def normalize(campaign: dict, now: datetime | None = None,
     if not isinstance(campaign, dict):
         return None
     now = now or datetime.now(timezone.utc)
-    ident, project = str(campaign.get("id") or ""), str(campaign.get("project") or "")
+    ident = str(campaign.get("id") or "").strip()
+    project = str(campaign.get("project") or "").strip()
+    chain_value = campaign.get("chain", "multi")
+    if not isinstance(chain_value, str) or not chain_value.strip():
+        return None
+    canonical_chain = chain_value.strip().lower()
     trusted_urls = _trusted_source_urls(
         campaign.get("official_url"), campaign.get("source_evidence_url")
     )
@@ -452,8 +562,13 @@ def normalize(campaign: dict, now: datetime | None = None,
     announced_at = _timestamp(campaign.get("announced_at"))
     if campaign.get("announced_at") and not announced_at:
         return None
-    claim_outcome = _claim_outcome(campaign, verifier=claim_verifier)
-    if status == "claimed" and not claim_outcome:
+    if status != "claimed" and campaign.get("claim") is not None:
+        return None
+    claim_evidence = _claim_evidence(campaign, verifier=claim_verifier)
+    claim_outcome = _verified_claim_outcome(claim_evidence)
+    if claim_outcome and claim_evidence:
+        claim_evidence["claim_verification_state"] = "fully_verified"
+    if status == "claimed" and not claim_evidence:
         return None
     wallets = [str(w) for w in campaign.get("wallets", []) if str(w).strip()]
     tasks = [t for t in campaign.get("tasks", []) if isinstance(t, dict) and t.get("name")]
@@ -466,15 +581,19 @@ def normalize(campaign: dict, now: datetime | None = None,
     )
     source_verified = official_verified and evidence_verified
     source_state = "source_verified" if source_verified else "source_unverified"
+    if claim_outcome and not source_verified:
+        claim_outcome = None
+        claim_evidence["claim_verification_state"] = "fully_verified_source_unverified"
     evidence_state = "recorded" if wallets and all(t.get("evidence") for t in tasks) else "unknown"
     # A claim page can be actionable; a task campaign still needs a controlled wallet
     # and explicit task evidence before it is anything more than research.
-    decision = ("CLAIMED" if status == "claimed" and source_verified else
+    decision = ("CLAIMED" if (status == "claimed" and claim_outcome
+                               and source_verified) else
                 "CLAIM_CHECK" if (status == "claimable" and evidence_state == "recorded"
                                   and source_verified)
                 else "WATCH")
     return {
-        "lane": "airdrop", "chain": campaign.get("chain", "multi"), "token": ident,
+        "lane": "airdrop", "chain": canonical_chain, "token": ident,
         "symbol": project, "source": "official campaign watchlist", "state": status,
         "decision": decision, "event_type": "airdrop_campaign", "official_url": url,
         "source_evidence_url": source_evidence_url, "trust_root": trust_root,
@@ -494,7 +613,11 @@ def normalize(campaign: dict, now: datetime | None = None,
             "official_marker_count": len(official_markers),
             "evidence_marker_count": len(evidence_markers),
         },
-        "tasks": tasks, "claim_outcome": claim_outcome,
+        "tasks": tasks, "claim_evidence": claim_evidence,
+        "claim_verification_state": (
+            claim_evidence.get("claim_verification_state") if claim_evidence else "none"
+        ),
+        "claim_outcome": claim_outcome,
         "reasons": [f"代码信任根: {trust_root}", f"官方源验证: {source_state}",
                     f"资格证据: {evidence_state}"],
     }
@@ -514,6 +637,9 @@ def sync(path: Path = WATCHLIST, now: datetime | None = None,
         ident, new = record(event)
         if event.get("claim_outcome"):
             save_outcome(ident, event["claim_outcome"], "resolved")
+        elif event.get("claim_evidence"):
+            # Reopen legacy tx-only rows that old code incorrectly resolved as claims.
+            save_outcome(ident, event["claim_evidence"], "open")
         inserted += int(new)
         accepted += 1
         if event["source_state"] == "source_verified":

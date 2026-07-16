@@ -361,14 +361,49 @@ def test_carry_quarantines_legacy_missing_market_and_incomplete_cost(ledger):
 def test_airdrop_sums_verified_claims_but_refuses_success_only_hit_rate(ledger):
     from src.pipeline import opportunity_outcomes as oo
 
+    tx_hash = "0x" + "a" * 64
     ident, _ = ledger.record({
         "lane": "airdrop", "chain": "ethereum", "token": "campaign",
         "symbol": "Campaign", "decision": "CLAIMED", "state": "claimed",
+        "source_state": "source_verified",
+        "source_verification": {
+            "official_page_verified": True,
+            "evidence_page_verified": True,
+        },
     })
+    verification = {
+        "tx_id": tx_hash, "confirmed_at": "2026-07-13T12:01:00+00:00",
+        "onchain_success": True,
+        "campaign_semantics_verified": True,
+        "beneficiary_verified": True,
+        "reward_amount_verified": True,
+        "reward_usd_verified": True,
+        "actual_cost_usd_verified": True,
+        "verified_campaign_id": "campaign",
+        "verified_beneficiary": "owned-wallet",
+        "verified_reward_amount": 125,
+        "verified_reward_asset": "USD",
+        "verified_reward_usd": 125,
+        "verified_actual_cost_usd": 5,
+    }
     ledger.save_outcome(ident, {
-        "kind": "airdrop_claim", "gross_reward_usd": 125,
+        "version": 3, "kind": "airdrop_claim",
+        "campaign_id": "campaign",
+        "claim_verification_state": "fully_verified",
+        "claimed_at": "2026-07-13T12:01:00+00:00",
+        "reported_claimed_at": "2026-07-13T12:00:00+00:00",
+        "tx_url": "https://etherscan.io/tx/" + tx_hash,
+        "chain": "ethereum",
+        "gross_reward_usd": 125,
         "actual_cost_usd": 5, "net_reward_usd": 120,
+        "verified_reward_amount": 125, "verified_reward_asset": "USD",
         "reward_is_claimed": True, "cost_is_actual": True,
+        "campaign_semantics_verified": True,
+        "beneficiary_verified": True,
+        "reward_amount_verified": True,
+        "reward_usd_verified": True,
+        "actual_cost_usd_verified": True,
+        "transaction_verification": verification,
     }, "resolved")
     ledger.record({
         "lane": "airdrop", "chain": "base", "token": "watching",
@@ -378,9 +413,186 @@ def test_airdrop_sums_verified_claims_but_refuses_success_only_hit_rate(ledger):
     stat = oo.lane_stats()["airdrop"]
     assert stat["verdict"] == "realized_claims"
     assert stat["n_events"] == 2 and stat["n_claimed"] == 1 and stat["pending"] == 1
+    assert stat["n_transaction_verified"] == 1
+    assert stat["n_claim_semantics_verified"] == 1
+    assert stat["n_reward_valued"] == stat["n_fully_verified_claims"] == 1
     assert stat["net_reward_usd"] == 120
     assert stat["edge_verdict"] == "不可判"
     assert "rate" not in stat and "命中率" in stat["note"]
+
+
+def test_airdrop_transaction_only_and_legacy_claims_never_enter_verified_pnl(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    legacy_id, _ = ledger.record({
+        "lane": "airdrop", "chain": "ethereum", "token": "legacy",
+        "symbol": "Legacy", "decision": "CLAIMED", "state": "claimed",
+    })
+    ledger.save_outcome(legacy_id, {
+        "version": 2, "kind": "airdrop_claim", "gross_reward_usd": 1_000_000,
+        "actual_cost_usd": 0, "net_reward_usd": 1_000_000,
+        "reward_is_claimed": True, "cost_is_actual": True,
+    }, "resolved")
+
+    tx_id, _ = ledger.record({
+        "lane": "airdrop", "chain": "starknet", "token": "tx-only",
+        "symbol": "Tx only", "decision": "WATCH", "state": "claimed",
+    })
+    ledger.save_outcome(tx_id, {
+        "version": 3, "kind": "airdrop_claim_evidence",
+        "claim_verification_state": "transaction_only",
+        "reported_reward_usd": 500_000,
+        "reported_actual_cost_usd": 1,
+        "transaction_verification": {
+            "tx_id": "0xabc", "confirmed_at": "2026-07-13T12:01:00+00:00",
+            "onchain_success": True, "campaign_semantics_verified": False,
+        },
+    }, "open")
+
+    stat = oo.lane_stats()["airdrop"]
+
+    assert stat["n_events"] == 2
+    assert stat["n_transaction_verified"] == 1
+    assert stat["n_claim_semantics_verified"] == stat["n_reward_valued"] == 0
+    assert stat["n_fully_verified_claims"] == stat["n_claimed"] == 0
+    assert stat["verdict"] == stat["edge_verdict"] == "不可判"
+    assert "net_reward_usd" not in stat
+    assert "不完整记录不计入净回报" in stat["note"]
+
+
+def test_airdrop_stats_fail_closed_on_malformed_or_forged_v3_outcomes(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    tx_hash = "0x" + "a" * 64
+    ident, _ = ledger.record({
+        "lane": "airdrop", "chain": "ethereum", "token": "campaign",
+        "symbol": "Campaign", "decision": "CLAIMED", "state": "claimed",
+        "source_state": "source_verified",
+        "source_verification": {
+            "official_page_verified": True, "evidence_page_verified": True,
+        },
+    })
+
+    for malformed in (["not", "an", "object"], "truthy string", 7, True):
+        ledger.save_outcome(ident, malformed, "resolved")
+        stat = oo.lane_stats()["airdrop"]
+        assert stat["n_fully_verified_claims"] == 0
+        assert "net_reward_usd" not in stat
+
+    base_verification = {
+        "tx_id": tx_hash, "confirmed_at": "2026-07-13T12:01:00+00:00",
+        "onchain_success": True,
+        "campaign_semantics_verified": True,
+        "beneficiary_verified": True,
+        "reward_amount_verified": True,
+        "reward_usd_verified": True,
+        "actual_cost_usd_verified": True,
+        "verified_campaign_id": "campaign",
+        "verified_beneficiary": "owned-wallet",
+        "verified_reward_amount": 125,
+        "verified_reward_asset": "USD",
+        "verified_reward_usd": 125,
+        "verified_actual_cost_usd": 5,
+    }
+    base_outcome = {
+        "version": 3, "kind": "airdrop_claim", "campaign_id": "campaign",
+        "claim_verification_state": "fully_verified",
+        "claimed_at": "2026-07-13T12:01:00+00:00",
+        "reported_claimed_at": "2026-07-13T12:00:00+00:00",
+        "tx_url": "https://etherscan.io/tx/" + tx_hash,
+        "chain": "ethereum",
+        "gross_reward_usd": 125, "actual_cost_usd": 5, "net_reward_usd": 120,
+        "verified_reward_amount": 125, "verified_reward_asset": "USD",
+        "reward_is_claimed": True, "cost_is_actual": True,
+        "campaign_semantics_verified": True, "beneficiary_verified": True,
+        "reward_amount_verified": True, "reward_usd_verified": True,
+        "actual_cost_usd_verified": True,
+    }
+    invalid_cases = (
+        ("verification", "verified_campaign_id", "other-campaign"),
+        ("verification", "verified_beneficiary", " "),
+        ("verification", "verified_reward_asset", ""),
+        ("verification", "verified_reward_amount", True),
+        ("verification", "verified_reward_amount", float("nan")),
+        ("verification", "verified_reward_amount", float("inf")),
+        ("verification", "verified_reward_amount", -1),
+        ("verification", "verified_reward_usd", float("nan")),
+        ("verification", "verified_actual_cost_usd", float("inf")),
+        ("verification", "confirmed_at", "9999-12-31T23:59:59-23:59"),
+        ("outcome", "version", 3.0),
+        ("outcome", "campaign_id", "other-campaign"),
+        ("outcome", "claimed_at", None),
+        ("outcome", "reported_claimed_at", None),
+        ("outcome", "tx_url", "https://etherscan.io/tx/" + "b" * 64),
+        ("outcome", "chain", "base"),
+        ("outcome", "verified_reward_amount", 124),
+        ("outcome", "verified_reward_asset", "ETH"),
+        ("outcome", "gross_reward_usd", True),
+        ("outcome", "net_reward_usd", float("nan")),
+    )
+    for target, key, value in invalid_cases:
+        verification = {**base_verification}
+        outcome = {**base_outcome}
+        if target == "verification":
+            verification[key] = value
+        else:
+            outcome[key] = value
+        outcome["transaction_verification"] = verification
+        ledger.save_outcome(ident, outcome, "resolved")
+        stat = oo.lane_stats()["airdrop"]
+        assert stat["n_fully_verified_claims"] == 0, (target, key, value)
+        assert "net_reward_usd" not in stat, (target, key, value)
+
+
+def test_airdrop_stats_reject_nonfinite_aggregate_even_when_rows_are_finite(ledger):
+    from src.pipeline import opportunity_outcomes as oo
+
+    for index in range(2):
+        campaign_id = f"huge-{index}"
+        tx_hash = "0x" + str(index + 1) * 64
+        ident, _ = ledger.record({
+            "lane": "airdrop", "chain": "ethereum", "token": campaign_id,
+            "symbol": campaign_id, "decision": "CLAIMED", "state": "claimed",
+            "source_state": "source_verified",
+            "source_verification": {
+                "official_page_verified": True, "evidence_page_verified": True,
+            },
+        })
+        verification = {
+            "tx_id": tx_hash,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+            "onchain_success": True,
+            "campaign_semantics_verified": True, "beneficiary_verified": True,
+            "reward_amount_verified": True, "reward_usd_verified": True,
+            "actual_cost_usd_verified": True,
+            "verified_campaign_id": campaign_id,
+            "verified_beneficiary": "owned-wallet",
+            "verified_reward_amount": 1e308, "verified_reward_asset": "USD",
+            "verified_reward_usd": 1e308, "verified_actual_cost_usd": 0,
+        }
+        ledger.save_outcome(ident, {
+            "version": 3, "kind": "airdrop_claim", "campaign_id": campaign_id,
+            "claim_verification_state": "fully_verified",
+            "claimed_at": "2026-07-13T12:01:00+00:00",
+            "reported_claimed_at": "2026-07-13T12:00:00+00:00",
+            "tx_url": "https://etherscan.io/tx/" + tx_hash,
+            "chain": "ethereum",
+            "gross_reward_usd": 1e308, "actual_cost_usd": 0,
+            "net_reward_usd": 1e308,
+            "verified_reward_amount": 1e308, "verified_reward_asset": "USD",
+            "reward_is_claimed": True, "cost_is_actual": True,
+            "campaign_semantics_verified": True, "beneficiary_verified": True,
+            "reward_amount_verified": True, "reward_usd_verified": True,
+            "actual_cost_usd_verified": True,
+            "transaction_verification": verification,
+        }, "resolved")
+
+    stat = oo.lane_stats()["airdrop"]
+
+    assert stat["n_fully_verified_claims"] == 2
+    assert stat["verdict"] == "不可判"
+    assert "net_reward_usd" not in stat
+    assert "聚合非有限" in stat["note"]
 
 
 def test_empty_airdrop_lane_is_explicitly_scored_as_zero_events(ledger):
