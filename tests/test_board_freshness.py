@@ -109,7 +109,9 @@ def test_partial_exports_merge_manifest_instead_of_erasing_other_views(tmp_path,
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
     launch = board_export._envelope(_launch_body([]), view="launch")
-    perps = board_export._envelope({}, view="perps")
+    perps = board_export._envelope(
+        {"perps": [], "carry": [], "cascade_events": []}, view="perps",
+    )
     board_export.write_views(launch=launch)
     board_export.write_views(perps=perps)
     original_perps = (tmp_path / "perps.json").read_bytes()

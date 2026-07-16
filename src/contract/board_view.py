@@ -10,6 +10,7 @@ import json
 import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Mapping
+from urllib.parse import urlparse
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
@@ -42,7 +43,7 @@ _CANONICAL_EVENT_COLLECTIONS = {
     "launch": ("events", "launch", True),
     "structure": ("events", "structure", True),
     "airdrop": ("events", "airdrop", True),
-    "perps": ("cascade_events", "cascade", False),
+    "perps": ("cascade_events", "cascade", True),
 }
 _ACTION_LEVELS = {
     "A0_BLOCKED", "A1_WATCH", "A2_PAPER_READY",
@@ -63,6 +64,12 @@ def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
     if required and not value:
         raise BoardViewContractError(f"{path} must explain the blocked state")
     return value
+
+
+def _required_text(value: Any, *, path: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BoardViewContractError(f"{path} must be a non-empty string")
+    return value.strip()
 
 
 def _launch_protocol_join_member(view: str, payload: Any) -> dict | None:
@@ -566,10 +573,189 @@ def _validate_launch_a3(row: Mapping[str, Any], *, assessment: Any,
         raise BoardViewContractError(f"{path} invalid A3 manual probe: {', '.join(failures)}")
 
 
+def _validate_nonlaunch_identity(row: Mapping[str, Any], *, generated_at: datetime,
+                                 path: str) -> None:
+    """Bind a public event to one source, asset and timezone-aware observation."""
+    for field in ("chain", "token", "symbol", "source"):
+        _required_text(row.get(field), path=f"{path}.{field}")
+    for field in ("detected_at", "decision_at"):
+        clock = _aware_clock(row.get(field), path=f"{path}.{field}")
+        if clock > generated_at + timedelta(seconds=5):
+            raise BoardViewContractError(f"{path}.{field} is ahead of the board clock")
+    # Event/executable clocks may legitimately describe a scheduled future listing
+    # or claim window. Observation and quote clocks may not claim future knowledge.
+    for field in ("event_at", "executable_at"):
+        if row.get(field) is None:
+            continue
+        _aware_clock(row[field], path=f"{path}.{field}")
+    if row.get("quote_at") is not None:
+        clock = _aware_clock(row["quote_at"], path=f"{path}.quote_at")
+        if clock > generated_at + timedelta(seconds=5):
+            raise BoardViewContractError(f"{path}.quote_at is ahead of the board clock")
+    if row.get("expires_at") is not None:
+        _aware_clock(row["expires_at"], path=f"{path}.expires_at")
+
+
+def _validate_nested_manual_only(row: Mapping[str, Any], *, path: str) -> None:
+    """Do not let a nested assessment or evidence object opt into automation."""
+    assessment = row.get("current_assessment")
+    if assessment is not None and assessment.get("auto_execution_allowed") is not False:
+        raise BoardViewContractError(
+            f"{path}.current_assessment.auto_execution_allowed must be exactly false"
+        )
+    evidence = row.get("evidence_gate")
+    if evidence is not None:
+        if not isinstance(evidence, Mapping):
+            raise BoardViewContractError(f"{path}.evidence_gate must be an object")
+        if evidence.get("auto_execution_allowed") is not False:
+            raise BoardViewContractError(
+                f"{path}.evidence_gate.auto_execution_allowed must be exactly false"
+            )
+
+
+def _trusted_https_url(value: Any, *, trust_root: str, path: str) -> str:
+    url = _required_text(value, path=path)
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if (parsed.scheme != "https" or not host or parsed.username is not None
+            or parsed.password is not None
+            or not (host == trust_root or host.endswith("." + trust_root))):
+        raise BoardViewContractError(f"{path} must be HTTPS under {trust_root}")
+    return url
+
+
+def _validate_airdrop_event(row: Mapping[str, Any], *, generated_at: datetime,
+                            path: str) -> None:
+    trust_root = _required_text(row.get("trust_root"), path=f"{path}.trust_root")
+    if trust_root != trust_root.lower().rstrip(".") or "." not in trust_root:
+        raise BoardViewContractError(f"{path}.trust_root is not canonical")
+    _trusted_https_url(
+        row.get("official_url"), trust_root=trust_root, path=f"{path}.official_url",
+    )
+    _trusted_https_url(
+        row.get("source_evidence_url"), trust_root=trust_root,
+        path=f"{path}.source_evidence_url",
+    )
+    state = row.get("source_state")
+    if state not in {"source_verified", "source_unverified"}:
+        raise BoardViewContractError(f"{path}.source_state is invalid")
+    if row.get("official_state") != state:
+        raise BoardViewContractError(f"{path}.official_state contradicts source_state")
+    verification = row.get("source_verification")
+    if not isinstance(verification, Mapping):
+        raise BoardViewContractError(f"{path}.source_verification must be an object")
+    if verification.get("trust_root") != trust_root:
+        raise BoardViewContractError(f"{path}.source_verification trust root drifted")
+    checked_at = _aware_clock(
+        verification.get("checked_at"), path=f"{path}.source_verification.checked_at",
+    )
+    if checked_at > generated_at + timedelta(seconds=5):
+        raise BoardViewContractError(
+            f"{path}.source_verification.checked_at is ahead of the board clock"
+        )
+    source_pass = (
+        verification.get("official_page_verified") is True
+        and verification.get("evidence_page_verified") is True
+    )
+    if (state == "source_verified") is not source_pass:
+        raise BoardViewContractError(f"{path}.source_verification contradicts source_state")
+    if row.get("deadline") != row.get("expires_at"):
+        raise BoardViewContractError(f"{path}.deadline must equal expires_at")
+
+    if row.get("actionable_now") is True:
+        if (row.get("effective_decision") != "CLAIM_CHECK"
+                or row.get("state") != "claimable"
+                or state != "source_verified"
+                or row.get("evidence_state") != "recorded"):
+            raise BoardViewContractError(f"{path} has no verified claim-check basis")
+        wallet_count = row.get("wallet_count")
+        if isinstance(wallet_count, bool) or not isinstance(wallet_count, int) \
+                or wallet_count < 1:
+            raise BoardViewContractError(f"{path}.wallet_count must prove an owned wallet")
+
+
+def _validate_cascade_event(row: Mapping[str, Any], *, path: str) -> None:
+    direction, side = row.get("direction"), row.get("side")
+    expected_side = {
+        "longs_crowded": "SHORT", "down": "SHORT",
+        "shorts_crowded": "LONG", "up": "LONG",
+    }.get(direction)
+    if expected_side is None or side != expected_side:
+        raise BoardViewContractError(f"{path}.side contradicts cascade direction")
+    if row.get("event_at") is None:
+        raise BoardViewContractError(f"{path}.event_at is required")
+    if row.get("actionable_now") is not True:
+        return
+    evidence = row.get("evidence_gate")
+    probe = row.get("execution_probe")
+    if not isinstance(evidence, Mapping) or evidence.get("state") != "pass":
+        raise BoardViewContractError(f"{path} lacks a passing cascade evidence gate")
+    if (not isinstance(probe, Mapping) or probe.get("state") != "quoted"
+            or probe.get("read_only") is not True
+            or probe.get("is_real_fill") is not False
+            or probe.get("side") != side
+            or probe.get("quote_at") != row.get("quote_at")):
+        raise BoardViewContractError(f"{path} lacks a bound read-only cascade quote")
+
+
+def _validate_nonlaunch_action(row: Mapping[str, Any], *, view: str,
+                               generated_at: datetime, path: str) -> None:
+    allowed = {
+        "structure": {"WATCH"},
+        "airdrop": {"WATCH", "CLAIM_CHECK", "CLAIMED", "EXPIRED", "AVOID"},
+        "perps": {"WATCH", "SMALL_PROBE", "EXPIRED", "AVOID"},
+    }[view]
+    effective = row.get("effective_decision")
+    if effective not in allowed:
+        raise BoardViewContractError(f"{path}.effective_decision is invalid for {view}")
+    action_decisions = {"SMALL_PROBE", "CLAIM_CHECK"}
+    if row.get("actionable_now") is not (effective in action_decisions):
+        raise BoardViewContractError(
+            f"{path}.actionable_now contradicts effective_decision"
+        )
+    _validate_nested_manual_only(row, path=path)
+    if view == "structure":
+        if row.get("event_at") is None:
+            raise BoardViewContractError(f"{path}.event_at is required")
+    elif view == "airdrop":
+        _validate_airdrop_event(row, generated_at=generated_at, path=path)
+    else:
+        _validate_cascade_event(row, path=path)
+
+
+def _validate_observation_rows(value: Any, *, path: str) -> None:
+    """Validate non-event Perps observations without inventing execution fields."""
+    if not isinstance(value, list):
+        raise BoardViewContractError(f"{path} must be a list")
+    for index, row in enumerate(value):
+        row_path = f"{path}[{index}]"
+        if not isinstance(row, Mapping):
+            raise BoardViewContractError(f"{row_path} must be an object")
+        _required_text(row.get("symbol"), path=f"{row_path}.symbol")
+        if row.get("actionable_now") is True:
+            raise BoardViewContractError(f"{row_path} is an observation, not an action")
+        if ("auto_execution_allowed" in row
+                and row.get("auto_execution_allowed") is not False):
+            raise BoardViewContractError(
+                f"{row_path}.auto_execution_allowed must be exactly false"
+            )
+        if (row.get("effective_decision") in {"SMALL_PROBE", "CLAIM_CHECK"}
+                or row.get("decision") in {"SMALL_PROBE", "CLAIM_CHECK"}):
+            raise BoardViewContractError(
+                f"{row_path} cannot make an observation actionable"
+            )
+
+
+def _validate_perps_view(payload: Mapping[str, Any]) -> None:
+    for key in ("perps", "carry"):
+        if key not in payload:
+            raise BoardViewContractError(f"perps.{key} is required")
+        _validate_observation_rows(payload[key], path=f"perps.{key}")
+
+
 def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
                     generated_at: datetime, path: str) -> None:
-    if not str(row.get("id") or "").strip():
-        raise BoardViewContractError(f"{path}.id must be non-empty")
+    _required_text(row.get("id"), path=f"{path}.id")
     if row.get("lane") != lane:
         raise BoardViewContractError(
             f"{path}.lane must be {lane!r}, got {row.get('lane')!r}"
@@ -615,6 +801,11 @@ def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
             _validate_launch_a3(
                 row, assessment=assessment, generated_at=generated_at, path=path
             )
+    else:
+        _validate_nonlaunch_identity(row, generated_at=generated_at, path=path)
+        _validate_nonlaunch_action(
+            row, view=view, generated_at=generated_at, path=path,
+        )
 
     if row.get("actionable_now"):
         if effective not in {"SMALL_PROBE", "CLAIM_CHECK"}:
@@ -663,6 +854,8 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         _validate_launch_view(payload, generated_at=envelope.generated_at)
     if name == "stats":
         _validate_stats_view(payload)
+    if name == "perps":
+        _validate_perps_view(payload)
 
     collection = _CANONICAL_EVENT_COLLECTIONS.get(name)
     if collection:
@@ -677,7 +870,7 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
             path = f"{name}.{key}[{index}]"
             if not isinstance(row, Mapping):
                 raise BoardViewContractError(f"{path} must be an object")
-            ident = str(row.get("id") or "").strip()
+            ident = _required_text(row.get("id"), path=f"{path}.id")
             if ident in seen:
                 raise BoardViewContractError(f"{name}.{key} contains duplicate id {ident!r}")
             seen.add(ident)

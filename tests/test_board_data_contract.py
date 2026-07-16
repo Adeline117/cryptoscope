@@ -688,10 +688,15 @@ def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkey
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    observed_at = datetime.now(timezone.utc).isoformat()
     launch = _view(board_export, "launch", _launch_body([_launch_event()]))
     perps = _view(board_export, "perps", {
         "perps": [], "carry": [], "cascade_events": [{
-            "id": "cascade-1", "lane": "cascade", "actionable_now": False,
+            "id": "cascade-1", "lane": "cascade", "chain": "hyperliquid",
+            "token": "BTC", "symbol": "BTC", "source": "Hyperliquid",
+            "detected_at": observed_at, "decision_at": observed_at,
+            "event_at": observed_at, "direction": "down", "side": "SHORT",
+            "actionable_now": False,
             "effective_decision": "WATCH", "auto_execution_allowed": False,
         }],
     })
