@@ -58,6 +58,49 @@ def _rows(db: str, sql: str) -> list:
 _DETECTOR_MAX_AGE_H = {"transfer_flow": 48}
 
 
+def _launch_protocol_health() -> dict:
+    """Expose the same fail-closed source/admission truth used by the board."""
+    from src.contract.launch_protocol import (
+        COHORT_VERSION, PROTOCOL_ID, PROTOCOL_START_AT,
+    )
+    from src.pipeline import launch_protocol_gate, launch_radar, solana_launch_reconcile
+
+    try:
+        readiness = solana_launch_reconcile.source_readiness()
+    except Exception as exc:
+        readiness = {
+            "state": "blocked", "ready": False,
+            "reason_codes": ["source_readiness_unavailable"],
+            "error": f"{type(exc).__name__}: {exc}"[:160],
+        }
+    try:
+        admission = launch_protocol_gate.read(protocol_id=PROTOCOL_ID)
+    except Exception as exc:
+        admission = None
+        admission_error = f"{type(exc).__name__}: {exc}"[:160]
+    else:
+        admission_error = None
+    if admission is None:
+        admission = {
+            "protocol_id": PROTOCOL_ID, "cohort_version": COHORT_VERSION,
+            "protocol_start_at": PROTOCOL_START_AT,
+            "state": "scheduled", "enrollment_open": False,
+            "reason_codes": [
+                "protocol_admission_unavailable" if admission_error
+                else "protocol_gate_not_initialized"
+            ],
+            "auto_execution_allowed": False,
+        }
+        if admission_error:
+            admission["error"] = admission_error
+    effective = launch_radar._public_research_protocol(readiness, admission)
+    return {
+        "source_readiness": readiness,
+        "protocol_admission": admission,
+        "effective": effective,
+    }
+
+
 def _dead_signals() -> list[dict]:
     """Registered detectors whose last EVALUABLE result is missing or too old.
 
@@ -184,7 +227,8 @@ def collect_stats() -> dict:
     keys = {
         k: bool(os.environ.get(k))
         for k in ("TELEGRAM_BOT_TOKEN", "HELIUS_API_KEY", "ALCHEMY_API_KEY",
-                  "ETHERSCAN_API_KEY", "DUNE_API_KEY", "ANTHROPIC_API_KEY")
+                  "ETHERSCAN_API_KEY", "DUNE_API_KEY", "ANTHROPIC_API_KEY",
+                  "SOLANA_RECONCILIATION_RPC_URL", "JUPITER_API_KEY")
     }
 
     return {
@@ -203,6 +247,7 @@ def collect_stats() -> dict:
         "labels": {"pump": labels_pump, "dud": labels_dud,
                    "ready_for_calibration": labels_pump >= 5 and labels_dud >= 5},
         "api_keys": keys,
+        "launch_protocol": _launch_protocol_health(),
         "scheduler": _scheduler_status(),
     }
 
@@ -253,6 +298,22 @@ def format_report(stats: dict) -> str:
     L.append(f"👁  观察名单(near-saturation): {s['watchlist_active']}")
     f = s["funders"]
     L.append(f"🔗 funder 缓存: {f['cached']} (已解析 {f['resolved']})")
+    launch = s.get("launch_protocol") or {}
+    effective = launch.get("effective") or {}
+    readiness = launch.get("source_readiness") or {}
+    L.append("")
+    L.append(
+        "🚦 Launch v3: "
+        + ("✅ OPEN" if effective.get("enrollment_open") else
+           f"❌ {effective.get('enrollment_state', 'blocked')}")
+    )
+    L.append(
+        "  独立 finalized burn-in: "
+        f"{readiness.get('observed_epochs', 0)}/{readiness.get('required_clean_epochs', '?')}"
+    )
+    reasons = effective.get("reason_codes") or []
+    if reasons:
+        L.append("  阻断原因: " + ", ".join(str(reason) for reason in reasons))
     L.append("")
     scr = s.get("screener", {})
     L.append(f"🔎 筛选器追踪 token: {scr.get('tracked', 0)}")
@@ -277,6 +338,12 @@ def format_telegram(stats: dict) -> str:
     s = stats
     snap = s["snapshots"]
     sigs = sum(s["signals"]["by_type"].values()) if s["signals"]["by_type"] else 0
+    launch = (s.get("launch_protocol") or {}).get("effective") or {}
+    launch_line = (
+        "🚦 Launch v3 ✅ OPEN\n" if launch.get("enrollment_open") else
+        f"🚦 Launch v3 ❌ {launch.get('enrollment_state', 'blocked')} · "
+        f"{','.join(launch.get('reason_codes') or ['unknown'])}\n"
+    )
     return (
         f"📊 <b>CryptoScope 日报 · 系统健康</b>\n"
         f"━━━━━━━━━━━━━━\n"
@@ -287,7 +354,8 @@ def format_telegram(stats: dict) -> str:
                    for d in s.get("dead_signals", []))
            if s.get("dead_signals") else "")
         + f"🎯 累计信号 {sigs} 条\n"
-        f"👁 观察名单 {s['watchlist_active']}\n"
+        + launch_line
+        + f"👁 观察名单 {s['watchlist_active']}\n"
         f"🔎 筛选器追踪 {s.get('screener',{}).get('tracked',0)} · 持续候选 {len(s.get('screener',{}).get('top_recurring',[]))}\n"
         f"🏷 标签 拉盘{s.get('labels',{}).get('pump',0)}/横死{s.get('labels',{}).get('dud',0)}\n"
         f"调度器 {'✅' if s['scheduler'].get('running') else '❌'}\n"
