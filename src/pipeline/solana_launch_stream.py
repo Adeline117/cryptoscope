@@ -642,6 +642,7 @@ def claim_qualification_batch(
     retry_after_seconds: float = QUALIFICATION_RETRY_SECONDS,
     lease_seconds: float = QUALIFICATION_LEASE_SECONDS,
     virgin_fraction: float = QUALIFICATION_VIRGIN_FRACTION,
+    require_reconciled_live: bool = False,
 ) -> list[dict]:
     """Atomically lease a fair mix of virgin and retryable launch evidence.
 
@@ -727,6 +728,11 @@ def claim_qualification_batch(
                        ))
                      )
                      AND {available_lease}"""
+        if require_reconciled_live:
+            where += (
+                " AND capture_mode='live_ws'"
+                " AND reconciliation_state='verified_live'"
+            )
         fields = """signature,slot,event_type,creator,mint,detected_at,
                     raw_payload_hash,hydration_payload_hash,
                     qualification_state,qualification_attempted_at"""

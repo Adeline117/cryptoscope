@@ -2060,6 +2060,37 @@ def test_claim_quarantines_preboundary_and_late_rows_before_limit(sol):
     }
 
 
+def test_protocol_claim_requires_live_capture_with_finalized_reconciliation(sol):
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    c = sol._conn()
+    try:
+        for signature, mode, reconciliation in (
+            ("verified", "live_ws", "verified_live"),
+            ("unverified", "live_ws", "unverified"),
+            ("backfill", "finalized_reconciliation", "reconciled_backfill"),
+        ):
+            c.execute(
+                """INSERT INTO raw_launches(
+                       signature,slot,program,event_type,creator,mint,detected_at,
+                       raw_payload_hash,hydration_payload_hash,logs,evidence_state,
+                       qualification_state,capture_mode,reconciliation_state)
+                   VALUES (?,1,?,?,?,?,?,?,?,'[]','complete','raw_unqualified',?,?)""",
+                (signature, sol.PUMP_FUN_PROGRAM, "pump_fun_createv2", "creator",
+                 f"mint-{signature}", (now - timedelta(minutes=1)).isoformat(),
+                 "a" * 64, "b" * 64, mode, reconciliation),
+            )
+        c.commit()
+    finally:
+        c.close()
+
+    claimed = sol.claim_qualification_batch(
+        now=now, limit=3, protocol_start_at=(now - timedelta(hours=1)).isoformat(),
+        max_source_to_decision_seconds=600, require_reconciled_live=True,
+    )
+
+    assert [row["signature"] for row in claimed] == ["verified"]
+
+
 def test_qualification_lease_is_exclusive_and_crash_retries_after_cooldown(sol):
     now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
     event = sol.parse_message(_notification())
