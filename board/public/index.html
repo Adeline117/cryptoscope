@@ -197,6 +197,10 @@
   .play{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px;max-width:none;border:0;background:transparent;box-shadow:none;overflow:visible}
   .command{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:20px;padding:26px;
     border:1px solid var(--border2);border-radius:16px;background:linear-gradient(130deg,var(--s1),color-mix(in srgb,var(--accent-bg) 58%,var(--s2)));box-shadow:var(--shadow)}
+  .runtime-safety-banner{grid-column:1/-1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 17px;border:1px solid var(--warn-b);border-left:4px solid var(--warn);border-radius:12px;background:var(--warn-bg);color:var(--muted);box-shadow:var(--shadow)}
+  .runtime-safety-banner[data-state="blocked"][data-blocks-actionability="true"],.runtime-safety-banner[data-state="unknown"][data-blocks-actionability="true"]{border-color:var(--danger-b);border-left-color:var(--danger);background:var(--danger-bg)}
+  .runtime-safety-banner strong{display:block;color:var(--text);font-size:13px;line-height:1.4}.runtime-safety-banner span{display:block;margin-top:3px;font-size:11px;line-height:1.5;overflow-wrap:anywhere}.runtime-safety-banner .runtime-state{flex:0 0 auto;margin:0;font:700 10px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--warn)}
+  .runtime-safety-banner[data-state="blocked"][data-blocks-actionability="true"] .runtime-state,.runtime-safety-banner[data-state="unknown"][data-blocks-actionability="true"] .runtime-state{color:var(--danger)}
   .decision-kicker{display:flex;align-items:center;gap:8px;margin-bottom:9px;font-size:10.5px;font-weight:750;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
   .decision-kicker::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 0 5px color-mix(in srgb,var(--warn) 13%,transparent)}
   .command.actionable .decision-kicker::before{background:var(--good);box-shadow:0 0 0 5px color-mix(in srgb,var(--good) 13%,transparent)}
@@ -337,7 +341,7 @@
     .lanehead{margin-top:12px;padding:18px 16px;border-radius:14px}.lanetitle{font-size:14px}.stat{display:grid;grid-template-columns:repeat(3,1fr);width:100%}
     .stat>div{min-width:0;padding:6px 10px;border-left:1px solid var(--border)}.stat>div:nth-child(3n+1){border-left:0;padding-left:0}
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
-    .command{padding:19px 17px;gap:17px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
+    .command{padding:19px 17px;gap:17px}.runtime-safety-banner{padding:13px 14px;flex-direction:column;gap:6px}.decision-title{font-size:25px}.decision-copy{font-size:13px}.decision-facts{grid-template-columns:repeat(2,1fr)}
     .funnel-panel{padding:12px}.funnel-head{align-items:flex-start;flex-direction:column}.funnel-steps{grid-template-columns:1fr 1fr}.funnel-step{padding:9px}.funnel-step .fv{font-size:16px}
     .opportunity-queue{padding:17px 14px}.opportunity-queue-head{flex-direction:column;gap:7px}.opportunity-grid{grid-template-columns:1fr}.opportunity-metrics{grid-template-columns:1fr}.gate-summary{align-items:flex-start;flex-direction:column;gap:2px}.risk-line{align-items:flex-start;flex-direction:column}.risk-line .jump{width:100%}
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
@@ -612,6 +616,73 @@ function carryEvidenceUiState(paper,evidence){
     reason:available?null:"Carry 公开优势合同缺失或无效",
   };
 }
+const RUNTIME_SAFETY_REASONS=Object.freeze({
+  runtime_health_unavailable:"运行健康证据缺失或不可验证",
+  storage_pressure_warn:"存储空间进入预警区",
+  storage_pressure_critical:"存储空间已到临界线",
+  solana_streams_unhealthy:"Solana 实时发现流不健康",
+  solana_maintenance_unhealthy:"Solana 维护与补洞任务不健康",
+  evm_streams_unhealthy:"EVM 工厂流或 finalized 覆盖不健康",
+  hyperliquid_raw_trade_retention_shed:"Hyperliquid 原始成交已按磁盘策略丢弃",
+});
+const RUNTIME_SAFETY_REASON_ORDER=Object.freeze(Object.keys(RUNTIME_SAFETY_REASONS));
+function runtimeSafetyUiState(meta=data?.meta){
+  const fallback={available:false,state:"unknown",blocks:true,storagePressure:"unknown",
+    reasonCodes:["runtime_health_unavailable"],streams:{solana:{state:"unknown",live:null,configured:null,maintenance:"unknown"},evm:{state:"unknown",live:null,configured:null}},retention:"unknown"};
+  const object=value=>value!==null&&typeof value==="object"&&!Array.isArray(value);
+  const exact=(value,keys)=>object(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
+  const count=value=>value===null||Number.isSafeInteger(value)&&value>=0;
+  const raw=meta?.runtime_safety;
+  if(!exact(raw,["version","state","blocks_actionability","auto_execution_allowed","storage_pressure","reason_codes","streams","hyperliquid_raw_trade_retention"]))return fallback;
+  if(raw.version!==1||!["healthy","degraded","blocked","unknown"].includes(raw.state)
+    ||typeof raw.blocks_actionability!=="boolean"||raw.auto_execution_allowed!==false
+    ||!["ok","warn","critical","unknown"].includes(raw.storage_pressure)
+    ||!exact(raw.streams,["solana","evm"]))return fallback;
+  const sol=raw.streams.solana,evm=raw.streams.evm;
+  if(!exact(sol,["state","live","configured","maintenance"])
+    ||!["healthy","blocked","unknown"].includes(sol.state)||!count(sol.live)||!count(sol.configured)
+    ||!["healthy","blocked","unknown"].includes(sol.maintenance)
+    ||!exact(evm,["state","live","configured"])
+    ||!["healthy","degraded","blocked","unknown"].includes(evm.state)||!count(evm.live)||!count(evm.configured)
+    ||!["retained","shed","unknown"].includes(raw.hyperliquid_raw_trade_retention))return fallback;
+  if(sol.live!==null&&sol.configured!==null&&sol.live>sol.configured)return fallback;
+  if(evm.live!==null&&evm.configured!==null&&evm.live>evm.configured)return fallback;
+  const expectedSol=sol.live===null||sol.configured===null||sol.configured===0?"unknown":sol.live===sol.configured?"healthy":"blocked";
+  const expectedEvm=evm.live===null||evm.configured===null||evm.configured===0?"unknown":evm.live===evm.configured?"healthy":evm.live===0?"blocked":"degraded";
+  if(sol.state!==expectedSol||evm.state!==expectedEvm)return fallback;
+  const reasons=raw.reason_codes;
+  if(!Array.isArray(reasons)||new Set(reasons).size!==reasons.length||reasons.some(code=>!RUNTIME_SAFETY_REASON_ORDER.includes(code)))return fallback;
+  const retention=raw.hyperliquid_raw_trade_retention;
+  const unavailable=raw.storage_pressure==="unknown"||sol.state==="unknown"||sol.maintenance==="unknown"||evm.state==="unknown"||retention==="unknown";
+  const expectedReasons=unavailable?["runtime_health_unavailable"]:[];
+  if(raw.storage_pressure==="warn")expectedReasons.push("storage_pressure_warn");
+  else if(raw.storage_pressure==="critical")expectedReasons.push("storage_pressure_critical");
+  if(sol.state==="blocked")expectedReasons.push("solana_streams_unhealthy");
+  if(sol.maintenance==="blocked")expectedReasons.push("solana_maintenance_unhealthy");
+  if(["degraded","blocked"].includes(evm.state))expectedReasons.push("evm_streams_unhealthy");
+  if(retention==="shed")expectedReasons.push("hyperliquid_raw_trade_retention_shed");
+  if(JSON.stringify(reasons)!==JSON.stringify(expectedReasons))return fallback;
+  const expectedState=unavailable?"unknown":raw.storage_pressure==="critical"||sol.state==="blocked"||sol.maintenance==="blocked"?"blocked":raw.storage_pressure==="warn"||evm.state!=="healthy"||retention==="shed"?"degraded":"healthy";
+  const expectedBlocks=["blocked","unknown"].includes(expectedState);
+  if(raw.state!==expectedState||raw.blocks_actionability!==expectedBlocks)return fallback;
+  return{available:true,state:raw.state,blocks:raw.blocks_actionability,storagePressure:raw.storage_pressure,
+    reasonCodes:[...reasons],streams:{solana:{state:sol.state,live:sol.live,configured:sol.configured,maintenance:sol.maintenance},evm:{state:evm.state,live:evm.live,configured:evm.configured}},retention};
+}
+function runtimeSafetyBanner(runtime=runtimeSafetyUiState()){
+  if(runtime.state==="healthy")return"";
+  const blocked=runtime.blocks,title=blocked?"采集受阻 · 当前不可行动":"采集降级 · 当前仅作有限观察";
+  const value=n=>Number.isSafeInteger(n)?String(n):"?";
+  const stateLabel=state=>({healthy:"健康",degraded:"降级",blocked:"阻断",unknown:"未知"}[state]||"未知");
+  const storage=({ok:"OK",warn:"WARN",critical:"CRITICAL",unknown:"?"}[runtime.storagePressure]||"?");
+  const sol=runtime.streams.solana,evm=runtime.streams.evm;
+  const retention=runtime.retention==="shed"
+    ?"HL 原始成交已停止留存；该字段不证明 BBO / books / asset ctx 在线"
+    :runtime.retention==="retained"?"HL 原始成交正常留存":"HL 原始成交留存 ?";
+  const statuses=`存储 ${storage}；Solana ${value(sol.live)}/${value(sol.configured)}（${stateLabel(sol.state)}，维护${stateLabel(sol.maintenance)}）；EVM ${value(evm.live)}/${value(evm.configured)}（${stateLabel(evm.state)}）；${retention}`;
+  const reasons=runtime.reasonCodes.map(code=>RUNTIME_SAFETY_REASONS[code]).filter(Boolean).join("；");
+  const details=`${statuses}。${reasons?`原因：${reasons}。`:""}视图按时 ≠ 上游完整。自动交易始终关闭。`;
+  return `<section class="runtime-safety-banner" data-state="${esc(runtime.state)}" data-blocks-actionability="${runtime.blocks?"true":"false"}" role="region" aria-label="运行安全状态"><div><strong>${title}</strong><span>${esc(details)}</span></div><span class="runtime-state">${esc(runtime.state)}</span></section>`;
+}
 const ACTION_LEVELS=new Set(["A0_BLOCKED","A1_WATCH","A2_PAPER_READY","A3_MANUAL_PROBE","A4_REAL_FILL_VALIDATED"]);
 function actionLevel(r,launchPayload){
   const hard=(r?.decision==="AVOID"||r?.recorded_decision==="AVOID"||r?.security_gate?.state==="avoid");
@@ -619,6 +690,7 @@ function actionLevel(r,launchPayload){
   const level=ACTION_LEVELS.has(r?.action_level)?r.action_level:"A1_WATCH";
   const expiry=r?.current_assessment?.expires_at||r?.expires_at;
   if(["A2_PAPER_READY","A3_MANUAL_PROBE"].includes(level)&&(!expiry||Date.now()>=new Date(expiry).getTime()))return "A1_WATCH";
+  if(level==="A3_MANUAL_PROBE"&&runtimeSafetyUiState().blocks)return "A1_WATCH";
   if(level==="A3_MANUAL_PROBE"&&(!launchProtocolUiState(launchPayload||data?.launch).open||launchReconciliationProofState(r).state!=="pass"))return "A1_WATCH";
   if(level==="A3_MANUAL_PROBE"&&launchStatsJoinState().actionBlock)return "A1_WATCH";
   if(level==="A3_MANUAL_PROBE"&&launchDeliveryUiState(r,launchPayload||data?.launch).state!=="pass")return "A1_WATCH";
@@ -1404,6 +1476,7 @@ function launchOpportunityQueue(launches){
 // board from a data dashboard into a clear, honest, ranked trading thesis.
 function renderPlay(){
   const launches=data.launch?.events||[];
+  const runtimeSafety=runtimeSafetyUiState();
   const launchProtocol=launchProtocolUiState(data.launch);
   const allCarry=data.perp?.carry||[];
   const carry=allCarry.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0);
@@ -1442,8 +1515,11 @@ function renderPlay(){
   const launchResolved=Number.isFinite(launchEvidence?.n)?launchEvidence.n:null;
   const trackingValue=`L ${launchResolved??"?"} · C ${carryValid??"?"}`;
   let h='<div class="scroll play">';
-  const verdict=!data.launch?'不可判 · Launch 视图缺失':!launchProtocol.open?'等待 · Launch 来源准入未开放':actionCount?`${actionCount} 个人工小额验证窗仍有效`:'等待 · 当前不入场';
-  const verdictCopy=!data.launch
+  h+=runtimeSafetyBanner(runtimeSafety);
+  const verdict=runtimeSafety.blocks?'采集受阻 · 当前不可行动':!data.launch?'不可判 · Launch 视图缺失':!launchProtocol.open?'等待 · Launch 来源准入未开放':actionCount?`${actionCount} 个人工小额验证窗仍有效`:'等待 · 当前不入场';
+  const verdictCopy=runtimeSafety.blocks
+    ?'运行源健康证据缺失或已明确阻断，所有 A3 已强制降为 A1。先恢复采集与运行门禁，再重新验证报价、来源和证据；视图按时不代表上游完整。'
+    :!data.launch
     ?'Launch 当前视图未加载，不能把缺失解释成没有机会；请先检查关键视图时钟与来源覆盖。'
     :!launchProtocol.open
     ?`独立 finalized 来源 readiness 或持久化 protocol admission 未开放；所有原始 A3 已强制降为 A1。阻断：${launchProtocol.reasons.map(launchReasonLabel).join('、')||'不可判'}。`
@@ -1453,7 +1529,7 @@ function renderPlay(){
       ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有固定情景的部分模型代理为正，尚未证明真实成本后优势。'
       :'当前没有通过完整门禁的 Launch 或 Carry 候选；数据缺失时保持不可判，不把抓取失败说成没有机会。';
   h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
-    <div><div class="decision-kicker">当前决策 · ${!data.launch?'数据缺失':!launchProtocol.open?'来源准入关闭':actionCount?'可人工验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
+    <div><div class="decision-kicker">当前决策 · ${runtimeSafety.blocks?'运行源阻断':!data.launch?'数据缺失':!launchProtocol.open?'来源准入关闭':actionCount?'可人工验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
       <p class="decision-copy">${verdictCopy}</p>
       <div class="command-actions"><button class="jump primary" data-jump="launch">查看来源与人工验证门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
     <div class="funnel-panel" aria-label="机会漏斗">
@@ -1686,6 +1762,7 @@ function setLiveStatus(message){const node=$("livet");if(node.textContent!==mess
 function staleness(){
   // A synthesis page has several independent clocks. Name the stale or missing
   // lane instead of letting one slow legacy feed impersonate the whole site's age.
+  const runtime=runtimeSafetyUiState();
   const all=[["早期",data.launch],["结构",data.structure],["空投",data.airdrop],["永续",data.perp],["操盘",data.op],["旧版线索",data.opp],["钱包",data.watch],["证据",data.stats]];
   const selected=view==="play"?all:[[view==="avoid"?"风险过滤":view,data[view==="avoid"?"opp":view]]];
   const missing=selected.filter(([,d])=>!d).map(([name])=>name),now=Date.now(),el=$("live");
@@ -1700,7 +1777,8 @@ function staleness(){
   const stale=available.filter(x=>!Number.isFinite(x.staleAfter)||now>=x.staleAfter);
   $("gen").textContent=`最新 ${newest.name} ${relMs(newest.gen)} · 最老 ${oldest.name} ${relMs(oldest.gen)}${missing.length?` · 缺失 ${missing.join("、")}`:""}`;
   const bad=[...missing,...stale.map(x=>x.name)];
-  if(!bad.length){el.className="live";setLiveStatus(`LIVE · ${available.length}/${selected.length}视图按时`)}
+  if(runtime.blocks){el.className="live dead";setLiveStatus(bad.length?"源阻断 · 视图异常":"源阻断 · 视图按时")}
+  else if(!bad.length){el.className="live";setLiveStatus(`LIVE · ${available.length}/${selected.length}视图按时`)}
   else if(stale.some(x=>now-x.gen>=864e5)||missing.length){el.className="live dead";setLiveStatus(`缺失/超期: ${bad.slice(0,2).join("、")}`)}
   else{el.className="live stale";setLiveStatus(`${bad.length}条陈旧: ${bad.slice(0,2).join("、")}`)}
 }
