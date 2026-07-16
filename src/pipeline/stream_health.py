@@ -351,9 +351,18 @@ def advance_gap(gap_id: int, through_cursor: int, *, details: dict | None = None
             "SELECT COUNT(*) FROM gaps WHERE source=? AND stream=? AND status='open'",
             (source, stream),
         ).fetchone()[0]
+        # A verified prefix only repairs historical coverage. It must not erase a
+        # transport disconnect that happened after the gap was detected.
         c.execute(
-            "UPDATE streams SET status=?,updated_at=? WHERE source=? AND stream=?",
-            ("degraded" if remaining else "live", now, source, stream),
+            """UPDATE streams
+               SET status=CASE
+                     WHEN status='disconnected' THEN status
+                     WHEN ? THEN 'degraded'
+                     ELSE 'live'
+                   END,
+                   updated_at=?
+               WHERE source=? AND stream=?""",
+            (remaining, now, source, stream),
         )
         c.commit()
         return result

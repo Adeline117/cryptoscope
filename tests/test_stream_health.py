@@ -265,6 +265,25 @@ def test_gap_prefix_can_advance_without_claiming_full_recovery(health):
     assert health.snapshot()[0]["status"] == "live"
 
 
+def test_gap_prefix_resolution_cannot_erase_a_later_disconnect(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    health.observe("solana", "slots", cursor=10, received_at=t0,
+                   expect_contiguous=True)
+    health.observe("solana", "slots", cursor=12, received_at=t0,
+                   expect_contiguous=True)
+    gap = health.open_gaps("solana", "slots")[0]
+    health.mark_disconnected(
+        "solana", "slots", "websocket closed", at=t0 + timedelta(seconds=1),
+    )
+
+    assert health.advance_gap(gap["id"], 11, at=t0 + timedelta(seconds=2)) \
+        == "resolved"
+    row = health.snapshot(now=t0 + timedelta(seconds=2), stale_after_seconds=60)[0]
+    assert row["status"] == "disconnected"
+    assert row["last_error"] == "websocket closed"
+    assert row["open_gaps"] == 0
+
+
 def test_failed_gap_recovery_backs_off_without_hiding_the_gap(health):
     t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
     health.observe("solana", "slots", cursor=10, received_at=t0,
