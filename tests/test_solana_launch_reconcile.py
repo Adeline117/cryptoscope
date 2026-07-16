@@ -72,6 +72,10 @@ def reconcile(tmp_path, monkeypatch):
 
     monkeypatch.setattr(stream, "DB", tmp_path / "launches.db")
     monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
+    monkeypatch.setenv("SOLANA_STREAM_RPC_URL", "https://live.example")
+    monkeypatch.setenv(
+        "SOLANA_RECONCILIATION_RPC_URL", "https://archive.example"
+    )
     return module, stream, stream_health
 
 
@@ -100,6 +104,16 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
     finally:
         connection.close()
     assert state[0] == "live_ws" and state[1] == "verified_live" and state[2]
+    proof = module.reconciliation_epoch_proof(
+        state[2], slot=100, reconciled_at=got["checked_at"],
+    )
+    assert proof == {
+        "version": 1, "epoch_id": state[2], "from_slot": 100, "to_slot": 103,
+        "status": "sealed_clean", "checked_at": got["checked_at"],
+        "live_provider": "solana_rpc:live.example",
+        "archive_provider": "solana_rpc:archive.example",
+        "genesis_hash": "genesis-mainnet", "evidence_hash": got["evidence_hash"],
+    }
 
 
 def test_archive_only_launch_is_backfill_and_permanent_epoch_breach(reconcile):
@@ -128,6 +142,8 @@ def test_archive_only_launch_is_backfill_and_permanent_epoch_breach(reconcile):
         "finalized_reconciliation", "reconciled_backfill",
         "provenance_conflict", now.isoformat(),
     )
+    with pytest.raises(module.ReconciliationError, match="not clean"):
+        module.reconciliation_epoch_proof(got["epoch_id"], slot=100)
 
 
 def test_live_only_launch_is_extra_and_blocks_readiness(reconcile):
@@ -198,3 +214,75 @@ def test_same_provider_or_incomplete_signature_page_fails_closed(reconcile):
             FakeRpc("https://live.example"), malformed,
             epoch_slots=4, safety_slots=0, start_slot=100,
         )
+
+
+def test_readiness_is_scoped_to_configured_archive_and_recent_evidence(
+        reconcile, monkeypatch):
+    module, stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    stream.persist(
+        _payload(), transaction=_transaction(), capture_mode="live_ws",
+        captured_at=now, source_provider="solana_rpc:live.example",
+    )
+    module.reconcile_next_epoch(
+        FakeRpc("https://live.example"), FakeRpc("https://archive.example"),
+        now=now, epoch_slots=4, safety_slots=0, start_slot=100,
+    )
+
+    stale = module.source_readiness(
+        now=now.replace(minute=6), required_clean_epochs=1,
+        require_runtime_health=False,
+    )
+    assert stale["ready"] is False
+    assert "reconciliation_evidence_stale" in stale["reason_codes"]
+
+    monkeypatch.setenv(
+        "SOLANA_RECONCILIATION_RPC_URL", "https://different-archive.example"
+    )
+    wrong_provider = module.source_readiness(
+        now=now, required_clean_epochs=1, require_runtime_health=False,
+    )
+    assert wrong_provider["observed_epochs"] == 0
+    assert "clean_epoch_burn_in_incomplete" in wrong_provider["reason_codes"]
+
+    monkeypatch.delenv("SOLANA_RECONCILIATION_RPC_URL")
+    unconfigured = module.source_readiness(
+        now=now, required_clean_epochs=1, require_runtime_health=False,
+    )
+    assert unconfigured["archive_provider"] is None
+    assert "archive_provider_not_configured" in unconfigured["reason_codes"]
+
+
+def test_epoch_and_candidate_marking_commit_atomically(reconcile, monkeypatch):
+    module, stream, _health = reconcile
+    now = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    stream.persist(
+        _payload(), transaction=_transaction(), capture_mode="live_ws",
+        captured_at=now, source_provider="solana_rpc:live.example",
+    )
+
+    def fail_mark(*_args, **_kwargs):
+        raise RuntimeError("comparison write failed")
+
+    monkeypatch.setattr(module, "_mark_comparison", fail_mark)
+    with pytest.raises(RuntimeError, match="comparison write failed"):
+        module.reconcile_next_epoch(
+            FakeRpc("https://live.example"), FakeRpc("https://archive.example"),
+            now=now, epoch_slots=4, safety_slots=0, start_slot=100,
+        )
+
+    connection = stream._conn()
+    try:
+        epochs = connection.execute(
+            "SELECT COUNT(*) FROM reconciliation_epochs"
+        ).fetchone()[0]
+        cursors = connection.execute(
+            "SELECT COUNT(*) FROM reconciliation_cursor"
+        ).fetchone()[0]
+        candidate = connection.execute(
+            "SELECT reconciliation_state,reconciliation_epoch_id FROM raw_launches"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert epochs == cursors == 0
+    assert candidate == ("unverified", None)

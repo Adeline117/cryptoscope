@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,7 @@ from src.pipeline import stream_health
 DEFAULT_EPOCH_SLOTS = 128
 DEFAULT_SAFETY_SLOTS = 64
 DEFAULT_REQUIRED_CLEAN_EPOCHS = 1_440
+DEFAULT_MAX_READINESS_AGE_SECONDS = 300
 MAX_SIGNATURE_PAGES = 50
 SIGNATURE_PAGE_SIZE = 1_000
 
@@ -200,44 +202,40 @@ def _live_signatures(start: int, end: int) -> set[str]:
 
 
 def _mark_comparison(
-    *, epoch_id: str, checked_at: str, verified: set[str],
+    connection, *, epoch_id: str, checked_at: str, verified: set[str],
     missing: set[str], extra: set[str],
 ) -> None:
-    connection = stream._conn()
-    try:
-        connection.execute("BEGIN IMMEDIATE")
-        for signature in verified:
-            connection.execute(
-                """UPDATE raw_launches SET reconciliation_state='verified_live',
-                     reconciliation_epoch_id=?,reconciled_at=? WHERE signature=?""",
-                (epoch_id, checked_at, signature),
-            )
-        for signature, state, reason in (
-            *((signature, "reconciled_backfill", "independent archive found no live capture")
-              for signature in missing),
-            *((signature, "extra_live", "live capture absent from finalized archive set")
-              for signature in extra),
-        ):
-            connection.execute(
-                """UPDATE raw_launches SET reconciliation_state=?,
-                     reconciliation_epoch_id=?,reconciled_at=?,
-                     source_conflict_at=?,source_conflict_reason=?
-                   WHERE signature=?""",
-                (state, epoch_id, checked_at, checked_at, reason, signature),
-            )
-            connection.execute(
-                """UPDATE raw_launches SET qualification_state='provenance_conflict',
-                     qualification_error=? WHERE signature=?
-                   AND qualification_state IN
-                       ('raw_unqualified','market_pending','market_error')""",
-                (reason, signature),
-            )
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
+    """Attach comparisons inside the same transaction that seals the epoch."""
+    for signature in verified:
+        changed = connection.execute(
+            """UPDATE raw_launches SET reconciliation_state='verified_live',
+                 reconciliation_epoch_id=?,reconciled_at=? WHERE signature=?""",
+            (epoch_id, checked_at, signature),
+        ).rowcount
+        if changed != 1:
+            raise ReconciliationError("verified candidate disappeared before epoch seal")
+    for signature, state, reason in (
+        *((signature, "reconciled_backfill", "independent archive found no live capture")
+          for signature in missing),
+        *((signature, "extra_live", "live capture absent from finalized archive set")
+          for signature in extra),
+    ):
+        changed = connection.execute(
+            """UPDATE raw_launches SET reconciliation_state=?,
+                 reconciliation_epoch_id=?,reconciled_at=?,
+                 source_conflict_at=?,source_conflict_reason=?
+               WHERE signature=?""",
+            (state, epoch_id, checked_at, checked_at, reason, signature),
+        ).rowcount
+        if changed != 1:
+            raise ReconciliationError("breached candidate disappeared before epoch seal")
+        connection.execute(
+            """UPDATE raw_launches SET qualification_state='provenance_conflict',
+                 qualification_error=? WHERE signature=?
+               AND qualification_state IN
+                   ('raw_unqualified','market_pending','market_error')""",
+            (reason, signature),
+        )
 
 
 def reconcile_next_epoch(
@@ -316,16 +314,13 @@ def reconcile_next_epoch(
         "genesis": live_genesis, "from_slot": first, "to_slot": last,
         "live_provider": live_provider, "archive_provider": archive_provider,
     })[:32]
-    _mark_comparison(
-        epoch_id=epoch_id, checked_at=checked.isoformat(),
-        verified=archive_launches & live_launches, missing=missing, extra=extra,
-    )
     evidence = {
         "produced_slots_hash": _canonical_hash(archive_blocks),
         "archive_launches_hash": _canonical_hash(sorted(archive_launches)),
         "live_launches_hash": _canonical_hash(sorted(live_launches)),
     }
     status = "sealed_clean" if not missing and not extra else "sealed_breached"
+    evidence_hash = _canonical_hash(evidence)
     connection = stream._conn()
     try:
         _ensure_schema(connection)
@@ -338,7 +333,12 @@ def reconcile_next_epoch(
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)""",
             (epoch_id, first, last, live_provider, archive_provider, live_genesis,
              status, checked.isoformat(), len(archive_blocks), len(archive_launches),
-             len(live_launches), len(missing), len(extra), _canonical_hash(evidence)),
+             len(live_launches), len(missing), len(extra), evidence_hash),
+        )
+        _mark_comparison(
+            connection, epoch_id=epoch_id, checked_at=checked.isoformat(),
+            verified=archive_launches & live_launches,
+            missing=missing, extra=extra,
         )
         connection.execute(
             """INSERT INTO reconciliation_cursor(archive_provider,next_slot,updated_at)
@@ -359,6 +359,44 @@ def reconcile_next_epoch(
         "live_launches": len(live_launches),
         "missing_live": len(missing), "extra_live": len(extra),
         "live_provider": live_provider, "archive_provider": archive_provider,
+        "checked_at": checked.isoformat(), "evidence_hash": evidence_hash,
+    }
+
+
+def reconciliation_epoch_proof(
+    epoch_id: str, *, slot: int, reconciled_at: str | None = None,
+) -> dict:
+    """Return the immutable clean-epoch proof covering one candidate slot."""
+    if not isinstance(epoch_id, str) or not epoch_id:
+        raise ReconciliationError("candidate has no reconciliation epoch")
+    candidate_slot = _integer(slot, field="candidate slot")
+    connection = stream._conn()
+    try:
+        _ensure_schema(connection)
+        row = connection.execute(
+            """SELECT epoch_id,from_slot,to_slot,status,checked_at,live_provider,
+                      archive_provider,genesis_hash,evidence_hash
+               FROM reconciliation_epochs WHERE epoch_id=?""",
+            (epoch_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        raise ReconciliationError("candidate reconciliation epoch is unavailable")
+    (stored_id, first, last, status, checked_at, live_provider,
+     archive_provider, genesis_hash, evidence_hash) = row
+    if status != "sealed_clean":
+        raise ReconciliationError("candidate reconciliation epoch is not clean")
+    if not int(first) <= candidate_slot <= int(last):
+        raise ReconciliationError("candidate slot is outside reconciliation epoch")
+    if reconciled_at is not None and str(reconciled_at) != str(checked_at):
+        raise ReconciliationError("candidate reconciliation clock changed")
+    return {
+        "version": 1, "epoch_id": stored_id,
+        "from_slot": int(first), "to_slot": int(last), "status": status,
+        "checked_at": checked_at, "live_provider": live_provider,
+        "archive_provider": archive_provider, "genesis_hash": genesis_hash,
+        "evidence_hash": evidence_hash,
     }
 
 
@@ -366,28 +404,56 @@ def source_readiness(
     *, now: datetime | None = None,
     required_clean_epochs: int = DEFAULT_REQUIRED_CLEAN_EPOCHS,
     require_runtime_health: bool = True,
+    max_age_seconds: float = DEFAULT_MAX_READINESS_AGE_SECONDS,
 ) -> dict:
     """Fail closed until a contiguous clean burn-in and live health both exist."""
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     required = max(1, int(required_clean_epochs))
+    live_provider = stream.rpc_provider_id(stream.configured_rpc_endpoint())
+    archive_endpoint = configured_archive_endpoint()
+    archive_provider = (
+        stream.rpc_provider_id(archive_endpoint) if archive_endpoint else None
+    )
+    try:
+        max_age = float(max_age_seconds)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("max reconciliation age must be positive") from exc
+    if not math.isfinite(max_age) or max_age <= 0:
+        raise ValueError("max reconciliation age must be positive")
     connection = stream._conn()
     try:
         _ensure_schema(connection)
-        epochs = connection.execute(
-            """SELECT from_slot,to_slot,status,archive_provider,checked_at,
-                      missing_live,extra_live FROM reconciliation_epochs
-               ORDER BY to_slot DESC LIMIT ?""",
-            (required,),
-        ).fetchall()
+        epochs = (connection.execute(
+            """SELECT epoch_id,from_slot,to_slot,status,live_provider,
+                      archive_provider,checked_at,missing_live,extra_live
+                 FROM reconciliation_epochs
+                WHERE archive_provider=? AND live_provider=?
+                ORDER BY to_slot DESC LIMIT ?""",
+            (archive_provider, live_provider, required),
+        ).fetchall() if archive_provider else [])
     finally:
         connection.close()
     contiguous = len(epochs) == required
     if contiguous:
         for newer, older in zip(epochs, epochs[1:]):
-            if int(older[1]) + 1 != int(newer[0]):
+            if int(older[2]) + 1 != int(newer[1]):
                 contiguous = False
                 break
-    clean = contiguous and all(row[2] == "sealed_clean" for row in epochs)
+    clean = contiguous and all(row[3] == "sealed_clean" for row in epochs)
+    latest_checked = None
+    if epochs:
+        try:
+            latest_checked = datetime.fromisoformat(
+                str(epochs[0][6]).replace("Z", "+00:00")
+            )
+            if latest_checked.tzinfo is None:
+                raise ValueError("naive reconciliation clock")
+            latest_checked = latest_checked.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            latest_checked = None
+    age = ((current - latest_checked).total_seconds()
+           if latest_checked is not None else None)
+    fresh = bool(age is not None and 0 <= age <= max_age)
     health = [row for row in stream_health.snapshot(now=current)
               if row.get("source") == "solana"] if require_runtime_health else []
     live = next((row for row in health if row.get("stream") == "pump_fun_launches"), None)
@@ -398,24 +464,34 @@ def source_readiness(
         and maintenance and maintenance.get("status") == "live"
     ))
     reasons = []
-    if len(epochs) < required:
+    if archive_provider is None:
+        reasons.append("archive_provider_not_configured")
+    elif archive_provider == live_provider:
+        reasons.append("archive_provider_not_independent")
+    elif len(epochs) < required:
         reasons.append("clean_epoch_burn_in_incomplete")
     elif not contiguous:
         reasons.append("reconciliation_epochs_not_contiguous")
     elif not clean:
         reasons.append("reconciliation_epoch_breached")
+    if epochs and not fresh:
+        reasons.append("reconciliation_evidence_stale")
     if not runtime_ok:
         reasons.append("live_stream_health_not_ready")
+    independent = bool(archive_provider and archive_provider != live_provider)
+    ready = bool(independent and clean and fresh and runtime_ok)
     return {
-        "state": "ready" if clean and runtime_ok else "blocked",
-        "ready": bool(clean and runtime_ok),
+        "state": "ready" if ready else "blocked", "ready": ready,
+        "live_provider": live_provider, "archive_provider": archive_provider,
         "required_clean_epochs": required,
         "observed_epochs": len(epochs),
+        "max_age_seconds": max_age, "latest_age_seconds": age,
         "latest_epoch": ({
-            "from_slot": epochs[0][0], "to_slot": epochs[0][1],
-            "status": epochs[0][2], "archive_provider": epochs[0][3],
-            "checked_at": epochs[0][4], "missing_live": epochs[0][5],
-            "extra_live": epochs[0][6],
+            "epoch_id": epochs[0][0],
+            "from_slot": epochs[0][1], "to_slot": epochs[0][2],
+            "status": epochs[0][3], "live_provider": epochs[0][4],
+            "archive_provider": epochs[0][5], "checked_at": epochs[0][6],
+            "missing_live": epochs[0][7], "extra_live": epochs[0][8],
         } if epochs else None),
         "runtime": {"live": live, "maintenance": maintenance},
         "reason_codes": reasons,
