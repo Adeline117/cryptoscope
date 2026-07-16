@@ -86,6 +86,11 @@ class StreamRunner:
                 event = self.parse(raw)
                 if event is None:
                     continue
+                # Raw evidence is the source of truth.  Never advance a health
+                # cursor before its event has durably passed the lane's writer:
+                # ENOSPC/SQLite failures must reconnect from the prior cursor
+                # instead of manufacturing apparent coverage.
+                self.on_event(event.payload)
                 health_now = self.monotonic()
                 should_record_health = ((self.expect_contiguous and event.cursor is not None)
                                         or self.health_interval_seconds == 0
@@ -110,7 +115,6 @@ class StreamRunner:
                             gap["id"], details={"backfilled": True,
                                                 "from": gap["from_cursor"],
                                                 "to": gap["to_cursor"]})
-                self.on_event(event.payload)
                 processed += 1
             return processed
         finally:

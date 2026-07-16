@@ -179,6 +179,28 @@ def test_payloads_without_cursor_do_not_disable_health_throttle(monkeypatch):
     assert [call["cursor"] for call in health_calls] == [None, 7]
 
 
+def test_failed_evidence_write_never_advances_health_cursor(health_db):
+    from src.pipeline.stream_runner import StreamEvent, StreamRunner
+
+    ws = _Socket([{"seq": 7}])
+
+    def fail_write(_payload):
+        raise sqlite3.OperationalError("database or disk is full")
+
+    runner = StreamRunner(
+        source="solana", stream="launches", connect=lambda: ws,
+        subscribe=lambda sock: None,
+        parse=lambda raw: StreamEvent(raw, cursor=raw["seq"]),
+        on_event=fail_write,
+        expect_contiguous=True,
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="disk is full"):
+        runner.run_connection(threading.Event())
+
+    assert health_db.snapshot() == []
+
+
 def test_health_disconnect_write_failure_does_not_kill_worker(monkeypatch):
     from src.pipeline import stream_health
     from src.pipeline.stream_runner import StreamEvent, StreamRunner
@@ -187,6 +209,7 @@ def test_health_disconnect_write_failure_does_not_kill_worker(monkeypatch):
     sockets = iter([_Socket([{"seq": 1}]), _Socket([{"seq": 2}])])
     observations = 0
     disconnect_writes = []
+    persisted = []
 
     def observe(*args, **kwargs):
         nonlocal observations
@@ -205,7 +228,10 @@ def test_health_disconnect_write_failure_does_not_kill_worker(monkeypatch):
         source="base", stream="uniswap_v3_pools", connect=lambda: next(sockets),
         subscribe=lambda sock: None,
         parse=lambda raw: StreamEvent(raw, cursor=raw["seq"]),
-        on_event=lambda payload: stop.set(),
+        on_event=lambda payload: (
+            persisted.append(payload["seq"]),
+            stop.set() if payload["seq"] == 2 else None,
+        ),
         backoff_base_seconds=0, backoff_max_seconds=0,
     )
 
@@ -213,3 +239,4 @@ def test_health_disconnect_write_failure_does_not_kill_worker(monkeypatch):
 
     assert observations == 2
     assert len(disconnect_writes) == 1
+    assert persisted == [1, 2]
