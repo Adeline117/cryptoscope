@@ -287,7 +287,7 @@ def test_solana_reconciliation_has_an_independent_bounded_job():
     jobs = {job.id: job for job in scheduler.get_jobs()}
     job = jobs["solana_launch_reconciliation"]
     assert job.func is not jobs["launch_radar"].func
-    assert job.trigger.interval.total_seconds() == 60
+    assert job.trigger.interval.total_seconds() == 30
 
 
 @pytest.mark.asyncio

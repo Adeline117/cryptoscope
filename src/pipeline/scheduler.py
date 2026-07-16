@@ -249,7 +249,10 @@ def create_scheduler() -> AsyncIOScheduler:
     )
     scheduler.add_job(
         _run_solana_launch_reconciliation,
-        IntervalTrigger(minutes=1),
+        # One 128-slot epoch spans roughly 51 seconds at the nominal 400 ms slot
+        # time. A 60-second cadence can never catch up after any delay, so run a
+        # bounded single epoch every 30 seconds and let max_instances prevent overlap.
+        IntervalTrigger(seconds=30),
         id="solana_launch_reconciliation",
         name="Solana Launch 独立 finalized epoch 对账",
     )
@@ -722,7 +725,7 @@ async def _run_launch_radar():
 
 
 async def _run_solana_launch_reconciliation():
-    """Seal one bounded epoch; missing independent config remains fail-visible."""
+    """Seal one bounded epoch; frequent runs can catch up without unbounded loops."""
     import asyncio
 
     from src.pipeline import solana_launch_reconcile as reconcile
