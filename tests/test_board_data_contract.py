@@ -704,6 +704,129 @@ def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkey
     ] == "A1_WATCH"
 
 
+def test_meta_protocol_join_ignores_non_safety_admission_churn(tmp_path, monkeypatch):
+    from src.pipeline import board_export, opportunity_ledger
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    monkeypatch.setattr(opportunity_ledger, "DB", tmp_path / "ledger.db")
+    launch = _view(board_export, "launch", _launch_body([_launch_event()]))
+    stats = board_export.render_stats(None)
+    launch_admission = launch["primary_sources"]["solana"]["protocol_admission"]
+    stats_admission = stats["lanes"]["launch"]["edge_validation"][
+        "protocol_admission"
+    ]
+    # The gate state and immutable clocks are the safety truth. Observation clocks,
+    # readiness hashes and explanatory reasons legitimately differ by render cadence.
+    launch_admission.update({
+        key: stats_admission.get(key) for key in (
+            "state", "enrollment_open", "armed_at", "opened_at", "breached_at",
+            "auto_execution_allowed",
+        )
+    })
+    launch_admission.update({
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "readiness_hash": "b" * 64,
+        "reason_codes": ["archive_provider_not_configured"],
+    })
+    launch["research_protocol"]["persistent_admission_state"] = stats_admission["state"]
+    launch["research_protocol"]["enrollment_state"] = stats_admission["state"]
+    launch["research_protocol"]["reason_codes"] = sorted(set(
+        launch["research_protocol"]["reason_codes"]
+        + launch_admission["reason_codes"]
+    ))
+
+    board_export.write_views(launch=launch, stats=stats)
+    meta = json.loads((tmp_path / "meta.json").read_text())
+
+    assert meta["launch_protocol_join"]["state"] == "consistent"
+    assert meta["launch_protocol_join"]["cross_view_edge_usable"] is True
+
+
+def test_single_view_protocol_transition_marks_sync_pending_then_recovers():
+    from src.contract.board_view import launch_protocol_join
+
+    scheduled = {
+        "generated_at": "2026-07-16T00:00:00+00:00",
+        **_launch_body([]),
+    }
+    stats_admission = deepcopy(scheduled["primary_sources"]["solana"]["protocol_admission"])
+    stats_payload = {
+        "generated_at": "2026-07-16T00:00:00+00:00",
+        "lanes": {"launch": {"edge_validation": {
+            **{field: scheduled["research_protocol"][field] for field in (
+                "protocol_id", "cohort_version", "protocol_start_at",
+            )},
+            "protocol_admission": stats_admission,
+        }}},
+    }
+    armed = deepcopy(scheduled)
+    later = (datetime.fromisoformat(stats_admission["updated_at"])
+             + timedelta(minutes=1)).isoformat()
+    armed["generated_at"] = later
+    armed_admission = armed["primary_sources"]["solana"]["protocol_admission"]
+    armed_admission.update({
+        "state": "armed", "enrollment_open": False,
+        "armed_at": later, "updated_at": later,
+    })
+
+    pending = launch_protocol_join(armed, stats_payload)
+    assert pending["state"] == "sync_pending"
+    assert pending["cross_view_edge_usable"] is False
+
+    stats_payload["lanes"]["launch"]["edge_validation"][
+        "protocol_admission"
+    ] = deepcopy(armed_admission)
+    recovered = launch_protocol_join(armed, stats_payload)
+    assert recovered["state"] == "consistent"
+    assert recovered["cross_view_edge_usable"] is True
+
+
+def test_same_batch_protocol_identity_mismatch_preserves_every_file(
+        tmp_path, monkeypatch):
+    from src.contract import board_view
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    old = {"keep": "launch"}
+    old_stats = {"keep": "stats"}
+    old_meta = {"keep": "meta"}
+    for name, payload in (("launch", old), ("stats", old_stats), ("meta", old_meta)):
+        (tmp_path / f"{name}.json").write_text(json.dumps(payload))
+    before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
+    monkeypatch.setattr(board_view, "validate_board_view", lambda *_args, **_kwargs: None)
+    launch_admission = _protocol_admission()
+    launch_admission.update({
+        "protocol_id": "v3", "cohort_version": 6,
+        "protocol_start_at": "2026-08-03T00:00:00+00:00",
+    })
+    stats_admission = deepcopy(launch_admission)
+    stats_admission.update({
+        "protocol_id": "v2", "cohort_version": 5,
+        "protocol_start_at": "2026-07-20T00:00:00+00:00",
+    })
+    launch = {
+        "generated_at": "2026-07-16T00:00:00+00:00",
+        "research_protocol": {
+            "protocol_id": "v3", "cohort_version": 6,
+            "protocol_start_at": "2026-08-03T00:00:00+00:00",
+        },
+        "primary_sources": {"solana": {"protocol_admission": launch_admission}},
+    }
+    stats = {
+        "generated_at": "2026-07-16T00:00:00+00:00",
+        "lanes": {"launch": {"edge_validation": {
+            "protocol_id": "v2", "cohort_version": 5,
+            "protocol_start_at": "2026-07-20T00:00:00+00:00",
+            "protocol_admission": stats_admission,
+        }}},
+    }
+
+    with pytest.raises(ValueError, match="protocol identity mismatch"):
+        board_export.write_views(launch=launch, stats=stats)
+
+    assert {path.name: path.read_bytes() for path in tmp_path.glob("*.json")} == before
+
+
 def test_stats_view_quarantines_legacy_and_rejects_execution_edge_claims(
         tmp_path, monkeypatch):
     from src.pipeline import board_export, opportunity_ledger

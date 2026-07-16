@@ -49,6 +49,11 @@ _ACTION_LEVELS = {
     "A3_MANUAL_PROBE", "A4_REAL_FILL_VALIDATED",
 }
 _ENROLLMENT_STATES = {"scheduled", "armed", "open", "breached", "blocked"}
+_PROTOCOL_IDENTITY_FIELDS = ("protocol_id", "cohort_version", "protocol_start_at")
+_ADMISSION_SAFETY_FIELDS = (
+    "state", "enrollment_open", "armed_at", "opened_at", "breached_at",
+    "auto_execution_allowed",
+)
 
 
 def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
@@ -58,6 +63,92 @@ def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
     if required and not value:
         raise BoardViewContractError(f"{path} must explain the blocked state")
     return value
+
+
+def _launch_protocol_join_member(view: str, payload: Any) -> dict | None:
+    """Project only immutable identity and admission safety for cross-view joins."""
+    if not isinstance(payload, Mapping):
+        return None
+    try:
+        if view == "launch":
+            identity_source = payload["research_protocol"]
+            admission = payload["primary_sources"]["solana"]["protocol_admission"]
+        elif view == "stats":
+            validation = payload["lanes"]["launch"]["edge_validation"]
+            identity_source = validation
+            admission = validation["protocol_admission"]
+        else:
+            raise ValueError(f"unsupported protocol join view: {view}")
+        if not isinstance(identity_source, Mapping) or not isinstance(admission, Mapping):
+            return None
+        identity = {field: identity_source.get(field) for field in _PROTOCOL_IDENTITY_FIELDS}
+        safety = {field: admission.get(field) for field in _ADMISSION_SAFETY_FIELDS}
+        if (not isinstance(identity["protocol_id"], str)
+                or isinstance(identity["cohort_version"], bool)
+                or not isinstance(identity["cohort_version"], int)
+                or not isinstance(identity["protocol_start_at"], str)
+                or safety["state"] not in {"scheduled", "armed", "open", "breached"}
+                or not isinstance(safety["enrollment_open"], bool)
+                or safety["auto_execution_allowed"] is not False
+                or any(admission.get(field) != value
+                       or type(admission.get(field)) is not type(value)
+                       for field, value in identity.items())):
+            return None
+        return {
+            "view": view,
+            "generated_at": payload.get("generated_at"),
+            "identity": identity,
+            "admission_updated_at": admission.get("updated_at"),
+            "admission": safety,
+        }
+    except (KeyError, TypeError):
+        return None
+
+
+def launch_protocol_join(launch: Any, stats: Any) -> dict:
+    """Build a fail-closed certificate for independently cached Launch views."""
+    members = {
+        "launch": _launch_protocol_join_member("launch", launch),
+        "stats": _launch_protocol_join_member("stats", stats),
+    }
+    missing = [name for name, member in members.items() if member is None]
+    if missing:
+        state, reasons = "incomplete", [f"{name}_protocol_projection_missing" for name in missing]
+    elif members["launch"]["identity"] != members["stats"]["identity"]:
+        state, reasons = "identity_mismatch", ["launch_stats_protocol_identity_mismatch"]
+    elif members["launch"]["admission"] == members["stats"]["admission"]:
+        state, reasons = "consistent", []
+    else:
+        left, right = members["launch"], members["stats"]
+        left_state, right_state = left["admission"]["state"], right["admission"]["state"]
+        if left_state == right_state:
+            state, reasons = "contradiction", ["same_state_safety_projection_mismatch"]
+        else:
+            try:
+                left_clock = _aware_clock(
+                    left["admission_updated_at"], path="launch admission updated_at",
+                )
+                right_clock = _aware_clock(
+                    right["admission_updated_at"], path="stats admission updated_at",
+                )
+            except BoardViewContractError:
+                left_clock = right_clock = None
+            if left_clock is None or right_clock is None or left_clock == right_clock:
+                state, reasons = "contradiction", ["admission_state_clock_ambiguous"]
+            else:
+                older, newer = ((left, right) if left_clock < right_clock else (right, left))
+                rank = {"scheduled": 0, "armed": 1, "open": 2, "breached": 3}
+                if rank[newer["admission"]["state"]] < rank[older["admission"]["state"]]:
+                    state, reasons = "contradiction", ["admission_state_regressed"]
+                else:
+                    state, reasons = "sync_pending", ["admission_state_not_yet_joined"]
+    return {
+        "version": 1,
+        "state": state,
+        "cross_view_edge_usable": state == "consistent",
+        "reason_codes": reasons,
+        "members": members,
+    }
 
 
 def _finite_nonnegative(value: Any, *, path: str, optional: bool = False) -> float | None:

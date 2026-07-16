@@ -669,7 +669,7 @@ def _atomic_json(path, payload: dict) -> None:
 
 def write_views(**views: dict) -> list:
     """Atomically write views and merge their clocks into a durable manifest."""
-    from src.contract.board_view import validate_board_view
+    from src.contract.board_view import launch_protocol_join, validate_board_view
 
     prepared = []
     # Validate the complete batch before touching any file. A later malformed view
@@ -688,6 +688,25 @@ def write_views(**views: dict) -> list:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     paths = []
     with _WRITE_LOCK:
+        prepared_by_name = dict((name, payload) for name, payload in prepared)
+
+        def joined_payload(name: str) -> dict | None:
+            if name in prepared_by_name:
+                return prepared_by_name[name]
+            path = EXPORT_DIR / f"{name}.json"
+            try:
+                value = json.loads(path.read_text())
+                return value if isinstance(value, dict) else None
+            except (OSError, json.JSONDecodeError):
+                return None
+
+        protocol_join = launch_protocol_join(
+            joined_payload("launch"), joined_payload("stats"),
+        )
+        if ({"launch", "stats"}.issubset(prepared_by_name)
+                and protocol_join["state"] == "identity_mismatch"):
+            raise ValueError("launch/stats protocol identity mismatch in one write batch")
+
         mp = EXPORT_DIR / "meta.json"
         try:
             previous = json.loads(mp.read_text()) if mp.exists() else {}
@@ -703,7 +722,10 @@ def write_views(**views: dict) -> list:
                     "generated_at", "next_expected_at", "stale_after_at",
                     "refresh_cadence_min", "freshness_grace_min")
             }
-        meta = _envelope({"views": sorted(manifest), "view_status": manifest}, view="meta")
+        meta = _envelope({
+            "views": sorted(manifest), "view_status": manifest,
+            "launch_protocol_join": protocol_join,
+        }, view="meta")
         _atomic_json(mp, meta)
         paths.append(mp)
     return paths
