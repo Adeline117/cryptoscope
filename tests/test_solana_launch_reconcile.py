@@ -116,7 +116,7 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
         "finalized_head": 200,
     }
     candidate = module.candidate_reconciliation_proof(
-        "sig-create", slot=100, mint="mint", creator="creator",
+        "sig-create", slot=100, mint="mint",
     )
     connection = stream._conn()
     try:
@@ -142,6 +142,99 @@ def test_independent_archive_seals_exact_live_epoch(reconcile):
     assert stream.release_qualification_lease(
         "sig-create", claimed[0]["qualification_lease_token"],
     ) is True
+
+
+def test_real_ledger_outcome_row_rechecks_exact_source_without_payload_creator(
+        reconcile, tmp_path, monkeypatch):
+    """The statistics read model must prove source membership from SQLite alone."""
+    module, stream, _health = reconcile
+    from src.contract.launch_selector import (
+        evaluate_selector_snapshot, freeze_selector_snapshot, freeze_source_snapshot,
+    )
+    from src.pipeline import edge_validation, opportunity_ledger
+    from src.pipeline.execution_cost import solana_launch_full_paper_contract
+
+    captured = datetime(2026, 8, 4, 12, tzinfo=timezone.utc)
+    decision = captured + timedelta(seconds=1)
+    event_at = decision - timedelta(minutes=30)
+    monkeypatch.setattr(opportunity_ledger, "DB", tmp_path / "ledger.db")
+    stream.persist(
+        _payload(), transaction=_transaction(), capture_mode="live_ws",
+        captured_at=captured, source_provider="solana_rpc:live.example",
+    )
+    module.reconcile_next_epoch(
+        FakeRpc("https://live.example"), FakeRpc("https://archive.example"),
+        now=captured, epoch_slots=4, safety_slots=0, start_slot=100,
+    )
+    proof = module.candidate_reconciliation_proof(
+        "sig-create", slot=100, mint="mint",
+    )
+    connection = stream._conn()
+    try:
+        raw_hash, identity_hash = connection.execute(
+            "SELECT raw_payload_hash,hydration_payload_hash FROM raw_launches"
+        ).fetchone()
+    finally:
+        connection.close()
+    selector_snapshot = freeze_selector_snapshot(
+        pool_created_at=event_at.isoformat(), liquidity_usd=8_000,
+        fdv_usd=100_000, volume_m5_usd=500, buys_m5=5, sells_m5=2,
+    )
+    selector = evaluate_selector_snapshot(
+        selector_snapshot, event_at=event_at.isoformat(),
+        decision_at=decision.isoformat(),
+    )
+    cost = solana_launch_full_paper_contract(
+        notional_usd=selector["max_notional_usd"],
+        modeled_route_roundtrip_pct=selector["modeled_route_roundtrip_pct"],
+        method=edge_validation.LAUNCH_COST_METHOD,
+    )
+    source_snapshot = freeze_source_snapshot(
+        signature="sig-create", slot=100, event_type="pump_fun_createv2",
+        detected_at=captured.isoformat(), captured_at=captured.isoformat(),
+        decision_at=decision.isoformat(), mint="mint",
+        raw_payload_hash=raw_hash, hydration_payload_hash=identity_hash,
+        capture_mode="live_ws", source_provider="solana_rpc:live.example",
+        reconciliation_state="verified_live", reconciled_at=captured.isoformat(),
+        reconciliation_proof=proof,
+    )
+
+    real_datetime = opportunity_ledger.datetime
+
+    class FrozenDatetime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return (decision + timedelta(seconds=1)).astimezone(tz or timezone.utc)
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(opportunity_ledger, "datetime", FrozenDatetime)
+        opportunity_ledger.record({
+            "lane": "launch", "chain": "solana", "token": "mint", "symbol": "T",
+            "source": "Pump.fun standard logs + DEX Screener pool",
+            "primary_evidence": {"signature": "sig-create", "creator": "creator"},
+            "state": "live", "decision": selector["decision"],
+            "event_at": event_at.isoformat(), "detected_at": captured.isoformat(),
+            "decision_at": decision.isoformat(), "entry_price": 1.0,
+            "max_notional_usd": selector["max_notional_usd"],
+            "liquidity_usd": selector["liquidity_usd"],
+            "cohort_version": edge_validation.COHORT_VERSION,
+            "entry_observation": {
+                "version": 1, "provider": "dexscreener_token_pairs_v1",
+                "observed_at": decision.isoformat(), "chain": "solana",
+                "base_token": "mint", "quote_token": "SOL", "pair": "pool",
+                "price": 1.0, "currency": "usd", "field": "priceUsd",
+                "identity_verified": True, "selector_snapshot": selector_snapshot,
+                "source_snapshot": source_snapshot,
+            },
+            "cost_contract": cost, "cost_model": edge_validation.LAUNCH_COST_METHOD,
+            "roundtrip_cost_pct_est": cost["all_in_total_pct"],
+        })
+
+    row = opportunity_ledger.outcome_rows()[0]
+    assert "primary_evidence" not in row
+    assert row["payload"]["primary_evidence"]["creator"] == "creator"
+    assert edge_validation.protocol_exclusion_reasons(row) == []
+    assert edge_validation.protocol_snapshot(row)["source_snapshot"] == source_snapshot
 
 
 def test_archive_only_launch_is_backfill_and_permanent_epoch_breach(reconcile):
@@ -343,7 +436,7 @@ def test_fabricated_mutable_flags_do_not_prove_candidate_membership(reconcile):
 
     with pytest.raises(module.ReconciliationError, match="immutable"):
         module.candidate_reconciliation_proof(
-            "fabricated", slot=101, mint="fake-mint", creator="creator",
+            "fabricated", slot=101, mint="fake-mint",
         )
 
 

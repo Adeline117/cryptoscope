@@ -383,7 +383,6 @@ def _scan_primary_solana_batch(fetch, *, now: datetime, assessor, assessed: int,
 
                 frozen_reconciliation = reconcile.candidate_reconciliation_proof(
                     raw["signature"], slot=raw["slot"], mint=raw["mint"],
-                    creator=raw["creator"],
                 )
                 normalized_mint = raw["mint"]
                 if normalized_mint not in candidate_tokens:
@@ -467,7 +466,6 @@ def _scan_primary_solana_batch(fetch, *, now: datetime, assessor, assessed: int,
                     break
                 current_reconciliation = reconcile.candidate_reconciliation_proof(
                     raw["signature"], slot=raw["slot"], mint=raw["mint"],
-                    creator=raw["creator"],
                 )
                 if current_reconciliation != frozen_reconciliation:
                     raise RuntimeError("candidate reconciliation proof changed during scan")

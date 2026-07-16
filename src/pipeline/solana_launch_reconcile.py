@@ -460,13 +460,16 @@ def reconciliation_epoch_proof(
 
 
 def candidate_reconciliation_proof(
-    signature: str, *, slot: int, mint: str, creator: str,
+    signature: str, *, slot: int, mint: str,
 ) -> dict:
-    """Prove exact membership in both immutable sides of one clean epoch."""
+    """Prove membership without trusting a mutable ledger creator field.
+
+    Creator is read from the append-only raw launch and matched against both
+    hydration observations.  The frozen ledger source snapshot intentionally binds
+    signature, slot and mint, so callers must not supply creator from payload JSON.
+    """
     candidate_slot = _integer(slot, field="candidate slot")
-    expected = {
-        "signature": str(signature), "mint": str(mint), "creator": str(creator),
-    }
+    expected = {"signature": str(signature), "mint": str(mint)}
     if not all(value for value in expected.values()):
         raise ReconciliationError("candidate source identity is incomplete")
     connection = stream._conn()
@@ -502,7 +505,8 @@ def candidate_reconciliation_proof(
             candidate["signature"] == expected["signature"]
             and int(candidate["slot"]) == candidate_slot
             and candidate["mint"] == expected["mint"]
-            and candidate["creator"] == expected["creator"]
+            and isinstance(candidate["creator"], str)
+            and bool(candidate["creator"].strip())
             and candidate["capture_mode"] == "live_ws"
             and candidate["evidence_state"] == "complete"
             and candidate["source_conflict_at"] is None

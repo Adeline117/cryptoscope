@@ -103,11 +103,9 @@ def _candidate_source_proof(row: dict, source_snapshot: dict) -> dict:
     """Re-read immutable source tables; a self-consistent JSON blob is insufficient."""
     from src.pipeline import solana_launch_reconcile as reconcile
 
-    primary = row.get("primary_evidence")
-    creator = primary.get("creator") if isinstance(primary, dict) else None
     return reconcile.candidate_reconciliation_proof(
         source_snapshot["signature"], slot=source_snapshot["slot"],
-        mint=source_snapshot["mint"], creator=creator,
+        mint=source_snapshot["mint"],
     )
 
 
