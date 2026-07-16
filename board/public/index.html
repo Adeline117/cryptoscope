@@ -460,18 +460,51 @@ function launchReasonCodes(...sources){
 }
 function launchReconciliationTelemetryState(d){
   const heartbeat=d?.primary_sources?.solana?.reconciliation,details=heartbeat?.details,rpc=details?.rpc;
-  const nonnegativeInt=value=>Number.isInteger(value)&&value>=0;
+  const boundedInt=(value,maximum)=>Number.isInteger(value)&&value>=0&&value<=maximum;
+  const nonnegativeInt=value=>boundedInt(value,1_000_000_000);
+  const outcomes=new Set(["unconfigured","sealed_clean","sealed_breached","waiting_finality","rpc_pressure","failed"]);
   const valid=details?.schema_version===1&&rpc?.version===1
     &&rpc.algorithm==="signature_pagination_transaction_hydration_v1"
     &&nonnegativeInt(rpc.rpc_calls_total)&&nonnegativeInt(rpc.rpc_failures_total)
     &&rpc.rpc_failures_total<=rpc.rpc_calls_total
-    &&nonnegativeInt(rpc.approx_success_response_bytes)
-    &&typeof rpc.run_elapsed_ms==="number"&&Number.isFinite(rpc.run_elapsed_ms)&&rpc.run_elapsed_ms>=0
-    &&typeof details.outcome==="string"&&details.outcome.length>0&&details.outcome.length<=80;
-  if(!valid)return{available:false,heartbeat,reason:"最近一轮 reconciliation 成本 details 缺失或合同无效"};
+    &&boundedInt(rpc.approx_success_response_bytes,1_000_000_000_000_000)
+    &&typeof rpc.run_elapsed_ms==="number"&&Number.isFinite(rpc.run_elapsed_ms)
+    &&rpc.run_elapsed_ms>=0&&rpc.run_elapsed_ms<=86_400_000
+    &&outcomes.has(details.outcome);
+  if(!valid)return{available:false,reason:"最近一轮 reconciliation 成本 details 缺失或合同无效"};
+  const hasExactKeys=(value,expected)=>value&&typeof value==="object"&&!Array.isArray(value)
+    &&Object.keys(value).length===expected.length&&expected.every(key=>Object.hasOwn(value,key));
+  const providerHost=value=>{
+    if(typeof value!=="string")return null;
+    const match=value.match(/^solana_rpc:([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$/);
+    if(!match||match[1].toLowerCase()==="unknown"||(match[2]&&Number(match[2])>65535))return null;
+    return match[1].toLowerCase();
+  };
+  const awareClock=value=>typeof value==="string"&&/(?:Z|[+-]\d{2}:\d{2})$/.test(value)
+    &&Number.isFinite(Date.parse(value));
+  const failedMethods=new Set(["getGenesisHash","getSlot","getFirstAvailableBlock","getBlocks","getSignaturesForAddress","getTransaction","unknown"]);
+  const circuitPresent=Object.hasOwn(details,"circuit");
+  let circuit=null,circuitObserved=false;
+  if(circuitPresent){
+    const candidate=details.circuit,state=candidate?.state;
+    const common=["state","consecutive_pressure_failures","live_provider","archive_provider"];
+    const expected=state==="closed"?common:[...common,"next_retry_at","pressure_kind","failed_method"];
+    const liveHost=providerHost(candidate?.live_provider),archiveHost=providerHost(candidate?.archive_provider);
+    const providersValid=liveHost!==null&&archiveHost!==null&&liveHost!==archiveHost;
+    const closedValid=state==="closed"&&hasExactKeys(candidate,expected)
+      &&candidate.consecutive_pressure_failures===0&&providersValid;
+    const pressureValid=["open","retry_due"].includes(state)&&hasExactKeys(candidate,expected)
+      &&nonnegativeInt(candidate.consecutive_pressure_failures)&&candidate.consecutive_pressure_failures>=1
+      &&providersValid&&awareClock(candidate.next_retry_at)
+      &&typeof candidate.pressure_kind==="string"&&/^[A-Za-z0-9_.-]{1,80}$/.test(candidate.pressure_kind)
+      &&failedMethods.has(candidate.failed_method);
+    if(!closedValid&&!pressureValid)return{available:false,circuitInvalid:true,reason:"最近一轮 reconciliation 持久熔断合同无效"};
+    circuit=candidate;circuitObserved=true;
+  }
   const fresh=heartbeat?.stale===false,healthy=fresh&&heartbeat?.status==="live"
-    &&rpc.rpc_failures_total===0&&["sealed_clean","waiting_finality"].includes(details.outcome);
-  return{available:true,healthy,fresh,heartbeat,details,rpc};
+    &&rpc.rpc_failures_total===0&&["sealed_clean","waiting_finality"].includes(details.outcome)
+    &&circuitObserved&&circuit.state==="closed";
+  return{available:true,healthy,fresh,heartbeat,details,rpc,circuit,circuitObserved};
 }
 function launchProtocolUiState(d,now=Date.now()){
   const protocol=d?.research_protocol,solana=d?.primary_sources?.solana||{},readiness=solana.source_readiness,admission=solana.protocol_admission;
@@ -739,16 +772,17 @@ function renderLaunchCoverage(d){
   const evmOrphan=evmTraceAvailable?(evmTrace.orphan_rows??0):"不可判";
   const evmReadbackUnavailable=evmTrace&&["ok","partial","unavailable"].includes(evmTrace.state)?(evmTrace.readback_unavailable_rows??0)+(evmTrace.readback_error_rows??0):"不可判";
   const evmTraceLabel=!evmTraceAvailable?"账本回读不可用":evmTrace.state==="partial"?`${evmOrphan} 条 orphan 已隔离`:"精确回读正常";
-  const reconciliationTelemetry=launchReconciliationTelemetryState(d),reconciliationRpc=reconciliationTelemetry.rpc||{},reconciliationDetails=reconciliationTelemetry.details||{};
-  const reconciliationLabel=!reconciliationTelemetry.available?"成本遥测缺失":reconciliationTelemetry.healthy?"本轮 RPC 无失败":reconciliationTelemetry.fresh?"本轮失败/降级":"遥测已陈旧";
+  const reconciliationTelemetry=launchReconciliationTelemetryState(d),reconciliationRpc=reconciliationTelemetry.rpc||{},reconciliationDetails=reconciliationTelemetry.details||{},reconciliationCircuit=reconciliationTelemetry.circuit;
+  const reconciliationLabel=!reconciliationTelemetry.available?(reconciliationTelemetry.circuitInvalid?"熔断合同无效":"成本遥测缺失"):!reconciliationTelemetry.circuitObserved?"熔断未观测":reconciliationCircuit.state==="open"?"持久熔断中":reconciliationCircuit.state==="retry_due"?"重试已到期":reconciliationTelemetry.healthy?"本轮 RPC 无失败":reconciliationTelemetry.fresh?"本轮失败/降级":"遥测已陈旧";
   const reconciliationClass=reconciliationTelemetry.healthy?"b-good":reconciliationTelemetry.available?"b-warn":"b-danger";
+  const reconciliationCircuitCopy=!reconciliationTelemetry.available?"":!reconciliationTelemetry.circuitObserved?"持久熔断未观测；兼容旧 payload，但不能据此声称 RPC 健康。":reconciliationCircuit.state==="closed"?`持久熔断 closed · 连续压力 ${esc(reconciliationCircuit.consecutive_pressure_failures)} 次。`:`持久熔断 ${esc(reconciliationCircuit.state)} · 连续压力 ${esc(reconciliationCircuit.consecutive_pressure_failures)} 次 · failed_method ${esc(reconciliationCircuit.failed_method)} · next_retry_at ${esc(utcClock(reconciliationCircuit.next_retry_at))}。`;
   const last=stream?.last_received_at?relMs(new Date(stream.last_received_at).getTime()):"无接收时钟";
   return `${renderLaunchProtocolStatus(d)}<section class="coverage-strip" aria-label="Launch 数据覆盖与缺口">
     <div class="coverage-card"><div class="ck"><span>Pump.fun 主链发行流</span><span class="chip ${cls}">${esc(labels[status]||status)}${status==="live"&&!protocol.open?" · 准入仍关闭":""}</span></div><div class="cv">${esc(recent)} <small class="dim">/ 近${esc(q.recent_hours??24)}h</small></div><div class="cs">身份完整证据累计 ${esc(complete)}；最后接收 ${esc(last)}。监听实时不等于 finalized 独立对账通过，也不等于无漏单。</div></div>
     <div class="coverage-card"><div class="ck"><span>资格检查队列 / 账本回读</span><span class="chip ${traceUnavailable?"b-danger":orphan||pending?"b-warn":"b-accent"}">${esc(traceLabel)}</span></div><div class="cv">${esc(recorded)} <small class="dim">可追溯唯一账本事件</small></div><div class="cs">原始待检查 ${esc(raw)} · 待索引/错误重试 ${esc(pending)} · 规则筛除 ${esc(states.screened_out||0)} · orphan 隔离 ${esc(orphan)} 行/${esc(trace.orphan_unique_ledger_ids??"不可判")} ID。只有能从 opportunity ledger 精确回读的唯一 ID 才计入账；失败会退避，不会伪装成无机会。</div></div>
     <div class="coverage-card"><div class="ck"><span>EVM 官方工厂流</span><span class="chip ${evmHealthy===evmStreams.length&&evmStreams.length?"b-accent":"b-warn"}">${esc(evmHealthy)}/${esc(evmStreams.length||5)} 新鲜 · 研究扩展</span></div><div class="cv">${esc(eq.evidence?.complete||0)} <small class="dim">完整原始池</small></div><div class="cs">BSC / Base / Ethereum 共 5 条工厂流；EVM 不进入当前 Solana v6 前向分母，也不能据此显示 A3。边界前 ${esc(es.historical_raw_only||0)} 条仅作历史覆盖。</div></div>
     <div class="coverage-card"><div class="ck"><span>EVM 精确池资格 / 账本回读</span><span class="chip ${!evmTraceAvailable?"b-danger":evmTrace.state==="partial"||evmPending?"b-warn":"b-accent"}">${esc(evmTraceLabel)}</span></div><div class="cv">${esc(evmRecorded)} <small class="dim">可追溯唯一账本事件</small></div><div class="cs">原始标记已入账 ${esc(evmTrace.raw_marked_recorded_rows??"不可判")} 行 · orphan 隔离 ${esc(evmOrphan)} 行/${esc(evmTrace.orphan_unique_ledger_ids??"不可判")} ID · 回读不可用 ${esc(evmReadbackUnavailable)}。待检查/重试 ${esc(evmPending)}；只匹配工厂原始 pool。</div></div>
-    <div class="coverage-card"><div class="ck"><span>独立对账 RPC 成本</span><span class="chip ${reconciliationClass}">${esc(reconciliationLabel)}</span></div><div class="cv">${reconciliationTelemetry.available?`${esc(reconciliationRpc.rpc_calls_total)} 次调用 · ${esc(reconciliationRpc.rpc_failures_total)} 次失败`:"未观测"}</div><div class="cs">${reconciliationTelemetry.available?`算法 ${esc(reconciliationRpc.algorithm)} · 成功响应约 ${esc(reconciliationRpc.approx_success_response_bytes)} bytes · 整轮 ${esc(Math.round(reconciliationRpc.run_elapsed_ms))} ms · 结果 ${esc(reconciliationDetails.outcome)}。`:esc(reconciliationTelemetry.reason)} 指标只描述最近一次有界对账尝试，不代表来源完整、无漏单或存在收益。</div></div>
+    <div class="coverage-card"><div class="ck"><span>独立对账 RPC 成本</span><span class="chip ${reconciliationClass}">${esc(reconciliationLabel)}</span></div><div class="cv">${reconciliationTelemetry.available?`${esc(reconciliationRpc.rpc_calls_total)} 次调用 · ${esc(reconciliationRpc.rpc_failures_total)} 次失败`:"未观测"}</div><div class="cs">${reconciliationTelemetry.available?`算法 ${esc(reconciliationRpc.algorithm)} · 成功响应约 ${esc(reconciliationRpc.approx_success_response_bytes)} bytes · 整轮 ${esc(Math.round(reconciliationRpc.run_elapsed_ms))} ms · 结果 ${esc(reconciliationDetails.outcome)}。${reconciliationCircuitCopy}`:esc(reconciliationTelemetry.reason)} 指标只描述最近一次有界对账尝试，不代表来源完整、无漏单或存在收益。</div></div>
     <div class="coverage-card"><div class="ck"><span>已知覆盖缺口</span><span class="chip ${(stream?.open_gaps||evmGaps)||!protocol.open?"b-danger":"b-good"}">${esc((stream?.open_gaps||0)+evmGaps)} 个 open gap · 准入 ${protocol.open?"open":"closed"}</span></div><div class="cv">${protocol.open?"当前来源可入组":"协议未开放"}</div><div class="cs">DEX Screener 池与 profiles 仅负责市场水合/补充发现，不代表全市场覆盖；链上缺口、RPC、索引延迟或 finalized 对账失败都会阻断准入。</div></div>
   </section>`;
 }
