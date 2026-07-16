@@ -153,7 +153,9 @@ def test_launch_action_requires_statistical_evidence_gate():
 
     assert "完整成本+报价+证据+送达SLA" in html
     assert "成本后 24h 试验组相对同期 WATCH 对照的证据门" in html
-    assert "v5 前向固定前缀" in html
+    assert "当前预注册协议的前向固定前缀" in html
+    assert "launchValidation.cohort_version" in html
+    assert "ev.cohort_version" in html
     assert "union UTC 日历" in html
     assert "sequential SPA/Reality Check" in html
     assert "20 个样本的漂亮区间或反复刷新都不能放行" in html

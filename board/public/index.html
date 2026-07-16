@@ -581,7 +581,7 @@ const LANES={
   launch:{
     title:d=>{const e=d?.events||[];const p=e.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const s=d?.primary_sources?.solana?.streams?.[0];return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个 A3 人工验证窗仍有效`:'暂无通过新报价合同的 A3 人工验证窗'}；Pump.fun 主链流 ${esc(s?.status||"不可判")}${s?.open_gaps?`，有 ${esc(s.open_gaps)} 个已知缺口`:''}。`},
     stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{},eq=d?.primary_sources?.evm?.qualification||{};return [["首池事件",e.length,"首次发现价已锁定"],["SOL主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["EVM工厂完整证据",eq.evidence?.complete??"—","5条官方工厂流"],["A3人工验证窗",e.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"完整成本+报价+证据+送达SLA"],["A2纸面就绪",e.filter(x=>actionLevel(x)==="A2_PAPER_READY").length,"不得当作入场指令"],["A1观察",e.filter(x=>actionLevel(x)==="A1_WATCH").length,"旧数据/条件未齐/已过期"],["A0阻断",e.filter(x=>actionLevel(x)==="A0_BLOCKED").length,"已知安全红旗"]]},
-    readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。<b>SMALL_PROBE</b> 必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的证据门。优势门只认 v5 前向固定前缀、至少 14 个共享 UTC 市场日、union UTC 日历（缺席组按现金效用 0）和 sequential SPA/Reality Check；旧 cohort、20 个样本的漂亮区间或反复刷新都不能放行。样本不足时保留原始 cohort 做纸面结算，但当前动作降为 WATCH；缺 API key、取数失败或路由未知也只观察，已知蜜罐/权限雷或无法卖出直接避开。",
+    readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。<b>SMALL_PROBE</b> 必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的证据门。优势门只认当前预注册协议的前向固定前缀、至少 14 个共享 UTC 市场日、union UTC 日历（缺席组按现金效用 0）和 sequential SPA/Reality Check；旧 cohort、20 个样本的漂亮区间或反复刷新都不能放行。样本不足时保留原始 cohort 做纸面结算，但当前动作降为 WATCH；缺 API key、取数失败或路由未知也只观察，已知蜜罐/权限雷或无法卖出直接避开。",
     rows:d=>d?.events||[],
     id:r=>r.id||r.chain+r.token, flash:r=>r.entry_price,
     empty:"暂时没有合格首池事件。Launch 是事件流，不是热榜；空白是正常输出。",
@@ -990,6 +990,7 @@ function renderPlay(){
   const launchEvidence=data.stats?.lanes?.launch;
   const launchValidation=launchEvidence?.edge_validation||{};
   const launchEligible=launchValidation.eligible_n||{};
+  const launchProtocolLabel=Number.isInteger(launchValidation.cohort_version)?`v${launchValidation.cohort_version}`:"当前协议";
   const launchTarget=launchValidation.state==="awaiting_outcomes"?(launchValidation.look_n_per_arm||100):(launchValidation.next_look_n_per_arm||launchValidation.look_n_per_arm||100);
   const sourceHealth=data.structure?.source_health||[];
   const sourceOk=sourceHealth.filter(x=>x.status==="ok").length;
@@ -1044,7 +1045,7 @@ function renderPlay(){
   const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
   const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:(carryValid!=null&&carryTotal!=null?Math.max(0,carryTotal-carryValid):null);
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
-    <div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 v5 前向 24h、union UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 ${esc(launchProtocolLabel)} 前向 24h、union UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid??'?'}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal??'?'} · 排除 ${carryExcluded??'?'} · 旧协议 open 隔离 ${pp.n_quarantined_total??0}；模型代理为正，成本组件仍不全时也只作纸面候选；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,(carryValid??0)/20*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
   </section>`;
@@ -1217,7 +1218,7 @@ function paint(){
       if(measuredCost) st.push(["24h净分布",`中位 ${ls.median_net_24h}%`,`P90 ${ls.p90_net_24h}% · P99 ${ls.p99_net_24h}% · 成本为估算,非实盘成交`]);
       if(ls.edge_verdict) st.push(["相对优势",ls.edge_verdict,ls.edge_note||""]);
       if(ls.base_rate!=null) st.push(["vs 基准率",`${(ls.base_rate*100).toFixed(0)}%`,`lift ${ls.lift} · ${ls.edge||''}`]);
-    } else if(ls.verdict==="不可判") {const ev=ls.edge_validation;if(view==="launch"&&ev){const target=ev.state==="awaiting_outcomes"?(ev.look_n_per_arm||100):(ev.next_look_n_per_arm||ev.look_n_per_arm||100);st.push(["前向优势","不可判",`v5 SMALL_PROBE ${ev.eligible_n?.SMALL_PROBE||0}/${target} · WATCH ${ev.eligible_n?.WATCH||0}/${target} · ${ev.reason||""}`])}else st.push(["24h结果","不可判",`积累${ls.n}/20 · ${ls.edge_note||""}`]);} }
+    } else if(ls.verdict==="不可判") {const ev=ls.edge_validation;if(view==="launch"&&ev){const target=ev.state==="awaiting_outcomes"?(ev.look_n_per_arm||100):(ev.next_look_n_per_arm||ev.look_n_per_arm||100),protocol=Number.isInteger(ev.cohort_version)?`v${ev.cohort_version}`:"当前协议";st.push(["前向优势","不可判",`${protocol} SMALL_PROBE ${ev.eligible_n?.SMALL_PROBE||0}/${target} · WATCH ${ev.eligible_n?.WATCH||0}/${target} · ${ev.reason||""}`])}else st.push(["24h结果","不可判",`积累${ls.n}/20 · ${ls.edge_note||""}`]);} }
   $("lanestat").innerHTML=st.map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
   $("rd").innerHTML=L.readme;
   $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : view==="launch"?renderLaunchCoverage(d)+renderTable(view,L.rows(d),L.cols,L) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
