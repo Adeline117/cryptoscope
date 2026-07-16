@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sqlite3
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
+from threading import Lock
 from time import monotonic
 
 import structlog
@@ -297,6 +299,53 @@ OKX_FUNDING_BULK_URL = (
     "https://www.okx.com/api/v5/public/funding-rate?instId=ANY"
 )
 OKX_FUNDING_MAX_AGE_MS = 5 * 60 * 1000
+_OKX_SWAP_ID = re.compile(r"^[A-Z0-9]+-(?:USDT|USD)-SWAP$")
+_OKX_XPERP_ID = re.compile(r"^[A-Z0-9]+-USD_UM_XPERP-[0-9]{6}$")
+_OKX_BULK_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="okx-funding-bulk",
+)
+_OKX_BULK_LOCK = Lock()
+_OKX_BULK_FUTURE: Future | None = None
+
+
+def _okx_funding_identity(row: object) -> str | None:
+    """Return a canonical ANY-snapshot identity or fail closed."""
+    if not isinstance(row, dict):
+        return None
+    inst_id = row.get("instId")
+    inst_type = row.get("instType")
+    if not isinstance(inst_id, str) or inst_id != inst_id.strip():
+        return None
+    if inst_type == "SWAP" and _OKX_SWAP_ID.fullmatch(inst_id):
+        return inst_id
+    if inst_type == "FUTURES" and _OKX_XPERP_ID.fullmatch(inst_id):
+        return inst_id
+    return None
+
+
+def _start_okx_bulk_fetch(fetch) -> tuple[Future, bool]:
+    """Start at most one live OKX request process-wide.
+
+    A timed-out urllib call cannot be killed safely. Keeping its Future registered
+    prevents later scheduler ticks from accumulating threads and sockets behind it.
+    """
+    global _OKX_BULK_FUTURE
+    with _OKX_BULK_LOCK:
+        if _OKX_BULK_FUTURE is not None:
+            if not _OKX_BULK_FUTURE.done():
+                return _OKX_BULK_FUTURE, False
+            _OKX_BULK_FUTURE = None
+        _OKX_BULK_FUTURE = _OKX_BULK_EXECUTOR.submit(
+            fetch, OKX_FUNDING_BULK_URL,
+        )
+        return _OKX_BULK_FUTURE, True
+
+
+def _release_okx_bulk_fetch(future: Future) -> None:
+    global _OKX_BULK_FUTURE
+    with _OKX_BULK_LOCK:
+        if _OKX_BULK_FUTURE is future and future.done():
+            _OKX_BULK_FUTURE = None
 
 
 def _store_xdiff(diffs: dict[str, float]) -> None:
@@ -402,6 +451,10 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
         request_cap = max(0, int(cap))
     except (TypeError, ValueError):
         request_cap = OKX_FUNDING_REQUEST_CAP
+    try:
+        scan_timeout = max(0.0, float(scan_timeout_s))
+    except (TypeError, ValueError):
+        scan_timeout = OKX_FUNDING_SCAN_TIMEOUT_S
     limited = symbols[:request_cap]
     actual_workers = 1 if limited else 0
     upstream_requests = 0
@@ -412,19 +465,18 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
     source_error = None
     data = None
     if limited:
-        executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="okx-funding-bulk",
-        )
-        future = executor.submit(fetch, OKX_FUNDING_BULK_URL)
-        upstream_requests = 1
-        try:
+        future, started_here = _start_okx_bulk_fetch(fetch)
+        if not started_here:
+            source_error_kind = "request_timeout"
+            source_error = "previous OKX bulk funding request is still in flight"
+        else:
+            upstream_requests = 1
             done, pending = wait(
-                [future], timeout=max(float(scan_timeout_s), 0.0),
+                [future], timeout=scan_timeout,
             )
             if pending:
                 source_error_kind = "request_timeout"
                 source_error = "OKX bulk funding snapshot timed out"
-                future.cancel()
             elif done:
                 try:
                     data = future.result()
@@ -437,8 +489,8 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
                         "request_timeout" if timed_out else "request_failed"
                     )
                     source_error = str(exc)[:160]
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+                finally:
+                    _release_okx_bulk_fetch(future)
 
     index: dict[str, dict] = {}
     duplicate_ids: set[str] = set()
@@ -455,8 +507,8 @@ def okx_funding_scan(coins: list[str], cap: int = OKX_FUNDING_REQUEST_CAP,
         else:
             bulk_rows = len(data["data"])
             for row in data["data"]:
-                inst_id = row.get("instId") if isinstance(row, dict) else None
-                if not isinstance(inst_id, str) or not inst_id:
+                inst_id = _okx_funding_identity(row)
+                if inst_id is None:
                     bulk_invalid_rows += 1
                     continue
                 if inst_id in index:

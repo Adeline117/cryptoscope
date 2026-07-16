@@ -147,7 +147,9 @@ def test_okx_bulk_invalid_identity_or_duplicate_is_not_unsupported():
     malformed = hl.okx_funding_scan(
         ["MISSING"],
         fetch=lambda _url: {"code": "0", "data": [
-            _bulk_row("ETH"), {"fundingRate": "0.1"},
+            _bulk_row("ETH"),
+            {**_bulk_row("SPACE"), "instId": " SPACE-USDT-SWAP "},
+            {**_bulk_row("BADTYPE"), "instType": "OPTION"},
         ]},
     )
     duplicate = hl.okx_funding_scan(
@@ -158,7 +160,7 @@ def test_okx_bulk_invalid_identity_or_duplicate_is_not_unsupported():
     )
 
     assert malformed["status_by_symbol"] == {"MISSING": "rate_invalid"}
-    assert malformed["summary"]["bulk_invalid_rows"] == 1
+    assert malformed["summary"]["bulk_invalid_rows"] == 2
     assert malformed["summary"]["state"] == "unavailable"
     assert duplicate["status_by_symbol"] == {"BTC": "rate_invalid"}
     assert duplicate["summary"]["bulk_invalid_rows"] == 1
@@ -493,11 +495,15 @@ def test_okx_bulk_scan_closes_every_symbol_without_cap_or_silent_gap():
 
 def test_okx_funding_scan_whole_round_timeout_is_fail_closed():
     gate = Event()
+    finished = Event()
     symbols = ["WAIT0", "WAIT1", "WAIT2", "WAIT3"]
 
     def fetch(_url):
-        gate.wait(timeout=2)
-        return {"code": "0", "data": [_row()]}
+        try:
+            gate.wait(timeout=2)
+            return {"code": "0", "data": [_bulk_row("WAIT0")]}
+        finally:
+            finished.set()
 
     started = monotonic()
     try:
@@ -506,6 +512,7 @@ def test_okx_funding_scan_whole_round_timeout_is_fail_closed():
         )
     finally:
         gate.set()
+        assert finished.wait(timeout=0.5)
     elapsed = monotonic() - started
 
     assert elapsed < 0.5
@@ -516,6 +523,48 @@ def test_okx_funding_scan_whole_round_timeout_is_fail_closed():
     assert scan["summary"]["request_timeout"] == len(symbols)
     assert scan["summary"]["state"] == "unavailable"
     assert scan["summary"]["duration_ms"] < 500
+
+
+def test_okx_bulk_timeout_is_single_flight_across_scheduler_ticks():
+    gate = Event()
+    entered = Event()
+    finished = Event()
+    lock = Lock()
+    calls = active = peak = 0
+
+    def fetch(_url):
+        nonlocal calls, active, peak
+        with lock:
+            calls += 1
+            active += 1
+            peak = max(peak, active)
+        entered.set()
+        try:
+            gate.wait(timeout=2)
+            return {"code": "0", "data": [_bulk_row("WAIT")]}
+        finally:
+            with lock:
+                active -= 1
+            finished.set()
+
+    try:
+        first = hl.okx_funding_scan(
+            ["WAIT"], fetch=fetch, scan_timeout_s=0.02,
+        )
+        assert entered.wait(timeout=0.5)
+        second = hl.okx_funding_scan(
+            ["WAIT"], fetch=fetch, scan_timeout_s=0.02,
+        )
+    finally:
+        gate.set()
+        assert finished.wait(timeout=0.5)
+
+    assert calls == 1 and peak == 1 and active == 0
+    assert first["status_by_symbol"] == {"WAIT": "request_timeout"}
+    assert second["status_by_symbol"] == {"WAIT": "request_timeout"}
+    assert first["summary"]["upstream_requests"] == 1
+    assert second["summary"]["upstream_requests"] == 0
+    assert "still in flight" in second["summary"]["source_error"]
 
 
 def test_scan_carry_never_turns_okx_failure_into_single_venue_entry(monkeypatch):
