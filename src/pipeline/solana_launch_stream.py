@@ -184,12 +184,13 @@ def _adjust_gap_budget(current: int, clean_cycles: int,
                        result: dict) -> tuple[int, int]:
     current = min(GAP_RETRY_MAX_SLOT_BUDGET,
                   max(GAP_RETRY_SLOT_BUDGET, int(current)))
-    if result.get("pressure_kind") or int(result.get("failed") or 0):
+    if result.get("pressure_kind"):
         return GAP_RETRY_SLOT_BUDGET, 0
-    if result.get("deadline_exhausted"):
-        # Running out of lane wall-clock is not provider pressure: the budget
-        # simply outgrew the time slice. Halve instead of restarting the ramp
-        # from the floor, or a raised ceiling would sawtooth at 1.
+    if result.get("deadline_exhausted") or int(result.get("failed") or 0):
+        # Neither is provider pressure: wall-clock exhaustion means the budget
+        # outgrew the time slice, and a gap-local failure was already deferred
+        # with its own backoff. Halve instead of restarting the ramp from the
+        # floor, or a raised ceiling would sawtooth at 1.
         return max(GAP_RETRY_SLOT_BUDGET, current // 2), 0
     attempted = int(result.get("attempted") or 0)
     completed = int(result.get("recovered") or 0) + int(
@@ -1943,8 +1944,9 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
             except Exception as exc:
                 failed += 1
                 pressure = _as_rpc_pressure(exc)
-                pressure_kind = pressure.kind if pressure else None
-                retry_after = pressure.retry_after_seconds if pressure else None
+                if pressure is not None:
+                    pressure_kind = pressure.kind
+                    retry_after = pressure.retry_after_seconds
                 try:
                     deferred = stream_health.defer_gap(
                         gap["id"], str(exc),
@@ -1967,7 +1969,12 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                     error=str(exc)[:120],
                     next_retry_at=(deferred or {}).get("next_retry_at"),
                 )
-                stop_lane = True
+                # Provider pressure stops the lane for the cycle. A gap-local
+                # failure (for example a block missing from the provider's
+                # long-term storage) was just deferred with backoff and must
+                # not keep every healthy gap behind it from being served.
+                if pressure is not None:
+                    stop_lane = True
                 break
     return {
         "attempted": attempted, "recovered": recovered,

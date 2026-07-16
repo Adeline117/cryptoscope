@@ -1015,13 +1015,14 @@ def test_adaptive_budgets_ramp_only_after_full_clean_cycles_and_reset(sol):
     used_gap_budgets.append(gap_budget)
     assert used_gap_budgets == [1, 1, 2, 2, 4]
     assert sol._adjust_gap_budget(
-        4, 1, _gap_stats(1, failed=1),
-    ) == (1, 0)
-    assert sol._adjust_gap_budget(
         4, 1, _gap_stats(4, progressed=4, pressure_kind="rate_limited"),
     ) == (1, 0)
-    # A hit wall-clock deadline is not provider pressure: back off by halving
-    # instead of restarting the ramp from the floor.
+    # A hit wall-clock deadline or a deferred gap-local failure is not
+    # provider pressure: back off by halving instead of restarting the ramp
+    # from the floor.
+    assert sol._adjust_gap_budget(
+        4, 1, _gap_stats(2, progressed=1, failed=1),
+    ) == (2, 0)
     assert sol._adjust_gap_budget(
         16, 1, _gap_stats(9, progressed=9, deadline_exhausted=True),
     ) == (8, 0)
@@ -1030,7 +1031,7 @@ def test_adaptive_budgets_ramp_only_after_full_clean_cycles_and_reset(sol):
     ) == (1, 0)
     assert sol._adjust_gap_budget(
         16, 1, _gap_stats(9, progressed=8, failed=1, deadline_exhausted=True),
-    ) == (1, 0)
+    ) == (8, 0)
 
     hydration_limit = 5
     hydration_streak = 0
@@ -1518,6 +1519,74 @@ def test_full_budget_cycle_ending_at_deadline_is_not_deadline_exhausted(
     assert result == _gap_stats(1, progressed=1)
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
     assert (gap["from_cursor"], gap["to_cursor"]) == (12, 29)
+
+
+def test_failing_gap_defers_without_blocking_later_gaps(sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          received_at=t0, expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          received_at=t0, expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=14,
+                          received_at=t0 + timedelta(seconds=1),
+                          expect_contiguous=True)
+    calls = []
+
+    def recover(slot, **kwargs):
+        calls.append(slot)
+        if slot == 11:
+            raise RuntimeError("block missing in long-term storage")
+        return {
+            "state": "produced", "slot": slot,
+            "verified_through": slot, "launches": 0,
+        }
+
+    monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
+    result = sol.retry_open_gaps(object(), slot_budget=4)
+
+    assert result == _gap_stats(2, recovered=1, failed=1)
+    assert calls == [11, 13]
+    # The poisoned gap backs off with its own retry clock instead of holding
+    # the healthy gap behind it hostage for the whole cycle.
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    c = stream_health._conn()
+    try:
+        rows = c.execute(
+            "SELECT from_cursor,status,next_retry_at IS NOT NULL,last_error "
+            "FROM gaps ORDER BY from_cursor"
+        ).fetchall()
+    finally:
+        c.close()
+    assert rows[0][:3] == (11, "open", 1)
+    assert "long-term storage" in rows[0][3]
+    assert rows[1][:2] == (13, "resolved")
+
+
+def test_pressure_failure_still_stops_the_whole_gap_lane(sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=14,
+                          expect_contiguous=True)
+    calls = []
+
+    def recover(slot, **kwargs):
+        calls.append(slot)
+        raise sol.RpcPressureError("429", kind="rate_limited",
+                                   retry_after_seconds=120)
+
+    monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
+    result = sol.retry_open_gaps(object(), slot_budget=4)
+
+    assert result == _gap_stats(
+        1, failed=1, pressure_kind="rate_limited", retry_after_seconds=120,
+    )
+    assert calls == [11]
 
 
 def test_gap_deadline_checkpoints_completed_slot_then_stops(sol, monkeypatch):
