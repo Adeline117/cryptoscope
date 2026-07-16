@@ -130,6 +130,29 @@ def test_v6_launch_snapshot_is_database_immutable_but_outcome_remains_writable(
     assert row["cost_model"] == "test_frozen_cost"
     assert row["state"] == "aged_out"
     assert row["outcome"]["note"] == "still appendable"
+    assert datetime.fromisoformat(row["created_at"]).tzinfo is not None
+
+    connection = ledger._conn()
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        connection.execute("DELETE FROM opportunities WHERE id=?", (ident,))
+    connection.rollback()
+    connection.close()
+
+
+def test_legacy_row_cannot_be_updated_into_protected_v6_cohort(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry(cohort_version=5))
+    connection = ledger._conn()
+    with pytest.raises(sqlite3.IntegrityError, match="snapshot is immutable"):
+        connection.execute(
+            "UPDATE opportunities SET cohort_version=6 WHERE id=?", (ident,)
+        )
+    connection.rollback()
+    connection.close()
+
+    assert ledger.outcome_rows()[0]["cohort_version"] == 5
 
 
 def test_entry_observation_is_validated_normalized_and_frozen_on_first_insert(
@@ -355,6 +378,7 @@ def test_legacy_schema_backfills_only_provable_decision_clock(tmp_path, monkeypa
     assert row["expires_at"] is None
     assert row["entry_observation_version"] is None
     assert row["entry_observation"] is None
+    assert row["created_at"] is None
     assert row["price_observations"] == {}
 
     conn = sqlite3.connect(path)
@@ -372,13 +396,16 @@ def test_legacy_schema_backfills_only_provable_decision_clock(tmp_path, monkeypa
         )
     }
     conn.close()
-    assert {"entry_observation_version", "entry_observation"} <= opportunity_columns
+    assert {"entry_observation_version", "entry_observation", "created_at"} \
+        <= opportunity_columns
     assert {
         "observation_id", "opportunity_id", "horizon",
         "entry_observation_hash", "cost_contract_hash", "payload",
     } <= price_columns
     assert {
         "launch_v6_snapshot_no_update",
+        "launch_v6_snapshot_no_update_v2",
+        "launch_v6_snapshot_no_delete",
         "outcome_price_observations_no_update",
         "outcome_price_observations_no_delete",
     } <= triggers

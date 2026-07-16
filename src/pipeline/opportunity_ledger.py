@@ -160,7 +160,7 @@ def _conn() -> sqlite3.Connection:
         entry_observation_version INTEGER, entry_observation TEXT,
         cohort_version INTEGER, payload TEXT NOT NULL,
         outcome_state TEXT NOT NULL DEFAULT 'open', outcome TEXT,
-        updated_at TEXT NOT NULL
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )""")
     # Additive migration for ledgers created before discovery-time costs were frozen.
     cols = {r[1] for r in c.execute("PRAGMA table_info(opportunities)").fetchall()}
@@ -180,6 +180,10 @@ def _conn() -> sqlite3.Connection:
         c.execute("ALTER TABLE opportunities ADD COLUMN entry_observation_version INTEGER")
     if "entry_observation" not in cols:
         c.execute("ALTER TABLE opportunities ADD COLUMN entry_observation TEXT")
+    if "created_at" not in cols:
+        # Historical insertion time cannot be reconstructed honestly.  Leave legacy
+        # rows NULL so no earlier row can be promoted into a forward-only protocol.
+        c.execute("ALTER TABLE opportunities ADD COLUMN created_at TEXT")
     # Canonical event clocks. Only decision_at can be truthfully reconstructed for
     # legacy rows: the old first-seen row proves the decision existed by detected_at.
     # Quote/executable/expiry clocks stay NULL rather than inventing precision.
@@ -219,6 +223,46 @@ def _conn() -> sqlite3.Connection:
                    OR NEW.cohort_version IS NOT OLD.cohort_version
                  ) BEGIN
                    SELECT RAISE(ABORT, 'launch v6 discovery snapshot is immutable');
+                 END""")
+    # v2 also rejects one-step promotion from an old/non-Launch row into cohort 6 and
+    # freezes the insertion clock.  Keep a new trigger name so existing databases
+    # install the stronger definition instead of retaining IF-NOT-EXISTS v1 SQL.
+    c.execute("""CREATE TRIGGER IF NOT EXISTS launch_v6_snapshot_no_update_v2
+                 BEFORE UPDATE ON opportunities
+                 WHEN (
+                      (OLD.lane='launch' AND OLD.cohort_version>=6)
+                   OR (NEW.lane='launch' AND NEW.cohort_version>=6)
+                 ) AND (
+                      NEW.lane IS NOT OLD.lane
+                   OR NEW.chain IS NOT OLD.chain
+                   OR NEW.token IS NOT OLD.token
+                   OR NEW.symbol IS NOT OLD.symbol
+                   OR NEW.detected_at IS NOT OLD.detected_at
+                   OR NEW.event_at IS NOT OLD.event_at
+                   OR NEW.decision_at IS NOT OLD.decision_at
+                   OR NEW.quote_at IS NOT OLD.quote_at
+                   OR NEW.executable_at IS NOT OLD.executable_at
+                   OR NEW.expires_at IS NOT OLD.expires_at
+                   OR NEW.source IS NOT OLD.source
+                   OR NEW.decision IS NOT OLD.decision
+                   OR NEW.entry_price IS NOT OLD.entry_price
+                   OR NEW.invalidation_price IS NOT OLD.invalidation_price
+                   OR NEW.max_notional_usd IS NOT OLD.max_notional_usd
+                   OR NEW.cost_pct_est IS NOT OLD.cost_pct_est
+                   OR NEW.cost_model IS NOT OLD.cost_model
+                   OR NEW.cost_contract_version IS NOT OLD.cost_contract_version
+                   OR NEW.cost_contract IS NOT OLD.cost_contract
+                   OR NEW.entry_observation_version IS NOT OLD.entry_observation_version
+                   OR NEW.entry_observation IS NOT OLD.entry_observation
+                   OR NEW.cohort_version IS NOT OLD.cohort_version
+                   OR NEW.created_at IS NOT OLD.created_at
+                 ) BEGIN
+                   SELECT RAISE(ABORT, 'launch v6 discovery snapshot is immutable');
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS launch_v6_snapshot_no_delete
+                 BEFORE DELETE ON opportunities
+                 WHEN OLD.lane='launch' AND OLD.cohort_version>=6 BEGIN
+                   SELECT RAISE(ABORT, 'launch v6 discovery snapshot is append-only');
                  END""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_opportunities_lane_open "
               "ON opportunities(lane, outcome_state, detected_at DESC)")
@@ -351,7 +395,7 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
               cost_contract_json,
               entry_observation.get("version") if entry_observation else None,
               entry_observation_json, candidate.get("cohort_version", 2),
-              payload, now)
+              payload, now, now)
     c = _conn()
     try:
         inserted = c.execute("SELECT 1 FROM opportunities WHERE id=?", (ident,)).fetchone() is None
@@ -361,8 +405,8 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   executable_at,expires_at,source,state,decision,
                   entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
                   cost_contract_version,cost_contract,entry_observation_version,
-                  entry_observation,cohort_version,payload,updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  entry_observation,cohort_version,payload,created_at,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO UPDATE SET
                     state=excluded.state,
                     decision=CASE WHEN opportunities.lane='carry'
@@ -394,8 +438,8 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   executable_at,expires_at,source,state,decision,
                   entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
                   cost_contract_version,cost_contract,entry_observation_version,
-                  entry_observation,cohort_version,payload,updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  entry_observation,cohort_version,payload,created_at,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO NOTHING
             """, values).rowcount)
         c.commit()
@@ -1001,7 +1045,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                                   max_notional_usd, cost_pct_est, cost_model, cohort_version,
                                   cost_contract_version,cost_contract,
                                   entry_observation_version,entry_observation,
-                                  payload, outcome_state, outcome
+                                  payload, created_at, outcome_state, outcome
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
         latest_assessments = _latest_assessment_map(c, [row[0] for row in rows])
@@ -1023,7 +1067,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                 "source", "state", "decision", "entry_price", "invalidation_price",
                 "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version",
                 "cost_contract_version", "cost_contract", "entry_observation_version",
-                "entry_observation", "payload",
+                "entry_observation", "payload", "created_at",
                 "outcome_state", "outcome")
         item = dict(zip(keys, row))
         initial_recorded_decision = item.get("decision") or "WATCH"
@@ -1144,7 +1188,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
                                     max_notional_usd,cost_pct_est,cost_model,cohort_version,
                                     cost_contract_version,cost_contract,
                                     entry_observation_version,entry_observation,payload,
-                                    outcome_state,outcome,updated_at
+                                    created_at,outcome_state,outcome,updated_at
                              FROM opportunities {where}
                              ORDER BY detected_at ASC""").fetchall()
         observed_prices = _read_price_observations(c)
@@ -1155,7 +1199,7 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
             "source", "state", "decision", "entry_price", "invalidation_price",
             "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version",
             "cost_contract_version", "cost_contract", "entry_observation_version",
-            "entry_observation", "payload",
+            "entry_observation", "payload", "created_at",
             "outcome_state", "outcome", "updated_at")
     prices_by_event: dict[str, dict[str, dict]] = {}
     for observation in observed_prices:
