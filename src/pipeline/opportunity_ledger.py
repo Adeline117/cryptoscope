@@ -962,12 +962,17 @@ def _current_assessment(item: dict) -> dict:
 
 def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | None,
                    now: datetime) -> dict:
-    """Derive A0-A4 at read time; active read-only candidates can never be A4."""
+    """Derive the public Launch action while unverified real fills stay non-actionable."""
     common = {"auto_execution_allowed": False, "actionable_now": False,
               "current_assessment": _current_assessment(assessment) if assessment else None}
     if item.get("decision") == "AVOID":
         return {**common, "action_level": "A0_BLOCKED",
                 "action_reason_codes": ["discovery_hard_block"]}
+    if (assessment is not None and (
+            assessment.get("security_state") == "avoid"
+            or assessment.get("route_state") == "untradeable")):
+        return {**common, "action_level": "A0_BLOCKED",
+                "action_reason_codes": ["security_or_reverse_route_block"]}
     from src.pipeline.edge_validation import is_protocol_event
 
     if not is_protocol_event(item):
@@ -978,14 +983,8 @@ def _launch_action(item: dict, assessment: dict | None, evidence_gate: dict | No
                 "action_reason_codes": ["assessment_missing"]}
     current = common["current_assessment"]
     if assessment.get("kind") == "real_fill" and assessment.get("is_real_fill"):
-        if current.get("roundtrip_validated") is True:
-            return {**common, "action_level": "A4_REAL_FILL_VALIDATED",
-                    "action_reason_codes": ["historical_real_roundtrip_validated"]}
         return {**common, "action_level": "A1_WATCH",
-                "action_reason_codes": ["real_fill_roundtrip_not_validated"]}
-    if assessment.get("security_state") == "avoid" or assessment.get("route_state") == "untradeable":
-        return {**common, "action_level": "A0_BLOCKED",
-                "action_reason_codes": ["security_or_reverse_route_block"]}
+                "action_reason_codes": ["real_fill_verifier_unavailable"]}
     from src.contract.launch_probe import launch_manual_probe_failures
 
     candidate = {**item, "recorded_decision": item.get("decision"),

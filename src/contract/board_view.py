@@ -97,8 +97,10 @@ def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
         )
     if not isinstance(row.get("actionable_now"), bool):
         raise BoardViewContractError(f"{path}.actionable_now must be boolean")
-    if row.get("auto_execution_allowed") is True:
-        raise BoardViewContractError(f"{path} cannot allow automatic execution")
+    if row.get("auto_execution_allowed") is not False:
+        raise BoardViewContractError(
+            f"{path}.auto_execution_allowed must be exactly false"
+        )
 
     _validate_cost_contract(row.get("cost_contract"), path=f"{path}.cost_contract")
     assessment = row.get("current_assessment")
@@ -115,6 +117,10 @@ def _validate_event(row: Mapping[str, Any], *, view: str, lane: str,
     if view == "launch":
         if level not in _ACTION_LEVELS:
             raise BoardViewContractError(f"{path}.action_level is invalid")
+        if level == "A4_REAL_FILL_VALIDATED":
+            raise BoardViewContractError(
+                f"{path} cannot publish A4 until the real-fill verifier is available"
+            )
         expected = {
             "A0_BLOCKED": (False, "AVOID"),
             "A1_WATCH": (False, "WATCH"),
