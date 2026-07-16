@@ -67,6 +67,19 @@ def test_selector_snapshot_reproduces_arm_and_position_cap():
     assert got["modeled_route_roundtrip_pct"] > 0
 
 
+def test_protocol_identity_and_future_boundary_are_single_sourced():
+    from src.contract.launch_protocol import (
+        COHORT_VERSION, LAUNCH_COST_METHOD, PROTOCOL_ID, PROTOCOL_START_AT,
+        SOLANA_NETWORK_FEE_CEILING_USD,
+    )
+
+    assert PROTOCOL_ID == "launch-forward-spa-v3"
+    assert COHORT_VERSION == 6
+    assert PROTOCOL_START_AT == "2026-08-03T00:00:00+00:00"
+    assert SOLANA_NETWORK_FEE_CEILING_USD == 2.0
+    assert "solana_2usd_network_ceiling" in LAUNCH_COST_METHOD
+
+
 def test_source_snapshot_freezes_clean_independent_epoch_before_decision():
     from src.contract.launch_selector import validate_source_snapshot
 
