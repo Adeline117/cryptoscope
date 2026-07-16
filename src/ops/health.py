@@ -15,11 +15,75 @@ Every query is defensive — tables may not exist yet on a fresh install.
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import subprocess
 from datetime import datetime, timezone
 
-from src.config import DATA_DIR
+from src.config import DATA_DIR, PROJECT_ROOT
+
+
+_GIB = 1024 ** 3
+_DISK_THRESHOLD_DEFAULTS = {
+    "CRYPTOSCOPE_DISK_WARN_GIB": 15.0,
+    "CRYPTOSCOPE_DISK_WARN_PERCENT": 10.0,
+    "CRYPTOSCOPE_DISK_CRITICAL_GIB": 5.0,
+    "CRYPTOSCOPE_DISK_CRITICAL_PERCENT": 3.0,
+}
+
+
+def _disk_threshold(name: str) -> float:
+    """Read a non-negative disk threshold, falling back on invalid config."""
+    default = _DISK_THRESHOLD_DEFAULTS[name]
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    if value < 0 or value == float("inf") or value != value:
+        return default
+    if name.endswith("_PERCENT") and value > 100:
+        return default
+    return value
+
+
+def _disk_health() -> dict:
+    """Measure free space on the volume containing the CryptoScope workspace."""
+    thresholds = {
+        "warn_gib": _disk_threshold("CRYPTOSCOPE_DISK_WARN_GIB"),
+        "warn_percent": _disk_threshold("CRYPTOSCOPE_DISK_WARN_PERCENT"),
+        "critical_gib": _disk_threshold("CRYPTOSCOPE_DISK_CRITICAL_GIB"),
+        "critical_percent": _disk_threshold("CRYPTOSCOPE_DISK_CRITICAL_PERCENT"),
+    }
+    try:
+        usage = shutil.disk_usage(PROJECT_ROOT)
+        free_gib = usage.free / _GIB
+        free_percent = (usage.free / usage.total * 100) if usage.total else 0.0
+    except Exception as exc:
+        return {
+            "state": "unknown",
+            "path": str(PROJECT_ROOT),
+            "free_gib": None,
+            "free_percent": None,
+            "thresholds": thresholds,
+            "error": f"{type(exc).__name__}: {exc}"[:160],
+        }
+
+    if (free_gib < thresholds["critical_gib"] or
+            free_percent < thresholds["critical_percent"]):
+        state = "critical"
+    elif (free_gib < thresholds["warn_gib"] or
+          free_percent < thresholds["warn_percent"]):
+        state = "warn"
+    else:
+        state = "ok"
+    return {
+        "state": state,
+        "path": str(PROJECT_ROOT),
+        "free_gib": round(free_gib, 2),
+        "free_percent": round(free_percent, 2),
+        "total_gib": round(usage.total / _GIB, 2),
+        "thresholds": thresholds,
+    }
 
 
 def _scalar(db: str, sql: str, params: tuple = ()) -> int:
@@ -247,6 +311,7 @@ def collect_stats() -> dict:
         "labels": {"pump": labels_pump, "dud": labels_dud,
                    "ready_for_calibration": labels_pump >= 5 and labels_dud >= 5},
         "api_keys": keys,
+        "disk": _disk_health(),
         "launch_protocol": _launch_protocol_health(),
         "scheduler": _scheduler_status(),
     }
@@ -275,6 +340,12 @@ def format_report(stats: dict) -> str:
     L.append("=" * 50)
     sch = s["scheduler"]
     L.append(f"调度器: {'✅ 运行中 PID ' + str(sch['pid']) if sch.get('running') else '❌ 未运行'}")
+    disk = s.get("disk") or {}
+    disk_state = str(disk.get("state", "unknown")).upper()
+    disk_icon = {"OK": "✅", "WARN": "⚠️", "CRITICAL": "🛑"}.get(disk_state, "❔")
+    disk_free = f"{disk['free_gib']:.2f}" if disk.get("free_gib") is not None else "?"
+    disk_percent = f"{disk['free_percent']:.2f}" if disk.get("free_percent") is not None else "?"
+    L.append(f"工作区磁盘: {disk_icon} {disk_state} · 剩余 {disk_free} GiB ({disk_percent}%)")
     L.append("")
     snap = s["snapshots"]
     L.append("📸 持币快照")
@@ -344,6 +415,15 @@ def format_telegram(stats: dict) -> str:
         f"🚦 Launch v3 ❌ {launch.get('enrollment_state', 'blocked')} · "
         f"{','.join(launch.get('reason_codes') or ['unknown'])}\n"
     )
+    disk = s.get("disk") or {}
+    disk_state = str(disk.get("state", "unknown")).upper()
+    disk_icon = {"OK": "✅", "WARN": "⚠️", "CRITICAL": "🛑"}.get(disk_state, "❔")
+    disk_free = f"{disk['free_gib']:.2f}" if disk.get("free_gib") is not None else "?"
+    disk_percent = f"{disk['free_percent']:.2f}" if disk.get("free_percent") is not None else "?"
+    disk_line = (
+        f"💾 工作区磁盘 {disk_icon} {disk_state} · 剩余 {disk_free} GiB "
+        f"({disk_percent}%)\n"
+    )
     return (
         f"📊 <b>CryptoScope 日报 · 系统健康</b>\n"
         f"━━━━━━━━━━━━━━\n"
@@ -355,6 +435,7 @@ def format_telegram(stats: dict) -> str:
            if s.get("dead_signals") else "")
         + f"🎯 累计信号 {sigs} 条\n"
         + launch_line
+        + disk_line
         + f"👁 观察名单 {s['watchlist_active']}\n"
         f"🔎 筛选器追踪 {s.get('screener',{}).get('tracked',0)} · 持续候选 {len(s.get('screener',{}).get('top_recurring',[]))}\n"
         f"🏷 标签 拉盘{s.get('labels',{}).get('pump',0)}/横死{s.get('labels',{}).get('dud',0)}\n"

@@ -5,6 +5,7 @@ highlight because the recency filter never checked the timestamp. The same class
 of bug could pollute the accumulation slope with stale snapshots.
 """
 
+from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 
 from src.collectors.base import CollectedItem
@@ -74,7 +75,73 @@ def test_health_collect_and_format():
 
     stats = health.collect_stats()
     assert "snapshots" in stats and "signals" in stats and "scheduler" in stats
+    assert stats["disk"]["state"] in {"ok", "warn", "critical", "unknown"}
     report = health.format_report(stats)
     assert "健康看板" in report
+    assert "工作区磁盘" in report and "GiB" in report and "%" in report
+    assert stats["disk"]["state"].upper() in report
     tg = health.format_telegram(stats)
     assert "系统健康" in tg
+    assert "工作区磁盘" in tg and "GiB" in tg and "%" in tg
+    assert stats["disk"]["state"].upper() in tg
+
+
+_DiskUsage = namedtuple("usage", "total used free")
+_GIB = 1024 ** 3
+
+
+def test_disk_health_uses_gib_or_percent_thresholds(monkeypatch):
+    from src.ops import health
+
+    for name in health._DISK_THRESHOLD_DEFAULTS:
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.setattr(
+        health.shutil, "disk_usage",
+        lambda _path: _DiskUsage(1000 * _GIB, 980 * _GIB, 20 * _GIB),
+    )
+    assert health._disk_health()["state"] == "critical"  # 2% free, despite 20 GiB
+
+    monkeypatch.setattr(
+        health.shutil, "disk_usage",
+        lambda _path: _DiskUsage(100 * _GIB, 88 * _GIB, 12 * _GIB),
+    )
+    disk = health._disk_health()
+    assert disk["state"] == "warn"  # 12 GiB, despite 12% free
+    assert disk["free_gib"] == 12.0
+    assert disk["free_percent"] == 12.0
+
+
+def test_disk_health_thresholds_are_environment_configurable(monkeypatch):
+    from src.ops import health
+
+    monkeypatch.setenv("CRYPTOSCOPE_DISK_WARN_GIB", "10")
+    monkeypatch.setenv("CRYPTOSCOPE_DISK_WARN_PERCENT", "5")
+    monkeypatch.setenv("CRYPTOSCOPE_DISK_CRITICAL_GIB", "2")
+    monkeypatch.setenv("CRYPTOSCOPE_DISK_CRITICAL_PERCENT", "1")
+    monkeypatch.setattr(
+        health.shutil, "disk_usage",
+        lambda _path: _DiskUsage(100 * _GIB, 88 * _GIB, 12 * _GIB),
+    )
+
+    disk = health._disk_health()
+    assert disk["state"] == "ok"
+    assert disk["thresholds"] == {
+        "warn_gib": 10.0,
+        "warn_percent": 5.0,
+        "critical_gib": 2.0,
+        "critical_percent": 1.0,
+    }
+
+
+def test_disk_health_failure_is_visible_without_breaking_health(monkeypatch):
+    from src.ops import health
+
+    def fail(_path):
+        raise OSError("volume unavailable")
+
+    monkeypatch.setattr(health.shutil, "disk_usage", fail)
+    disk = health._disk_health()
+    assert disk["state"] == "unknown"
+    assert disk["free_gib"] is None
+    assert "volume unavailable" in disk["error"]
