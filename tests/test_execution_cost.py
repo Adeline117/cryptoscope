@@ -1,4 +1,6 @@
 """Cost contracts must expose unknowns instead of inventing an all-in number."""
+from copy import deepcopy
+
 import pytest
 
 
@@ -12,6 +14,111 @@ def test_discovery_contract_is_comparable_but_explicitly_partial():
     assert contract["completeness"] == "partial"
     assert contract["components"][1] == {
         "name": "network_fee", "pct": None, "status": "unknown"}
+
+
+def test_solana_launch_full_paper_contract_includes_preregistered_fee_ceiling():
+    from src.pipeline.execution_cost import (
+        SOLANA_LAUNCH_ROUNDTRIP_NETWORK_FEE_CEILING_USD,
+        solana_launch_full_paper_contract,
+    )
+
+    contract = solana_launch_full_paper_contract(
+        notional_usd=25,
+        modeled_route_roundtrip_pct=1.2,
+        method="frozen_route_model_v1",
+    )
+    components = {item["name"]: item for item in contract["components"]}
+
+    assert contract["purpose"] == "discovery_outcome"
+    assert contract["measurement_kind"] == "paper_model"
+    assert contract["cost_policy"] == "preregistered_full_paper_ceiling"
+    assert SOLANA_LAUNCH_ROUNDTRIP_NETWORK_FEE_CEILING_USD == 2.0
+    assert contract["network_fee_ceiling_usd"] == (
+        SOLANA_LAUNCH_ROUNDTRIP_NETWORK_FEE_CEILING_USD
+    )
+    assert components["modeled_route_dex_and_impact"]["pct"] == 1.2
+    assert components["network_fee"]["policy"] == "preregistered_ceiling"
+    assert components["network_fee"]["ceiling_usd"] == 2.0
+    assert components["network_fee"]["pct"] == 8.0
+    assert contract["known_total_pct"] == 9.2
+    assert contract["all_in_total_pct"] == 9.2
+    assert contract["completeness"] == "complete"
+    assert contract["is_real_fill"] is False
+
+
+def test_solana_launch_full_paper_contract_supports_explicit_fee_ceiling():
+    from src.pipeline.execution_cost import solana_launch_full_paper_contract
+
+    contract = solana_launch_full_paper_contract(
+        notional_usd=50,
+        modeled_route_roundtrip_pct=0.4,
+        method="frozen_route_model_v1",
+        network_fee_ceiling_usd=0.75,
+    )
+
+    assert contract["components"][1]["pct"] == 1.5
+    assert contract["known_total_pct"] == 1.9
+    assert contract["all_in_total_pct"] == 1.9
+
+
+@pytest.mark.parametrize("field,value", [
+    ("notional_usd", True),
+    ("notional_usd", float("nan")),
+    ("notional_usd", float("inf")),
+    ("modeled_route_roundtrip_pct", True),
+    ("modeled_route_roundtrip_pct", -0.01),
+    ("network_fee_ceiling_usd", True),
+    ("network_fee_ceiling_usd", float("-inf")),
+    ("network_fee_ceiling_usd", -0.01),
+])
+def test_solana_launch_full_paper_contract_rejects_unsafe_numbers(field, value):
+    from src.pipeline.execution_cost import solana_launch_full_paper_contract
+
+    values = {
+        "notional_usd": 25,
+        "modeled_route_roundtrip_pct": 1.2,
+        "network_fee_ceiling_usd": 2.0,
+        "method": "frozen_route_model_v1",
+    }
+    values[field] = value
+    with pytest.raises(ValueError, match="finite non-negative|positive notional"):
+        solana_launch_full_paper_contract(**values)
+
+
+def test_full_paper_policy_rejects_fee_and_semantic_field_drift():
+    from src.pipeline.execution_cost import (
+        solana_launch_full_paper_contract,
+        validate,
+    )
+
+    contract = solana_launch_full_paper_contract(
+        notional_usd=25,
+        modeled_route_roundtrip_pct=1.2,
+        method="frozen_route_model_v1",
+    )
+    wrong_ceiling = deepcopy(contract)
+    wrong_ceiling["components"][1]["ceiling_usd"] = 1.0
+    with pytest.raises(ValueError, match="ceiling fields disagree"):
+        validate(wrong_ceiling)
+
+    wrong_pct = deepcopy(contract)
+    wrong_pct["components"][1]["pct"] = 7.0
+    wrong_pct["known_total_pct"] = wrong_pct["all_in_total_pct"] = 8.2
+    with pytest.raises(ValueError, match="USD and pct disagree"):
+        validate(wrong_pct)
+
+    wrong_kind = {**contract, "measurement_kind": "real_fill"}
+    with pytest.raises(ValueError, match="semantics disagree"):
+        validate(wrong_kind)
+
+    missing_method = {**contract, "method": " "}
+    with pytest.raises(ValueError, match="requires a method"):
+        validate(missing_method)
+
+    wrong_component_policy = deepcopy(contract)
+    wrong_component_policy["components"][1]["policy"] = "measured"
+    with pytest.raises(ValueError, match="component policy disagrees"):
+        validate(wrong_component_policy)
 
 
 def test_route_contract_does_not_double_count_dex_fee_inside_route_loss():
@@ -49,6 +156,57 @@ def test_cost_contract_rejects_mismatched_totals_and_filled_unknowns():
                   "completeness": "partial",
                   "components": [{"name": "network", "pct": 0.0,
                                   "status": "unknown"}]})
+
+
+@pytest.mark.parametrize("path,value", [
+    ("notional", True),
+    ("notional", float("nan")),
+    ("component", float("inf")),
+    ("component", True),
+    ("known_total", float("-inf")),
+    ("all_in_total", True),
+    ("extension_amount", -1),
+    ("extension_pct", float("nan")),
+])
+def test_validate_rejects_nonfinite_boolean_and_negative_cost_fields(path, value):
+    from src.pipeline.execution_cost import validate
+
+    contract = {
+        "version": 1, "purpose": "current_action", "basis": "round_trip",
+        "currency": "USD", "notional_usd": 25, "method": "test",
+        "components": [{"name": "route", "pct": 1.0, "status": "included"}],
+        "known_total_pct": 1.0, "all_in_total_pct": 1.0,
+        "completeness": "complete", "is_real_fill": False,
+    }
+    if path == "notional":
+        contract["notional_usd"] = value
+    elif path == "component":
+        contract["components"][0]["pct"] = value
+    elif path == "known_total":
+        contract["known_total_pct"] = value
+    elif path == "all_in_total":
+        contract["all_in_total_pct"] = value
+    elif path == "extension_amount":
+        contract["components"][0]["assumption_usd"] = value
+    else:
+        contract["components"][0]["modeled_proxy_pct"] = value
+
+    with pytest.raises(ValueError, match="finite non-negative|requires"):
+        validate(contract)
+
+
+def test_validate_rejects_non_boolean_fill_claim():
+    from src.pipeline.execution_cost import validate
+
+    contract = {
+        "version": 1, "purpose": "current_action", "basis": "round_trip",
+        "currency": "USD", "notional_usd": 25, "method": "test",
+        "components": [{"name": "route", "pct": 1.0, "status": "included"}],
+        "known_total_pct": 1.0, "all_in_total_pct": 1.0,
+        "completeness": "complete", "is_real_fill": "false",
+    }
+    with pytest.raises(ValueError, match="is_real_fill must be boolean"):
+        validate(contract)
 
 
 def test_unknown_route_contract_invents_no_zero_cost_fill():

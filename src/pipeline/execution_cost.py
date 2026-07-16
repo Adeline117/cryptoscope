@@ -1,27 +1,59 @@
 """Versioned, auditable cost contracts shared by discovery and live assessments."""
 from __future__ import annotations
 
-from math import isclose
+from math import isclose, isfinite
 
 
 CONTRACT_VERSION = 1
 PURPOSES = {"discovery_outcome", "current_action", "paper_measurement"}
 STATUSES = {"included", "unknown", "excluded", "not_applicable"}
+SOLANA_LAUNCH_ROUNDTRIP_NETWORK_FEE_CEILING_USD = 2.0
+
+
+def _finite_nonnegative(value: object, *, field: str) -> float:
+    """Parse a cost number without accepting booleans, NaN or infinity."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a finite non-negative number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field} must be a finite non-negative number") from exc
+    if not isfinite(number) or number < 0:
+        raise ValueError(f"{field} must be a finite non-negative number")
+    return number
+
+
+def _validate_cost_numbers(value: object, *, path: str = "cost_contract") -> None:
+    """Fail closed on every monetary/percentage field, including extensions."""
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            field = f"{path}.{key}"
+            if key == "pct" or key.endswith("_pct") or key.endswith("_usd"):
+                if nested is not None:
+                    _finite_nonnegative(nested, field=field)
+            else:
+                _validate_cost_numbers(nested, path=field)
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _validate_cost_numbers(nested, path=f"{path}[{index}]")
 
 
 def validate(contract: dict) -> dict:
     """Validate and return a normalized cost contract without filling unknowns."""
     if not isinstance(contract, dict) or contract.get("version") != CONTRACT_VERSION:
         raise ValueError("unsupported cost contract version")
+    _validate_cost_numbers(contract)
     if contract.get("purpose") not in PURPOSES:
         raise ValueError("invalid cost contract purpose")
     if contract.get("basis") != "round_trip" or contract.get("currency") != "USD":
         raise ValueError("cost contract must use round-trip USD basis")
     try:
-        notional = float(contract["notional_usd"])
-    except (KeyError, TypeError, ValueError) as exc:
+        notional = _finite_nonnegative(
+            contract["notional_usd"], field="cost_contract.notional_usd"
+        )
+    except KeyError as exc:
         raise ValueError("cost contract requires positive notional_usd") from exc
-    if notional <= 0:
+    if notional == 0:
         raise ValueError("cost contract requires positive notional_usd")
     components = contract.get("components")
     if not isinstance(components, list) or not components:
@@ -42,11 +74,11 @@ def validate(contract: dict) -> dict:
         value = component.get("pct")
         if status == "included":
             try:
-                value = float(value)
-            except (TypeError, ValueError) as exc:
+                value = _finite_nonnegative(
+                    value, field=f"cost component {name} pct"
+                )
+            except ValueError as exc:
                 raise ValueError(f"included cost component {name} needs pct") from exc
-            if value < 0:
-                raise ValueError("cost percentages cannot be negative")
             known += value
         elif value is not None:
             raise ValueError(f"non-included cost component {name} must have null pct")
@@ -55,10 +87,12 @@ def validate(contract: dict) -> dict:
         normalized_components.append({**component, "name": name, "pct": value})
     supplied_known = contract.get("known_total_pct")
     try:
-        supplied_known = float(supplied_known)
-    except (TypeError, ValueError) as exc:
+        supplied_known = _finite_nonnegative(
+            supplied_known, field="cost_contract.known_total_pct"
+        )
+    except ValueError as exc:
         raise ValueError("cost contract requires known_total_pct") from exc
-    if not isclose(supplied_known, known, abs_tol=1e-6):
+    if not isclose(supplied_known, known, rel_tol=0.0, abs_tol=1e-6):
         raise ValueError("known_total_pct does not equal included components")
     expected_completeness = "partial" if incomplete else "complete"
     if contract.get("completeness") != expected_completeness:
@@ -68,17 +102,56 @@ def validate(contract: dict) -> dict:
         raise ValueError("partial cost contract cannot claim all-in total")
     if not incomplete:
         try:
-            all_in = float(all_in)
-        except (TypeError, ValueError) as exc:
+            all_in = _finite_nonnegative(
+                all_in, field="cost_contract.all_in_total_pct"
+            )
+        except ValueError as exc:
             raise ValueError("complete cost contract requires all-in total") from exc
-        if not isclose(all_in, known, abs_tol=1e-6):
+        if not isclose(all_in, known, rel_tol=0.0, abs_tol=1e-6):
             raise ValueError("all_in_total_pct does not equal included components")
+    if "is_real_fill" in contract and not isinstance(contract["is_real_fill"], bool):
+        raise ValueError("is_real_fill must be boolean")
+    is_real_fill = contract.get("is_real_fill", False)
+
+    if contract.get("cost_policy") == "preregistered_full_paper_ceiling":
+        expected_names = {
+            "modeled_route_dex_and_impact",
+            "network_fee",
+        }
+        indexed = {component["name"]: component for component in normalized_components}
+        if set(indexed) != expected_names:
+            raise ValueError("full paper ceiling components disagree with policy")
+        if (contract.get("purpose") != "discovery_outcome"
+                or contract.get("measurement_kind") != "paper_model"
+                or expected_completeness != "complete"
+                or is_real_fill is not False):
+            raise ValueError("full paper ceiling contract semantics disagree with policy")
+        if (not isinstance(contract.get("method"), str)
+                or not contract["method"].strip()):
+            raise ValueError("full paper ceiling contract requires a method")
+        if indexed["network_fee"].get("policy") != "preregistered_ceiling":
+            raise ValueError("network fee component policy disagrees")
+        ceiling = _finite_nonnegative(
+            contract.get("network_fee_ceiling_usd"),
+            field="cost_contract.network_fee_ceiling_usd",
+        )
+        component_ceiling = _finite_nonnegative(
+            indexed["network_fee"].get("ceiling_usd"),
+            field="network_fee.ceiling_usd",
+        )
+        if not isclose(ceiling, component_ceiling, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError("network fee ceiling fields disagree")
+        expected_fee_pct = ceiling / notional * 100.0
+        if not isclose(
+                indexed["network_fee"]["pct"],
+                expected_fee_pct, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError("network fee ceiling USD and pct disagree")
     return {**contract, "notional_usd": notional,
             "components": normalized_components,
             "known_total_pct": round(known, 6),
             "all_in_total_pct": round(all_in, 6) if all_in is not None else None,
             "completeness": expected_completeness,
-            "is_real_fill": bool(contract.get("is_real_fill", False))}
+            "is_real_fill": is_real_fill}
 
 
 def discovery_contract(*, notional_usd: float, modeled_roundtrip_pct: float,
@@ -95,6 +168,47 @@ def discovery_contract(*, notional_usd: float, modeled_roundtrip_pct: float,
         ],
         "known_total_pct": modeled_roundtrip_pct, "all_in_total_pct": None,
         "completeness": "partial", "is_real_fill": False,
+    })
+
+
+def solana_launch_full_paper_contract(
+        *, notional_usd: float, modeled_route_roundtrip_pct: float, method: str,
+        network_fee_ceiling_usd: float = (
+            SOLANA_LAUNCH_ROUNDTRIP_NETWORK_FEE_CEILING_USD)) -> dict:
+    """Freeze a conservative, complete paper-cost policy for Solana Launch.
+
+    The $2 default is a deliberately conservative, pre-registered scenario
+    ceiling. It is not a Solana fee fact, quote, or measured fill. Converting
+    the scenario to a percentage at the frozen notional makes the route and fee
+    components additive while keeping their assumptions auditable.
+    """
+    notional = _finite_nonnegative(notional_usd, field="notional_usd")
+    if notional == 0:
+        raise ValueError("cost contract requires positive notional_usd")
+    route_pct = _finite_nonnegative(
+        modeled_route_roundtrip_pct, field="modeled_route_roundtrip_pct"
+    )
+    ceiling_usd = _finite_nonnegative(
+        network_fee_ceiling_usd, field="network_fee_ceiling_usd"
+    )
+    network_fee_pct = round(ceiling_usd / notional * 100.0, 6)
+    total_pct = round(route_pct + network_fee_pct, 6)
+    return validate({
+        "version": CONTRACT_VERSION, "purpose": "discovery_outcome",
+        "basis": "round_trip", "currency": "USD", "notional_usd": notional,
+        "method": method, "measurement_kind": "paper_model",
+        "cost_policy": "preregistered_full_paper_ceiling",
+        "network_fee_ceiling_usd": ceiling_usd,
+        "components": [
+            {"name": "modeled_route_dex_and_impact", "pct": route_pct,
+             "status": "included", "measurement_kind": "paper_model"},
+            {"name": "network_fee", "pct": network_fee_pct,
+             "status": "included", "ceiling_usd": ceiling_usd,
+             "policy": "preregistered_ceiling",
+             "measurement_kind": "paper_model", "is_ceiling": True},
+        ],
+        "known_total_pct": total_pct, "all_in_total_pct": total_pct,
+        "completeness": "complete", "is_real_fill": False,
     })
 
 
@@ -151,11 +265,11 @@ def carry_paper_contract(*, notional_usd_per_leg: float,
     ``modeled_fee_pct`` is exposed only as a proxy assumption; it is not known cost.
     """
     try:
-        fee_proxy = float(modeled_fee_pct)
-    except (TypeError, ValueError) as exc:
+        fee_proxy = _finite_nonnegative(
+            modeled_fee_pct, field="carry modeled fee proxy"
+        )
+    except ValueError as exc:
         raise ValueError("carry modeled fee proxy must be numeric") from exc
-    if fee_proxy < 0:
-        raise ValueError("carry modeled fee proxy cannot be negative")
 
     components = []
     known_total = 0.0
@@ -167,9 +281,12 @@ def carry_paper_contract(*, notional_usd_per_leg: float,
             components.append({"name": name, "pct": None, "status": "unknown",
                                "source": "read_only_orderbook", "phase": phase})
         else:
-            measured = float(value)
-            if measured < 0:
-                raise ValueError("carry book impact cannot be negative")
+            try:
+                measured = _finite_nonnegative(
+                    value, field=f"carry {name}"
+                )
+            except ValueError as exc:
+                raise ValueError("carry book impact must be finite and non-negative") from exc
             known_total += measured
             components.append({"name": name, "pct": measured, "status": "included",
                                "source": "read_only_orderbook", "phase": phase,
