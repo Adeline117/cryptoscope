@@ -696,6 +696,40 @@ def _validate_stats_view(payload: Mapping[str, Any]) -> None:
     _validate_launch_stats(lanes["launch"], path="stats.lanes.launch")
     if "carry" in lanes:
         _validate_carry_stats(lanes["carry"], path="stats.lanes.carry")
+    # The browser receives one pre-shaped snapshot and must never infer edge
+    # semantics by joining independently refreshed views.  Recompute from these
+    # exact lanes and compare strict JSON encodings so bool/int and int/float drift
+    # cannot exploit Python's permissive equality rules.
+    from src.pipeline.validation_overview import build_validation_overview
+
+    expected = build_validation_overview(lanes)
+    present_invalid = [
+        row["lane"] for row in expected["rows"]
+        if row["verdict"] == "unverifiable" and row["lane"] in lanes
+    ]
+    if present_invalid:
+        raise BoardViewContractError(
+            "stats contains invalid present validation lanes: "
+            + ", ".join(present_invalid)
+        )
+    actual = payload.get("validation_overview")
+    try:
+        expected_json = json.dumps(
+            expected, ensure_ascii=False, allow_nan=False,
+            sort_keys=True, separators=(",", ":"),
+        )
+        actual_json = json.dumps(
+            actual, ensure_ascii=False, allow_nan=False,
+            sort_keys=True, separators=(",", ":"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise BoardViewContractError(
+            f"stats.validation_overview is not strict JSON: {exc}"
+        ) from exc
+    if actual_json != expected_json:
+        raise BoardViewContractError(
+            "stats.validation_overview does not match its lanes snapshot"
+        )
 
 
 def _aware_clock(value: Any, *, path: str) -> datetime:

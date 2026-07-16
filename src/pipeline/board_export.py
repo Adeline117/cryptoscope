@@ -418,7 +418,10 @@ def render_stats(opportunities: dict | None) -> dict:
         # refresh must never choose the observation time or trigger a large backfill.
         from src.pipeline.opportunity_outcomes import lane_stats as opportunity_lane_stats
         lanes.update(opportunity_lane_stats())
+        from src.pipeline.validation_overview import build_validation_overview
+        validation_overview = build_validation_overview(lanes)
         return _envelope({"lanes": lanes,
+                          "validation_overview": validation_overview,
                           "note": "只有 Launch/Cascade 方向事件按首次发现价做固定 1h/24h/7d "
                                   "纸面测量并扣冻结的估算成本；Structure 不计算方向命中率；"
                                   "Airdrop 只汇总语义、受益人、奖励与实际成本全部核验的完整领取；"

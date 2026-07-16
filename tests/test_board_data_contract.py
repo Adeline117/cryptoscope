@@ -274,6 +274,7 @@ def _carry_contract_fixtures():
         "execution_mode": "paper_orderbook_measurement",
         "real_edge_eligible": False,
         "verdict": "不可判", "edge_verdict": "不可判",
+        "note": "有效报价代理关闭 1/20；仅作描述，不能判定优势",
     }
     paper = {
         "cohort_kind": "descriptive_quote_proxy",
@@ -1022,6 +1023,8 @@ def test_carry_public_contract_rejects_real_edge_and_count_claims(
     carry_stats, carry_paper = _carry_contract_fixtures()
     stats = board_export.render_stats(None)
     stats["lanes"]["carry"] = carry_stats
+    from src.pipeline.validation_overview import build_validation_overview
+    stats["validation_overview"] = build_validation_overview(stats["lanes"])
     perps = _view(board_export, "perps", {
         "perps": [], "carry": [], "cascade_events": [],
         "carry_paper": carry_paper,
