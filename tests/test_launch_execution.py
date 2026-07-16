@@ -14,6 +14,20 @@ def _event(**overrides):
     return event
 
 
+def _v2_quote(input_mint, output_mint, amount, threshold, *, impact, label):
+    return {
+        "inputMint": input_mint, "outputMint": output_mint,
+        "inAmount": str(amount), "outAmount": str(threshold),
+        "otherAmountThreshold": str(threshold), "swapMode": "ExactIn",
+        "slippageBps": 100, "priceImpact": impact, "transaction": None,
+        "routePlan": [{"swapInfo": {
+            "label": label, "inputMint": input_mint,
+            "outputMint": output_mint, "inAmount": str(amount),
+            "outAmount": str(threshold),
+        }}],
+    }
+
+
 def _solana_row(**overrides):
     row = {
         "mintable": {"status": "0"}, "freezable": {"status": "0"},
@@ -245,16 +259,23 @@ def test_jupiter_roundtrip_quote_replaces_modeled_cost():
         if url == le.JUPITER_PRICE:
             return {"Mint": {"decimals": 6, "usdPrice": 0.06, "blockId": 123}}
         if params["inputMint"] == le.JUPITER_USDC:
-            return {"outAmount": "1000000000", "priceImpact": "-0.004",
-                    "routePlan": [{"swapInfo": {"label": "Raydium"}}]}
-        return {"outAmount": "58800000", "priceImpact": "-0.006",
-                "routePlan": [{"swapInfo": {"label": "Meteora"}}]}
+            return _v2_quote(
+                le.JUPITER_USDC, "Mint", params["amount"], 1_000_000_000,
+                impact="-0.004", label="Raydium",
+            )
+        return _v2_quote(
+            "Mint", le.JUPITER_USDC, params["amount"], 58_800_000,
+            impact="-0.006", label="Meteora",
+        )
 
     route = le._jupiter_route(_event(), "key", quotes)
     assert route["state"] == "quoted"
     assert route["roundtrip_loss_pct"] == 2.0
     assert route["buy_price_impact_pct"] == 0.4
     assert route["sell_price_impact_pct"] == 0.6
+    assert route["promotion_eligible"] is True
+    assert route["quote_contract_verified"] is True
+    assert route["provider_contract"]["endpoint"] == le.JUPITER_ORDER
     assert [url for url, _, _ in requests] == [
         le.JUPITER_ORDER, le.JUPITER_PRICE, le.JUPITER_ORDER]
     assert all("restrictIntermediateTokens" not in params and
@@ -320,7 +341,7 @@ def test_jupiter_excessive_roundtrip_loss_is_untradeable():
     assert got["roundtrip_loss_pct"] == 20.0
 
 
-def test_missing_router_key_uses_labelled_keyless_quote_fallback(monkeypatch):
+def test_missing_router_key_uses_v2_keyless_diagnostic_without_promotion(monkeypatch):
     from src.pipeline import launch_execution as le
 
     monkeypatch.delenv("JUPITER_API_KEY", raising=False)
@@ -328,7 +349,7 @@ def test_missing_router_key_uses_labelled_keyless_quote_fallback(monkeypatch):
 
     def quotes(url, params, headers):
         calls.append((url, headers))
-        if url == le.JUPITER_LITE_PRICE:
+        if url == le.JUPITER_PRICE:
             return {"Mint": {"decimals": 6}}
         if params["inputMint"] == le.JUPITER_USDC:
             return {"outAmount": "1000000000",
@@ -339,11 +360,12 @@ def test_missing_router_key_uses_labelled_keyless_quote_fallback(monkeypatch):
     got = le.route_probe(_event(), fetch=quotes)
 
     assert got["state"] == "quoted"
-    assert got["api_mode"] == "keyless_lite_fallback"
-    assert "keyless fallback" in got["source"]
-    assert calls == [(le.JUPITER_LITE_QUOTE, None),
-                     (le.JUPITER_LITE_PRICE, None),
-                     (le.JUPITER_LITE_QUOTE, None)]
+    assert got["api_mode"] == "keyless_v2_diagnostic"
+    assert got["promotion_eligible"] is False
+    assert "keyless diagnostic" in got["source"]
+    assert calls == [(le.JUPITER_ORDER, None),
+                     (le.JUPITER_PRICE, None),
+                     (le.JUPITER_ORDER, None)]
 
 
 def test_missing_token_decimals_keeps_route_but_blocks_standardized_entry_price():
@@ -393,6 +415,7 @@ def test_scan_assessment_failure_appends_unknown_without_relabeling_discovery(tm
         return [profile] if url == lr.PROFILES_URL else [pair]
 
     got = lr.scan(fetch=fetch, now=now, max_primary=0, max_evm=0,
+                  evidence_clock=lambda: now,
                   assessor=lambda event: (_ for _ in ()).throw(
                       RuntimeError("security down")))
     assert got["assessed"] == 1
@@ -431,10 +454,16 @@ def test_current_route_quote_cannot_rewrite_discovery_price_or_cost(tmp_path, mo
         event["expires_at"] = (now + timedelta(seconds=60)).isoformat()
         return event
 
-    lr.scan(fetch=fetch, now=now, max_primary=0, max_evm=0, assessor=assessor)
+    lr.scan(
+        fetch=fetch, now=now, max_primary=0, max_evm=0, assessor=assessor,
+        evidence_clock=lambda: now,
+    )
     discovery = ol.outcome_rows()[0]
     latest = ol.latest_execution_assessment(discovery["id"])
     assert discovery["entry_price"] == 0.001
-    assert discovery["cost_contract"]["method"].endswith("buffer_v1")
+    from src.pipeline.edge_validation import LAUNCH_COST_METHOD
+    assert discovery["cost_contract"]["method"] == LAUNCH_COST_METHOD
+    assert discovery["cost_contract"]["completeness"] == "complete"
+    assert discovery["cost_contract"]["network_fee_ceiling_usd"] == 2.0
     assert latest["cost_contract"]["known_total_pct"] == 2.5
     assert latest["entry_reference_price"] is None

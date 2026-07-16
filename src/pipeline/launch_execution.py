@@ -13,6 +13,7 @@ failures, and incomplete fields are UNKNOWN and downgrade the candidate to WATCH
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import urllib.parse
@@ -21,9 +22,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 JUPITER_ORDER = "https://api.jup.ag/swap/v2/order"
-# Jupiter postponed the keyless Lite API retirement in February 2026. It remains a
-# deliberately labelled fallback for quote-only validation when no portal key is
-# configured; the keyed V2 order endpoint stays preferred.
+# Kept only as explicit legacy identifiers for old observations/tests. The current
+# keyless diagnostic path uses api.jup.ag Swap V2; lite-api is being phased out.
 JUPITER_LITE_QUOTE = "https://lite-api.jup.ag/swap/v1/quote"
 JUPITER_PRICE = "https://api.jup.ag/price/v3"
 JUPITER_LITE_PRICE = "https://lite-api.jup.ag/price/v3"
@@ -255,18 +255,54 @@ def _roundtrip(notional: float, back_usd: float) -> float:
     return round((notional - back_usd) / notional * 100, 4)
 
 
+def _order_response_verified(
+        value: dict, *, input_mint: str, output_mint: str, amount: str) -> bool:
+    """Verify the quote-only V2 response bindings required for promotion."""
+    if not isinstance(value, dict):
+        return False
+    try:
+        threshold = int(value.get("otherAmountThreshold") or 0)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return bool(
+        value.get("inputMint") == input_mint
+        and value.get("outputMint") == output_mint
+        and value.get("inAmount") == amount
+        and value.get("swapMode") == "ExactIn"
+        and value.get("slippageBps") == 100
+        and isinstance(value.get("routePlan"), list)
+        and bool(value.get("routePlan"))
+        and threshold > 0
+        and value.get("errorCode") in (None, 0)
+        and not str(value.get("error") or value.get("errorMessage") or "").strip()
+        and value.get("transaction") in (None, "")
+    )
+
+
+def _quote_hash(value: dict) -> str:
+    encoded = json.dumps(
+        value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _jupiter_route(event: dict, key: str, fetch: Fetch, *, endpoint: str = JUPITER_ORDER) -> dict:
     notional = float(event.get("max_notional_usd") or 0)
     token = event.get("token")
     if notional <= 0 or not token:
         return {"state": "unknown", "reason": "missing quote notional/token"}
+    key = key.strip() if isinstance(key, str) else ""
     headers = {"x-api-key": key} if key else None
-    source = ("Jupiter Swap v2 order" if endpoint == JUPITER_ORDER
-              else "Jupiter Swap v1 lite quote (keyless fallback)")
-    common = {"slippageBps": 100}
+    is_v2 = endpoint == JUPITER_ORDER
+    keyed_v2 = bool(is_v2 and key)
+    source = ("Jupiter Swap v2 order" if keyed_v2 else
+              "Jupiter Swap v2 order (keyless diagnostic)" if is_v2 else
+              "Jupiter legacy quote diagnostic")
+    common = {"slippageBps": 100, "swapMode": "ExactIn"}
+    buy_amount = str(round(notional * 1_000_000))
     try:
         buy = fetch(endpoint, {**common, "inputMint": JUPITER_USDC,
-                    "outputMint": token, "amount": str(round(notional * 1_000_000))}, headers)
+                    "outputMint": token, "amount": buy_amount}, headers)
     except Exception as exc:
         return {"state": "unknown", "source": source,
                 "reason": f"buy quote unavailable: {str(exc)[:70]}", "read_only": True}
@@ -289,8 +325,9 @@ def _jupiter_route(event: dict, key: str, fetch: Fetch, *, endpoint: str = JUPIT
     except (KeyError, TypeError, ValueError, OSError):
         decimals = None
     try:
+        sell_amount = str(token_out)
         sell = fetch(endpoint, {**common, "inputMint": token,
-                     "outputMint": JUPITER_USDC, "amount": str(token_out)}, headers)
+                     "outputMint": JUPITER_USDC, "amount": sell_amount}, headers)
     except Exception as exc:
         return {"state": "unknown", "source": source,
                 "reason": f"sell quote unavailable: {str(exc)[:70]}", "read_only": True}
@@ -302,9 +339,29 @@ def _jupiter_route(event: dict, key: str, fetch: Fetch, *, endpoint: str = JUPIT
     loss = _roundtrip(notional, back_usd)
     token_units = token_out / (10 ** decimals) if decimals is not None else None
     entry_reference = (notional / token_units if token_units and token_units > 0 else None)
+    buy_verified = _order_response_verified(
+        buy, input_mint=JUPITER_USDC, output_mint=token, amount=buy_amount,
+    ) if is_v2 else False
+    sell_verified = _order_response_verified(
+        sell, input_mint=token, output_mint=JUPITER_USDC, amount=sell_amount,
+    ) if is_v2 else False
+    promotion_eligible = bool(keyed_v2 and buy_verified and sell_verified)
     return {"state": "quoted" if loss <= MAX_ROUNDTRIP_LOSS_PCT else "untradeable",
             "source": source, "read_only": True,
-            "api_mode": "keyed_v2" if endpoint == JUPITER_ORDER else "keyless_lite_fallback",
+            "api_mode": ("keyed_v2" if keyed_v2 else "keyless_v2_diagnostic"
+                         if is_v2 else "legacy_diagnostic"),
+            "promotion_eligible": promotion_eligible,
+            "provider_contract": {
+                "version": 1, "provider": "jupiter", "api_version": "v2",
+                "operation": "order", "endpoint": endpoint,
+                "auth_mode": "x_api_key" if keyed_v2 else "keyless",
+                "slippage_bps": 100, "swap_mode": "ExactIn",
+                "read_only": True, "taker_supplied": False,
+                "transaction_built": False,
+            },
+            "quote_contract_verified": buy_verified and sell_verified,
+            "buy_response_hash": _quote_hash(buy),
+            "sell_response_hash": _quote_hash(sell),
             "roundtrip_loss_pct": loss, "notional_usd": notional,
             "roundtrip_back_usd": round(back_usd, 6),
             "token_decimals": decimals,
@@ -364,7 +421,7 @@ def route_probe(event: dict, fetch: Fetch = _get_json) -> dict:
         key = os.getenv("JUPITER_API_KEY", "")
         if key:
             return _jupiter_route(event, key, fetch)
-        return _jupiter_route(event, "", fetch, endpoint=JUPITER_LITE_QUOTE)
+        return _jupiter_route(event, "", fetch, endpoint=JUPITER_ORDER)
     if chain in _EVM_USDC:
         key = os.getenv("ZEROX_API_KEY", "")
         if not key:
@@ -401,7 +458,8 @@ def gate(event: dict, security: dict, execution: dict,
     sec_state, route_state = security.get("state"), execution.get("state")
     if sec_state == "avoid" or route_state == "untradeable":
         event["decision"] = "AVOID"
-    elif sec_state != "pass" or route_state != "quoted":
+    elif (sec_state != "pass" or route_state != "quoted"
+          or execution.get("promotion_eligible") is not True):
         event["decision"] = "WATCH"
     else:
         loss = float(execution.get("roundtrip_loss_pct") or 0)
