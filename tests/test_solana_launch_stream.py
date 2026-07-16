@@ -1158,6 +1158,15 @@ def test_open_slot_gap_is_retried_and_resolved(sol):
     assert stream_health.snapshot(stale_after_seconds=60)[0]["status"] == "live"
 
 
+def test_maintenance_budgets_fit_the_cycle_and_reserve_hydration_time(sol):
+    # The maintenance loop waits interval - elapsed, so total work must stay
+    # well inside the 60s cycle, and the gap lane must always leave hydration
+    # its own wall-clock reserve.
+    assert sol.MAINTENANCE_WORK_BUDGET_SECONDS < 60.0
+    assert sol.MAINTENANCE_WORK_BUDGET_SECONDS - sol.GAP_WORK_BUDGET_SECONDS \
+        >= 10.0
+
+
 def test_small_gaps_are_served_before_a_large_backlog_gap(sol):
     from src.pipeline import stream_health
 

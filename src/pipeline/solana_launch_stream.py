@@ -52,8 +52,8 @@ HYDRATION_RAMP_CLEAN_CYCLES = 2
 # Soft wall-clock budgets: no new RPC starts after its deadline and production
 # socket timeouts are clamped to remaining time. Synchronous JSON decoding cannot
 # be pre-empted safely, so these are not advertised as hard real-time limits.
-MAINTENANCE_WORK_BUDGET_SECONDS = 20.0
-GAP_WORK_BUDGET_SECONDS = 10.0
+MAINTENANCE_WORK_BUDGET_SECONDS = 30.0
+GAP_WORK_BUDGET_SECONDS = 20.0
 RPC_PRESSURE_DEFAULT_COOLDOWN_SECONDS = 60
 RPC_PRESSURE_MAX_COOLDOWN_SECONDS = 3600
 MAINTENANCE_STREAM = "pump_fun_maintenance"
