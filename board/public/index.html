@@ -290,6 +290,17 @@
   /* perp: carry section header + heatmap */
   .perp-sec{font-size:12px;font-weight:650;color:var(--text);margin:2px 0 9px;letter-spacing:.02em}
   .perp-sec small{font-weight:500;color:var(--dim);letter-spacing:0}
+  .perp-identity-policy{margin:0 0 14px;padding:16px;border:1px solid var(--danger-b);border-left:4px solid var(--danger);border-radius:12px;background:color-mix(in srgb,var(--danger-bg) 34%,var(--s1));box-shadow:var(--shadow)}
+  .perp-identity-policy[data-status="research_only"]{border-color:var(--warn-b);border-left-color:var(--warn);background:color-mix(in srgb,var(--warn-bg) 42%,var(--s1))}
+  .perp-identity-policy[data-status="verified"][data-blocks-identity="false"]{border-color:var(--good-b);border-left-color:var(--good);background:color-mix(in srgb,var(--good-bg) 36%,var(--s1))}
+  .identity-policy-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+  .identity-policy-title{font-size:13px;font-weight:740;color:var(--text)}
+  .identity-policy-copy{margin-top:7px;font-size:11.5px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
+  .identity-policy-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px}
+  .identity-policy-metric{min-width:0;padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:color-mix(in srgb,var(--s1) 88%,transparent)}
+  .identity-policy-metric .ik{display:block;font-size:9px;line-height:1.35;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}
+  .identity-policy-metric .iv{display:block;margin-top:4px;font:700 13px/1.35 var(--mono);color:var(--text);overflow-wrap:anywhere}
+  .identity-policy-note{margin-top:9px;padding-top:8px;border-top:1px solid var(--border);font-size:10px;line-height:1.5;color:var(--dim);overflow-wrap:anywhere}
   .carry-health{margin:0 0 14px;padding:15px 16px;border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:12px;background:var(--s1)}
   .carry-health.partial{border-left-color:var(--warn);background:color-mix(in srgb,var(--warn-bg) 38%,var(--s1))}
   .carry-health.unavailable{border-left-color:var(--danger);background:color-mix(in srgb,var(--danger-bg) 34%,var(--s1))}
@@ -351,7 +362,7 @@
     .market-coverage{padding:17px 14px}.market-coverage-head{flex-direction:column;gap:7px}.market-coverage-grid{grid-template-columns:1fr}.market-coverage-card:last-child{grid-column:auto}.market-coverage-card .mch{gap:6px}
     .swipe-hint{display:block;position:sticky;left:0;width:100%;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;text-align:right}
     body[data-view="perp"] .stat{grid-template-columns:repeat(2,1fr)}body[data-view="perp"] .stat>div:nth-child(n){border-left:1px solid var(--border);padding-left:10px}body[data-view="perp"] .stat>div:nth-child(2n+1){border-left:0;padding-left:0}
-    .carry-health-grid{grid-template-columns:1fr 1fr}.carry-health-head{align-items:flex-start;flex-direction:column}.sc-card{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sc-card .k,.evidence-reasons{grid-column:1/-1}.sc-card .v{align-items:flex-start;flex-direction:column;gap:1px}.carry-life-grid{grid-template-columns:1fr}.carry-life{padding:12px}.event-timeline{padding:12px}.event-timeline-head{flex-direction:column}.event-chart{height:220px}.event-clock-grid{grid-template-columns:1fr 1fr}
+    .identity-policy-head{flex-direction:column;gap:6px}.identity-policy-grid{grid-template-columns:1fr 1fr}.carry-health-grid{grid-template-columns:1fr 1fr}.carry-health-head{align-items:flex-start;flex-direction:column}.sc-card{display:grid;grid-template-columns:1fr 1fr;gap:10px}.sc-card .k,.evidence-reasons{grid-column:1/-1}.sc-card .v{align-items:flex-start;flex-direction:column;gap:1px}.carry-life-grid{grid-template-columns:1fr}.carry-life{padding:12px}.event-timeline{padding:12px}.event-timeline-head{flex-direction:column}.event-chart{height:220px}.event-clock-grid{grid-template-columns:1fr 1fr}
   }
   @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important}}
 </style>
@@ -683,6 +694,99 @@ function runtimeSafetyBanner(runtime=runtimeSafetyUiState()){
   const details=`${statuses}。${reasons?`原因：${reasons}。`:""}视图按时 ≠ 上游完整。自动交易始终关闭。`;
   return `<section class="runtime-safety-banner" data-state="${esc(runtime.state)}" data-blocks-actionability="${runtime.blocks?"true":"false"}" role="region" aria-label="运行安全状态"><div><strong>${title}</strong><span>${esc(details)}</span></div><span class="runtime-state">${esc(runtime.state)}</span></section>`;
 }
+const PERP_IDENTITY_TTL_SECONDS=26*60*60;
+const PERP_IDENTITY_REASONS=Object.freeze({
+  heuristic_mapping_not_actionable:"ticker 与链上合约身份尚未独立核验",
+  identity_collection_blocked:"身份缓存采集被运行策略阻断",
+  identity_cache_invalid:"身份缓存合同无效",
+  identity_cache_stale:"身份缓存已过期",
+  identity_cache_unavailable:"身份缓存不可读取",
+  identity_projection_invalid:"身份公开投影缺失或合同无效",
+  identity_load_failed:"身份缓存读取失败",
+});
+const PERP_IDENTITY_REASON_ORDER=Object.freeze(Object.keys(PERP_IDENTITY_REASONS));
+const PERP_IDENTITY_KEYS=Object.freeze(["version","status","blocks_identity_dependent_scans","auto_execution_allowed","reason_codes","market_count","research_mapped","actionable_identity_count","independent_source_count","observed_path_count","cache_age_seconds","cache_ttl_seconds"]);
+function perpIdentityCanonicalUtcMillis(value){
+  if(typeof value!=="string")return NaN;
+  const match=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|\+00:00)$/.exec(value);
+  if(!match)return NaN;
+  const parsed=Date.parse(value),date=new Date(parsed),fraction=(match[7]||"").padEnd(3,"0").slice(0,3);
+  if(!Number.isFinite(parsed)||date.getUTCFullYear()!==Number(match[1])||date.getUTCMonth()+1!==Number(match[2])
+    ||date.getUTCDate()!==Number(match[3])||date.getUTCHours()!==Number(match[4])
+    ||date.getUTCMinutes()!==Number(match[5])||date.getUTCSeconds()!==Number(match[6])
+    ||date.getUTCMilliseconds()!==Number(fraction||0))return NaN;
+  return parsed;
+}
+function perpIdentityPolicyUiState(meta=data?.meta,nowMs=Date.now()){
+  const fallback={available:false,sourceStatus:"invalid",status:"invalid",blocks:true,
+    reasonCodes:["identity_projection_invalid"],marketCount:0,researchMapped:0,
+    actionableIdentities:0,independentSources:0,observedPaths:0,
+    cacheAgeSeconds:null,cacheTtlSeconds:PERP_IDENTITY_TTL_SECONDS,expired:false};
+  const object=value=>value!==null&&typeof value==="object"&&!Array.isArray(value);
+  const exact=(value,keys)=>object(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
+  const count=(value,max)=>Number.isSafeInteger(value)&&value>=0&&value<=max;
+  const raw=meta?.perp_identity_policy;
+  const projectedAt=perpIdentityCanonicalUtcMillis(meta?.generated_at);
+  if(!Number.isFinite(nowMs)||!Number.isFinite(projectedAt)||projectedAt>nowMs||!exact(raw,PERP_IDENTITY_KEYS))return fallback;
+  if(raw.version!==1||!["verified","research_only","blocked","invalid","stale","unavailable"].includes(raw.status)
+    ||typeof raw.blocks_identity_dependent_scans!=="boolean"||raw.auto_execution_allowed!==false
+    ||raw.cache_ttl_seconds!==PERP_IDENTITY_TTL_SECONDS
+    ||!count(raw.market_count,100_000)||!count(raw.research_mapped,20_000)
+    ||!count(raw.actionable_identity_count,20_000)||!count(raw.independent_source_count,64)
+    ||!count(raw.observed_path_count,64)||raw.research_mapped+raw.actionable_identity_count>raw.market_count)return fallback;
+  const reasons=raw.reason_codes;
+  if(!Array.isArray(reasons)||new Set(reasons).size!==reasons.length||reasons.some(code=>!PERP_IDENTITY_REASON_ORDER.includes(code)))return fallback;
+  const usable=["verified","research_only"].includes(raw.status);
+  if(usable){
+    if(!count(raw.cache_age_seconds,PERP_IDENTITY_TTL_SECONDS-1)||raw.market_count===0
+      ||raw.independent_source_count===0||raw.observed_path_count<raw.independent_source_count)return fallback;
+    if(raw.status==="research_only"&&(raw.blocks_identity_dependent_scans!==true
+      ||raw.research_mapped===0||raw.actionable_identity_count!==0
+      ||JSON.stringify(reasons)!==JSON.stringify(["heuristic_mapping_not_actionable"])))return fallback;
+    if(raw.status==="verified"&&(raw.blocks_identity_dependent_scans!==false
+      ||raw.research_mapped!==0||raw.actionable_identity_count===0||reasons.length))return fallback;
+  }else{
+    const allowed={blocked:["identity_collection_blocked"],invalid:["identity_cache_invalid","identity_projection_invalid"],stale:["identity_cache_stale"],unavailable:["identity_cache_unavailable","identity_load_failed"]}[raw.status];
+    if(raw.blocks_identity_dependent_scans!==true||reasons.length!==1||!allowed.includes(reasons[0])
+      ||raw.market_count!==0||raw.research_mapped!==0||raw.actionable_identity_count!==0
+      ||raw.independent_source_count!==0||raw.observed_path_count!==0||raw.cache_age_seconds!==null)return fallback;
+  }
+  const elapsed=usable?Math.max(0,Math.floor((nowMs-projectedAt)/1000)):0;
+  const measuredAge=usable?raw.cache_age_seconds+elapsed:null;
+  const expired=usable&&measuredAge>=raw.cache_ttl_seconds;
+  return{available:true,sourceStatus:raw.status,status:expired?"stale":raw.status,
+    blocks:expired?true:raw.blocks_identity_dependent_scans,
+    reasonCodes:expired?["identity_cache_stale"]:[...reasons],marketCount:raw.market_count,
+    researchMapped:raw.research_mapped,actionableIdentities:raw.actionable_identity_count,
+    independentSources:raw.independent_source_count,observedPaths:raw.observed_path_count,
+    cacheAgeSeconds:measuredAge===null?null:Math.min(measuredAge,raw.cache_ttl_seconds),
+    cacheTtlSeconds:raw.cache_ttl_seconds,expired};
+}
+function perpIdentityCacheAgeText(policy){
+  if(policy.cacheAgeSeconds===null)return"未知 / 26h";
+  if(policy.expired)return"≥26h / 26h";
+  const seconds=policy.cacheAgeSeconds;
+  const age=seconds<60?`${seconds}s`:seconds<3600?`${Math.floor(seconds/60)}m`:seconds<86400?`${Math.floor(seconds/3600)}h ${Math.floor(seconds%3600/60)}m`:`${Math.floor(seconds/86400)}d ${Math.floor(seconds%86400/3600)}h`;
+  return`${age} / 26h`;
+}
+function perpIdentityPolicyPanel(policy=perpIdentityPolicyUiState()){
+  const cfg=policy.status==="verified"?["身份准入可用 · 仍非交易信号","b-good"]
+    :policy.status==="research_only"?["研究可见 · 身份策略阻断","b-warn"]
+    :policy.status==="stale"?["身份缓存过期 · 依赖扫描阻断","b-danger"]
+    :policy.status==="blocked"?["身份采集受阻 · 依赖扫描阻断","b-danger"]
+    :["身份状态不可验证 · 依赖扫描阻断","b-danger"];
+  const reason=policy.reasonCodes.map(code=>PERP_IDENTITY_REASONS[code]).filter(Boolean).join("；")||"无公开阻断原因";
+  const scanCopy=policy.blocks
+    ?"依赖该身份的 holder→CEX 充值、mobilization 与 LP 解锁扫描未运行。"
+    :"身份依赖扫描只解除资产身份门；事件本身仍须单独验证，绝不自动执行。";
+  return `<section class="perp-identity-policy" data-status="${esc(policy.status)}" data-blocks-identity="${policy.blocks?"true":"false"}" role="region" aria-label="永续资产身份准入"><div class="identity-policy-head"><div><div class="identity-policy-title">永续资产身份准入</div><div class="identity-policy-copy">符号 + 市值启发式映射不证明永续资产与链上合约是同一资产。${esc(scanCopy)} Hyperliquid Cascade 与 HL/OKX Carry 使用独立直接市场源，不受此身份门影响；自动交易始终关闭。</div></div><span class="chip ${cfg[1]}">${cfg[0]}</span></div><div class="identity-policy-grid"><div class="identity-policy-metric"><span class="ik">OKX 线性 USDT 永续</span><span class="iv">${esc(policy.marketCount)}</span></div><div class="identity-policy-metric"><span class="ik">研究映射</span><span class="iv">${esc(policy.researchMapped)}</span></div><div class="identity-policy-metric"><span class="ik">已核验扫描身份</span><span class="iv">${esc(policy.actionableIdentities)}</span></div><div class="identity-policy-metric"><span class="ik">缓存年龄 / TTL</span><span class="iv">${esc(perpIdentityCacheAgeText(policy))}</span></div></div><div class="identity-policy-note">${esc(reason)}。独立市场权威 ${esc(policy.independentSources)} · 观测路径 ${esc(policy.observedPaths)}；多路径不等于多份独立身份真值。</div></section>`;
+}
+function perpIdentityCoverageState(policy=perpIdentityPolicyUiState()){
+  if(policy.status==="verified"&&!policy.blocks)return{state:"ok",label:`身份扩展 · 已核验 ${policy.actionableIdentities}`};
+  if(policy.status==="research_only")return{state:"partial",label:`身份扩展 · 研究 ${policy.researchMapped} / 扫描阻断`};
+  if(policy.status==="stale")return{state:"unavailable",label:"身份扩展 · 缓存过期 / 扫描阻断"};
+  return{state:"unavailable",label:"身份扩展 · 不可判 / 扫描阻断"};
+}
 const ACTION_LEVELS=new Set(["A0_BLOCKED","A1_WATCH","A2_PAPER_READY","A3_MANUAL_PROBE","A4_REAL_FILL_VALIDATED"]);
 function actionLevel(r,launchPayload){
   const hard=(r?.decision==="AVOID"||r?.recorded_decision==="AVOID"||r?.security_gate?.state==="avoid");
@@ -900,6 +1004,7 @@ function renderLaunchCoverage(d){
 }
 
 let view="play", data={launch:null,structure:null,airdrop:null,watch:null,opp:null,perp:null,op:null,stats:null,meta:null}, lastPoll=0;
+let perpIdentityExpiryTimer=null;
 const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 let filterState={launch:"actionable"}, searchState={};
@@ -953,6 +1058,17 @@ function launchStatsJoinState(){
   const guard=window.CryptoScopeProtocolJoin;
   if(!guard||typeof guard.evaluate!=="function")return{state:"guard_unavailable",edgeUsable:false,reasonCodes:["protocol_join_guard_unavailable"],actionBlock:false,actionReasonCodes:[]};
   try{return guard.evaluate(data.launch,data.stats,data.meta)}catch(error){return{state:"guard_error",edgeUsable:false,reasonCodes:["protocol_join_guard_error"],actionBlock:false,actionReasonCodes:[]}}
+}
+
+function schedulePerpIdentityExpiry(meta=data?.meta){
+  if(perpIdentityExpiryTimer!==null){clearTimeout(perpIdentityExpiryTimer);perpIdentityExpiryTimer=null}
+  const policy=perpIdentityPolicyUiState(meta);
+  if(!policy.available||policy.expired||!["verified","research_only"].includes(policy.sourceStatus))return;
+  const remaining=Math.max(0,policy.cacheTtlSeconds-policy.cacheAgeSeconds);
+  perpIdentityExpiryTimer=setTimeout(()=>{
+    perpIdentityExpiryTimer=null;
+    if(perpIdentityPolicyUiState().expired&&(view==="perp"||view==="play"))paint();
+  },remaining*1000+25);
 }
 
 function launchRowId(r){return String(r?.id||`${r?.chain||""}${r?.token||""}`)}
@@ -1243,6 +1359,7 @@ function renderMarketCoverageMatrix(){
   const perp=data.perp,hl=perp?.carry_source_health?.hl||{};
   const cascadeState=!perp||!perp.carry_source_health||hl.state!=="ok"?"unavailable":"ok";
   const cascadeCount=perp?.cascade_events?.length;
+  const identityCoverage=perpIdentityCoverageState();
 
   const structure=data.structure,sourceHealth=structure?.source_health||[];
   const configured=Number.isFinite(structure?.configured_sources)?structure.configured_sources:(sourceHealth.length||null);
@@ -1268,7 +1385,7 @@ function renderMarketCoverageMatrix(){
     <div class="market-coverage-head"><div><h3>五赛道数据覆盖 · 不是全市场地图</h3><p>这里显示本轮实际拿到的逐源健康证据。绿色只表示已配置来源在当前合同下可判；缺数据、抓取失败或账本回读失败一律降为不可判，绝不解释成“市场没有机会”。</p></div>${coverageChip([launchState,cascadeState,structureState,airdropState,carryState].every(x=>x==="ok")?"ok":"partial","覆盖始终有限")}</div>
     <div class="market-coverage-grid">
       <article class="market-coverage-card ${launchState}"><div class="mch"><div class="mct">Launch<small>Solana v6 对账入组 + EVM 研究扩展</small></div>${coverageChip(launchState,launchProtocol.open?"来源准入可判":"来源准入未开放")}</div><div class="mcv">SOL ${coverageCount(solLive,solStreams.length)} · EVM ${coverageCount(evmLive,evmStreams.length)} 无缺口新鲜</div><div class="mcs">${coverageChip(worstCoverageState(solState,protocolCoverageState),"Pump.fun + finalized 对账 · "+(launchProtocol.open?"准入开放":"准入关闭"))}${coverageChip(evmState==="unavailable"?"unavailable":"partial","EVM 工厂 · 研究扩展，不进 v6")}${coverageChip(worstCoverageState(solTraceState,evmTraceState,protocolCoverageState),"精确账本回读 · "+(worstCoverageState(solTraceState,evmTraceState,protocolCoverageState)==="ok"?"正常":worstCoverageState(solTraceState,evmTraceState,protocolCoverageState)==="partial"?"部分/未开放":"不可用"))}</div><div class="mcg"><b>已知缺口</b> · ${esc(traceText)}；只覆盖已配置的 Pump.fun 与 EVM 工厂，不覆盖所有链和 DEX。RPC、索引延迟、流缺口或独立 finalized 对账失守都会阻断 v6 新入组。</div></article>
-      <article class="market-coverage-card ${cascadeState}"><div class="mch"><div class="mct">Cascade<small>清算 / 拥挤结构防御线</small></div>${coverageChip(cascadeState)}</div><div class="mcv">Hyperliquid ${Number.isFinite(hl.rows)?`${esc(hl.rows)} 行`:'行数未知'} · ${Number.isFinite(cascadeCount)?`${esc(cascadeCount)} 个账本事件`:'事件不可判'}</div><div class="mcs">${coverageChip(cascadeState,"Hyperliquid · "+(cascadeState==="ok"?"本轮快照正常":"本轮快照不可用"))}</div><div class="mcg"><b>已知缺口</b> · 目前仅覆盖 Hyperliquid 的 OI / 资金费 / 行情快照；未接 Binance、OKX、Bybit 清算流。拥挤代理不等于真实清算成交。</div></article>
+      <article class="market-coverage-card ${cascadeState}"><div class="mch"><div class="mct">Cascade<small>清算 / 拥挤结构防御线</small></div>${coverageChip(cascadeState)}</div><div class="mcv">Hyperliquid ${Number.isFinite(hl.rows)?`${esc(hl.rows)} 行`:'行数未知'} · ${Number.isFinite(cascadeCount)?`${esc(cascadeCount)} 个账本事件`:'事件不可判'}</div><div class="mcs">${coverageChip(cascadeState,"Hyperliquid · "+(cascadeState==="ok"?"本轮快照正常":"本轮快照不可用"))}${coverageChip(identityCoverage.state,identityCoverage.label)}</div><div class="mcg"><b>已知缺口</b> · 目前仅覆盖 Hyperliquid 的 OI / 资金费 / 行情快照；未接 Binance、OKX、Bybit 清算流。身份扩展只控制 holder→CEX / mobilization / LP 解锁，不改变本卡的 Hyperliquid Cascade 状态；拥挤代理不等于真实清算成交。</div></article>
       <article class="market-coverage-card ${structureState}"><div class="mch"><div class="mct">Structure<small>公开 CEX instruments 库存差分</small></div>${coverageChip(structureState)}</div><div class="mcv">${Number.isFinite(configured)?`${structureOk}/${configured}`:"?/?"} 个配置 CEX 本轮可达</div><div class="mcs">${structurePills}</div><div class="mcg"><b>已知缺口</b> · 逐源失败不计覆盖；当前库存差分不是官方公告确认，也不覆盖解锁、全部地区端点或所有交易所。</div></article>
       <article class="market-coverage-card ${airdropState}"><div class="mch"><div class="mct">Airdrop<small>官方活动人工登记与来源核验</small></div>${coverageChip(airdropState)}</div><div class="mcv">${adVerified==null||adAccepted==null?"?/?":`${adVerified}/${adAccepted}`} 个接受条目通过双页验证</div><div class="mcs">${coverageChip(trustRoots.length?"ok":"unavailable",trustRoots.length?`代码信任根 · ${trustRoots.join(" / ")}`:"代码信任根不可判")}${coverageChip(airdropFailuresState,`未验证 ${adUnverified??"?"} · 拒绝 ${adRejected??"?"}`)}</div><div class="mcg"><b>已知缺口</b> · 配置 ${adConfigured??"?"} 条；只接受代码审计信任根下的活动页 + 独立证据页。人工登记覆盖不完整，不是全市场空投发现器；源通过也不代表钱包有资格。</div></article>
       <article class="market-coverage-card ${carryState}"><div class="mch"><div class="mct">Carry<small>Hyperliquid + OKX 跨所资金费假设</small></div>${coverageChip(carryState)}</div><div class="mcv">HL ${Number.isFinite(hl.rows)?`${esc(hl.rows)} 行`:'? 行'} · OKX ${esc(okxCoverage)} 合约已观测</div><div class="mcs">${coverageChip(hl.state==="ok"?"ok":"unavailable",`Hyperliquid · ${hl.state||"未知"}`)}${coverageChip(okx.state==="ok"?"ok":okx.state==="partial"?"partial":"unavailable",`OKX · ${okx.state||"未知"}`)}</div><div class="mcg"><b>已知缺口</b> · 只覆盖 HL + OKX；OKX 本轮请求上限 ${okx.request_cap??"?"}。basis、账户费率、抵押成本、调仓与实际结算仍不完整，不能当作真实收益。</div></article>
@@ -1665,7 +1782,8 @@ function renderPerp(d){
   const carry=d?.carry||[], s=d?.perps||[], cascadeEvents=d?.cascade_events||[];
   const carryProof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry),carryEvidence=carryProof.evidence,pp=carryProof.paper,health=d?.carry_source_health||{};
   const healthState=["ok","partial","unavailable"].includes(health.state)?health.state:"unavailable";
-  let html=carryHealthHtml(health);
+  let html=perpIdentityPolicyPanel();
+  html+=carryHealthHtml(health);
   html+=carryLifecycleHtml(pp);
   html+=carryEvidenceHtml(pp,carryEvidence,d?.carry_scorecard);
 
@@ -1812,6 +1930,7 @@ async function load(){
   if(op&&op.schema_version===1)data.op=op;
   if(st&&st.schema_version===1)data.stats=st;
   if(me&&me.schema_version===1)data.meta=me;
+  if(me&&me.schema_version===1)schedulePerpIdentityExpiry(me);
   queueLaunchDeliveryVerifications(data.launch);
   lastPoll=Date.now(); pt=0;
   paint();
@@ -1825,8 +1944,8 @@ async function loadLaunch(){
     const [launch,meta]=results.map(result=>result.status==="fulfilled"?result.value:null);
     let changed=false;
     if(launch&&launch.schema_version===1){data.launch=launch;queueLaunchDeliveryVerifications(launch);changed=true}
-    if(meta&&meta.schema_version===1){data.meta=meta;changed=true}
-    if(changed&&(view==="launch"||view==="play"))paint();
+    if(meta&&meta.schema_version===1){data.meta=meta;schedulePerpIdentityExpiry(meta);changed=true}
+    if(changed&&(view==="launch"||view==="play"||view==="perp"))paint();
   }catch(e){}finally{launchLoading=false}
 }
 $("view").innerHTML=`<div class="scroll">${'<div class="skl"></div>'.repeat(6)}</div>`;
