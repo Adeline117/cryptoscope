@@ -747,9 +747,10 @@ def test_active_actionability_fails_closed_on_missing_or_expired_quote(tmp_path,
     rows = {row["token"]: row for row in ledger.active("launch", now=now)}
     assert rows["fresh"]["effective_decision"] == "WATCH"
     assert rows["fresh"]["actionable_now"] is False
-    assert rows["fresh"]["evidence_gate"]["state"] == "collecting"
-    assert "至少需要 100 个候选" in rows["fresh"]["actionability_reason"]
-    assert "SMALL_PROBE 0, WATCH 0" in rows["fresh"]["actionability_reason"]
+    assert rows["fresh"]["evidence_gate"]["state"] == "blocked"
+    assert rows["fresh"]["evidence_gate"]["protocol_state"] \
+        == "protocol_integrity_blocked"
+    assert "admission" in rows["fresh"]["actionability_reason"]
     assert rows["fresh"]["seconds_to_expiry"] == 60
     assert rows["expired"]["effective_decision"] == "WATCH"
     assert rows["expired"]["actionable_now"] is False
@@ -778,7 +779,8 @@ def test_active_probe_requires_proven_cost_after_control_edge(tmp_path, monkeypa
                              expires_at=(now + timedelta(seconds=60)).isoformat()))
 
     fresh = {row["token"]: row for row in ledger.active("launch", now=now)}["fresh"]
-    assert fresh["evidence_gate"]["state"] == "collecting"
+    assert fresh["evidence_gate"]["state"] == "blocked"
+    assert fresh["evidence_gate"]["protocol_state"] == "protocol_integrity_blocked"
     assert fresh["evidence_gate"]["edge_verdict"] == "不可判"
     assert fresh["effective_decision"] == "WATCH"
     assert fresh["action_level"] == "A1_WATCH"

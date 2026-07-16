@@ -414,9 +414,11 @@ def test_ledger_shared_a3_contract_rejects_missing_public_plan_fields(
     assert "discovery_invalidation_invalid" in row["action_reason_codes"]
 
 
-def test_real_ledger_a3_crosses_the_public_board_contract(tmp_path, monkeypatch):
+def test_real_ledger_quote_crosses_only_as_paper_ready_without_delivery_readback(
+        tmp_path, monkeypatch):
     from src.pipeline.execution_cost import route_contract
     from src.pipeline import board_export, edge_validation, opportunity_outcomes
+    from tests.test_board_data_contract import _launch_body
 
     at = datetime.now(timezone.utc).replace(microsecond=0)
     monkeypatch.setattr(
@@ -435,10 +437,13 @@ def test_real_ledger_a3_crosses_the_public_board_contract(tmp_path, monkeypatch)
         lambda lane: _passing_edge_gate(lane),
     )
     row = ledger.active("launch", now=at)[0]
+    assert row["action_level"] == "A2_PAPER_READY"
+    assert row["actionable_now"] is False
+    assert "delivery_readback_verifier_unavailable" in row["action_reason_codes"]
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path / "board")
 
     paths = board_export.write_views(
-        launch=board_export._envelope({"events": [row]}, view="launch")
+        launch=board_export._envelope(_launch_body([row]), view="launch")
     )
 
     assert {path.name for path in paths} == {"launch.json", "meta.json"}
