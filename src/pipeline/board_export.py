@@ -320,10 +320,12 @@ def render_stats(opportunities: dict | None) -> dict:
         from src.pipeline.opportunity_outcomes import lane_stats as opportunity_lane_stats
         lanes.update(opportunity_lane_stats())
         return _envelope({"lanes": lanes,
-                          "note": "五线事件按首次价结算1h/24h/7d并扣发现时冻结的成本估算。"
-                                  "Launch 优势只认 v5 前向固定 look、union 日历与 SPA/Reality Check；"
-                                  "纸面成本不冒充真实成交。旧聪明钱分数和 picks 为冻结历史，"
-                                  "只作描述且永远不可据此判定优势。"},
+                          "note": "只有 Launch/Cascade 方向事件按首次发现价做固定 1h/24h/7d "
+                                  "纸面测量并扣冻结的估算成本；Structure 不计算方向命中率；"
+                                  "Airdrop 只汇总语义、受益人、奖励与实际成本全部核验的完整领取；"
+                                  "Carry 使用独立代理账本且不冒充实盘收益。Launch 优势只认 v5 "
+                                  "前向固定 look、union 日历与 SPA/Reality Check。旧聪明钱分数和 "
+                                  "picks 为冻结历史，只作描述且永远不可据此判定优势。"},
                          view="stats")
     except Exception as e:
         logger.warning("render_stats_failed", error=str(e)[:120])

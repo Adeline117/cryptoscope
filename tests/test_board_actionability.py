@@ -114,6 +114,31 @@ def test_airdrop_view_exposes_source_coverage_cost_and_risk_without_guessing():
     assert "域名已验证活动" not in html
 
 
+def test_airdrop_board_separates_transaction_semantics_value_and_pnl():
+    html = BOARD.read_text()
+
+    for field in (
+        "n_transaction_verified",
+        "n_claim_semantics_verified",
+        "n_reward_valued",
+        "n_fully_verified_claims",
+    ):
+        assert field in html
+    for state in (
+        "交易成功·领取未核验",
+        "活动领取已绑定·金额未齐",
+        "证据齐·官方源离线",
+        "领取与金额已核验",
+    ):
+        assert state in html
+    assert "交易成功不等于本活动领取成功；手填奖励/成本永不进入净回报" in html
+    assert "链上记录时间（区块时间）" in html
+    assert "操作员报告·未核验" in html
+    assert "缺参与失败/资格未命中分母，不能判断是否有 edge" in html
+    assert 'if(view==="airdrop"&&ls)' in html
+    assert html.index('if(view==="airdrop"&&ls)') < html.index('if(ls.verdict==="measured")')
+
+
 def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
     html = BOARD.read_text()
 

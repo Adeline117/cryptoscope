@@ -81,3 +81,5 @@ def test_stats_render_is_read_only_and_never_runs_legacy_price_backfill(monkeypa
     assert payload["lanes"]["opp"]["edge"] == "不可判"
     assert payload["lanes"]["launch"]["edge_verdict"] == "不可判"
     assert "冻结历史" in payload["note"]
+    assert "Airdrop" in payload["note"] and "完整领取" in payload["note"]
+    assert "五线事件按首次价" not in payload["note"]
