@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.config import DATA_DIR
 
@@ -18,6 +19,37 @@ DB = DATA_DIR / "opportunity_ledger.db"
 LANES = {"launch", "cascade", "structure", "airdrop", "carry"}
 CLOCK_FIELDS = ("event_at", "detected_at", "decision_at", "quote_at",
                 "executable_at", "expires_at")
+PRICE_HORIZONS = {"1h", "24h", "7d"}
+CLOCK_SKEW_TOLERANCE = timedelta(seconds=5)
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(
+        value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    )
+
+
+def _json_hash(value: object) -> str:
+    return hashlib.sha256(_canonical_json(value).encode()).hexdigest()
+
+
+def _finite_positive(value: object, *, field: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a positive finite number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field} must be a positive finite number") from exc
+    if not math.isfinite(number) or number <= 0:
+        raise ValueError(f"{field} must be a positive finite number")
+    return number
+
+
+def _same_identity(left: object, right: object, chain: object) -> bool:
+    """Compare on-chain identities without corrupting case-sensitive Solana keys."""
+    if not isinstance(left, str) or not isinstance(right, str) or not left or not right:
+        return False
+    return left == right if str(chain).lower() == "solana" else left.lower() == right.lower()
 
 
 def _utc_iso(value: object, *, field: str) -> str | None:
@@ -36,6 +68,82 @@ def _utc_iso(value: object, *, field: str) -> str | None:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def validate_entry_observation(candidate: dict) -> dict:
+    """Validate an optional immutable decision-time price observation.
+
+    Legacy candidates predate this contract and remain valid without the field.  Once
+    an observation is supplied, however, it must prove the exact chain/base identity,
+    pool, price and timezone-aware observation clock.  The normalized mapping is what
+    gets frozen in its own SQL column; a later refresh cannot backfill or replace it.
+    """
+    if not isinstance(candidate, dict):
+        raise ValueError("entry observation candidate must be a mapping")
+    raw = candidate.get("entry_observation")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("entry_observation must be a mapping")
+    if raw.get("version") != 1:
+        raise ValueError("unsupported entry_observation version")
+    provider = raw.get("provider")
+    chain = candidate.get("chain")
+    token = candidate.get("token")
+    pair = raw.get("pair")
+    base_token = raw.get("base_token")
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("entry_observation provider is required")
+    if raw.get("identity_verified") is not True:
+        raise ValueError("entry_observation identity_verified must be true")
+    if raw.get("currency") != "usd":
+        raise ValueError("entry_observation currency must be usd")
+    if raw.get("field") != "priceUsd":
+        raise ValueError("entry_observation field must be priceUsd")
+    if not isinstance(chain, str) or not chain:
+        raise ValueError("entry_observation candidate chain is required")
+    if raw.get("chain") != chain:
+        raise ValueError("entry_observation chain disagrees with candidate")
+    if not _same_identity(base_token, token, chain):
+        raise ValueError("entry_observation base_token disagrees with candidate")
+    if not isinstance(pair, str) or not pair.strip():
+        raise ValueError("entry_observation pair is required")
+    observed_at = _utc_iso(raw.get("observed_at"), field="entry_observation.observed_at")
+    if observed_at is None:
+        raise ValueError("entry_observation observed_at is required")
+    detected_at = _utc_iso(candidate.get("detected_at"), field="detected_at")
+    decision_at = _utc_iso(candidate.get("decision_at"), field="decision_at")
+    if detected_at is not None and datetime.fromisoformat(observed_at) < datetime.fromisoformat(detected_at):
+        raise ValueError("entry_observation cannot be before detected_at")
+    if (decision_at is not None
+            and datetime.fromisoformat(observed_at) > datetime.fromisoformat(decision_at)):
+        raise ValueError("entry_observation cannot be after decision_at")
+    price = _finite_positive(raw.get("price"), field="entry_observation price")
+    entry_price = _finite_positive(candidate.get("entry_price"), field="entry_price")
+    if not math.isclose(price, entry_price, rel_tol=1e-12, abs_tol=0.0):
+        raise ValueError("entry_observation price disagrees with entry_price")
+    normalized = {
+        **raw,
+        "version": 1,
+        "provider": provider.strip(),
+        "identity_verified": True,
+        "currency": "usd",
+        "field": "priceUsd",
+        "observed_at": observed_at,
+        "chain": chain,
+        "base_token": str(token),
+        "pair": pair.strip(),
+        "price": price,
+        "token_side": "base",
+    }
+    if raw.get("token_side", "base") != "base":
+        raise ValueError("entry_observation token_side must be base")
+    quote_token = normalized.get("quote_token")
+    if quote_token is not None and (not isinstance(quote_token, str) or not quote_token.strip()):
+        raise ValueError("entry_observation quote_token must be a non-empty string")
+    if isinstance(quote_token, str):
+        normalized["quote_token"] = quote_token.strip()
+    return normalized
+
+
 def _conn() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB), timeout=10)
@@ -49,6 +157,7 @@ def _conn() -> sqlite3.Connection:
         state TEXT NOT NULL, decision TEXT NOT NULL, entry_price REAL,
         invalidation_price REAL, max_notional_usd REAL, cost_pct_est REAL,
         cost_model TEXT, cost_contract_version INTEGER, cost_contract TEXT,
+        entry_observation_version INTEGER, entry_observation TEXT,
         cohort_version INTEGER, payload TEXT NOT NULL,
         outcome_state TEXT NOT NULL DEFAULT 'open', outcome TEXT,
         updated_at TEXT NOT NULL
@@ -67,6 +176,10 @@ def _conn() -> sqlite3.Connection:
         c.execute("ALTER TABLE opportunities ADD COLUMN cost_contract_version INTEGER")
     if "cost_contract" not in cols:
         c.execute("ALTER TABLE opportunities ADD COLUMN cost_contract TEXT")
+    if "entry_observation_version" not in cols:
+        c.execute("ALTER TABLE opportunities ADD COLUMN entry_observation_version INTEGER")
+    if "entry_observation" not in cols:
+        c.execute("ALTER TABLE opportunities ADD COLUMN entry_observation TEXT")
     # Canonical event clocks. Only decision_at can be truthfully reconstructed for
     # legacy rows: the old first-seen row proves the decision existed by detected_at.
     # Quote/executable/expiry clocks stay NULL rather than inventing precision.
@@ -112,6 +225,38 @@ def _conn() -> sqlite3.Connection:
                  BEFORE DELETE ON execution_assessments BEGIN
                    SELECT RAISE(ABORT,'execution assessments are append-only');
                  END""")
+    c.execute("""CREATE TABLE IF NOT EXISTS outcome_price_observations(
+        observation_id TEXT PRIMARY KEY,
+        opportunity_id TEXT NOT NULL,
+        horizon TEXT NOT NULL CHECK(horizon IN ('1h','24h','7d')),
+        target_at TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        chain TEXT NOT NULL,
+        pool TEXT NOT NULL,
+        candle_at TEXT NOT NULL,
+        distance_seconds REAL NOT NULL CHECK(
+            distance_seconds>=0 AND distance_seconds<=7200
+        ),
+        price REAL NOT NULL CHECK(price>0),
+        retrieved_at TEXT NOT NULL,
+        entry_observation_hash TEXT NOT NULL,
+        cost_contract_hash TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(opportunity_id,horizon),
+        FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_outcome_price_observations_event "
+              "ON outcome_price_observations(opportunity_id,horizon)")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS outcome_price_observations_no_update
+                 BEFORE UPDATE ON outcome_price_observations BEGIN
+                   SELECT RAISE(ABORT,'outcome price observations are append-only');
+                 END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS outcome_price_observations_no_delete
+                 BEFORE DELETE ON outcome_price_observations BEGIN
+                   SELECT RAISE(ABORT,'outcome price observations are append-only');
+                 END""")
+    c.commit()
     return c
 
 
@@ -153,6 +298,14 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
     cost_contract_json = (json.dumps(cost_contract, ensure_ascii=False,
                                      separators=(",", ":"))
                           if cost_contract is not None else None)
+    entry_observation = validate_entry_observation({
+        **candidate,
+        "detected_at": detected_at,
+        "decision_at": clocks["decision_at"],
+    })
+    entry_observation_json = (
+        _canonical_json(entry_observation) if entry_observation else None
+    )
     payload = json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))
     values = (ident, lane, chain, token, candidate.get("symbol", "?"),
               detected_at, clocks["event_at"], clocks["decision_at"], clocks["quote_at"],
@@ -162,7 +315,9 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
               candidate.get("invalidation_price"), candidate.get("max_notional_usd"),
               candidate.get("roundtrip_cost_pct_est"), candidate.get("cost_model"),
               cost_contract.get("version") if cost_contract else None,
-              cost_contract_json, candidate.get("cohort_version", 2),
+              cost_contract_json,
+              entry_observation.get("version") if entry_observation else None,
+              entry_observation_json, candidate.get("cohort_version", 2),
               payload, now)
     c = _conn()
     try:
@@ -172,8 +327,9 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
                   executable_at,expires_at,source,state,decision,
                   entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
-                  cost_contract_version,cost_contract,cohort_version,payload,updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  cost_contract_version,cost_contract,entry_observation_version,
+                  entry_observation,cohort_version,payload,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO UPDATE SET
                     state=excluded.state,
                     decision=CASE WHEN opportunities.lane='carry'
@@ -204,8 +360,9 @@ def record(candidate: dict, *, refresh_existing: bool = True) -> tuple[str, bool
                   id,lane,chain,token,symbol,detected_at,event_at,decision_at,quote_at,
                   executable_at,expires_at,source,state,decision,
                   entry_price,invalidation_price,max_notional_usd,cost_pct_est,cost_model,
-                  cost_contract_version,cost_contract,cohort_version,payload,updated_at)
-                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                  cost_contract_version,cost_contract,entry_observation_version,
+                  entry_observation,cohort_version,payload,updated_at)
+                  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                   ON CONFLICT(id) DO NOTHING
             """, values).rowcount)
         c.commit()
@@ -307,6 +464,215 @@ def append_execution_assessment(ident: str, assessment: dict) -> tuple[str, bool
         ON CONFLICT(assessment_id) DO NOTHING""", values).rowcount)
         c.commit()
         return assessment_id, inserted
+    finally:
+        c.close()
+
+
+def _normalize_price_observation(
+        ident: str, horizon: str, observation: dict, opportunity: dict,
+        ledger_at: datetime) -> dict:
+    if horizon not in PRICE_HORIZONS:
+        raise ValueError(f"unknown price observation horizon: {horizon}")
+    if not isinstance(observation, dict):
+        raise ValueError("price observation must be a mapping")
+    if observation.get("version") != 1:
+        raise ValueError("unsupported price observation version")
+    entry = opportunity.get("entry_observation")
+    contract = opportunity.get("cost_contract")
+    if not isinstance(entry, dict) or not entry:
+        raise ValueError("price observation requires a frozen entry_observation")
+    if not isinstance(contract, dict) or not contract:
+        raise ValueError("price observation requires a frozen cost_contract")
+    chain = opportunity.get("chain")
+    if observation.get("chain") != chain:
+        raise ValueError("price observation chain disagrees with opportunity")
+    pool = observation.get("pool")
+    if not _same_identity(pool, entry.get("pair"), chain):
+        raise ValueError("price observation pool disagrees with frozen entry pair")
+    provider = observation.get("provider")
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("price observation provider is required")
+    if observation.get("identity_verified") is not True:
+        raise ValueError("price observation identity_verified must be true")
+    if observation.get("currency") != "usd":
+        raise ValueError("price observation currency must be usd")
+    token = observation.get("token")
+    if not _same_identity(token, entry.get("base_token"), chain):
+        raise ValueError("price observation token disagrees with frozen entry token")
+    token_side = observation.get("token_side")
+    if token_side not in {"base", "quote"}:
+        raise ValueError("price observation token_side must be base or quote")
+    target_at = _utc_iso(observation.get("target_at"), field="price_observation.target_at")
+    candle_at = _utc_iso(observation.get("candle_at"), field="price_observation.candle_at")
+    retrieved_at = _utc_iso(
+        observation.get("retrieved_at"), field="price_observation.retrieved_at"
+    )
+    if target_at is None or candle_at is None or retrieved_at is None:
+        raise ValueError("price observation clocks are required")
+    expected_target = datetime.fromisoformat(entry["observed_at"]) + timedelta(
+        hours={"1h": 1, "24h": 24, "7d": 7 * 24}[horizon]
+    )
+    if datetime.fromisoformat(target_at) != expected_target:
+        raise ValueError("price observation target_at disagrees with entry anchor")
+    target_clock = datetime.fromisoformat(target_at)
+    candle_clock = datetime.fromisoformat(candle_at)
+    retrieved_clock = datetime.fromisoformat(retrieved_at)
+    if retrieved_clock < target_clock:
+        raise ValueError("price observation cannot be retrieved before its target")
+    if retrieved_clock > ledger_at + CLOCK_SKEW_TOLERANCE:
+        raise ValueError("price observation cannot be retrieved after the ledger clock")
+    if candle_clock > target_clock:
+        raise ValueError("price observation candle cannot be after its target")
+    if candle_clock > retrieved_clock:
+        raise ValueError("price observation candle cannot be after retrieval")
+    if isinstance(observation.get("distance_seconds"), bool):
+        raise ValueError("price observation distance_seconds must be finite and nonnegative")
+    try:
+        distance = float(observation["distance_seconds"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "price observation distance_seconds must be finite and nonnegative"
+        ) from exc
+    actual_distance = (target_clock - candle_clock).total_seconds()
+    if (not math.isfinite(distance) or distance < 0
+            or not math.isclose(distance, actual_distance, rel_tol=0, abs_tol=1e-6)):
+        raise ValueError("price observation distance_seconds disagrees with its clocks")
+    if distance > 7200:
+        raise ValueError("price observation candle is more than 7200 seconds from target")
+    price = _finite_positive(observation.get("price"), field="price observation price")
+    field = observation.get("field")
+    if field != "close":
+        raise ValueError("price observation field must be close")
+    entry_hash = _json_hash(entry)
+    cost_hash = _json_hash(contract)
+    supplied_bindings = {
+        "opportunity_id": ident,
+        "horizon": horizon,
+        "entry_observation_hash": entry_hash,
+        "cost_contract_hash": cost_hash,
+    }
+    for name, expected in supplied_bindings.items():
+        supplied = observation.get(name)
+        if supplied is not None and supplied != expected:
+            raise ValueError(f"price observation {name} binding disagrees with ledger")
+    if observation.get("observation_id") is not None:
+        raise ValueError("price observation_id is assigned by the ledger")
+    return {
+        **observation,
+        "version": 1,
+        "provider": provider.strip(),
+        "identity_verified": True,
+        "currency": "usd",
+        "chain": chain,
+        "pool": entry["pair"],
+        "token": entry["base_token"],
+        "token_side": token_side,
+        "target_at": target_at,
+        "candle_at": candle_at,
+        "distance_seconds": distance,
+        "price": price,
+        "field": "close",
+        "retrieved_at": retrieved_at,
+        **supplied_bindings,
+    }
+
+
+def append_price_observation(
+        opportunity_id: str, horizon: str, observation: dict) -> tuple[str, bool]:
+    """Append one horizon price, idempotently rejecting any conflicting rewrite."""
+    created_clock = datetime.now(timezone.utc)
+    c = _conn()
+    try:
+        row = c.execute(
+            "SELECT chain,entry_observation,cost_contract FROM opportunities WHERE id=?",
+            (opportunity_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"unknown opportunity: {opportunity_id}")
+        try:
+            entry = json.loads(row[1]) if row[1] else None
+            contract = json.loads(row[2]) if row[2] else None
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("opportunity has malformed frozen evidence") from exc
+        normalized = _normalize_price_observation(
+            opportunity_id,
+            horizon,
+            observation,
+            {"chain": row[0], "entry_observation": entry, "cost_contract": contract},
+            created_clock,
+        )
+        canonical = _canonical_json(normalized)
+        observation_id = hashlib.sha256(
+            f"{opportunity_id}:{horizon}:{canonical}".encode()
+        ).hexdigest()[:32]
+        created_at = created_clock.isoformat()
+        inserted = bool(c.execute(
+            """INSERT INTO outcome_price_observations(
+                observation_id,opportunity_id,horizon,target_at,provider,chain,pool,
+                candle_at,distance_seconds,price,retrieved_at,entry_observation_hash,
+                cost_contract_hash,payload,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT DO NOTHING""",
+            (
+                observation_id, opportunity_id, horizon, normalized["target_at"],
+                normalized["provider"], normalized["chain"], normalized["pool"],
+                normalized["candle_at"], normalized["distance_seconds"],
+                normalized["price"], normalized["retrieved_at"],
+                normalized["entry_observation_hash"], normalized["cost_contract_hash"],
+                canonical, created_at,
+            ),
+        ).rowcount)
+        if not inserted:
+            existing = c.execute(
+                """SELECT observation_id,payload FROM outcome_price_observations
+                   WHERE opportunity_id=? AND horizon=?""",
+                (opportunity_id, horizon),
+            ).fetchone()
+            if existing is None or existing[1] != canonical:
+                raise ValueError(
+                    f"conflicting price observation for {opportunity_id} {horizon}"
+                )
+            observation_id = existing[0]
+        c.commit()
+        return observation_id, inserted
+    finally:
+        c.close()
+
+
+_PRICE_OBSERVATION_COLUMNS = (
+    "observation_id", "opportunity_id", "horizon", "target_at", "provider",
+    "chain", "pool", "candle_at", "distance_seconds", "price", "retrieved_at",
+    "entry_observation_hash", "cost_contract_hash", "payload", "created_at",
+)
+
+
+def _price_observation_from_row(row: tuple) -> dict:
+    stored = dict(zip(_PRICE_OBSERVATION_COLUMNS, row))
+    try:
+        payload = json.loads(stored.pop("payload"))
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return {**payload, **stored}
+
+
+def _read_price_observations(
+        c: sqlite3.Connection, opportunity_id: str | None = None) -> list[dict]:
+    where, params = (" WHERE opportunity_id=?", (opportunity_id,)) \
+        if opportunity_id is not None else ("", ())
+    rows = c.execute(
+        f"""SELECT {','.join(_PRICE_OBSERVATION_COLUMNS)}
+            FROM outcome_price_observations{where}
+            ORDER BY opportunity_id,target_at,horizon""",
+        params,
+    ).fetchall()
+    return [_price_observation_from_row(row) for row in rows]
+
+
+def price_observations(opportunity_id: str | None = None) -> list[dict]:
+    """Read append-only price evidence for one event or the complete ledger."""
+    c = _conn()
+    try:
+        return _read_price_observations(c, opportunity_id)
     finally:
         c.close()
 
@@ -495,6 +861,7 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                                   source, state, decision, entry_price, invalidation_price,
                                   max_notional_usd, cost_pct_est, cost_model, cohort_version,
                                   cost_contract_version,cost_contract,
+                                  entry_observation_version,entry_observation,
                                   payload, outcome_state, outcome
                            FROM opportunities WHERE lane=? AND outcome_state='open'
                            ORDER BY detected_at DESC LIMIT ?""", (lane, limit)).fetchall()
@@ -516,7 +883,8 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                 "decision_at", "quote_at", "executable_at", "expires_at",
                 "source", "state", "decision", "entry_price", "invalidation_price",
                 "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version",
-                "cost_contract_version", "cost_contract", "payload",
+                "cost_contract_version", "cost_contract", "entry_observation_version",
+                "entry_observation", "payload",
                 "outcome_state", "outcome")
         item = dict(zip(keys, row))
         initial_recorded_decision = item.get("decision") or "WATCH"
@@ -527,7 +895,8 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
             # rewrite the entry, invalidation, size cap, or discovery timestamp.
             immutable = {"entry_price", "invalidation_price", "max_notional_usd",
                          "roundtrip_cost_pct_est", "cost_model", "cost_contract",
-                         "cost_contract_version", "cohort_version", "decision",
+                         "cost_contract_version", "entry_observation_version",
+                         "entry_observation", "cohort_version", "decision",
                          *CLOCK_FIELDS}
             if lane == "launch":
                 immutable.update({"security_gate", "execution_probe", "action_level",
@@ -548,6 +917,11 @@ def active(lane: str, limit: int = 50, *, now: datetime | None = None) -> list[d
                                      if item.get("cost_contract") else None)
         except (TypeError, json.JSONDecodeError):
             item["cost_contract"] = None
+        try:
+            item["entry_observation"] = (json.loads(item["entry_observation"])
+                                         if item.get("entry_observation") else None)
+        except (TypeError, json.JSONDecodeError):
+            item["entry_observation"] = None
         if item.get("outcome"):
             try:
                 item["outcome"] = json.loads(item["outcome"])
@@ -629,27 +1003,36 @@ def outcome_rows(*, open_only: bool = False) -> list[dict]:
                                     decision_at,quote_at,executable_at,expires_at,
                                     source,state,decision,entry_price,invalidation_price,
                                     max_notional_usd,cost_pct_est,cost_model,cohort_version,
-                                    cost_contract_version,cost_contract,payload,
+                                    cost_contract_version,cost_contract,
+                                    entry_observation_version,entry_observation,payload,
                                     outcome_state,outcome,updated_at
                              FROM opportunities {where}
                              ORDER BY detected_at ASC""").fetchall()
+        observed_prices = _read_price_observations(c)
     finally:
         c.close()
     keys = ("id", "lane", "chain", "token", "symbol", "detected_at", "event_at",
             "decision_at", "quote_at", "executable_at", "expires_at",
             "source", "state", "decision", "entry_price", "invalidation_price",
             "max_notional_usd", "cost_pct_est", "cost_model", "cohort_version",
-            "cost_contract_version", "cost_contract", "payload",
+            "cost_contract_version", "cost_contract", "entry_observation_version",
+            "entry_observation", "payload",
             "outcome_state", "outcome", "updated_at")
+    prices_by_event: dict[str, dict[str, dict]] = {}
+    for observation in observed_prices:
+        prices_by_event.setdefault(observation["opportunity_id"], {})[
+            observation["horizon"]
+        ] = observation
     out = []
     for row in rows:
         item = dict(zip(keys, row))
-        for key in ("cost_contract", "payload", "outcome"):
+        for key in ("cost_contract", "entry_observation", "payload", "outcome"):
             try:
                 item[key] = json.loads(item[key]) if item.get(key) else (
-                    None if key == "cost_contract" else {})
+                    None if key in {"cost_contract", "entry_observation"} else {})
             except (TypeError, json.JSONDecodeError):
-                item[key] = None if key == "cost_contract" else {}
+                item[key] = None if key in {"cost_contract", "entry_observation"} else {}
+        item["price_observations"] = prices_by_event.get(item["id"], {})
         _normalize_carry_read(item)
         out.append(item)
     return out

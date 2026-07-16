@@ -22,6 +22,66 @@ def _candidate(**overrides):
     return item
 
 
+def _entry_observation(**overrides):
+    item = {
+        "version": 1,
+        "provider": "dexscreener",
+        "observed_at": "2026-07-14T12:00:01+00:00",
+        "chain": "solana",
+        "base_token": "token",
+        "quote_token": "SOL",
+        "pair": "FrozenPool",
+        "price": 1.0,
+        "currency": "usd",
+        "field": "priceUsd",
+        "identity_verified": True,
+    }
+    item.update(overrides)
+    return item
+
+
+def _candidate_with_entry(**overrides):
+    from src.pipeline.execution_cost import discovery_contract
+
+    item = _candidate(
+        entry_observation=_entry_observation(),
+        max_notional_usd=50,
+        roundtrip_cost_pct_est=1.0,
+        cost_model="test_frozen_cost",
+        cost_contract=discovery_contract(
+            notional_usd=50,
+            modeled_roundtrip_pct=1.0,
+            method="test_discovery_cost",
+        ),
+    )
+    item.update(overrides)
+    return item
+
+
+def _price_observation(*, horizon="24h", **overrides):
+    anchor = datetime(2026, 7, 14, 12, 0, 1, tzinfo=timezone.utc)
+    hours = {"1h": 1, "24h": 24, "7d": 7 * 24}[horizon]
+    target = anchor + timedelta(hours=hours)
+    item = {
+        "version": 1,
+        "provider": "geckoterminal",
+        "chain": "solana",
+        "pool": "FrozenPool",
+        "token": "token",
+        "token_side": "base",
+        "currency": "usd",
+        "identity_verified": True,
+        "target_at": target.isoformat(),
+        "candle_at": target.isoformat(),
+        "distance_seconds": 0,
+        "price": 1.25,
+        "field": "close",
+        "retrieved_at": (target + timedelta(minutes=5)).isoformat(),
+    }
+    item.update(overrides)
+    return item
+
+
 def test_clocks_are_canonical_and_first_observation_is_immutable(tmp_path, monkeypatch):
     from src.pipeline import opportunity_ledger as ledger
 
@@ -41,6 +101,73 @@ def test_clocks_are_canonical_and_first_observation_is_immutable(tmp_path, monke
     assert row["quote_at"] == "2026-07-14T12:00:03+00:00"
     assert row["executable_at"] == "2026-07-14T12:00:04+00:00"
     assert row["expires_at"] == "2026-07-14T12:03:00+00:00"
+
+
+def test_entry_observation_is_validated_normalized_and_frozen_on_first_insert(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    first = _candidate_with_entry()
+    normalized = ledger.validate_entry_observation(first)
+    assert normalized["observed_at"] == "2026-07-14T12:00:01+00:00"
+    assert normalized["price"] == 1.0
+    assert normalized["identity_verified"] is True
+    assert normalized["currency"] == "usd"
+    assert normalized["field"] == "priceUsd"
+    assert normalized["token_side"] == "base"
+
+    ledger.record(first)
+    ledger.record(_candidate_with_entry(
+        entry_price=2.0,
+        entry_observation=_entry_observation(
+            observed_at="2026-07-14T12:00:02+00:00",
+            pair="LaterPool",
+            price=2.0,
+        ),
+    ))
+
+    row = ledger.outcome_rows()[0]
+    assert row["entry_price"] == 1.0
+    assert row["entry_observation_version"] == 1
+    assert row["entry_observation"] == normalized
+    assert row["entry_observation"]["pair"] == "FrozenPool"
+
+
+@pytest.mark.parametrize(("observation", "message"), [
+    (_entry_observation(chain="base"), "chain disagrees"),
+    (_entry_observation(base_token="different"), "base_token disagrees"),
+    (_entry_observation(price=2), "price disagrees"),
+    (_entry_observation(identity_verified=False), "identity_verified"),
+    (_entry_observation(currency="eur"), "currency"),
+    (_entry_observation(field="close"), "field"),
+    (_entry_observation(token_side="quote"), "token_side"),
+])
+def test_entry_observation_rejects_unproven_or_mismatched_semantics(
+        tmp_path, monkeypatch, observation, message):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    with pytest.raises(ValueError, match=message):
+        ledger.record(_candidate(entry_observation=observation))
+    assert not (tmp_path / "ledger.db").exists() or ledger.outcome_rows() == []
+
+
+def test_record_validates_entry_against_its_computed_detection_clock(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    candidate = _candidate(
+        decision_at="2000-01-01T00:00:02+00:00",
+        entry_observation=_entry_observation(
+            observed_at="2000-01-01T00:00:01+00:00"
+        ),
+    )
+    candidate.pop("detected_at")
+
+    with pytest.raises(ValueError, match="before detected_at"):
+        ledger.record(candidate)
 
 
 def test_record_if_absent_never_refreshes_first_event_provenance(tmp_path, monkeypatch):
@@ -197,6 +324,184 @@ def test_legacy_schema_backfills_only_provable_decision_clock(tmp_path, monkeypa
     assert row["quote_at"] is None
     assert row["executable_at"] is None
     assert row["expires_at"] is None
+    assert row["entry_observation_version"] is None
+    assert row["entry_observation"] is None
+    assert row["price_observations"] == {}
+
+    conn = sqlite3.connect(path)
+    opportunity_columns = {
+        column[1] for column in conn.execute("PRAGMA table_info(opportunities)")
+    }
+    price_columns = {
+        column[1]
+        for column in conn.execute("PRAGMA table_info(outcome_price_observations)")
+    }
+    triggers = {
+        trigger[0]
+        for trigger in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger'"
+        )
+    }
+    conn.close()
+    assert {"entry_observation_version", "entry_observation"} <= opportunity_columns
+    assert {
+        "observation_id", "opportunity_id", "horizon",
+        "entry_observation_hash", "cost_contract_hash", "payload",
+    } <= price_columns
+    assert {
+        "outcome_price_observations_no_update",
+        "outcome_price_observations_no_delete",
+    } <= triggers
+
+
+def test_price_observation_is_idempotent_bound_and_returned_with_outcome_rows(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    observation = _price_observation()
+
+    first_id, inserted = ledger.append_price_observation(ident, "24h", observation)
+    assert inserted is True
+    second_id, inserted = ledger.append_price_observation(
+        ident, "24h", dict(reversed(list(observation.items())))
+    )
+    assert (second_id, inserted) == (first_id, False)
+
+    stored = ledger.price_observations(ident)
+    assert len(stored) == 1
+    assert stored[0]["observation_id"] == first_id
+    assert stored[0]["opportunity_id"] == ident
+    assert stored[0]["horizon"] == "24h"
+    assert stored[0]["pool"] == "FrozenPool"
+    assert len(stored[0]["entry_observation_hash"]) == 64
+    assert len(stored[0]["cost_contract_hash"]) == 64
+    assert ledger.price_observations() == stored
+    row = ledger.outcome_rows()[0]
+    assert row["price_observations"] == {"24h": stored[0]}
+
+
+def test_price_observation_rejects_conflict_and_frozen_binding_mismatches(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    observation = _price_observation()
+    ledger.append_price_observation(ident, "24h", observation)
+
+    with pytest.raises(ValueError, match="conflicting price observation"):
+        ledger.append_price_observation(
+            ident, "24h", _price_observation(price=1.5)
+        )
+    with pytest.raises(ValueError, match="pool disagrees"):
+        ledger.append_price_observation(
+            ident, "1h", _price_observation(horizon="1h", pool="OtherPool")
+        )
+    with pytest.raises(ValueError, match="entry_observation_hash binding disagrees"):
+        ledger.append_price_observation(
+            ident,
+            "1h",
+            _price_observation(horizon="1h", entry_observation_hash="forged"),
+        )
+    assert len(ledger.price_observations(ident)) == 1
+
+
+@pytest.mark.parametrize(("overrides", "message"), [
+    ({"version": 2}, "version"),
+    ({"identity_verified": False}, "identity_verified"),
+    ({"currency": "eur"}, "currency"),
+    ({"token": "different"}, "token disagrees"),
+    ({"field": "open"}, "field"),
+    ({"retrieved_at": "2099-01-01T00:00:00+00:00"}, "after the ledger clock"),
+    ({
+        "candle_at": "2026-07-15T13:00:01+00:00",
+        "distance_seconds": 0,
+    }, "after its target"),
+    ({
+        "candle_at": "2026-07-15T09:00:01+00:00",
+        "distance_seconds": 10_800,
+    }, "more than 7200"),
+    ({
+        "candle_at": "2026-07-15T11:00:01+00:00",
+        "distance_seconds": 0,
+    }, "distance_seconds disagrees"),
+])
+def test_price_observation_rejects_unproven_identity_or_invalid_candle(
+        tmp_path, monkeypatch, overrides, message):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+
+    with pytest.raises(ValueError, match=message):
+        ledger.append_price_observation(
+            ident, "24h", _price_observation(**overrides)
+        )
+    assert ledger.price_observations(ident) == []
+
+
+def test_price_observation_preserves_verified_quote_side_identity(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+
+    _, inserted = ledger.append_price_observation(
+        ident, "24h", _price_observation(token_side="quote")
+    )
+
+    assert inserted is True
+    assert ledger.price_observations(ident)[0]["token_side"] == "quote"
+
+
+def test_price_observation_table_rejects_update_and_delete(tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    ident, _ = ledger.record(_candidate_with_entry())
+    observation_id, _ = ledger.append_price_observation(
+        ident, "24h", _price_observation()
+    )
+
+    conn = sqlite3.connect(tmp_path / "ledger.db")
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute(
+            "UPDATE outcome_price_observations SET price=2 WHERE observation_id=?",
+            (observation_id,),
+        )
+    conn.rollback()
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute(
+            "DELETE FROM outcome_price_observations WHERE observation_id=?",
+            (observation_id,),
+        )
+    conn.rollback()
+    conn.close()
+    assert ledger.price_observations(ident)[0]["price"] == 1.25
+
+
+def test_price_observation_requires_frozen_entry_and_cost_evidence(
+        tmp_path, monkeypatch):
+    from src.pipeline import opportunity_ledger as ledger
+
+    monkeypatch.setattr(ledger, "DB", tmp_path / "ledger.db")
+    legacy_id, _ = ledger.record(_candidate())
+    with pytest.raises(ValueError, match="frozen entry_observation"):
+        ledger.append_price_observation(
+            legacy_id, "24h", _price_observation()
+        )
+
+    no_cost_id, _ = ledger.record(_candidate(
+        token="no-cost",
+        entry_observation=_entry_observation(base_token="no-cost"),
+    ))
+    with pytest.raises(ValueError, match="frozen cost_contract"):
+        ledger.append_price_observation(
+            no_cost_id, "24h", _price_observation()
+        )
 
 
 def test_active_actionability_fails_closed_on_missing_or_expired_quote(tmp_path, monkeypatch):
