@@ -153,3 +153,62 @@ def test_solana_rate_limit_closes_response_and_preserves_retry_after(monkeypatch
         solana_launch_stream.JsonRpc("https://solana.invalid").call("getBlock", [])
     assert malformed_result.value.retry_after_seconds is None
     assert malformed.was_closed and malformed.fp.closed
+
+
+def test_dune_closes_billing_rejection_and_preserves_failure_type(monkeypatch):
+    from src.onchain import dune_client
+
+    error = TrackedHTTPError(
+        "https://api.dune.com/api/v1/query/17/execute", code=402,
+        headers={"Retry-After": "75"},
+    )
+    monkeypatch.setenv("DUNE_API_KEY", "test-key")
+    monkeypatch.setenv("DUNE_402_COOLDOWN_SECONDS", "60")
+    monkeypatch.setattr(dune_client, "CREDITS_EXHAUSTED", False)
+    monkeypatch.setattr(dune_client, "_CREDITS_EXHAUSTED_UNTIL", 0.0)
+    calls = []
+
+    def rejected(request, timeout):
+        calls.append(request.full_url)
+        raise error
+
+    monkeypatch.setattr(
+        dune_client.urllib.request, "urlopen",
+        rejected,
+    )
+
+    result = dune_client._request("POST", "/query/17/execute")
+    blocked = dune_client.run_sql_result("select blocked")
+
+    assert result["ok"] is False
+    assert result["error_kind"] == "credits_exhausted"
+    assert result["http_status"] == 402
+    assert result["retry_after_seconds"] == 75
+    assert blocked["state"] == "deferred"
+    assert blocked["error_kind"] == "credits_cooldown"
+    assert len(calls) == 1
+    assert error.was_closed and error.fp.closed
+
+
+def test_dune_query_management_402_does_not_block_cached_execution(monkeypatch):
+    from src.onchain import dune_client
+
+    error = TrackedHTTPError(
+        "https://api.dune.com/api/v1/query", code=402,
+    )
+    monkeypatch.setenv("DUNE_API_KEY", "test-key")
+    monkeypatch.setenv("DUNE_402_COOLDOWN_SECONDS", "60")
+    monkeypatch.setattr(dune_client, "CREDITS_EXHAUSTED", False)
+    monkeypatch.setattr(dune_client, "_CREDITS_EXHAUSTED_UNTIL", 0.0)
+    monkeypatch.setattr(
+        dune_client.urllib.request, "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(error),
+    )
+
+    result = dune_client._request("POST", "/query")
+
+    assert result["error_kind"] == "billing_or_plan_required"
+    assert result["http_status"] == 402
+    assert dune_client.CREDITS_EXHAUSTED is False
+    assert dune_client._CREDITS_EXHAUSTED_UNTIL == 0.0
+    assert error.was_closed and error.fp.closed
