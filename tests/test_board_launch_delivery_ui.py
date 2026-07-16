@@ -20,6 +20,22 @@ JOIN = ROOT / "board" / "public" / "protocol-join.js"
 CHARTS = ROOT / "board" / "public" / "vendor" / "lightweight-charts-5.2.0.js"
 
 
+def _healthy_runtime() -> dict:
+    return {
+        "version": 1, "state": "healthy", "blocks_actionability": False,
+        "auto_execution_allowed": False, "storage_pressure": "ok",
+        "reason_codes": [],
+        "streams": {
+            "solana": {
+                "state": "healthy", "live": 1, "configured": 1,
+                "maintenance": "healthy",
+            },
+            "evm": {"state": "healthy", "live": 2, "configured": 2},
+        },
+        "hyperliquid_raw_trade_retention": "retained",
+    }
+
+
 def _canonical_bytes(value: object) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, allow_nan=False, sort_keys=True,
@@ -266,7 +282,7 @@ def test_real_browser_keeps_a3_downgraded_until_exact_readback(
         "opportunities": {"schema_version": 1, "opportunities": []},
         "operators": {"schema_version": 1, "operators": []},
         "stats": {"schema_version": 1, "lanes": {}},
-        "meta": {"schema_version": 1},
+        "meta": {"schema_version": 1, "runtime_safety": _healthy_runtime()},
     }
 
     with playwright.sync_playwright() as driver:

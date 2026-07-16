@@ -26,6 +26,58 @@ SAFETY_FIELDS = (
 )
 
 
+def _healthy_runtime() -> dict:
+    return {
+        "version": 1, "state": "healthy", "blocks_actionability": False,
+        "auto_execution_allowed": False, "storage_pressure": "ok",
+        "reason_codes": [],
+        "streams": {
+            "solana": {
+                "state": "healthy", "live": 1, "configured": 1,
+                "maintenance": "healthy",
+            },
+            "evm": {"state": "healthy", "live": 2, "configured": 2},
+        },
+        "hyperliquid_raw_trade_retention": "retained",
+    }
+
+
+def _carry_contract() -> tuple[dict, dict]:
+    episode = {"symbol": "CARRY-CONTRACT-UNAFFECTED"}
+    paper = {
+        "cohort_kind": "descriptive_quote_proxy",
+        "n_open": 1, "n_closed": 1, "n_proxy_closed": 1,
+        "real_edge_n": 0, "n_exit_pending": 0,
+        "n_quarantined_total": 0, "n_closed_total": 2,
+        "n_closed_excluded": 1,
+        "excluded_by_reason": {"legacy_episode": 1},
+        "cost_completeness": "partial", "all_in_total_pct": None,
+        "is_real_fill": False, "real_edge_eligible": False,
+        "open_positions": [episode], "recent": [episode],
+    }
+    evidence = {
+        "n": 1, "n_proxy": 1, "hits": 1, "real_edge_n": 0,
+        "total_closed": 2, "excluded_closed": 1,
+        "excluded_by_reason": {"legacy_episode": 1}, "pending": 0,
+        "metric": "quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy",
+        "cohort_kind": "descriptive_quote_proxy",
+        "cost_completeness": "partial", "all_in_total_pct": None,
+        "cost_is_real_fill": False,
+        "execution_mode": "paper_orderbook_measurement",
+        "real_edge_eligible": False,
+        "verdict": "不可判", "edge_verdict": "不可判",
+    }
+    return paper, evidence
+
+
+def _perps() -> dict:
+    paper, _ = _carry_contract()
+    return {
+        "schema_version": 1, "perps": [], "carry": [],
+        "cascade_events": [], "carry_paper": paper,
+    }
+
+
 def _admission(state: str, updated_at: str) -> dict:
     return {
         **IDENTITY,
@@ -79,6 +131,7 @@ def _launch(generated_at: str, admission: dict, symbol: str = "LIVE-EVENT") -> d
 
 
 def _stats(generated_at: str, admission: dict, edge: str = "LAUNCH-EDGE") -> dict:
+    _, carry = _carry_contract()
     return {
         "schema_version": 1,
         "generated_at": generated_at,
@@ -92,7 +145,7 @@ def _stats(generated_at: str, admission: dict, edge: str = "LAUNCH-EDGE") -> dic
                     "look_n_per_arm": 100,
                 },
             },
-            "carry": {"edge_verdict": "CARRY-EDGE-UNAFFECTED", "real_edge_n": 0},
+            "carry": carry,
         },
     }
 
@@ -110,6 +163,7 @@ def _member(view: str, payload: dict, admission: dict) -> dict:
 def _meta(launch: dict, stats: dict, launch_admission: dict, stats_admission: dict) -> dict:
     return {
         "schema_version": 1,
+        "runtime_safety": _healthy_runtime(),
         "launch_protocol_join": {
             "version": 1, "state": "consistent", "cross_view_edge_usable": True,
             "reason_codes": [],
@@ -241,7 +295,8 @@ def test_board_loads_meta_and_only_quarantines_launch_stats():
     assert "if(me&&me.schema_version===1)data.meta=me" in html
     assert "const launchEvidence=launchJoin.edgeUsable?data.stats?.lanes?.launch:null" in html
     assert "协议同步中·不可判" in html and "Launch 统计 edge 已隔离" in html
-    assert "const carryEvidence=data.stats?.lanes?.carry" in html
+    assert "carryEvidenceUiState(data.perp?.carry_paper,data.stats?.lanes?.carry)" in html
+    assert "const carryEvidence=data.stats?.lanes?.carry" not in html
     assert 'if(view==="launch"&&!launchJoin.edgeUsable)' in html
     assert 'if(level==="A3_MANUAL_PROBE"&&launchStatsJoinState().actionBlock)' in html
 
@@ -260,7 +315,7 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
         "structure": {"schema_version": 1, "events": [], "source_health": []},
         "airdrop": {"schema_version": 1, "events": []},
         "watch": {"schema_version": 1, "watch": []},
-        "perps": {"schema_version": 1, "perps": [], "carry": [], "cascade_events": []},
+        "perps": _perps(),
         "opportunities": {"schema_version": 1, "opportunities": []},
         "operators": {"schema_version": 1, "operators": []},
     }
@@ -293,7 +348,7 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
         page.goto("https://board.test/", wait_until="networkidle")
         body = page.locator("body")
         assert "OLD-LAUNCH-EDGE-MUST-DISAPPEAR" in body.inner_text()
-        assert "CARRY-EDGE-UNAFFECTED" in body.inner_text()
+        assert "CARRY-CONTRACT-UNAFFECTED" in body.inner_text()
 
         payloads["launch"] = new_launch
         phase["stats_fail"] = True
@@ -302,7 +357,7 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
         assert "协议同步中·不可判" in text
         assert "OLD-LAUNCH-EDGE-MUST-DISAPPEAR" not in text
         assert "NEW-LAUNCH-EVENT" in text
-        assert "CARRY-EDGE-UNAFFECTED" in text
+        assert "CARRY-CONTRACT-UNAFFECTED" in text
         browser.close()
 
 
@@ -321,7 +376,7 @@ def test_fast_poll_fail_closes_on_old_meta_then_recovers_with_new_certificate():
         "structure": {"schema_version": 1, "events": [], "source_health": []},
         "airdrop": {"schema_version": 1, "events": []},
         "watch": {"schema_version": 1, "watch": []},
-        "perps": {"schema_version": 1, "perps": [], "carry": [], "cascade_events": []},
+        "perps": _perps(),
         "opportunities": {"schema_version": 1, "opportunities": []},
         "operators": {"schema_version": 1, "operators": []},
     }
