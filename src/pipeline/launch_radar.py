@@ -12,21 +12,62 @@ import json
 from copy import deepcopy
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
 from src.pipeline.opportunity_ledger import (
     active, event_id_readback_matches, record, record_if_absent,
 )
-from src.contract.launch_probe import (
-    MAX_POOL_LIQUIDITY_FRACTION, MAX_PROBE_NOTIONAL_USD, MIN_PROBE_NOTIONAL_USD,
-    SUPPORTED_LAUNCH_CHAINS,
+from src.contract import dexscreener as dex
+from src.contract.launch_probe import SUPPORTED_LAUNCH_CHAINS
+from src.contract.launch_protocol import (
+    COHORT_VERSION, LAUNCH_COST_METHOD, PROTOCOL_ID, PROTOCOL_START_AT,
+)
+from src.contract.launch_selector import (
+    MAX_FDV_USD, MAX_LIQUIDITY_USD, MAX_POOL_AGE_MIN,
+    MAX_SOURCE_TO_DECISION_SECONDS, MIN_FDV_USD,
+    MIN_LIQUIDITY_USD, evaluate_selector_snapshot, freeze_selector_snapshot,
+    freeze_source_snapshot,
 )
 
 PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
-PAIRS_URL = "https://api.dexscreener.com/token-pairs/v1/{chain}/{token}"
+PAIRS_URL = dex.TOKEN_PAIRS_URL
+TOKENS_URL = dex.TOKENS_URL
+DEX_BATCH_SIZE = dex.BATCH_SIZE
 SUPPORTED_CHAINS = set(SUPPORTED_LAUNCH_CHAINS)
 MAX_CANDIDATES = 30
 MAX_EXECUTION_ASSESSMENTS = 5
-ENTRY_EVIDENCE_COHORT_VERSION = 6
+ENTRY_EVIDENCE_COHORT_VERSION = COHORT_VERSION
+Clock = Callable[[], datetime]
+AdmissionProbe = Callable[..., dict]
+
+
+MarketDataSchemaError = dex.MarketDataSchemaError
+
+
+def _wall_clock() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _clock_value(clock: Clock) -> datetime:
+    value = clock()
+    return (value if value.tzinfo else value.replace(tzinfo=timezone.utc)).astimezone(
+        timezone.utc
+    )
+
+
+def _protocol_admission(
+        *, now: datetime, admission_probe: AdmissionProbe | None = None) -> dict:
+    if admission_probe is None:
+        from src.pipeline import launch_protocol_gate
+
+        admission_probe = launch_protocol_gate.admit
+    value = admission_probe(
+        protocol_id=PROTOCOL_ID, cohort_version=COHORT_VERSION,
+        start_at=PROTOCOL_START_AT, now=now,
+    )
+    if not isinstance(value, dict):
+        raise ValueError("launch protocol admission did not return a mapping")
+    return value
 
 
 def _num(value, default=0.0) -> float:
@@ -51,23 +92,19 @@ def _pair_for(profile: dict, fetch=_json) -> dict | None:
 
 def _pair_for_token(chain: str, token: str, *, fetch=_json) -> dict | None:
     """Select the deepest observable pool for one identity-proven token."""
-    pairs = fetch(PAIRS_URL.format(chain=chain, token=token))
-    pairs = pairs if isinstance(pairs, list) else []
-    def same_token(observed: object) -> bool:
-        observed, expected = str(observed or ""), str(token)
-        return observed == expected if chain == "solana" else observed.lower() == expected.lower()
+    return _pair_for_token_evidence(chain, token, fetch=fetch)[0]
 
-    # The token-pairs endpoint can return pools where the queried token is only the
-    # quote side, or even unrelated rows.  Launch price/FDV semantics require the
-    # identity-proven mint to be the base asset; never let a deeper unrelated pool
-    # replace it.
-    usable = [
-        p for p in pairs
-        if (p.get("pairAddress") and p.get("priceUsd")
-            and str(p.get("chainId") or "").lower() == str(chain).lower()
-            and same_token((p.get("baseToken") or {}).get("address")))
-    ]
-    return max(usable, key=lambda p: _num((p.get("liquidity") or {}).get("usd")), default=None)
+
+def _pair_for_token_evidence(
+        chain: str, token: str, *, fetch=_json) -> tuple[dict | None, str]:
+    """Return an exact-pool selection plus the complete response hash."""
+    evidence = dex.exact_base_pair(chain, token, fetch=fetch)
+    return evidence["pair"], evidence["response_hash"]
+
+
+def _batch_candidate_tokens(chain: str, tokens: list[str], *, fetch=_json) -> dict:
+    """Prefilter up to 30 tokens without using this response as entry evidence."""
+    return dex.batch_prefilter(chain, tokens, fetch=fetch)
 
 
 def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreener") -> dict | None:
@@ -92,33 +129,51 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
         event_at = datetime.fromtimestamp(float(created_ms) / 1000, tz=timezone.utc)
     except (TypeError, ValueError, OSError):
         return None
-    age_min = max(0.0, (now - event_at).total_seconds() / 60)
+    age_min = (now - event_at).total_seconds() / 60
     tx5 = (pair.get("txns") or {}).get("m5") or {}
     buys, sells = int(tx5.get("buys") or 0), int(tx5.get("sells") or 0)
     vol5 = _num((pair.get("volume") or {}).get("m5"))
     boost = _num((pair.get("boosts") or {}).get("active"))
     # A pool outside these bounds is either not executable, not the early-error
     # regime, or already too old for this specific lane.
-    if not (5_000 <= liq <= 2_000_000 and 10_000 <= fdv <= 10_000_000 and age_min <= 24 * 60):
+    if not (MIN_LIQUIDITY_USD <= liq <= MAX_LIQUIDITY_USD
+            and MIN_FDV_USD <= fdv <= MAX_FDV_USD
+            and 0 <= age_min <= MAX_POOL_AGE_MIN):
         return None
-    flow_ratio = buys / max(sells, 1)
-    # $25 is a hard cap for the first probe at $5k liquidity, rising only with depth.
-    # This prevents a visual "opportunity" from silently implying an unfillable bet.
-    max_notional = round(min(
-        MAX_PROBE_NOTIONAL_USD,
-        max(MIN_PROBE_NOTIONAL_USD, liq * MAX_POOL_LIQUIDITY_FRACTION),
-    ), 2)
-    # Frozen at discovery so later validation cannot choose a friendlier cost after
-    # seeing the return. This is a conservative model, not a claim of a real fill:
-    # constant-product impact on entry+exit plus a 0.60% DEX fee/routing buffer.
-    from src.pipeline.slippage import price_impact
-    roundtrip_cost = round(2 * price_impact(liq, max_notional) + 0.60, 3)
-    from src.pipeline.execution_cost import discovery_contract
-    cost_contract = discovery_contract(
-        notional_usd=max_notional, modeled_roundtrip_pct=roundtrip_cost,
-        method="constant_product_roundtrip_plus_0.60pct_buffer_v1")
-    ready = age_min <= 180 and buys >= 3 and flow_ratio >= 1.15 and vol5 >= liq * 0.015
-    decision = "SMALL_PROBE" if ready else "WATCH"
+    selector_snapshot = freeze_selector_snapshot(
+        pool_created_at=event_at.isoformat(), liquidity_usd=liq, fdv_usd=fdv,
+        volume_m5_usd=vol5, buys_m5=buys, sells_m5=sells,
+    )
+    selector = evaluate_selector_snapshot(
+        selector_snapshot, event_at=event_at.isoformat(), decision_at=now.isoformat(),
+    )
+    flow_ratio = selector["flow_ratio"]
+    # Both the size and route model are recomputed from the immutable selector facts.
+    max_notional = selector["max_notional_usd"]
+    roundtrip_cost = selector["modeled_route_roundtrip_pct"]
+    from src.pipeline.execution_cost import (
+        discovery_contract,
+        solana_launch_full_paper_contract,
+    )
+    if chain == "solana":
+        cost_contract = solana_launch_full_paper_contract(
+            notional_usd=max_notional,
+            modeled_route_roundtrip_pct=roundtrip_cost,
+            method=LAUNCH_COST_METHOD,
+        )
+        frozen_cost = cost_contract["all_in_total_pct"]
+        cost_model = LAUNCH_COST_METHOD
+    else:
+        # EVM pools remain visible, but their unknown network fee keeps the contract
+        # descriptive and excludes them from the Solana-only v6 edge protocol.
+        cost_model = "constant_product_roundtrip_plus_0.60pct_buffer_v1"
+        cost_contract = discovery_contract(
+            notional_usd=max_notional,
+            modeled_roundtrip_pct=roundtrip_cost,
+            method=cost_model,
+        )
+        frozen_cost = roundtrip_cost
+    decision = selector["decision"]
     reasons = [f"首池 {age_min:.0f}m", f"FDV ${fdv:,.0f}", f"流动性 ${liq:,.0f}"]
     if buys or sells:
         reasons.append(f"5m 买/卖 {buys}/{sells}")
@@ -127,6 +182,7 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
     observed_at = now.astimezone(timezone.utc).isoformat()
     return {
         "lane": "launch", "chain": chain, "token": token,
+        "event_key": f"dex_pair:{pair_address}",
         "symbol": base.get("symbol") or "?", "name": base.get("name") or "",
         "source": source, "event_at": event_at.isoformat(), "detected_at": observed_at,
         "decision_at": observed_at, "state": "live",
@@ -138,16 +194,18 @@ def qualify(pair: dict, *, now: datetime | None = None, source: str = "dexscreen
             "quote_token": (pair.get("quoteToken") or {}).get("address"),
             "pair": pair_address, "price": price, "currency": "usd",
             "field": "priceUsd", "identity_verified": True,
+            "selector_snapshot": selector_snapshot,
         },
         "invalidation_price": round(price * 0.70, 12),
         "max_notional_usd": max_notional, "age_min": round(age_min, 1),
-        "roundtrip_cost_pct_est": roundtrip_cost,
-        "cost_model": "constant_product_roundtrip_plus_0.60pct_buffer",
-        # v6 isolates the new decision-clock/exact-pool evidence contract.  The edge
-        # validator opens it only at its separately committed future boundary; these
-        # rows can never leak into or retroactively rewrite the frozen v5 cohort.
+        "modeled_route_cost_pct_est": roundtrip_cost,
+        "roundtrip_cost_pct_est": frozen_cost,
+        "cost_model": cost_model,
+        # Generic DEX profiles and EVM factory rows are a useful discovery surface but
+        # not the pre-registered Pump.fun source universe.  Only the primary bridge may
+        # promote a row to v6 after freezing its exact chain-log evidence.
         "cost_contract": cost_contract,
-        "cohort_version": ENTRY_EVIDENCE_COHORT_VERSION,
+        "cohort_version": 0,
         "fdv": fdv, "liquidity_usd": liq, "volume_m5": vol5,
         "buys_m5": buys, "sells_m5": sells, "flow_ratio": round(flow_ratio, 2),
         "boost_active": boost, "pair": pair_address, "url": pair.get("url"),
@@ -237,88 +295,300 @@ def _execution_assessment(event: dict, *, assessed_at: datetime) -> dict:
 
 
 def _append_assessment(ident: str, event: dict, assessor, *, assessed: int,
-                       max_assessments: int, now: datetime) -> tuple[dict, int]:
+                       max_assessments: int, clock: Clock = _wall_clock) -> tuple[dict, int]:
     """Assess a copy so current quotes can never mutate the discovery snapshot."""
     assessed_event, assessed = _assess_candidate(
         deepcopy(event), assessor, assessed=assessed, max_assessments=max_assessments)
     if event.get("decision") == "SMALL_PROBE":
         from src.pipeline.opportunity_ledger import append_execution_assessment
-        append_execution_assessment(ident, _execution_assessment(assessed_event, assessed_at=now))
+        append_execution_assessment(
+            ident,
+            _execution_assessment(assessed_event, assessed_at=_clock_value(clock)),
+        )
     return assessed_event, assessed
 
 
-def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
-                         max_assessments: int, max_candidates: int) -> tuple[dict, int]:
-    """Bridge standard Pump.fun log evidence into the conservative launch ledger."""
+def _scan_primary_solana_batch(fetch, *, now: datetime, assessor, assessed: int,
+                               max_assessments: int, max_candidates: int,
+                               clock: Clock = _wall_clock,
+                               admission_probe: AdmissionProbe | None = None,
+                               ) -> tuple[dict, int]:
+    """Claim and process at most one provider-sized Solana batch."""
     from src.pipeline import solana_launch_stream as stream
-
-    rows = stream.qualification_batch(now=now, limit=max_candidates)
     result = {"available": True, "attempted": 0, "recorded": 0, "inserted": 0,
               "pending": 0, "errors": 0, "screened_out": 0, "orphaned": 0}
-    for raw in rows:
-        result["attempted"] += 1
+    admission = _protocol_admission(now=now, admission_probe=admission_probe)
+    if admission.get("state") != "open" or admission.get("enrollment_open") is not True:
+        result.update({
+            "available": False, "reason": "launch protocol enrollment is blocked",
+            "source_admission": admission,
+        })
+        return result, assessed
+    rows = stream.claim_forward_protocol_batch(
+        now=now, limit=min(DEX_BATCH_SIZE, max(0, max_candidates)),
+        protocol_start_at=PROTOCOL_START_AT,
+        max_source_to_decision_seconds=MAX_SOURCE_TO_DECISION_SECONDS,
+    )
+    result["attempted"] = len(rows)
+    settled: set[str] = set()
+
+    def settle(raw: dict, state: str, *, error: str | None = None,
+               ledger_event_id: str | None = None, at: datetime,
+               outcome_kind: str, response_hash: str | None = None,
+               pair_address: str | None = None,
+               error_kind: str | None = None) -> None:
+        if not stream.set_qualification(
+            raw["signature"], state, error=error,
+            ledger_event_id=ledger_event_id,
+            lease_token=raw["qualification_lease_token"],
+            outcome_kind=outcome_kind, response_hash=response_hash,
+            pair_address=pair_address, error_kind=error_kind, at=at,
+        ):
+            raise RuntimeError("Solana qualification lease was lost")
+        settled.add(raw["signature"])
+
+    def release_unsettled() -> None:
+        for candidate in rows:
+            if candidate["signature"] not in settled:
+                stream.release_qualification_lease(
+                    candidate["signature"], candidate["qualification_lease_token"]
+                )
+
+    for offset in range(0, len(rows), DEX_BATCH_SIZE):
+        batch = rows[offset:offset + DEX_BATCH_SIZE]
         try:
-            pair = _pair_for_token("solana", raw["mint"], fetch=fetch)
-        except Exception as exc:
-            # A shared market-data failure should not fan out into one failed request
-            # per mint. Record the first miss and retry it after the persisted backoff.
-            stream.set_qualification(raw["signature"], "market_error", error=str(exc), at=now)
-            result["errors"] += 1
-            break
-        if not pair:
-            stream.set_qualification(raw["signature"], "market_pending",
-                                     error="DEX pool not indexed yet", at=now)
-            result["pending"] += 1
-            continue
-        event = qualify(pair, now=now, source="Pump.fun standard logs + DEX Screener pool")
-        if event is None:
-            created_ms = pair.get("pairCreatedAt")
-            try:
-                age_hours = ((now - datetime.fromtimestamp(
-                    float(created_ms) / 1000, tz=timezone.utc)).total_seconds() / 3600)
-            except (TypeError, ValueError, OSError):
-                age_hours = 0
-            terminal = age_hours > 24
-            state = "screened_out" if terminal else "market_pending"
-            reason = ("pool is older than the 24h launch window" if terminal
-                      else "pool not yet within liquidity/FDV launch bounds")
-            stream.set_qualification(raw["signature"], state, error=reason, at=now)
-            result["screened_out" if terminal else "pending"] += 1
-            continue
-        event["detected_at"] = raw["detected_at"]
-        event["decision_at"] = now.isoformat()
-        event["primary_evidence"] = {
-            "source": "Solana logsSubscribe + confirmed transaction",
-            "program": stream.PUMP_FUN_PROGRAM,
-            "signature": raw["signature"],
-            "creator": raw["creator"],
-            "slot": raw["slot"],
-            "event_type": raw["event_type"],
-            "evidence_state": "complete",
-            "explorer_url": f"https://solscan.io/tx/{raw['signature']}",
-        }
-        ident, new = record_if_absent(event)
-        if not event_id_readback_matches(
-                ident, lane="launch", chain="solana", token=raw["mint"]):
-            stream.set_qualification(
-                raw["signature"], "ledger_orphan",
-                error="opportunity ledger ID failed exact read-back",
-                ledger_event_id=ident, at=now,
+            batch_evidence = _batch_candidate_tokens(
+                "solana", [raw["mint"] for raw in batch], fetch=fetch,
             )
-            result["orphaned"] += 1
-            continue
-        _, assessed = _append_assessment(
-            ident, event, assessor, assessed=assessed,
-            max_assessments=max_assessments, now=now)
-        stream.set_qualification(raw["signature"], "qualified_recorded",
-                                 ledger_event_id=ident, at=now)
-        result["recorded"] += 1
-        result["inserted"] += int(new)
+            batch_observed_at = _clock_value(clock)
+            stream.report_qualification_provider(
+                "ok", response_hash=batch_evidence["response_hash"],
+                at=batch_observed_at,
+            )
+            candidate_tokens = batch_evidence["base_tokens"]
+        except Exception as exc:
+            # A provider-wide/schema failure is one health failure, not evidence
+            # that every token lacks a pool. Preserve each token state for retry.
+            release_unsettled()
+            stream.report_qualification_provider(
+                "error", error=f"{type(exc).__name__}: {exc}", at=now,
+            )
+            result["errors"] += 1
+            result["reason"] = f"{type(exc).__name__}: {exc}"[:160]
+            break
+        batch_failed = False
+        for raw in batch:
+            try:
+                from src.pipeline import solana_launch_reconcile as reconcile
+
+                frozen_reconciliation = reconcile.candidate_reconciliation_proof(
+                    raw["signature"], slot=raw["slot"], mint=raw["mint"],
+                    creator=raw["creator"],
+                )
+                normalized_mint = raw["mint"]
+                if normalized_mint not in candidate_tokens:
+                    settle(
+                        raw, "market_pending", error="DEX pool not indexed yet",
+                        at=batch_observed_at, outcome_kind="valid_empty",
+                        response_hash=batch_evidence["response_hash"],
+                    )
+                    result["pending"] += 1
+                    continue
+                try:
+                    pair, exact_response_hash = _pair_for_token_evidence(
+                        "solana", raw["mint"], fetch=fetch,
+                    )
+                except Exception as exc:
+                    stream.report_qualification_provider(
+                        "error", error=f"{type(exc).__name__}: {exc}", at=now,
+                    )
+                    raise
+                observed_at = _clock_value(clock)
+                detected_at = datetime.fromisoformat(raw["detected_at"]).astimezone(
+                    timezone.utc
+                )
+                if (observed_at - detected_at).total_seconds() \
+                        > MAX_SOURCE_TO_DECISION_SECONDS:
+                    settle(
+                        raw, "qualification_expired",
+                        error="source-to-decision deadline exceeded", at=observed_at,
+                        outcome_kind="deadline_exceeded",
+                        response_hash=exact_response_hash,
+                        pair_address=(pair or {}).get("pairAddress"),
+                    )
+                    result["screened_out"] += 1
+                    continue
+                if not pair:
+                    settle(
+                        raw, "market_pending", error="exact DEX pool not indexed yet",
+                        at=observed_at, outcome_kind="exact_pool_pending",
+                        response_hash=exact_response_hash,
+                    )
+                    result["pending"] += 1
+                    continue
+                event = qualify(
+                    pair, now=observed_at,
+                    source="Pump.fun standard logs + DEX Screener pool",
+                )
+                if event is None:
+                    created_ms = pair.get("pairCreatedAt")
+                    try:
+                        age_hours = ((observed_at - datetime.fromtimestamp(
+                            float(created_ms) / 1000,
+                            tz=timezone.utc)).total_seconds() / 3600)
+                    except (TypeError, ValueError, OSError):
+                        age_hours = 0
+                    terminal = age_hours > 24
+                    state = "screened_out" if terminal else "market_pending"
+                    reason = ("pool is older than the 24h launch window" if terminal
+                              else "pool not yet within liquidity/FDV launch bounds")
+                    settle(
+                        raw, state, error=reason, at=observed_at,
+                        outcome_kind="screened_out" if terminal else "below_threshold",
+                        response_hash=exact_response_hash,
+                        pair_address=pair.get("pairAddress"),
+                    )
+                    result["screened_out" if terminal else "pending"] += 1
+                    continue
+                event["detected_at"] = raw["detected_at"]
+                event["decision_at"] = observed_at.isoformat()
+                current_admission = _protocol_admission(
+                    now=observed_at, admission_probe=admission_probe,
+                )
+                if (current_admission.get("state") != "open"
+                        or current_admission.get("enrollment_open") is not True):
+                    release_unsettled()
+                    result.update({
+                        "available": False,
+                        "reason": "launch protocol enrollment breached during batch",
+                        "source_admission": current_admission,
+                    })
+                    batch_failed = True
+                    break
+                current_reconciliation = reconcile.candidate_reconciliation_proof(
+                    raw["signature"], slot=raw["slot"], mint=raw["mint"],
+                    creator=raw["creator"],
+                )
+                if current_reconciliation != frozen_reconciliation:
+                    raise RuntimeError("candidate reconciliation proof changed during scan")
+                source_snapshot = freeze_source_snapshot(
+                    signature=raw["signature"], slot=raw["slot"],
+                    event_type=raw["event_type"], detected_at=raw["detected_at"],
+                    captured_at=raw["captured_at"],
+                    decision_at=observed_at.isoformat(),
+                    mint=raw["mint"], raw_payload_hash=raw["raw_payload_hash"],
+                    hydration_payload_hash=raw["hydration_payload_hash"],
+                    capture_mode=raw["capture_mode"],
+                    source_provider=raw["source_provider"],
+                    reconciliation_state=raw["reconciliation_state"],
+                    reconciled_at=raw["reconciled_at"],
+                    reconciliation_proof=current_reconciliation,
+                )
+                event["entry_observation"]["source_snapshot"] = source_snapshot
+                event["cohort_version"] = ENTRY_EVIDENCE_COHORT_VERSION
+                event["event_key"] = f"pump_fun:{raw['signature']}"
+                event["primary_evidence"] = {
+                    "source": "Solana live websocket + independent finalized archive",
+                    "program": stream.PUMP_FUN_PROGRAM,
+                    "signature": raw["signature"],
+                    "creator": raw["creator"],
+                    "slot": raw["slot"],
+                    "event_type": raw["event_type"],
+                    "reconciliation_epoch_id": current_reconciliation["epoch_id"],
+                    "evidence_state": "complete",
+                    "explorer_url": f"https://solscan.io/tx/{raw['signature']}",
+                }
+                ident, new = record_if_absent(event)
+                if not event_id_readback_matches(
+                        ident, lane="launch", chain="solana", token=raw["mint"],
+                        cohort_version=ENTRY_EVIDENCE_COHORT_VERSION,
+                        source_snapshot=source_snapshot):
+                    settle(
+                        raw, "ledger_orphan",
+                        error="opportunity ledger ID failed exact read-back",
+                        ledger_event_id=ident, at=observed_at,
+                        outcome_kind="ledger_orphan",
+                        response_hash=exact_response_hash,
+                        pair_address=pair.get("pairAddress"),
+                    )
+                    result["orphaned"] += 1
+                    continue
+                _, assessed = _append_assessment(
+                    ident, event, assessor, assessed=assessed,
+                    max_assessments=max_assessments, clock=clock)
+                settle(
+                    raw, "qualified_recorded", ledger_event_id=ident,
+                    at=observed_at, outcome_kind="qualified",
+                    response_hash=exact_response_hash,
+                    pair_address=pair.get("pairAddress"),
+                )
+                result["recorded"] += 1
+                result["inserted"] += int(new)
+            except Exception as exc:
+                release_unsettled()
+                result["errors"] += 1
+                result["reason"] = f"{type(exc).__name__}: {exc}"[:160]
+                batch_failed = True
+                break
+        if batch_failed:
+            break
     return result, assessed
 
 
+def _scan_primary_solana(fetch, *, now: datetime, assessor, assessed: int,
+                         max_assessments: int, max_candidates: int,
+                         clock: Clock = _wall_clock,
+                         admission_probe: AdmissionProbe | None = None,
+                         ) -> tuple[dict, int]:
+    """Bridge live Pump.fun evidence in short, crash-safe provider batches."""
+    total = {"available": True, "attempted": 0, "recorded": 0, "inserted": 0,
+             "pending": 0, "errors": 0, "screened_out": 0, "orphaned": 0}
+    from src.pipeline import solana_launch_stream as stream
+    remaining = max(0, int(max_candidates))
+    if remaining == 0:
+        return total, assessed
+    admission = _protocol_admission(now=now, admission_probe=admission_probe)
+    if admission.get("state") != "open" or admission.get("enrollment_open") is not True:
+        total.update({
+            "available": False, "reason": "launch protocol enrollment is blocked",
+            "source_admission": admission,
+        })
+        return total, assessed
+    provider_health = stream.qualification_provider_health(now=now)
+    if not provider_health["ready"]:
+        total.update({
+            "available": False, "errors": 1,
+            "reason": "DEX Screener qualification circuit is open",
+        })
+        return total, assessed
+    while remaining:
+        batch, assessed = _scan_primary_solana_batch(
+            fetch, now=now, assessor=assessor, assessed=assessed,
+            max_assessments=max_assessments,
+            max_candidates=min(DEX_BATCH_SIZE, remaining), clock=clock,
+            admission_probe=admission_probe,
+        )
+        for key in (
+            "attempted", "recorded", "inserted", "pending", "errors",
+            "screened_out", "orphaned",
+        ):
+            total[key] += int(batch.get(key) or 0)
+        claimed = int(batch.get("attempted") or 0)
+        remaining -= claimed
+        if batch.get("available") is False:
+            total["available"] = False
+            if batch.get("source_admission"):
+                total["source_admission"] = batch["source_admission"]
+        if claimed == 0 or batch.get("errors") or batch.get("available") is False:
+            if batch.get("reason"):
+                total["reason"] = batch["reason"]
+            break
+    return total, assessed
+
+
 def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
-                      max_assessments: int, max_candidates: int) -> tuple[dict, int]:
+                      max_assessments: int, max_candidates: int,
+                      clock: Clock = _wall_clock) -> tuple[dict, int]:
     """Bridge exact official factory pools without guessing token identity."""
     from src.pipeline import evm_factory_stream as stream
     from src.pipeline.evm_launch_bridge import exact_pair, identify_target
@@ -340,6 +610,7 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
                                    len(backoffs) - 1)]
         try:
             pairs = fetch(PAIRS_URL.format(chain=raw["chain"], token=target))
+            observed_at = _clock_value(clock)
             pair = exact_pair(raw, target, pairs)
         except Exception as exc:
             stream.set_qualification(raw, "market_error", reason=str(exc),
@@ -372,7 +643,7 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
                                      retry_after_seconds=retry_after, at=now)
             result["errors"] += 1
             continue
-        event = qualify(pair, now=now,
+        event = qualify(pair, now=observed_at,
                         source=f"{raw['chain']} {raw['venue']} factory + DEX Screener exact pool")
         if event is None:
             stream.set_qualification(raw, "below_threshold",
@@ -389,8 +660,11 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
         # The factory clock is the primary event time. The market decision is made
         # now; never backdate it to the raw socket receipt.
         event["event_at"] = chain_time.isoformat()
-        event["detected_at"] = now.isoformat()
-        event["decision_at"] = now.isoformat()
+        event["detected_at"] = observed_at.isoformat()
+        event["decision_at"] = observed_at.isoformat()
+        event["event_key"] = (
+            f"factory:{raw['chain']}:{raw['transaction_hash']}:{raw['log_index']}"
+        )
         event["primary_evidence"] = {
             "source": "official EVM factory log",
             "factory": raw["factory"], "venue": raw["venue"],
@@ -430,7 +704,7 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
             continue
         _, assessed = _append_assessment(
             ident, event, assessor, assessed=assessed,
-            max_assessments=max_assessments, now=now)
+            max_assessments=max_assessments, clock=clock)
         stream.set_qualification(raw, "qualified_recorded", target_token=target,
                                  ledger_event_id=ident, at=now)
         result["recorded"] += 1
@@ -440,20 +714,24 @@ def _scan_primary_evm(fetch, *, now: datetime, assessor, assessed: int,
 
 def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CANDIDATES,
          assessor=None, max_assessments: int = MAX_EXECUTION_ASSESSMENTS,
-         max_primary: int = 20, max_evm: int = 10) -> dict:
+         max_primary: int = 120, max_evm: int = 10,
+         evidence_clock: Clock | None = None,
+         protocol_admission_probe: AdmissionProbe | None = None) -> dict:
     """Discover pools, then safety/round-trip gate only raw actionable candidates.
 
     The hard assessment budget bounds GoPlus/router calls. Anything beyond the budget
     is WATCH, never an unchecked SMALL_PROBE.
     """
     now = now or datetime.now(timezone.utc)
+    evidence_clock = evidence_clock or _wall_clock
     if assessor is None:
         from src.pipeline.launch_execution import assess as assessor
     inserted = assessed = 0
     try:
         primary, assessed = _scan_primary_solana(
             fetch, now=now, assessor=assessor, assessed=assessed,
-            max_assessments=max_assessments, max_candidates=max(0, max_primary))
+            max_assessments=max_assessments, max_candidates=max(0, max_primary),
+            clock=evidence_clock, admission_probe=protocol_admission_probe)
         inserted += primary["inserted"]
     except Exception as exc:
         primary = {"available": False, "attempted": 0, "recorded": 0, "inserted": 0,
@@ -462,7 +740,8 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
     try:
         primary_evm, assessed = _scan_primary_evm(
             fetch, now=now, assessor=assessor, assessed=assessed,
-            max_assessments=max_assessments, max_candidates=max(0, max_evm))
+            max_assessments=max_assessments, max_candidates=max(0, max_evm),
+            clock=evidence_clock)
         inserted += primary_evm["inserted"]
     except Exception as exc:
         primary_evm = {"available": False, "attempted": 0, "recorded": 0,
@@ -474,12 +753,13 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
     for profile in profiles[:max_profiles]:
         try:
             pair = _pair_for(profile, fetch)
-            event = qualify(pair, now=now) if pair else None
+            observed_at = _clock_value(evidence_clock)
+            event = qualify(pair, now=observed_at) if pair else None
             if event:
                 ident, new = record(event)
                 _, assessed = _append_assessment(
                     ident, event, assessor, assessed=assessed,
-                    max_assessments=max_assessments, now=now)
+                    max_assessments=max_assessments, clock=evidence_clock)
                 inserted += int(new)
         except Exception:
             continue
@@ -494,7 +774,8 @@ def scan(fetch=_json, *, now: datetime | None = None, max_profiles: int = MAX_CA
 
 def refresh_quotes(*, now: datetime | None = None, assessor=None,
                    max_candidates: int = 1, refresh_before_seconds: int = 30,
-                   retry_after_seconds: int = 60) -> dict:
+                   retry_after_seconds: int = 60,
+                   evidence_clock: Clock | None = None) -> dict:
     """Refresh a bounded set of evidence-bound quotes without rediscovery.
 
     Discovery remains a three-minute event job. This fast path only appends current
@@ -503,6 +784,7 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
     from src.pipeline import opportunity_ledger as ledger
 
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    evidence_clock = evidence_clock or _wall_clock
     from src.pipeline.edge_validation import is_protocol_event
 
     rows = [
@@ -572,12 +854,14 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
             route = (route_probe(event) if security.get("state") == "pass"
                      else {"state": "skipped", "reason": "security gate did not pass",
                            "read_only": True})
-            current_assessor = lambda candidate, s=security, r=route: gate(
-                candidate, s, r, now=now)
+            gate_at = _clock_value(evidence_clock)
+            current_assessor = lambda candidate, s=security, r=route, at=gate_at: gate(
+                candidate, s, r, now=at
+            )
         result["attempted"] += 1
         try:
             _append_assessment(row["id"], event, current_assessor, assessed=0,
-                               max_assessments=1, now=now)
+                               max_assessments=1, clock=evidence_clock)
             result["refreshed"] += 1
         except Exception:
             result["errors"] += 1
@@ -587,7 +871,10 @@ def refresh_quotes(*, now: datetime | None = None, assessor=None,
 def view() -> dict:
     """Read-only board payload; scanning belongs to a scheduled ingestion path."""
     try:
-        from src.pipeline import solana_launch_stream, stream_health
+        from src.pipeline import (
+            launch_protocol_gate, solana_launch_reconcile,
+            solana_launch_stream, stream_health,
+        )
         health = [item for item in stream_health.snapshot()
                   if item["source"] == "solana"]
         streams = [item for item in health
@@ -597,12 +884,24 @@ def view() -> dict:
              if item["stream"] == solana_launch_stream.MAINTENANCE_STREAM),
             None,
         )
+        protocol_admission = launch_protocol_gate.read(protocol_id=PROTOCOL_ID) or {
+            "protocol_id": PROTOCOL_ID,
+            "cohort_version": COHORT_VERSION,
+            "protocol_start_at": PROTOCOL_START_AT,
+            "state": "scheduled", "enrollment_open": False,
+            "reason_codes": ["protocol_gate_not_initialized"],
+            "auto_execution_allowed": False,
+        }
         primary = {"available": True,
                    "qualification": solana_launch_stream.qualification_summary(
                        ledger_readback=lambda ident, mint: event_id_readback_matches(
                            ident, lane="launch", chain="solana", token=mint)),
                    "streams": streams,
-                   "maintenance": maintenance}
+                   "maintenance": maintenance,
+                   "market_provider": solana_launch_stream.qualification_provider_health(),
+                   "source_readiness": solana_launch_reconcile.source_readiness(),
+                   "protocol_admission": protocol_admission,
+                   }
     except Exception as exc:
         primary = {"available": False, "reason": str(exc)[:120],
                    "streams": [], "maintenance": None}

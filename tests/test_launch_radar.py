@@ -23,8 +23,13 @@ def test_qualify_emits_small_probe_only_for_fresh_tradeable_flow():
     assert got["decision"] == "SMALL_PROBE"
     assert got["invalidation_price"] == pytest.approx(0.00007)
     assert got["max_notional_usd"] == 60  # 0.3% of pool, not an unbounded suggestion
-    assert got["cohort_version"] == 6
+    assert got["cohort_version"] == 0
     assert got["cost_contract"]["purpose"] == "discovery_outcome"
+    assert got["cost_contract"]["completeness"] == "complete"
+    assert got["cost_contract"]["is_real_fill"] is False
+    assert got["cost_contract"]["network_fee_ceiling_usd"] == 2.0
+    assert got["roundtrip_cost_pct_est"] == got["cost_contract"]["all_in_total_pct"]
+    assert got["roundtrip_cost_pct_est"] > got["modeled_route_cost_pct_est"]
     assert got["detected_at"] == got["decision_at"]
     assert got["entry_observation"] == {
         "version": 1,
@@ -38,6 +43,19 @@ def test_qualify_emits_small_probe_only_for_fresh_tradeable_flow():
         "currency": "usd",
         "field": "priceUsd",
         "identity_verified": True,
+        "selector_snapshot": {
+            "version": 1,
+            "rule_id": "launch-solana-discovery-rule-v1",
+            "provider": "dexscreener_token_pairs_v1",
+            "pool_created_at": datetime.fromtimestamp(
+                1_700_000_000, tz=timezone.utc
+            ).isoformat(),
+            "liquidity_usd": 20_000.0,
+            "fdv_usd": 100_000.0,
+            "volume_m5_usd": 1_000.0,
+            "buys_m5": 10,
+            "sells_m5": 3,
+        },
     }
 
 
@@ -52,16 +70,42 @@ def test_probe_and_watch_freeze_the_same_discovery_cost_method():
     assert probe["roundtrip_cost_pct_est"] == watch["roundtrip_cost_pct_est"]
 
 
+def test_evm_launch_stays_descriptive_without_inventing_network_cost():
+    from src.pipeline.launch_radar import qualify
+    from src.pipeline.edge_validation import PROTOCOL_START_AT, is_protocol_event
+
+    now = datetime.fromisoformat(PROTOCOL_START_AT) + timedelta(minutes=30)
+    event = qualify(_pair(
+        chainId="base",
+        pairAddress="0x0000000000000000000000000000000000000001",
+        pairCreatedAt=int((now - timedelta(minutes=30)).timestamp() * 1000),
+        baseToken={
+            "address": "0x0000000000000000000000000000000000000002",
+            "symbol": "T",
+            "name": "Test",
+        },
+    ), now=now)
+
+    assert event["cohort_version"] == 0
+    assert event["cost_contract"]["completeness"] == "partial"
+    assert event["cost_contract"]["all_in_total_pct"] is None
+    assert is_protocol_event(event) is False
+
+
 def test_qualify_rejects_untradeable_or_late_pools():
     from src.pipeline.launch_radar import qualify
     now = datetime.fromtimestamp(1_700_000_000_000 / 1000 + 60 * 30, tz=timezone.utc)
     assert qualify(_pair(liquidity={"usd": 4_999}), now=now) is None
     late = datetime.fromtimestamp(1_700_000_000_000 / 1000 + 25 * 3600, tz=timezone.utc)
     assert qualify(_pair(), now=late) is None
+    before_pool_creation = datetime.fromtimestamp(
+        1_700_000_000_000 / 1000 - 1, tz=timezone.utc
+    )
+    assert qualify(_pair(), now=before_pool_creation) is None
 
 
 def test_pair_hydration_rejects_unrelated_and_quote_side_deep_pools():
-    from src.pipeline.launch_radar import _pair_for_token
+    from src.pipeline.launch_radar import MarketDataSchemaError, _pair_for_token
 
     valid = _pair(pairAddress="valid", liquidity={"usd": 10_000},
                   baseToken={"address": "Target", "symbol": "T"})
@@ -78,24 +122,30 @@ def test_pair_hydration_rejects_unrelated_and_quote_side_deep_pools():
 
     got = _pair_for_token(
         "solana", "Target",
-        fetch=lambda _url: [unrelated, target_as_quote, wrong_chain, valid],
+        fetch=lambda _url: [target_as_quote, valid],
     )
 
     assert got["pairAddress"] == "valid"
-    assert _pair_for_token(
-        "solana", "Target", fetch=lambda _url: [unrelated, target_as_quote]
-    ) is None
+    with pytest.raises(MarketDataSchemaError, match="unrelated"):
+        _pair_for_token(
+            "solana", "Target", fetch=lambda _url: [unrelated, valid]
+        )
+    with pytest.raises(MarketDataSchemaError, match="changed chain"):
+        _pair_for_token(
+            "solana", "Target", fetch=lambda _url: [wrong_chain, valid]
+        )
 
 
 def test_pair_hydration_matches_evm_address_case_insensitively():
-    from src.pipeline.launch_radar import _pair_for_token
+    from src.pipeline.launch_radar import MarketDataSchemaError, _pair_for_token
 
     pair = _pair(chainId="base", baseToken={"address": "0xabcdef", "symbol": "T"})
     assert _pair_for_token("base", "0xAbCdEf", fetch=lambda _url: [pair]) == pair
     solana = _pair(baseToken={"address": "CaseSensitive", "symbol": "T"})
-    assert _pair_for_token(
-        "solana", "casesensitive", fetch=lambda _url: [solana]
-    ) is None
+    with pytest.raises(MarketDataSchemaError, match="unrelated"):
+        _pair_for_token(
+            "solana", "casesensitive", fetch=lambda _url: [solana]
+        )
 
 
 def test_ledger_keeps_first_seen_entry_when_event_is_refreshed(tmp_path, monkeypatch):
@@ -169,6 +219,73 @@ def test_cascade_without_fresh_executable_book_is_watch_only(tmp_path, monkeypat
     assert "stale book" in row["execution_probe"]["reason"]
 
 
+def _open_admission(**_kwargs):
+    return {
+        "state": "open", "enrollment_open": True, "reason_codes": [],
+        "auto_execution_allowed": False,
+    }
+
+
+def _install_reconciled_launch(stream, *, signature, slot, mint, now):
+    from src.pipeline import solana_launch_reconcile as reconcile
+
+    logs = [
+        f"Program {stream.PUMP_FUN_PROGRAM} invoke [1]",
+        "Program log: Instruction: CreateV2",
+        f"Program {stream.PUMP_FUN_PROGRAM} success",
+    ]
+    payload = {
+        "kind": "launch", "signature": signature, "slot": slot,
+        "transaction_index": None, "program": stream.PUMP_FUN_PROGRAM,
+        "event_type": "pump_fun_createv2", "logs": logs,
+    }
+    transaction = {
+        "slot": slot,
+        "transaction": {"signatures": [signature], "message": {
+            "accountKeys": [
+                {"pubkey": "creator", "signer": True},
+                {"pubkey": mint, "signer": True},
+                {"pubkey": "curve", "signer": False},
+            ],
+            "instructions": [{
+                "programId": stream.PUMP_FUN_PROGRAM,
+                "accounts": [mint, "curve", "creator"], "data": "raw",
+            }],
+        }},
+        "meta": {"err": None, "logMessages": logs},
+    }
+    stream.persist(
+        payload, transaction=transaction, capture_mode="live_ws",
+        captured_at=now, source_provider="solana_rpc:live.example",
+    )
+    stream.persist(
+        payload, transaction=transaction, capture_mode="finalized_reconciliation",
+        captured_at=now, source_provider="solana_rpc:archive.example",
+    )
+    connection = stream._conn()
+    try:
+        reconcile._ensure_schema(connection)
+        connection.execute(
+            """INSERT OR IGNORE INTO reconciliation_epochs(
+                 epoch_id,from_slot,to_slot,live_provider,archive_provider,
+                 genesis_hash,status,checked_at,produced_slots,canonical_launches,
+                 live_launches,missing_live,extra_live,evidence_hash,finalized_head,error)
+               VALUES ('11111111111111111111111111111111',0,999,
+                       'solana_rpc:live.example','solana_rpc:archive.example',
+                       'mainnet-genesis','sealed_clean',?,1000,1000,1000,0,0,?,999,NULL)""",
+            (now.isoformat(), "e" * 64),
+        )
+        connection.execute(
+            """UPDATE raw_launches SET reconciliation_state='verified_live',
+                 reconciliation_epoch_id='11111111111111111111111111111111',
+                 reconciled_at=? WHERE signature=?""",
+            (now.isoformat(), signature),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def _raw_solana_launch(tmp_path, monkeypatch, *, now):
     import src.pipeline.opportunity_ledger as ol
     from src.pipeline import solana_launch_stream as stream
@@ -177,26 +294,23 @@ def _raw_solana_launch(tmp_path, monkeypatch, *, now):
     monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
     monkeypatch.setattr(stream, "DB", tmp_path / "solana.db")
     monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
-    c = stream._conn()
-    try:
-        c.execute("""INSERT INTO raw_launches(
-            signature,slot,program,event_type,creator,mint,detected_at,hydrated_at,
-            raw_payload_hash,hydration_payload_hash,logs,evidence_state,qualification_state
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  ("sig-primary", 123, stream.PUMP_FUN_PROGRAM, "pump_fun_createv2",
-                   "creator", "Token", now.isoformat(), now.isoformat(), "a" * 64,
-                   "b" * 64, "[]", "complete", "raw_unqualified"))
-        c.commit()
-    finally:
-        c.close()
+    _install_reconciled_launch(
+        stream, signature="sig-primary", slot=123, mint="Token", now=now,
+    )
     return stream
+
+
+def _forward_protocol_now() -> datetime:
+    from src.contract.launch_protocol import PROTOCOL_START_AT
+
+    return datetime.fromisoformat(PROTOCOL_START_AT) + timedelta(minutes=5)
 
 
 def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
     import src.pipeline.opportunity_ledger as ol
 
-    now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
+    now = _forward_protocol_now()
     stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
     pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
 
@@ -213,12 +327,22 @@ def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
         return event
 
     result = lr.scan(fetch=fetch, now=now, max_profiles=0, max_primary=1,
-                     assessor=assessor)
+                     assessor=assessor, evidence_clock=lambda: now,
+                     protocol_admission_probe=_open_admission)
     assert result["primary"] == {"available": True, "attempted": 1, "recorded": 1,
                                  "inserted": 1, "pending": 0, "errors": 0,
                                  "screened_out": 0, "orphaned": 0}
     row = ol.active("launch", now=now)[0]
+    assert row["cohort_version"] == 6
     assert row["primary_evidence"]["signature"] == "sig-primary"
+    assert row["entry_observation"]["source_snapshot"]["universe_id"] \
+        == "solana-pump-fun-standard-create-logs-v1"
+    source_snapshot = row["entry_observation"]["source_snapshot"]
+    assert source_snapshot["version"] == 2
+    assert source_snapshot["capture_mode"] == "live_ws"
+    assert source_snapshot["reconciliation_proof"]["epoch_id"] == "1" * 32
+    assert source_snapshot["reconciliation_proof"]["live_observation_hash"] \
+        == source_snapshot["raw_payload_hash"]
     assert row["source"] == "Pump.fun standard logs + DEX Screener pool"
     assert row["entry_observation"]["observed_at"] == now.isoformat()
     assert row["detected_at"] <= row["entry_observation"]["observed_at"]
@@ -230,10 +354,136 @@ def test_primary_solana_launch_is_bridged_to_ledger(tmp_path, monkeypatch):
     assert state == ("qualified_recorded", row["id"])
 
 
+def test_blocked_protocol_never_claims_or_calls_dex(tmp_path, monkeypatch):
+    from src.pipeline import evm_factory_stream, launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    monkeypatch.setattr(evm_factory_stream, "DB", tmp_path / "evm.db")
+    calls = []
+
+    result = lr.scan(
+        fetch=lambda url: calls.append(url) or [],
+        now=_forward_protocol_now(), max_profiles=0, max_primary=10, max_evm=0,
+        assessor=lambda event: event,
+        protocol_admission_probe=lambda **_kwargs: {
+            "state": "scheduled", "enrollment_open": False,
+            "reason_codes": ["clean_epoch_burn_in_incomplete"],
+        },
+    )
+
+    assert result["primary"]["available"] is False
+    assert result["primary"]["attempted"] == 0
+    assert result["primary"]["source_admission"]["reason_codes"] \
+        == ["clean_epoch_burn_in_incomplete"]
+    assert calls == [lr.PROFILES_URL]
+    assert ol.outcome_rows() == []
+
+
+def test_readiness_breach_after_claim_releases_lease_without_ledger(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    now = _forward_protocol_now()
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
+    admissions = iter((
+        {"state": "open", "enrollment_open": True},
+        {"state": "open", "enrollment_open": True},
+        {"state": "breached", "enrollment_open": False,
+         "reason_codes": ["source_readiness_breached_after_open"]},
+    ))
+
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
+        now=now, max_profiles=0, max_primary=1, max_evm=0,
+        assessor=lambda event: event, evidence_clock=lambda: now,
+        protocol_admission_probe=lambda **_kwargs: next(admissions),
+    )
+
+    assert result["primary"]["available"] is False
+    assert result["primary"]["recorded"] == result["primary"]["inserted"] == 0
+    assert ol.outcome_rows() == []
+    connection = stream._conn()
+    try:
+        state = connection.execute(
+            "SELECT qualification_state,qualification_lease_token FROM raw_launches"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert state == ("raw_unqualified", None)
+
+
+def test_profile_row_cannot_capture_primary_source_provenance(tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    now = _forward_protocol_now()
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
+    profile_id, inserted = ol.record(lr.qualify(pair, now=now))
+    assert inserted is True
+    assert ol.outcome_rows()[0]["cohort_version"] == 0
+
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
+        now=now, max_profiles=0, max_primary=1, assessor=lambda event: event,
+        evidence_clock=lambda: now, protocol_admission_probe=_open_admission,
+    )
+
+    assert result["primary"]["recorded"] == result["primary"]["inserted"] == 1
+    rows = ol.outcome_rows()
+    assert len(rows) == 2
+    primary = next(row for row in rows if row["cohort_version"] == 6)
+    assert primary["id"] != profile_id
+    assert primary["entry_observation"]["source_snapshot"]["signature"] == "sig-primary"
+    c = stream._conn()
+    try:
+        linked = c.execute(
+            "SELECT qualification_state,ledger_event_id FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert linked == ("qualified_recorded", primary["id"])
+
+
+def test_profile_entry_clock_is_captured_after_pair_response_not_scan_start(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    import src.pipeline.opportunity_ledger as ol
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    scan_started = datetime.now(timezone.utc).replace(microsecond=0)
+    price_observed = scan_started + timedelta(minutes=2)
+    assessment_finished = price_observed + timedelta(seconds=5)
+    clocks = iter((price_observed, assessment_finished))
+    pair = _pair(pairCreatedAt=int((scan_started - timedelta(minutes=1)).timestamp() * 1000))
+
+    def fetch(url):
+        if url == lr.PROFILES_URL:
+            return [{"chainId": "solana", "tokenAddress": "Token"}]
+        return [pair]
+
+    lr.scan(
+        fetch=fetch, now=scan_started, max_profiles=1, max_primary=0, max_evm=0,
+        assessor=lambda event: event, evidence_clock=lambda: next(clocks),
+    )
+
+    row = ol.outcome_rows()[0]
+    assessment = ol.latest_execution_assessment(row["id"])
+    assert row["detected_at"] == price_observed.isoformat()
+    assert row["decision_at"] == price_observed.isoformat()
+    assert row["entry_observation"]["observed_at"] == price_observed.isoformat()
+    assert row["cohort_version"] == 0
+    assert "source_snapshot" not in row["entry_observation"]
+    assert assessment["assessed_at"] == assessment_finished.isoformat()
+
+
 def test_primary_solana_launch_quarantines_failed_ledger_readback(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
 
-    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    now = _forward_protocol_now()
     stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
     pair = _pair(pairCreatedAt=int((now.timestamp() - 60) * 1000))
     monkeypatch.setattr(lr, "event_id_readback_matches", lambda *_args, **_kwargs: False)
@@ -241,6 +491,7 @@ def test_primary_solana_launch_quarantines_failed_ledger_readback(tmp_path, monk
     result = lr.scan(
         fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
         now=now, max_profiles=0, max_primary=1, assessor=lambda event: event,
+        evidence_clock=lambda: now, protocol_admission_probe=_open_admission,
     )
 
     assert result["primary"]["recorded"] == 0
@@ -262,11 +513,13 @@ def test_primary_solana_launch_quarantines_failed_ledger_readback(tmp_path, monk
 def test_primary_market_miss_remains_retryable(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
 
-    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    now = _forward_protocol_now()
     stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
 
     result = lr.scan(fetch=lambda url: [] if url == lr.PROFILES_URL else [], now=now,
-                     max_profiles=0, max_primary=1, assessor=lambda event: event)
+                     max_profiles=0, max_primary=1, assessor=lambda event: event,
+                     evidence_clock=lambda: now,
+                     protocol_admission_probe=_open_admission)
     assert result["primary"]["pending"] == 1
     c = stream._conn()
     try:
@@ -278,10 +531,107 @@ def test_primary_market_miss_remains_retryable(tmp_path, monkeypatch):
     assert state == "market_pending" and "not indexed" in error
 
 
+def test_primary_batch_splits_31_tokens_without_freezing_batch_prices(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+    from src.pipeline import solana_launch_stream as stream
+    import src.pipeline.opportunity_ledger as ol
+    from src.pipeline import stream_health
+
+    now = _forward_protocol_now()
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    monkeypatch.setattr(stream, "DB", tmp_path / "solana.db")
+    monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
+    for index in range(31):
+        _install_reconciled_launch(
+            stream, signature=f"sig-{index}", slot=index,
+            mint=f"Token{index}", now=now,
+        )
+    calls = []
+
+    def fetch(url):
+        calls.append(url)
+        return []
+
+    result = lr.scan(
+        fetch=fetch, now=now, max_profiles=0, max_primary=31, max_evm=0,
+        assessor=lambda event: event, evidence_clock=lambda: now,
+        protocol_admission_probe=_open_admission,
+    )
+
+    batch_urls = [url for url in calls if "/tokens/v1/" in url]
+    assert [len(url.rsplit("/", 1)[1].split(",")) for url in batch_urls] == [30, 1]
+    assert not [url for url in calls if "/token-pairs/v1/" in url]
+    assert result["primary"]["attempted"] == result["primary"]["pending"] == 31
+
+
+def test_malformed_batch_response_does_not_become_token_market_pending(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+
+    now = _forward_protocol_now()
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else {"error": "overloaded"},
+        now=now, max_profiles=0, max_primary=1, max_evm=0,
+        assessor=lambda event: event, evidence_clock=lambda: now,
+        protocol_admission_probe=_open_admission,
+    )
+
+    assert result["primary"]["errors"] == 1
+    c = stream._conn()
+    try:
+        row = c.execute(
+            """SELECT qualification_state,qualification_attempt_count,
+                      qualification_lease_token FROM raw_launches"""
+        ).fetchone()
+        observations = c.execute(
+            "SELECT COUNT(*) FROM qualification_observations"
+        ).fetchone()[0]
+    finally:
+        c.close()
+    assert row == ("raw_unqualified", 0, None)
+    assert observations == 0
+    assert stream.qualification_provider_health(now=now)["circuit_state"] == "open"
+
+
+def test_batch_quote_side_pool_is_valid_but_never_used_as_entry(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_radar as lr
+
+    now = _forward_protocol_now()
+    stream = _raw_solana_launch(tmp_path, monkeypatch, now=now)
+    quote_side = _pair(
+        baseToken={"address": "Other", "symbol": "O", "name": "Other"},
+        quoteToken={"address": "Token", "symbol": "T", "name": "Token"},
+        pairCreatedAt=int((now.timestamp() - 60) * 1000),
+    )
+
+    result = lr.scan(
+        fetch=lambda url: [] if url == lr.PROFILES_URL else [quote_side],
+        now=now, max_profiles=0, max_primary=1, max_evm=0,
+        assessor=lambda event: event, evidence_clock=lambda: now,
+        protocol_admission_probe=_open_admission,
+    )
+
+    assert result["primary"]["pending"] == 1
+    c = stream._conn()
+    try:
+        state, outcome = c.execute(
+            "SELECT qualification_state,qualification_last_outcome_kind "
+            "FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    assert (state, outcome) == ("market_pending", "valid_empty")
+
+
 def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
     from src.pipeline import stream_health
 
+    monkeypatch.delenv("SOLANA_RECONCILIATION_RPC_URL", raising=False)
     now = datetime.now(timezone.utc)
     _raw_solana_launch(tmp_path, monkeypatch, now=now)
     stream_health.report_worker(
@@ -295,9 +645,14 @@ def test_launch_view_exposes_primary_stream_coverage(tmp_path, monkeypatch):
     assert solana["qualification"]["recent_complete"] == 1
     assert solana["maintenance"]["status"] == "degraded"
     assert solana["maintenance"]["last_error"] == "RPC circuit open"
+    assert solana["source_readiness"]["ready"] is False
+    assert "archive_provider_not_configured" in solana["source_readiness"]["reason_codes"]
+    assert solana["protocol_admission"]["state"] == "scheduled"
+    assert solana["protocol_admission"]["enrollment_open"] is False
 
 
 def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):
+    from src.contract.launch_selector import freeze_source_snapshot
     from src.pipeline import launch_radar as lr
     import src.pipeline.opportunity_ledger as ol
 
@@ -305,6 +660,28 @@ def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):
     now = datetime(2026, 7, 16, 12, tzinfo=timezone.utc)
     event = lr.qualify(_pair(pairCreatedAt=int(now.timestamp() * 1000)), now=now)
     event["detected_at"] = now.isoformat()
+    event["source"] = "Pump.fun standard logs + DEX Screener pool"
+    event["cohort_version"] = 6
+    event["entry_observation"]["source_snapshot"] = freeze_source_snapshot(
+        signature="signature-refresh", slot=1, event_type="pump_fun_createv2",
+        detected_at=now.isoformat(), captured_at=now.isoformat(),
+        decision_at=now.isoformat(), mint=event["token"],
+        raw_payload_hash="a" * 64, hydration_payload_hash="b" * 64,
+        capture_mode="live_ws", source_provider="solana_rpc:live.example",
+        reconciliation_state="verified_live", reconciled_at=now.isoformat(),
+        reconciliation_proof={
+            "version": 1, "epoch_id": "1" * 32,
+            "from_slot": 0, "to_slot": 10, "status": "sealed_clean",
+            "checked_at": now.isoformat(),
+            "live_provider": "solana_rpc:live.example",
+            "archive_provider": "solana_rpc:archive.example",
+            "genesis_hash": "mainnet-genesis", "evidence_hash": "e" * 64,
+            "finalized_head": 10, "live_captured_at": now.isoformat(),
+            "live_observation_hash": "a" * 64,
+            "archive_observation_hash": "a" * 64,
+            "hydration_identity_hash": "b" * 64,
+        },
+    )
     ident, _ = ol.record(event)
     calls = []
 
@@ -321,9 +698,12 @@ def test_fast_quote_refresh_appends_without_rediscovery(tmp_path, monkeypatch):
         candidate["expires_at"] = (now + timedelta(seconds=60)).isoformat()
         return candidate
 
-    first = lr.refresh_quotes(now=now, assessor=assessor)
+    first = lr.refresh_quotes(now=now, assessor=assessor, evidence_clock=lambda: now)
     assert first["refreshed"] == 1 and calls == [event["entry_price"]]
-    assert lr.refresh_quotes(now=now + timedelta(seconds=10), assessor=assessor)[
+    assert lr.refresh_quotes(
+        now=now + timedelta(seconds=10), assessor=assessor,
+        evidence_clock=lambda: now + timedelta(seconds=10),
+    )[
         "skipped_fresh"] == 1
     assert ol.outcome_rows()[0]["entry_price"] == event["entry_price"]
     assert ol.latest_execution_assessment(ident)["entry_reference_price"] == 0.00011
@@ -373,7 +753,7 @@ def test_forward_evm_factory_pool_is_exactly_bridged_as_paper_only(tmp_path, mon
         return [] if url == lr.PROFILES_URL else [pair]
 
     result = lr.scan(fetch=fetch, now=now, max_profiles=0, max_primary=0, max_evm=1,
-                     assessor=lambda event: event)
+                     assessor=lambda event: event, evidence_clock=lambda: now)
     assert result["primary_evm"]["inserted"] == 1
     row = ol.active("launch", now=now)[0]
     assert row["decision"] == "SMALL_PROBE" and row["primary_evidence"]["pool"] == pool
@@ -452,6 +832,7 @@ def test_forward_evm_factory_pool_quarantines_failed_exact_ledger_readback(
         fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
         now=now, max_profiles=0, max_primary=0, max_evm=1,
         assessor=lambda event: event,
+        evidence_clock=lambda: now,
     )
 
     assert result["primary_evm"]["recorded"] == 0
@@ -474,7 +855,7 @@ def test_forward_evm_factory_pool_quarantines_failed_exact_ledger_readback(
     assert state[2] == token and state[3]
 
 
-def test_forward_evm_duplicate_token_stays_separate_without_readback_or_assessment(
+def test_profile_token_cannot_capture_forward_evm_factory_provenance(
         tmp_path, monkeypatch):
     from src.pipeline import launch_radar as lr
     import src.pipeline.opportunity_ledger as ol
@@ -486,21 +867,21 @@ def test_forward_evm_duplicate_token_stays_separate_without_readback_or_assessme
     existing["detected_at"] = (now - timedelta(minutes=1)).isoformat()
     ident, inserted = ol.record_if_absent(existing)
     assert inserted
-    monkeypatch.setattr(
-        lr, "event_id_readback_matches",
-        lambda *_args, **_kwargs: pytest.fail("duplicates must not claim new readback"),
-    )
-
     result = lr.scan(
         fetch=lambda url: [] if url == lr.PROFILES_URL else [pair],
         now=now, max_profiles=0, max_primary=0, max_evm=1,
-        assessor=lambda event: pytest.fail("duplicates must not be reassessed"),
+        assessor=lambda event: event,
+        evidence_clock=lambda: now,
     )
 
-    assert result["primary_evm"]["duplicates"] == 1
-    assert result["primary_evm"]["inserted"] == 0
+    assert result["primary_evm"]["duplicates"] == 0
+    assert result["primary_evm"]["inserted"] == 1
     assert result["primary_evm"]["orphaned"] == 0
     assert ol.latest_execution_assessment(ident) is None
+    rows = ol.outcome_rows()
+    assert len(rows) == 2
+    primary = next(row for row in rows if row["source"] != "existing first launch")
+    assert primary["id"] != ident
     c = stream._conn()
     try:
         state = c.execute(
@@ -509,6 +890,6 @@ def test_forward_evm_duplicate_token_stays_separate_without_readback_or_assessme
         ).fetchone()
     finally:
         c.close()
-    assert state[:3] == (
-        "duplicate_token_existing", "token already has a first launch event", token)
-    assert state[3] is None
+    assert state[0] == "qualified_recorded"
+    assert state[2] == token
+    assert state[3] == primary["id"]
