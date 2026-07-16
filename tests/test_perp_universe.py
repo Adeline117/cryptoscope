@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -44,8 +45,29 @@ def _isolated(tmp_path, monkeypatch):
     def no_network(*_args, **_kwargs):
         raise AssertionError("test attempted real network access")
 
+    class NoNetworkOpener:
+        open = staticmethod(no_network)
+
     monkeypatch.setattr(pu.urllib.request, "urlopen", no_network)
+    monkeypatch.setattr(
+        pu.urllib.request, "build_opener", lambda *_handlers: NoNetworkOpener(),
+    )
     return guard
+
+
+def _install_http_open(monkeypatch, open_call):
+    installed_handlers = []
+
+    class Opener:
+        def open(self, request, timeout):
+            return open_call(request, timeout)
+
+    def build_opener(*handlers):
+        installed_handlers.extend(handlers)
+        return Opener()
+
+    monkeypatch.setattr(pu.urllib.request, "build_opener", build_opener)
+    return installed_handlers
 
 
 def _evidence(payload: object) -> dict[str, object]:
@@ -558,7 +580,134 @@ def test_unexpected_cache_validation_exception_is_contained(monkeypatch):
     assert pu.load() == {}
 
 
-def test_fetch_rejects_cross_host_redirect_and_always_closes(monkeypatch):
+class _RedirectResponse:
+    def __init__(self) -> None:
+        self.closed = False
+        self.read_called = False
+
+    def read(self, _size: int | None = None) -> bytes:
+        self.read_called = True
+        return b""
+
+    def close(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    "redirect",
+    [
+        "https://attacker.invalid/data?token=private",
+        "http://www.okx.com/api/v5/public/time?token=private",
+        "https://www.okx.com:444/api/v5/public/time?token=private",
+    ],
+)
+def test_redirect_handler_blocks_cross_origin_before_second_connection(
+    redirect,
+):
+    initial_url = "https://www.okx.com/api/v5/public/time"
+    response = _RedirectResponse()
+    second_connections = []
+
+    class Parent:
+        def open(self, request, *, timeout):
+            second_connections.append((request.full_url, timeout))
+            raise AssertionError("cross-origin redirect opened a second connection")
+
+    handler = pu._SameOriginRedirectHandler(
+        pu._https_origin(initial_url, "request_target_invalid"),
+    )
+    handler.add_parent(Parent())
+    request = urllib.request.Request(initial_url)
+    request.timeout = 20
+
+    with pytest.raises(pu._ContractError) as caught:
+        handler.http_error_302(
+            request, response, 302, "redirect", {"location": redirect},
+        )
+
+    assert caught.value.reason_code == "redirect_target_invalid"
+    assert "attacker.invalid" not in repr(caught.value)
+    assert "token=private" not in repr(caught.value)
+    assert response.closed is True
+    assert response.read_called is False
+    assert second_connections == []
+
+
+def test_redirect_handler_allows_relative_same_origin_and_closes_30x():
+    initial_url = "https://www.okx.com/api/v5/public/time"
+    response = _RedirectResponse()
+    final_response = object()
+    second_connections = []
+
+    class Parent:
+        def open(self, request, *, timeout):
+            second_connections.append((request.full_url, timeout))
+            return final_response
+
+    handler = pu._SameOriginRedirectHandler(
+        pu._https_origin(initial_url, "request_target_invalid"),
+    )
+    handler.add_parent(Parent())
+    request = urllib.request.Request(initial_url)
+    request.timeout = 20
+
+    result = handler.http_error_302(
+        request,
+        response,
+        302,
+        "redirect",
+        {"location": "../instruments?instType=SWAP"},
+    )
+
+    assert result is final_response
+    assert response.closed is True
+    assert response.read_called is True
+    assert second_connections == [(
+        "https://www.okx.com/api/v5/instruments?instType=SWAP",
+        20,
+    )]
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_same_origin_redirect_read_failure_closes_and_never_reconnects(status):
+    initial_url = "https://www.okx.com/api/v5/public/time"
+    reads = []
+    second_connections = []
+
+    class FailingResponse(_RedirectResponse):
+        def read(self, size=None):
+            reads.append(size)
+            raise OSError("https://secret.invalid/redirect-body")
+
+    class Parent:
+        def open(self, request, *, timeout):
+            second_connections.append((request.full_url, timeout))
+            raise AssertionError("failed redirect drain opened a connection")
+
+    response = FailingResponse()
+    handler = pu._SameOriginRedirectHandler(
+        pu._https_origin(initial_url, "request_target_invalid"),
+    )
+    handler.add_parent(Parent())
+    request = urllib.request.Request(initial_url)
+    request.timeout = 20
+    method = getattr(handler, f"http_error_{status}")
+
+    with pytest.raises(OSError):
+        method(
+            request,
+            response,
+            status,
+            "redirect",
+            {"location": "/api/v5/public/instruments"},
+        )
+
+    assert reads == [pu._MAX_REDIRECT_DRAIN_BYTES]
+    assert response.closed is True
+    assert second_connections == []
+
+
+def test_fetch_preserves_final_url_validation_and_always_closes(monkeypatch):
     class Response:
         def __init__(self) -> None:
             self.closed = False
@@ -576,10 +725,14 @@ def test_fetch_rejects_cross_host_redirect_and_always_closes(monkeypatch):
             self.closed = True
 
     response = Response()
-    monkeypatch.setattr(pu.urllib.request, "urlopen", lambda *_a, **_k: response)
+    handlers = _install_http_open(
+        monkeypatch, lambda _request, _timeout: response,
+    )
     with pytest.raises(pu._ContractError) as caught:
         pu._fetch_json("https://www.okx.com/api/v5/public/time")
     assert caught.value.reason_code == "response_target_invalid"
+    assert len(handlers) == 1
+    assert isinstance(handlers[0], pu._SameOriginRedirectHandler)
     assert response.closed is True
     assert response.read_called is False
 
@@ -605,7 +758,7 @@ def test_fetch_rejects_same_host_cross_authority_redirect(monkeypatch, redirect)
             self.closed = True
 
     response = Response()
-    monkeypatch.setattr(pu.urllib.request, "urlopen", lambda *_a, **_k: response)
+    _install_http_open(monkeypatch, lambda _request, _timeout: response)
     with pytest.raises(pu._ContractError) as caught:
         pu._fetch_json("https://www.okx.com/api/v5/public/time")
     assert caught.value.reason_code == "response_target_invalid"
@@ -629,7 +782,7 @@ def test_http_and_cache_reads_are_bounded_before_size_rejection(monkeypatch):
             self.closed = True
 
     response = Response()
-    monkeypatch.setattr(pu.urllib.request, "urlopen", lambda *_a, **_k: response)
+    _install_http_open(monkeypatch, lambda _request, _timeout: response)
     with pytest.raises(pu._ContractError) as caught:
         pu._fetch_json("https://www.okx.com/api/v5/public/time")
     assert caught.value.reason_code == "response_size_invalid"
@@ -647,9 +800,9 @@ def test_fetch_explicitly_closes_http_error(monkeypatch):
     )
     closed: list[bool] = []
     monkeypatch.setattr(error, "close", lambda: closed.append(True))
-    monkeypatch.setattr(
-        pu.urllib.request, "urlopen",
-        lambda *_a, **_k: (_ for _ in ()).throw(error),
+    _install_http_open(
+        monkeypatch,
+        lambda _request, _timeout: (_ for _ in ()).throw(error),
     )
     with pytest.raises(pu._ContractError) as caught:
         pu._fetch_json("https://www.okx.com/api/v5/public/time")

@@ -56,6 +56,7 @@ _COINGECKO_MARKETS_URL = (
 # unbounded memory and only then be rejected.
 _MAX_RETAINED_HTTP_BYTES = 32 * 1024 * 1024
 _MAX_CACHE_BYTES = 8 * 1024 * 1024
+_MAX_REDIRECT_DRAIN_BYTES = 64 * 1024
 _MAX_EXCHANGE_CLOCK_SKEW_SECONDS = 30
 _MAX_REFRESH_DURATION_SECONDS = 5 * 60
 # Operational completeness controls, not OKX protocol guarantees.  A catalog
@@ -174,43 +175,113 @@ def _sha256(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
+def _https_origin(url: object, reason_code: str) -> tuple[str, str, int]:
+    """Return a normalized HTTPS origin without retaining URL details in errors."""
+    if not isinstance(url, str):
+        raise _ContractError(reason_code)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        explicit_port = parsed.port
+    except (TypeError, ValueError):
+        raise _ContractError(reason_code) from None
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise _ContractError(reason_code)
+    effective_port = 443 if explicit_port is None else explicit_port
+    return parsed.scheme, parsed.hostname, effective_port
+
+
+def _close_http_response(response: object) -> None:
+    """Best-effort close without allowing response details to escape in errors."""
+    try:
+        response.close()  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+class _BoundedClosingRedirectResponse:
+    """Let urllib drain at most a small body while closing on every outcome."""
+
+    def __init__(self, response: object) -> None:
+        self._response = response
+
+    def read(self) -> bytes:
+        try:
+            value = self._response.read(  # type: ignore[attr-defined]
+                _MAX_REDIRECT_DRAIN_BYTES,
+            )
+            return value if isinstance(value, bytes) else b""
+        finally:
+            _close_http_response(self._response)
+
+    def close(self) -> None:
+        _close_http_response(self._response)
+
+
+class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject a redirect before urllib opens a connection to another origin."""
+
+    def __init__(self, initial_origin: tuple[str, str, int]) -> None:
+        super().__init__()
+        self._initial_origin = initial_origin
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            redirected_origin = _https_origin(newurl, "redirect_target_invalid")
+        except _ContractError:
+            _close_http_response(fp)
+            raise
+        if redirected_origin != self._initial_origin:
+            # HTTPRedirectHandler calls parent.open() only after this method returns.
+            # Close the 30x response here and fail before any second-origin socket can
+            # be created.
+            _close_http_response(fp)
+            raise _ContractError("redirect_target_invalid")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        # The stdlib handler drains ``fp.read()`` without a size and closes only
+        # afterwards.  A slow or failed same-origin 30x can therefore consume
+        # unbounded memory or leak its descriptor.  This proxy gives the standard
+        # redirect/loop/method logic a bounded read that closes in ``finally``.
+        bounded = _BoundedClosingRedirectResponse(fp)
+        return super().http_error_302(req, bounded, code, msg, headers)
+
+    http_error_301 = http_error_302
+    http_error_303 = http_error_302
+    http_error_307 = http_error_302
+    http_error_308 = http_error_302
+
+
 def _fetch_json(url: str, timeout: int = 20) -> dict[str, object]:
     """Fetch JSON and retain only its digest/size after the caller validates it."""
-    requested = urllib.parse.urlsplit(url)
-    try:
-        requested_port = requested.port or 443
-    except ValueError:
-        raise _ContractError("request_target_invalid") from None
-    if (
-        requested.scheme != "https"
-        or not requested.hostname
-        or requested.username is not None
-        or requested.password is not None
-    ):
-        raise _ContractError("request_target_invalid")
+    requested_origin = _https_origin(url, "request_target_invalid")
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    opener = urllib.request.build_opener(
+        _SameOriginRedirectHandler(requested_origin),
+    )
     try:
-        response = urllib.request.urlopen(request, timeout=timeout)
+        response = opener.open(request, timeout=timeout)
+    except _ContractError:
+        raise
     except urllib.error.HTTPError as exc:
-        exc.close()
+        _close_http_response(exc)
         raise _ContractError("http_status_error") from None
+    except (urllib.error.URLError, OSError, ValueError):
+        raise _ContractError("http_transport_error") from None
     try:
-        final = urllib.parse.urlsplit(response.geturl())
-        try:
-            final_port = final.port or 443
-        except ValueError:
-            raise _ContractError("response_target_invalid") from None
-        if (
-            final.scheme != "https"
-            or final.hostname != requested.hostname
-            or final_port != requested_port
-            or final.username is not None
-            or final.password is not None
-        ):
+        final_origin = _https_origin(
+            response.geturl(), "response_target_invalid",
+        )
+        if final_origin != requested_origin:
             raise _ContractError("response_target_invalid")
         raw = response.read(_MAX_RETAINED_HTTP_BYTES + 1)
     finally:
-        response.close()
+        _close_http_response(response)
     if not isinstance(raw, bytes) or not raw or len(raw) > _MAX_RETAINED_HTTP_BYTES:
         raise _ContractError("response_size_invalid")
     try:
