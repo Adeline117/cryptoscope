@@ -366,13 +366,14 @@ async def test_real_launch_quote_refresh_publishes_assessment(monkeypatch):
 @pytest.mark.asyncio
 async def test_launch_render_failure_preserves_last_good_view(tmp_path, monkeypatch):
     from src.pipeline import board_export, launch_radar, operator_sentinel, scheduler
+    from tests.test_board_data_contract import _launch_body
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    old = board_export._envelope({"events": [{
-        "id": "launch-1", "lane": "launch", "action_level": "A1_WATCH",
-        "actionable_now": False, "auto_execution_allowed": False,
-        "effective_decision": "WATCH",
-    }]}, view="launch")
+    old = board_export._envelope(_launch_body([{
+            "id": "launch-1", "lane": "launch", "action_level": "A1_WATCH",
+            "actionable_now": False, "auto_execution_allowed": False,
+            "effective_decision": "WATCH",
+        }]), view="launch")
     board_export.write_views(launch=old)
     before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
     monkeypatch.setattr(launch_radar, "refresh_quotes", lambda **kwargs: {

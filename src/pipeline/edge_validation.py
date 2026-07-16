@@ -112,7 +112,16 @@ def _candidate_source_proof(row: dict, source_snapshot: dict) -> dict:
 def _protocol_admission_state() -> dict | None:
     from src.pipeline import launch_protocol_gate
 
-    return launch_protocol_gate.read(protocol_id=PROTOCOL_ID)
+    return launch_protocol_gate.read(protocol_id=PROTOCOL_ID) or {
+        "protocol_id": PROTOCOL_ID,
+        "cohort_version": COHORT_VERSION,
+        "protocol_start_at": PROTOCOL_START_AT,
+        "state": "scheduled", "enrollment_open": False,
+        "armed_at": None, "opened_at": None, "breached_at": None,
+        "reason_codes": ["protocol_gate_not_initialized"],
+        "readiness_hash": None, "created_at": None, "updated_at": None,
+        "auto_execution_allowed": False,
+    }
 
 
 def _protocol_snapshot(row: dict) -> tuple[dict | None, dict | None, list[str]]:

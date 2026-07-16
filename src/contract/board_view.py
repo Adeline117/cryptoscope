@@ -48,6 +48,394 @@ _ACTION_LEVELS = {
     "A0_BLOCKED", "A1_WATCH", "A2_PAPER_READY",
     "A3_MANUAL_PROBE", "A4_REAL_FILL_VALIDATED",
 }
+_ENROLLMENT_STATES = {"scheduled", "armed", "open", "breached", "blocked"}
+
+
+def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
+    if (not isinstance(value, list)
+            or any(not isinstance(item, str) or not item.strip() for item in value)):
+        raise BoardViewContractError(f"{path} must be a string array")
+    if required and not value:
+        raise BoardViewContractError(f"{path} must explain the blocked state")
+    return value
+
+
+def _finite_nonnegative(value: Any, *, path: str, optional: bool = False) -> float | None:
+    if value is None and optional:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BoardViewContractError(f"{path} must be a nonnegative number")
+    number = float(value)
+    if not math.isfinite(number) or number < 0:
+        raise BoardViewContractError(f"{path} must be a nonnegative number")
+    return number
+
+
+def _provider_host(value: Any, *, path: str) -> str:
+    if not isinstance(value, str) or not value.startswith("solana_rpc:"):
+        raise BoardViewContractError(f"{path} must identify a Solana RPC provider")
+    host = value[len("solana_rpc:"):].strip().lower()
+    name, separator, port = host.rpartition(":")
+    if separator and name and port.isdigit():
+        host = name
+    if not host:
+        raise BoardViewContractError(f"{path} has no provider host")
+    return host
+
+
+def _validate_source_readiness(value: Any, *, path: str) -> dict:
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    state, ready = value.get("state"), value.get("ready")
+    if state not in {"ready", "blocked"} or not isinstance(ready, bool):
+        raise BoardViewContractError(f"{path} has an invalid readiness state")
+    if ready is not (state == "ready"):
+        raise BoardViewContractError(f"{path}.ready contradicts state")
+    readiness_reasons = _reason_codes(
+        value.get("reason_codes"), path=f"{path}.reason_codes", required=not ready,
+    )
+    if ready and readiness_reasons:
+        raise BoardViewContractError(f"{path}.reason_codes must be empty while ready")
+    required = _exact_nonnegative_int(
+        value.get("required_clean_epochs"), path=f"{path}.required_clean_epochs",
+    )
+    observed = _exact_nonnegative_int(
+        value.get("observed_epochs"), path=f"{path}.observed_epochs",
+    )
+    if required < 1:
+        raise BoardViewContractError(f"{path}.required_clean_epochs must be positive")
+    max_age = _finite_nonnegative(value.get("max_age_seconds"),
+                                  path=f"{path}.max_age_seconds")
+    if max_age == 0:
+        raise BoardViewContractError(f"{path}.max_age_seconds must be positive")
+    age = _finite_nonnegative(value.get("latest_age_seconds"),
+                              path=f"{path}.latest_age_seconds", optional=True)
+    max_lag = _exact_nonnegative_int(
+        value.get("max_finalized_lag_slots"),
+        path=f"{path}.max_finalized_lag_slots",
+    )
+    sealed_lag = value.get("latest_sealed_lag_slots")
+    runtime_lag = value.get("latest_runtime_lag_slots")
+    if sealed_lag is not None:
+        sealed_lag = _exact_nonnegative_int(
+            sealed_lag, path=f"{path}.latest_sealed_lag_slots",
+        )
+    if runtime_lag is not None:
+        runtime_lag = _exact_nonnegative_int(
+            runtime_lag, path=f"{path}.latest_runtime_lag_slots",
+        )
+    runtime = value.get("runtime")
+    if not isinstance(runtime, Mapping) or "live" not in runtime or "maintenance" not in runtime:
+        raise BoardViewContractError(f"{path}.runtime must expose live and maintenance")
+    epoch = value.get("latest_epoch")
+    if epoch is not None:
+        if not isinstance(epoch, Mapping):
+            raise BoardViewContractError(f"{path}.latest_epoch must be an object or null")
+        for field in ("epoch_id", "live_provider", "archive_provider", "checked_at"):
+            if not isinstance(epoch.get(field), str) or not epoch.get(field, "").strip():
+                raise BoardViewContractError(f"{path}.latest_epoch.{field} is required")
+        first = _exact_nonnegative_int(epoch.get("from_slot"),
+                                       path=f"{path}.latest_epoch.from_slot")
+        last = _exact_nonnegative_int(epoch.get("to_slot"),
+                                      path=f"{path}.latest_epoch.to_slot")
+        if first > last:
+            raise BoardViewContractError(f"{path}.latest_epoch slot range is invalid")
+        _exact_nonnegative_int(epoch.get("missing_live"),
+                               path=f"{path}.latest_epoch.missing_live")
+        _exact_nonnegative_int(epoch.get("extra_live"),
+                               path=f"{path}.latest_epoch.extra_live")
+        _exact_nonnegative_int(epoch.get("finalized_head"),
+                               path=f"{path}.latest_epoch.finalized_head")
+        if epoch.get("status") not in {"sealed_clean", "sealed_breached"}:
+            raise BoardViewContractError(f"{path}.latest_epoch.status is invalid")
+        _aware_clock(epoch.get("checked_at"), path=f"{path}.latest_epoch.checked_at")
+    if ready:
+        if observed < required or age is None or age > max_age:
+            raise BoardViewContractError(f"{path} lacks a fresh complete burn-in")
+        if sealed_lag is None or runtime_lag is None \
+                or sealed_lag > max_lag or runtime_lag > max_lag:
+            raise BoardViewContractError(f"{path} exceeds the finalized slot lag policy")
+        live_provider = value.get("live_provider")
+        archive_provider = value.get("archive_provider")
+        if (_provider_host(live_provider, path=f"{path}.live_provider")
+                == _provider_host(archive_provider, path=f"{path}.archive_provider")):
+            raise BoardViewContractError(f"{path} providers are not independent")
+        if (not isinstance(epoch, Mapping) or epoch.get("status") != "sealed_clean"
+                or epoch.get("missing_live") != 0 or epoch.get("extra_live") != 0
+                or epoch.get("live_provider") != live_provider
+                or epoch.get("archive_provider") != archive_provider):
+            raise BoardViewContractError(f"{path}.latest_epoch is not clean and bound")
+        for stream_name in ("live", "maintenance"):
+            stream = runtime.get(stream_name)
+            if (not isinstance(stream, Mapping) or stream.get("status") != "live"
+                    or stream.get("open_gaps") != 0):
+                raise BoardViewContractError(
+                    f"{path}.runtime.{stream_name} is not live and gap-free"
+                )
+    return dict(value)
+
+
+def _validate_protocol_admission(value: Any, *, path: str) -> dict:
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    from src.contract.launch_protocol import (
+        COHORT_VERSION, PROTOCOL_ID, PROTOCOL_START_AT,
+    )
+
+    for field, expected in (
+        ("protocol_id", PROTOCOL_ID), ("cohort_version", COHORT_VERSION),
+        ("protocol_start_at", PROTOCOL_START_AT),
+    ):
+        if value.get(field) != expected or type(value.get(field)) is not type(expected):
+            raise BoardViewContractError(f"{path}.{field} violates protocol identity")
+    state = value.get("state")
+    if state not in {"scheduled", "armed", "open", "breached"}:
+        raise BoardViewContractError(f"{path}.state is invalid")
+    if value.get("enrollment_open") is not (state == "open"):
+        raise BoardViewContractError(f"{path}.enrollment_open contradicts state")
+    if value.get("auto_execution_allowed") is not False:
+        raise BoardViewContractError(f"{path}.auto_execution_allowed must be false")
+    reasons = _reason_codes(
+        value.get("reason_codes"), path=f"{path}.reason_codes", required=state != "open",
+    )
+    if state == "open" and reasons:
+        raise BoardViewContractError(f"{path}.reason_codes must be empty while open")
+    required_clock = {"armed": "armed_at", "open": "opened_at", "breached": "breached_at"}
+    if state in required_clock:
+        _aware_clock(value.get(required_clock[state]), path=f"{path}.{required_clock[state]}")
+    for field in ("created_at", "updated_at"):
+        if value.get(field) is not None:
+            _aware_clock(value.get(field), path=f"{path}.{field}")
+    return dict(value)
+
+
+def _validate_research_protocol(value: Any, *, readiness: Mapping[str, Any],
+                                admission: Mapping[str, Any], generated_at: datetime,
+                                path: str) -> dict:
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    from src.contract.launch_protocol import (
+        COHORT_VERSION, PROTOCOL_ID, PROTOCOL_START_AT,
+    )
+
+    exact = {
+        "protocol_id": PROTOCOL_ID, "cohort_version": COHORT_VERSION,
+        "protocol_start_at": PROTOCOL_START_AT,
+        "persistent_admission_state": admission["state"],
+        "source_readiness_state": readiness["state"],
+        "sample_kind": "forward_paper_selector",
+        "selection_stage": "discovery_rule_before_security_and_route",
+        "real_edge_n": 0, "real_edge_eligible": False,
+        "execution_edge_eligible": False, "auto_execution_allowed": False,
+    }
+    for field, expected in exact.items():
+        if value.get(field) != expected or type(value.get(field)) is not type(expected):
+            raise BoardViewContractError(f"{path}.{field} violates public protocol truth")
+    state = value.get("enrollment_state")
+    if state not in _ENROLLMENT_STATES:
+        raise BoardViewContractError(f"{path}.enrollment_state is invalid")
+    effective_open = readiness["ready"] is True and admission["state"] == "open"
+    if value.get("enrollment_open") is not effective_open:
+        raise BoardViewContractError(f"{path}.enrollment_open contradicts source/admission")
+    expected_state = (
+        "open" if effective_open else
+        "breached" if admission["state"] == "breached" else
+        admission["state"] if admission["state"] in {"scheduled", "armed"} else
+        "blocked"
+    )
+    if state != expected_state:
+        raise BoardViewContractError(
+            f"{path}.enrollment_state must be {expected_state!r}"
+        )
+    if effective_open and generated_at < datetime.fromisoformat(PROTOCOL_START_AT):
+        raise BoardViewContractError(f"{path} cannot open before protocol_start_at")
+    research_reasons = _reason_codes(
+        value.get("reason_codes"), path=f"{path}.reason_codes",
+        required=not effective_open,
+    )
+    if effective_open and value.get("reason_codes"):
+        raise BoardViewContractError(f"{path}.reason_codes must be empty while open")
+    for reason in [
+        *(readiness.get("reason_codes") or []),
+        *(admission.get("reason_codes") or []),
+    ]:
+        if reason not in research_reasons:
+            raise BoardViewContractError(f"{path}.reason_codes hides {reason!r}")
+    return dict(value)
+
+
+def _validate_current_launch_source(row: Mapping[str, Any], *, path: str) -> None:
+    from src.pipeline.edge_validation import (
+        COHORT_VERSION, is_protocol_enrollment_candidate,
+    )
+
+    candidate = dict(row)
+    if not is_protocol_enrollment_candidate(candidate):
+        return
+    if candidate.get("cohort_version") != COHORT_VERSION:
+        raise BoardViewContractError(f"{path}.cohort_version escaped current protocol")
+    entry = candidate.get("entry_observation")
+    if not isinstance(entry, Mapping):
+        raise BoardViewContractError(f"{path}.entry_observation is required for v6")
+    try:
+        from src.contract.launch_selector import validate_source_snapshot
+
+        validate_source_snapshot(
+            entry.get("source_snapshot"), token=candidate.get("token"),
+            detected_at=candidate.get("detected_at"),
+            decision_at=candidate.get("decision_at"),
+        )
+    except (TypeError, ValueError, KeyError, OverflowError) as exc:
+        raise BoardViewContractError(
+            f"{path}.entry_observation.source_snapshot is invalid: {exc}"
+        ) from exc
+
+
+def _validate_launch_view(payload: Mapping[str, Any], *, generated_at: datetime) -> None:
+    primary_sources = payload.get("primary_sources")
+    if not isinstance(primary_sources, Mapping):
+        raise BoardViewContractError("launch.primary_sources must be an object")
+    solana = primary_sources.get("solana")
+    if not isinstance(solana, Mapping):
+        raise BoardViewContractError("launch.primary_sources.solana must be an object")
+    readiness = _validate_source_readiness(
+        solana.get("source_readiness"), path="launch.primary_sources.solana.source_readiness",
+    )
+    admission = _validate_protocol_admission(
+        solana.get("protocol_admission"), path="launch.primary_sources.solana.protocol_admission",
+    )
+    research = _validate_research_protocol(
+        payload.get("research_protocol"), readiness=readiness, admission=admission,
+        generated_at=generated_at, path="launch.research_protocol",
+    )
+    rows = payload.get("events")
+    if not isinstance(rows, list):
+        raise BoardViewContractError("launch.events must be a list")
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            continue
+        path = f"launch.events[{index}]"
+        _validate_current_launch_source(row, path=path)
+        if research["enrollment_open"] is not True and (
+            row.get("action_level") == "A3_MANUAL_PROBE"
+            or row.get("actionable_now") is True
+            or row.get("effective_decision") == "SMALL_PROBE"
+        ):
+            raise BoardViewContractError(
+                f"{path} cannot be actionable while protocol enrollment is blocked"
+            )
+
+
+def _exact_nonnegative_int(value: Any, *, path: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise BoardViewContractError(f"{path} must be a nonnegative integer")
+    return value
+
+
+def _validate_launch_stats(value: Any, *, path: str) -> None:
+    """Prevent descriptive or real-execution claims from entering the edge card."""
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    from src.pipeline.edge_validation import COHORT_VERSION, PROTOCOL_ID, PROTOCOL_START_AT
+
+    exact = {
+        "metric": "append_only_exact_pool_24h_positive_after_frozen_full_paper_cost",
+        "sample_kind": "forward_paper_selector",
+        "selection_stage": "discovery_rule_before_security_and_route",
+        "cost_is_real_fill": False,
+        "real_edge_n": 0,
+        "real_edge_eligible": False,
+        "execution_edge_eligible": False,
+        "auto_execution_allowed": False,
+        "source_membership_policy": (
+            "exact_live_and_independent_finalized_append_only_observation_recheck_v1"
+        ),
+    }
+    for field, expected in exact.items():
+        if value.get(field) != expected or type(value.get(field)) is not type(expected):
+            raise BoardViewContractError(f"{path}.{field} violates the Launch evidence contract")
+    n = _exact_nonnegative_int(value.get("n"), path=f"{path}.n")
+    probe, control = value.get("probe"), value.get("control")
+    if not isinstance(probe, Mapping) or not isinstance(control, Mapping):
+        raise BoardViewContractError(f"{path} must expose both frozen protocol arms")
+    strict_n = sum(
+        _exact_nonnegative_int(arm.get("resolved_n"), path=f"{path}.{name}.resolved_n")
+        for name, arm in (("probe", probe), ("control", control))
+    )
+    if n != strict_n:
+        raise BoardViewContractError(f"{path}.n must equal strict resolved arm truth")
+
+    validation = value.get("edge_validation")
+    if not isinstance(validation, Mapping):
+        raise BoardViewContractError(f"{path}.edge_validation must be an object")
+    validation_exact = {
+        "protocol_id": PROTOCOL_ID, "cohort_version": COHORT_VERSION,
+        "protocol_start_at": PROTOCOL_START_AT,
+        "sample_kind": exact["sample_kind"],
+        "selection_stage": exact["selection_stage"],
+        "cost_is_real_fill": False, "real_edge_n": 0,
+        "real_edge_eligible": False, "execution_edge_eligible": False,
+        "auto_execution_allowed": False,
+    }
+    for field, expected in validation_exact.items():
+        if (validation.get(field) != expected
+                or type(validation.get(field)) is not type(expected)):
+            raise BoardViewContractError(
+                f"{path}.edge_validation.{field} violates the frozen protocol"
+            )
+    if value.get("edge_verdict") != validation.get("edge_verdict"):
+        raise BoardViewContractError(f"{path}.edge_verdict disagrees with its validator")
+    state = validation.get("state")
+    if not isinstance(state, str) or not state.strip():
+        raise BoardViewContractError(f"{path}.edge_validation.state is required")
+    if not isinstance(validation.get("reason"), str) or not validation.get("reason", "").strip():
+        raise BoardViewContractError(f"{path}.edge_validation.reason is required")
+    if validation.get("source_membership_policy") != exact["source_membership_policy"]:
+        raise BoardViewContractError(
+            f"{path}.edge_validation.source_membership_policy drifted"
+        )
+    admission = _validate_protocol_admission(
+        validation.get("protocol_admission"),
+        path=f"{path}.edge_validation.protocol_admission",
+    )
+    if admission["state"] != "open" and (
+            state != "protocol_integrity_blocked"
+            or validation.get("edge_verdict") != "不可判"):
+        raise BoardViewContractError(
+            f"{path}.edge_validation hides a blocked protocol admission"
+        )
+
+    current = value.get("current_protocol")
+    if not isinstance(current, Mapping):
+        raise BoardViewContractError(f"{path}.current_protocol must be an object")
+    for field in ("protocol_id", "cohort_version", "protocol_start_at"):
+        if current.get(field) != validation.get(field):
+            raise BoardViewContractError(f"{path}.current_protocol.{field} drifted")
+    _exact_nonnegative_int(
+        current.get("integrity_invalid_n"),
+        path=f"{path}.current_protocol.integrity_invalid_n",
+    )
+    if current.get("protocol_admission") != validation.get("protocol_admission"):
+        raise BoardViewContractError(f"{path}.current_protocol admission drifted")
+
+    legacy = value.get("legacy_distribution")
+    if (not isinstance(legacy, Mapping)
+            or legacy.get("sample_kind") != "legacy_mutable_outcome_descriptive_only"
+            or legacy.get("edge_eligible") is not False
+            or legacy.get("real_edge_n") != 0
+            or legacy.get("real_edge_eligible") is not False
+            or legacy.get("execution_edge_eligible") is not False
+            or legacy.get("auto_execution_allowed") is not False):
+        raise BoardViewContractError(f"{path}.legacy_distribution is not quarantined")
+
+
+def _validate_stats_view(payload: Mapping[str, Any]) -> None:
+    lanes = payload.get("lanes")
+    if not isinstance(lanes, Mapping):
+        raise BoardViewContractError("stats.lanes must be an object")
+    if "launch" not in lanes:
+        raise BoardViewContractError("stats.lanes.launch is required")
+    _validate_launch_stats(lanes["launch"], path="stats.lanes.launch")
 
 
 def _aware_clock(value: Any, *, path: str) -> datetime:
@@ -179,6 +567,11 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         raise BoardViewContractError(f"{name} next_expected_at does not match cadence")
     if not math.isclose(grace_seconds, grace_min * 60, abs_tol=1e-6):
         raise BoardViewContractError(f"{name} stale_after_at does not match grace")
+
+    if name == "launch":
+        _validate_launch_view(payload, generated_at=envelope.generated_at)
+    if name == "stats":
+        _validate_stats_view(payload)
 
     collection = _CANONICAL_EVENT_COLLECTIONS.get(name)
     if collection:

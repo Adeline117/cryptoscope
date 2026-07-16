@@ -18,11 +18,90 @@ def _launch_event(**overrides):
     return event
 
 
+def _source_readiness(*, ready: bool = False) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    live_provider = "solana_rpc:live.example"
+    archive_provider = "solana_rpc:archive.example" if ready else None
+    epoch = ({
+        "epoch_id": "1" * 32, "from_slot": 100, "to_slot": 103,
+        "status": "sealed_clean", "live_provider": live_provider,
+        "archive_provider": archive_provider, "checked_at": now,
+        "missing_live": 0, "extra_live": 0, "finalized_head": 103,
+    } if ready else None)
+    stream = {"status": "live", "open_gaps": 0}
+    return {
+        "state": "ready" if ready else "blocked", "ready": ready,
+        "live_provider": live_provider, "archive_provider": archive_provider,
+        "required_clean_epochs": 1_440, "observed_epochs": 1_440 if ready else 0,
+        "max_age_seconds": 300.0, "latest_age_seconds": 0.0 if ready else None,
+        "max_finalized_lag_slots": 256,
+        "latest_sealed_lag_slots": 0 if ready else None,
+        "latest_runtime_lag_slots": 0 if ready else None,
+        "latest_epoch": epoch,
+        "runtime": {
+            "live": stream if ready else None,
+            "maintenance": stream if ready else None,
+        },
+        "reason_codes": [] if ready else ["archive_provider_not_configured"],
+    }
+
+
+def _protocol_admission(*, state: str = "scheduled") -> dict:
+    from src.contract.launch_protocol import (
+        COHORT_VERSION, PROTOCOL_ID, PROTOCOL_START_AT,
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "protocol_id": PROTOCOL_ID, "cohort_version": COHORT_VERSION,
+        "protocol_start_at": PROTOCOL_START_AT, "state": state,
+        "enrollment_open": state == "open",
+        "armed_at": now if state in {"armed", "open"} else None,
+        "opened_at": now if state == "open" else None,
+        "breached_at": now if state == "breached" else None,
+        "reason_codes": [] if state == "open" else [
+            "source_readiness_breached_after_open" if state == "breached"
+            else "protocol_start_not_reached"
+        ],
+        "readiness_hash": "a" * 64, "created_at": now, "updated_at": now,
+        "auto_execution_allowed": False,
+    }
+
+
+def _launch_body(events: list[dict], *, ready: bool = False,
+                 admission_state: str = "scheduled") -> dict:
+    from src.pipeline.launch_radar import _public_research_protocol
+
+    readiness = _source_readiness(ready=ready)
+    admission = _protocol_admission(state=admission_state)
+    return {
+        "events": events,
+        "research_protocol": _public_research_protocol(readiness, admission),
+        "primary_sources": {
+            "solana": {
+                "available": True, "source_readiness": readiness,
+                "protocol_admission": admission,
+            },
+            "evm": {"available": True, "streams": []},
+        },
+    }
+
+
+def _open_launch_body(events: list[dict]) -> dict:
+    return _launch_body(events, ready=True, admission_state="open")
+
+
 def _a3_event(**overrides):
+    from src.contract.launch_selector import (
+        evaluate_selector_snapshot, freeze_selector_snapshot, freeze_source_snapshot,
+    )
     from src.pipeline.edge_validation import (
         COHORT_VERSION, LAUNCH_COST_METHOD, PROTOCOL_ID, PROTOCOL_START_AT,
     )
-    from src.pipeline.execution_cost import discovery_contract, route_contract
+    from src.pipeline.execution_cost import (
+        route_contract,
+        solana_launch_full_paper_contract,
+    )
 
     now = datetime.now(timezone.utc)
     assessment = {
@@ -44,13 +123,25 @@ def _a3_event(**overrides):
                 },
             },
         },
-        "route_state": "quoted", "quote_source": "Jupiter", "quote_at": now.isoformat(),
+        "route_state": "quoted", "quote_source": "Jupiter Swap v2 order",
+        "quote_mode": "keyed_v2", "quote_at": now.isoformat(),
         "quote_expires_at": (now + timedelta(minutes=1)).isoformat(),
         "expires_at": (now + timedelta(minutes=1)).isoformat(),
         "notional_usd": 25.0, "entry_reference_price": 1.1,
         "invalidation_reference_price": 0.77, "roundtrip_back_usd": 24.55,
         "execution_probe": {
-            "state": "quoted", "source": "Jupiter", "checked_at": now.isoformat(),
+            "state": "quoted", "source": "Jupiter Swap v2 order",
+            "api_mode": "keyed_v2", "promotion_eligible": True,
+            "quote_contract_verified": True,
+            "provider_contract": {
+                "version": 1, "provider": "jupiter", "api_version": "v2",
+                "operation": "order",
+                "endpoint": "https://api.jup.ag/swap/v2/order",
+                "auth_mode": "x_api_key", "slippage_bps": 100,
+                "swap_mode": "ExactIn", "read_only": True,
+                "taker_supplied": False, "transaction_built": False,
+            },
+            "checked_at": now.isoformat(),
             "chain": "solana", "token": "Mint111",
             "read_only": True, "is_real_fill": False, "network_fees_included": True,
             "notional_usd": 25.0, "roundtrip_loss_pct": 1.8,
@@ -64,31 +155,92 @@ def _a3_event(**overrides):
         "delivery_sla_state": "pass", "is_real_fill": False,
         "auto_execution_allowed": False,
     }
+    detected = datetime.fromisoformat(PROTOCOL_START_AT) + timedelta(seconds=1)
+    detected_at = detected.isoformat()
+    event_at = detected - timedelta(minutes=30)
+    selector_snapshot = freeze_selector_snapshot(
+        pool_created_at=event_at.isoformat(), liquidity_usd=8_000,
+        fdv_usd=100_000, volume_m5_usd=500, buys_m5=5, sells_m5=2,
+    )
+    selector = evaluate_selector_snapshot(
+        selector_snapshot,
+        event_at=event_at.isoformat(),
+        decision_at=detected_at,
+    )
+    discovery_cost = solana_launch_full_paper_contract(
+        notional_usd=selector["max_notional_usd"],
+        modeled_route_roundtrip_pct=selector["modeled_route_roundtrip_pct"],
+        method=LAUNCH_COST_METHOD,
+    )
     event = _launch_event(
-        chain="solana", token="Mint111", symbol="T", source="test primary chain stream",
+        chain="solana", token="Mint111", symbol="T",
+        source="Pump.fun standard logs + DEX Screener pool",
         state="live", outcome_state="open", is_expired=False,
         action_level="A3_MANUAL_PROBE", actionable_now=True,
         effective_decision="SMALL_PROBE", decision="SMALL_PROBE",
         recorded_decision="SMALL_PROBE", entry_price=1.0,
         invalidation_price=0.7, liquidity_usd=8_000.0, max_notional_usd=25.0,
-        detected_at=(datetime.fromisoformat(PROTOCOL_START_AT)
-                     + timedelta(seconds=1)).isoformat(),
+        event_at=event_at.isoformat(), detected_at=detected_at,
+        decision_at=detected_at,
+        created_at=(detected + timedelta(seconds=1)).isoformat(),
+        entry_observation={
+            "version": 1, "provider": "dexscreener_token_pairs_v1",
+            "observed_at": detected_at, "chain": "solana",
+            "base_token": "Mint111", "quote_token": "SOL", "pair": "pool",
+            "price": 1.0, "currency": "usd", "field": "priceUsd",
+            "identity_verified": True,
+            "selector_snapshot": selector_snapshot,
+            "source_snapshot": freeze_source_snapshot(
+                signature="signature-Mint111", slot=1,
+                event_type="pump_fun_createv2", detected_at=detected_at,
+                captured_at=detected_at, decision_at=detected_at,
+                mint="Mint111", raw_payload_hash="a" * 64,
+                hydration_payload_hash="b" * 64, capture_mode="live_ws",
+                source_provider="solana_rpc:live.example",
+                reconciliation_state="verified_live", reconciled_at=detected_at,
+                reconciliation_proof={
+                    "version": 1, "epoch_id": "1" * 32,
+                    "from_slot": 0, "to_slot": 100, "status": "sealed_clean",
+                    "checked_at": detected_at,
+                    "live_provider": "solana_rpc:live.example",
+                    "archive_provider": "solana_rpc:archive.example",
+                    "genesis_hash": "mainnet-genesis", "evidence_hash": "e" * 64,
+                    "finalized_head": 100, "live_captured_at": detected_at,
+                    "live_observation_hash": "a" * 64,
+                    "archive_observation_hash": "a" * 64,
+                    "hydration_identity_hash": "b" * 64,
+                },
+            ),
+        },
         cohort_version=COHORT_VERSION, cost_contract_version=1,
-        cost_pct_est=1.2,
-        cost_contract=discovery_contract(
-            notional_usd=25, modeled_roundtrip_pct=1.2, method=LAUNCH_COST_METHOD,
-        ),
+        entry_observation_version=1,
+        cost_pct_est=discovery_cost["all_in_total_pct"],
+        cost_model=LAUNCH_COST_METHOD, cost_contract=discovery_cost,
         evidence_gate={
             "state": "pass", "lane": "launch", "protocol_id": PROTOCOL_ID,
             "protocol_state": "pass", "cost_is_real_fill": False,
-            "edge_verdict": "有前向纸面edge迹象", "minimum_n": 100,
+            "edge_verdict": "有前向纸面selector edge迹象", "minimum_n": 100,
             "measured_n": 200, "look_n_per_arm": 100,
+            "sample_kind": "forward_paper_selector",
+            "selection_stage": "discovery_rule_before_security_and_route",
+            "real_edge_n": 0, "real_edge_eligible": False,
+            "execution_edge_eligible": False, "auto_execution_allowed": False,
             "reason": "pre-registered forward look passed in contract fixture",
         },
         current_assessment=assessment,
     )
     event.update(overrides)
     return event
+
+
+def _enable_started_protocol(monkeypatch) -> None:
+    from src.contract import launch_protocol
+    from src.pipeline import edge_validation, launch_radar
+
+    boundary = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    monkeypatch.setattr(launch_protocol, "PROTOCOL_START_AT", boundary)
+    monkeypatch.setattr(edge_validation, "PROTOCOL_START_AT", boundary)
+    monkeypatch.setattr(launch_radar, "PROTOCOL_START_AT", boundary)
 
 
 def _view(board_export, view, body):
@@ -99,7 +251,7 @@ def test_wrong_view_name_rejects_write_and_preserves_existing_files(tmp_path, mo
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    good = _view(board_export, "launch", {"events": [_launch_event()]})
+    good = _view(board_export, "launch", _launch_body([_launch_event()]))
     board_export.write_views(launch=good)
     before_launch = (tmp_path / "launch.json").read_bytes()
     before_meta = (tmp_path / "meta.json").read_bytes()
@@ -117,14 +269,14 @@ def test_batch_preflight_rejects_nan_without_partial_update(tmp_path, monkeypatc
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    old_launch = _view(board_export, "launch", {"events": [_launch_event()]})
+    old_launch = _view(board_export, "launch", _launch_body([_launch_event()]))
     old_structure = _view(board_export, "structure", {"events": []})
     board_export.write_views(launch=old_launch, structure=old_structure)
     before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
 
-    new_launch = _view(board_export, "launch", {
-        "events": [_launch_event(symbol="NEW")],
-    })
+    new_launch = _view(
+        board_export, "launch", _launch_body([_launch_event(symbol="NEW")]),
+    )
     bad_structure = _view(board_export, "structure", {
         "events": [], "coverage_ratio": float("nan"),
     })
@@ -139,7 +291,7 @@ def test_future_generated_clock_cannot_make_quotes_live_for_years(tmp_path, monk
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    payload = _view(board_export, "launch", {"events": []})
+    payload = _view(board_export, "launch", _launch_body([]))
     generated = datetime(2100, 1, 1, tzinfo=timezone.utc)
     cadence = timedelta(minutes=payload["refresh_cadence_min"])
     grace = timedelta(minutes=payload["freshness_grace_min"])
@@ -155,11 +307,97 @@ def test_future_generated_clock_cannot_make_quotes_live_for_years(tmp_path, monk
     assert not (tmp_path / "launch.json").exists()
 
 
+def test_launch_context_is_mandatory_and_preserves_last_good(tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    good = _view(board_export, "launch", _launch_body([_launch_event()]))
+    board_export.write_views(launch=good)
+    before = (tmp_path / "launch.json").read_bytes()
+    before_meta = (tmp_path / "meta.json").read_bytes()
+
+    bad_bodies = [
+        {"events": [_launch_event()]},
+        {**_launch_body([_launch_event()]), "research_protocol": None},
+        {
+            **_launch_body([_launch_event()]),
+            "primary_sources": {"solana": {"protocol_admission": _protocol_admission()}},
+        },
+        {
+            **_launch_body([_launch_event()]),
+            "primary_sources": {"solana": {"source_readiness": _source_readiness()}},
+        },
+    ]
+    for body in bad_bodies:
+        with pytest.raises(ValueError):
+            board_export.write_views(launch=_view(board_export, "launch", body))
+        assert (tmp_path / "launch.json").read_bytes() == before
+        assert (tmp_path / "meta.json").read_bytes() == before_meta
+
+
+def test_open_launch_context_rejects_every_readiness_and_admission_contradiction(
+        tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    _enable_started_protocol(monkeypatch)
+    good = _view(board_export, "launch", _open_launch_body([_launch_event()]))
+    board_export.write_views(launch=good)
+    before = (tmp_path / "launch.json").read_bytes()
+
+    def readiness(body):
+        return body["primary_sources"]["solana"]["source_readiness"]
+
+    def admission(body):
+        return body["primary_sources"]["solana"]["protocol_admission"]
+
+    mutators = (
+        lambda body: readiness(body).update(ready=False),
+        lambda body: readiness(body)["reason_codes"].append("hidden_block"),
+        lambda body: readiness(body).update(observed_epochs=1),
+        lambda body: readiness(body).update(latest_age_seconds=301),
+        lambda body: readiness(body).update(latest_runtime_lag_slots=257),
+        lambda body: readiness(body)["latest_epoch"].update(status="sealed_breached"),
+        lambda body: readiness(body)["latest_epoch"].update(missing_live=1),
+        lambda body: readiness(body)["runtime"]["live"].update(open_gaps=1),
+        lambda body: readiness(body).update(
+            archive_provider="solana_rpc:live.example:9999"
+        ),
+        lambda body: admission(body).update(protocol_id="retuned-protocol"),
+        lambda body: admission(body).update(enrollment_open=False),
+        lambda body: admission(body).update(auto_execution_allowed=True),
+        lambda body: body["research_protocol"].update(enrollment_open=False),
+        lambda body: body["research_protocol"].update(enrollment_state="blocked"),
+    )
+    for mutate in mutators:
+        bad = deepcopy(good)
+        mutate(bad)
+        with pytest.raises(ValueError):
+            board_export.write_views(launch=bad)
+        assert (tmp_path / "launch.json").read_bytes() == before
+
+
+def test_blocked_protocol_never_publishes_forged_manual_window(tmp_path, monkeypatch):
+    from src.pipeline import board_export
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    forged = _launch_event(
+        action_level="A3_MANUAL_PROBE", actionable_now=True,
+        effective_decision="SMALL_PROBE",
+    )
+    with pytest.raises(ValueError, match="enrollment is blocked"):
+        board_export.write_views(
+            launch=_view(board_export, "launch", _launch_body([forged]))
+        )
+    assert not (tmp_path / "launch.json").exists()
+
+
 def test_a3_expiring_during_render_cannot_cross_the_write_boundary(
         tmp_path, monkeypatch):
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    _enable_started_protocol(monkeypatch)
     event = _a3_event()
     stale = datetime.now(timezone.utc) - timedelta(seconds=61)
     event["current_assessment"].update({
@@ -171,7 +409,7 @@ def test_a3_expiring_during_render_cannot_cross_the_write_boundary(
 
     with pytest.raises(ValueError, match="quote_clock_invalid"):
         board_export.write_views(
-            launch=_view(board_export, "launch", {"events": [event]})
+            launch=_view(board_export, "launch", _open_launch_body([event]))
         )
 
     assert not (tmp_path / "launch.json").exists()
@@ -186,27 +424,30 @@ def test_false_a3_cannot_cross_public_boundary(tmp_path, monkeypatch, changes):
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    _enable_started_protocol(monkeypatch)
     event = _a3_event()
     event.update(changes)
 
     with pytest.raises(ValueError):
         board_export.write_views(
-            launch=_view(board_export, "launch", {"events": [event]})
+            launch=_view(board_export, "launch", _open_launch_body([event]))
         )
     assert not (tmp_path / "launch.json").exists()
 
 
-def test_current_consistent_a3_can_cross_public_boundary(tmp_path, monkeypatch):
+def test_a3_cannot_cross_until_public_delivery_readback_exists(tmp_path, monkeypatch):
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    _enable_started_protocol(monkeypatch)
     event = _a3_event()
 
-    board_export.write_views(
-        launch=_view(board_export, "launch", {"events": [event]})
-    )
+    with pytest.raises(ValueError, match="delivery_readback_verifier_unavailable"):
+        board_export.write_views(
+            launch=_view(board_export, "launch", _open_launch_body([event]))
+        )
 
-    assert (tmp_path / "launch.json").exists()
+    assert not (tmp_path / "launch.json").exists()
 
 
 @pytest.mark.parametrize("case", [
@@ -239,7 +480,10 @@ def test_incomplete_a3_never_replaces_last_known_good_view(
     from src.pipeline.execution_cost import route_contract
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    old = _view(board_export, "launch", {"events": [_launch_event(symbol="KNOWN_GOOD")]})
+    _enable_started_protocol(monkeypatch)
+    old = _view(
+        board_export, "launch", _launch_body([_launch_event(symbol="KNOWN_GOOD")]),
+    )
     board_export.write_views(launch=old)
     before = (tmp_path / "launch.json").read_bytes()
     before_meta = (tmp_path / "meta.json").read_bytes()
@@ -432,7 +676,7 @@ def test_incomplete_a3_never_replaces_last_known_good_view(
 
     with pytest.raises(ValueError):
         board_export.write_views(
-            launch=_view(board_export, "launch", {"events": [event]})
+            launch=_view(board_export, "launch", _open_launch_body([event]))
         )
 
     assert (tmp_path / "launch.json").read_bytes() == before
@@ -444,7 +688,7 @@ def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkey
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    launch = _view(board_export, "launch", {"events": [_launch_event()]})
+    launch = _view(board_export, "launch", _launch_body([_launch_event()]))
     perps = _view(board_export, "perps", {
         "perps": [], "carry": [], "cascade_events": [{
             "id": "cascade-1", "lane": "cascade", "actionable_now": False,
@@ -460,11 +704,51 @@ def test_fail_closed_launch_and_carry_views_remain_serializable(tmp_path, monkey
     ] == "A1_WATCH"
 
 
+def test_stats_view_quarantines_legacy_and_rejects_execution_edge_claims(
+        tmp_path, monkeypatch):
+    from src.pipeline import board_export, opportunity_ledger
+
+    monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
+    monkeypatch.setattr(opportunity_ledger, "DB", tmp_path / "ledger.db")
+    good = board_export.render_stats(None)
+    board_export.write_views(stats=good)
+    before = (tmp_path / "stats.json").read_bytes()
+
+    mutators = (
+        lambda launch: launch.update(real_edge_n=99),
+        lambda launch: launch.update(auto_execution_allowed=1),
+        lambda launch: launch.update(n=1),
+        lambda launch: launch.pop("source_membership_policy"),
+        lambda launch: launch["edge_validation"].update(
+            auto_execution_allowed=True
+        ),
+        lambda launch: launch["edge_validation"].pop("source_membership_policy"),
+        lambda launch: launch["edge_validation"].update(
+            state="pass", edge_verdict="有前向纸面selector edge迹象"
+        ),
+        lambda launch: launch["current_protocol"].update(
+            protocol_admission={"state": "open"}
+        ),
+        lambda launch: launch["legacy_distribution"].update(edge_eligible=True),
+    )
+    missing_launch = deepcopy(good)
+    missing_launch["lanes"].pop("launch")
+    with pytest.raises(ValueError, match="stats.lanes.launch is required"):
+        board_export.write_views(stats=missing_launch)
+    assert (tmp_path / "stats.json").read_bytes() == before
+    for mutate in mutators:
+        bad = deepcopy(good)
+        mutate(bad["lanes"]["launch"])
+        with pytest.raises(ValueError):
+            board_export.write_views(stats=bad)
+        assert (tmp_path / "stats.json").read_bytes() == before
+
+
 def test_full_export_render_failure_never_replaces_last_good_launch(tmp_path, monkeypatch):
     from src.pipeline import board_export
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    old = _view(board_export, "launch", {"events": [_launch_event()]})
+    old = _view(board_export, "launch", _launch_body([_launch_event()]))
     board_export.write_views(launch=old)
     before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
     monkeypatch.setattr(board_export, "render_launch", lambda: (_ for _ in ()).throw(

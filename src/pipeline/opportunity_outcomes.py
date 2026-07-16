@@ -860,6 +860,7 @@ def _launch_stats(rows: list[dict]) -> dict:
         "edge_note": validation["reason"],
         "sample_kind": validation["sample_kind"],
         "selection_stage": validation["selection_stage"],
+        "source_membership_policy": validation["source_membership_policy"],
         "real_edge_n": 0, "real_edge_eligible": False,
         "execution_edge_eligible": False, "auto_execution_allowed": False,
         "current_protocol": {
@@ -876,6 +877,7 @@ def _launch_stats(rows: list[dict]) -> dict:
             "integrity_invalid_by_reason": validation.get(
                 "integrity_invalid_by_reason", {}
             ),
+            "protocol_admission": validation.get("protocol_admission"),
         },
     }
     if n < MIN_N:
