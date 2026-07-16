@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import urllib.error
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
@@ -191,6 +192,9 @@ def test_concurrent_legacy_hydration_migration_is_idempotent(sol):
         "qualification_attempt_count", "qualification_lease_token",
         "qualification_lease_started_at", "qualification_lease_expires_at",
         "qualification_next_retry_at", "qualification_last_outcome_kind",
+        "capture_mode", "captured_at", "block_time", "source_provider",
+        "source_conflict_at", "source_conflict_reason", "reconciliation_state",
+        "reconciliation_epoch_id", "reconciled_at",
     )
     assert all(schema[-len(expected):] == expected for schema in schemas)
 
@@ -209,6 +213,133 @@ def test_creation_is_parsed_and_hydrated_as_raw_unqualified(sol):
                        "raw_unqualified", 64, 64)
     finally:
         c.close()
+
+
+def test_live_capture_and_exact_backfill_are_distinct_append_only_observations(sol):
+    captured = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    finalized = captured + timedelta(minutes=1)
+    event = sol.parse_message(_notification())
+    sol.persist(
+        event.payload, transaction=_transaction(), capture_mode="live_ws",
+        captured_at=captured, source_provider="solana_rpc:live.example",
+    )
+    c = sol._conn()
+    try:
+        first = c.execute(
+            """SELECT detected_at,raw_payload_hash,hydration_payload_hash,
+                      capture_mode,captured_at,transaction_index
+               FROM raw_launches"""
+        ).fetchone()
+    finally:
+        c.close()
+
+    replay = deepcopy(event.payload)
+    replay["transaction_index"] = 7
+    sol.persist(
+        replay, transaction=_transaction(), capture_mode="gap_backfill",
+        captured_at=finalized, block_time=captured - timedelta(seconds=5),
+        source_provider="solana_rpc:archive.example",
+    )
+    c = sol._conn()
+    try:
+        current = c.execute(
+            """SELECT detected_at,raw_payload_hash,hydration_payload_hash,
+                      capture_mode,captured_at,transaction_index,block_time
+               FROM raw_launches"""
+        ).fetchone()
+        observations = c.execute(
+            """SELECT capture_mode,source_provider,canonical_match
+               FROM raw_launch_observations ORDER BY id"""
+        ).fetchall()
+        hydration_sources = c.execute(
+            "SELECT source_provider FROM hydration_observations ORDER BY id"
+        ).fetchall()
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            c.execute("UPDATE raw_launch_observations SET canonical_match=0")
+    finally:
+        c.close()
+
+    assert current[:5] == first[:5]
+    assert current[5:] == (
+        7, (captured - timedelta(seconds=5)).isoformat(),
+    )
+    assert observations == [
+        ("live_ws", "solana_rpc:live.example", 1),
+        ("gap_backfill", "solana_rpc:archive.example", 1),
+    ]
+    assert hydration_sources == [
+        ("solana_rpc:live.example",), ("solana_rpc:archive.example",),
+    ]
+
+
+def test_conflicting_signature_never_rewrites_first_raw_capture(sol):
+    captured = datetime(2026, 7, 20, 12, tzinfo=timezone.utc)
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction(), captured_at=captured)
+    c = sol._conn()
+    try:
+        before = c.execute(
+            "SELECT slot,event_type,logs,raw_payload_hash FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    conflict = deepcopy(event.payload)
+    conflict["logs"] = [*conflict["logs"], "Program log: forged"]
+
+    with pytest.raises(sol.SourceEvidenceConflict, match="conflicting"):
+        sol.persist(
+            conflict, capture_mode="gap_backfill",
+            captured_at=captured + timedelta(minutes=1),
+            source_provider="solana_rpc:archive.example",
+        )
+
+    c = sol._conn()
+    try:
+        after = c.execute(
+            """SELECT slot,event_type,logs,raw_payload_hash,evidence_state,
+                      qualification_state FROM raw_launches"""
+        ).fetchone()
+        matches = c.execute(
+            "SELECT canonical_match FROM raw_launch_observations ORDER BY id"
+        ).fetchall()
+    finally:
+        c.close()
+    assert after[:4] == before
+    assert after[4:] == ("source_conflict", "provenance_conflict")
+    assert matches == [(1,), (0,)]
+
+
+def test_complete_hydration_identity_cannot_be_overwritten(sol):
+    event = sol.parse_message(_notification())
+    sol.persist(event.payload, transaction=_transaction())
+    c = sol._conn()
+    try:
+        before = c.execute(
+            "SELECT creator,mint,hydration_payload_hash FROM raw_launches"
+        ).fetchone()
+    finally:
+        c.close()
+    conflict = deepcopy(_transaction())
+    conflict["transaction"]["message"]["accountKeys"][0]["pubkey"] = "attacker"
+    conflict["transaction"]["message"]["instructions"][0]["accounts"][2] = "attacker"
+
+    with pytest.raises(sol.SourceEvidenceConflict, match="identity conflicts"):
+        sol._set_hydration("sig-1", conflict, None)
+
+    c = sol._conn()
+    try:
+        after = c.execute(
+            """SELECT creator,mint,hydration_payload_hash,evidence_state,
+                      qualification_state FROM raw_launches"""
+        ).fetchone()
+        states = c.execute(
+            "SELECT evidence_state FROM hydration_observations ORDER BY id"
+        ).fetchall()
+    finally:
+        c.close()
+    assert after[:3] == before
+    assert after[3:] == ("source_conflict", "provenance_conflict")
+    assert states == [("complete",), ("source_conflict",)]
 
 
 def test_raw_json_transaction_indexes_prove_launch_identity(sol):
@@ -417,6 +548,7 @@ def test_hydration_queue_is_fifo_so_new_launches_cannot_starve_old_rows(sol):
             calls.append(params[0])
             tx = _transaction()
             tx["transaction"]["signatures"] = [params[0]]
+            tx["slot"] = 100
             return tx
 
     result = sol.rehydrate_pending(Rpc(), limit=2, now=base + timedelta(minutes=1))
@@ -1286,7 +1418,9 @@ def test_unresolved_raw_create_is_retained_and_does_not_block_the_gap(sol):
     class HydrationRpc:
         def call(self, method, params):
             assert method == "getTransaction"
-            return _transaction()
+            tx = _transaction()
+            tx["slot"] = 11
+            return tx
 
     assert sol.rehydrate_pending(
         HydrationRpc(), include_incomplete=True,

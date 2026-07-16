@@ -80,6 +80,26 @@ def configured_ws_endpoint() -> str:
     return PUBLIC_SOLANA_WS
 
 
+def rpc_provider_id(endpoint: str | None = None) -> str:
+    """Name a provider without persisting API keys or URL query parameters."""
+    parsed = urllib.parse.urlsplit(endpoint or configured_rpc_endpoint())
+    host = (parsed.hostname or "unknown").lower()
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"solana_rpc:{host}{port}"
+
+
+def _capture_clock(value: datetime | str | None) -> str:
+    if value is None:
+        parsed = datetime.now(timezone.utc)
+    elif isinstance(value, datetime):
+        parsed = value
+    else:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("capture timestamps must be timezone-aware")
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 class RpcPressureError(RuntimeError):
     """Transport/rate pressure that must stop all RPC work for this cycle."""
 
@@ -325,6 +345,15 @@ def _conn() -> sqlite3.Connection:
             ("qualification_lease_expires_at", "TEXT"),
             ("qualification_next_retry_at", "TEXT"),
             ("qualification_last_outcome_kind", "TEXT"),
+            ("capture_mode", "TEXT NOT NULL DEFAULT 'legacy_unknown'"),
+            ("captured_at", "TEXT"),
+            ("block_time", "TEXT"),
+            ("source_provider", "TEXT"),
+            ("source_conflict_at", "TEXT"),
+            ("source_conflict_reason", "TEXT"),
+            ("reconciliation_state", "TEXT NOT NULL DEFAULT 'unverified'"),
+            ("reconciliation_epoch_id", "TEXT"),
+            ("reconciled_at", "TEXT"),
         )
         columns = {row[1] for row in c.execute("PRAGMA table_info(raw_launches)")}
         if any(name not in columns for name, _kind in migrations):
@@ -378,6 +407,48 @@ def _conn() -> sqlite3.Connection:
             failure_count INTEGER NOT NULL DEFAULT 0,
             circuit_open_until TEXT,
             response_hash TEXT)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS raw_launch_observations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signature TEXT NOT NULL,
+            slot INTEGER NOT NULL,
+            transaction_index INTEGER,
+            capture_mode TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            block_time TEXT,
+            source_provider TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            canonical_match INTEGER NOT NULL,
+            UNIQUE(signature,capture_mode,source_provider,payload_hash),
+            FOREIGN KEY(signature) REFERENCES raw_launches(signature))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS hydration_observations(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signature TEXT NOT NULL,
+            observed_at TEXT NOT NULL,
+            source_provider TEXT NOT NULL,
+            response_hash TEXT,
+            identity_hash TEXT,
+            creator TEXT,
+            mint TEXT,
+            evidence_state TEXT NOT NULL,
+            error TEXT,
+            UNIQUE(signature,source_provider,response_hash,identity_hash,evidence_state),
+            FOREIGN KEY(signature) REFERENCES raw_launches(signature))""")
+        for trigger, table in (
+            ("trg_raw_launch_observation_no_update", "raw_launch_observations"),
+            ("trg_hydration_observation_no_update", "hydration_observations"),
+        ):
+            c.execute(f"""CREATE TRIGGER IF NOT EXISTS {trigger}
+                         BEFORE UPDATE ON {table} BEGIN
+                           SELECT RAISE(ABORT, 'source observation is append-only');
+                         END""")
+        for trigger, table in (
+            ("trg_raw_launch_observation_no_delete", "raw_launch_observations"),
+            ("trg_hydration_observation_no_delete", "hydration_observations"),
+        ):
+            c.execute(f"""CREATE TRIGGER IF NOT EXISTS {trigger}
+                         BEFORE DELETE ON {table} BEGIN
+                           SELECT RAISE(ABORT, 'source observation is append-only');
+                         END""")
         c.execute("""CREATE TRIGGER IF NOT EXISTS trg_solana_terminal_qualification_immutable
                      BEFORE UPDATE OF qualification_state,qualification_error,
                                       ledger_event_id,qualified_at ON raw_launches
@@ -418,6 +489,11 @@ QUALIFICATION_PROVIDER = "dexscreener"
 QUALIFICATION_ENDPOINT_CONTRACT = (
     "tokens_v1_batch_prefilter_then_token_pairs_v1_exact_entry_v1"
 )
+CAPTURE_MODES = {"live_ws", "gap_backfill", "finalized_reconciliation"}
+
+
+class SourceEvidenceConflict(RuntimeError):
+    """Two observations disagree on immutable on-chain launch identity."""
 
 
 def _sha256_or_none(value: str | None) -> str | None:
@@ -1105,25 +1181,97 @@ def _hash(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _insert_raw(payload: dict) -> None:
-    detected_at = datetime.now(timezone.utc).isoformat()
+def _insert_raw(
+    payload: dict, *, capture_mode: str = "live_ws",
+    captured_at: datetime | str | None = None,
+    block_time: datetime | str | None = None,
+    source_provider: str | None = None,
+) -> None:
+    if capture_mode not in CAPTURE_MODES:
+        raise ValueError(f"unknown Solana capture mode: {capture_mode}")
+    captured = _capture_clock(captured_at)
+    normalized_block_time = _capture_clock(block_time) if block_time is not None else None
+    provider = str(source_provider or rpc_provider_id())
+    logs_json = json.dumps(payload["logs"], separators=(",", ":"))
+    # transaction_index is an enrichment unavailable to logsSubscribe. Excluding
+    # its value from the canonical hash lets finalized reconciliation prove the
+    # same event without rewriting the first live payload.
     evidence = {key: payload.get(key) for key in (
-        "signature", "slot", "transaction_index", "program", "event_type", "logs")}
+        "signature", "slot", "program", "event_type", "logs")}
+    evidence["transaction_index"] = None
+    payload_hash = _hash(evidence)
+    conflict_reason = None
     c = _conn()
     try:
-        c.execute("""INSERT INTO raw_launches(
-            signature,slot,transaction_index,program,event_type,detected_at,
-            raw_payload_hash,logs,evidence_state,qualification_state
-        ) VALUES (?,?,?,?,?,?,?,?,?,'raw_unqualified')
-        ON CONFLICT(signature) DO UPDATE SET
-          slot=excluded.slot,
-          transaction_index=COALESCE(raw_launches.transaction_index,
-                                     excluded.transaction_index)""",
-                  (payload["signature"], payload["slot"],
-                   payload.get("transaction_index"), payload["program"],
-                   payload["event_type"], detected_at, _hash(evidence),
-                   json.dumps(payload["logs"], separators=(",", ":")), "raw_only"))
+        c.execute("BEGIN IMMEDIATE")
+        existing = c.execute(
+            """SELECT slot,transaction_index,program,event_type,logs,
+                      qualification_state
+               FROM raw_launches WHERE signature=?""",
+            (payload["signature"],),
+        ).fetchone()
+        canonical_match = True
+        if existing is None:
+            c.execute("""INSERT INTO raw_launches(
+                signature,slot,transaction_index,program,event_type,detected_at,
+                raw_payload_hash,logs,evidence_state,qualification_state,
+                capture_mode,captured_at,block_time,source_provider
+            ) VALUES (?,?,?,?,?,?,?,?,?,'raw_unqualified',?,?,?,?)""",
+                      (payload["signature"], payload["slot"],
+                       payload.get("transaction_index"), payload["program"],
+                       payload["event_type"], captured, payload_hash, logs_json,
+                       "raw_only", capture_mode, captured, normalized_block_time,
+                       provider))
+        else:
+            canonical_match = (
+                int(existing[0]) == int(payload["slot"])
+                and str(existing[2]) == str(payload["program"])
+                and str(existing[3]) == str(payload["event_type"])
+                and str(existing[4]) == logs_json
+            )
+            if canonical_match:
+                c.execute(
+                    """UPDATE raw_launches SET
+                         transaction_index=COALESCE(transaction_index,?),
+                         block_time=COALESCE(block_time,?)
+                       WHERE signature=?""",
+                    (payload.get("transaction_index"), normalized_block_time,
+                     payload["signature"]),
+                )
+            else:
+                conflict_reason = "same signature has conflicting slot/program/event/logs"
+                c.execute(
+                    """UPDATE raw_launches SET evidence_state='source_conflict',
+                         source_conflict_at=?,source_conflict_reason=?
+                       WHERE signature=?""",
+                    (captured, conflict_reason, payload["signature"]),
+                )
+                if existing[5] in RETRYABLE_QUALIFICATION_STATES:
+                    c.execute(
+                        """UPDATE raw_launches SET
+                             qualification_state='provenance_conflict',
+                             qualification_error=?
+                           WHERE signature=?""",
+                        (conflict_reason, payload["signature"]),
+                    )
+        c.execute(
+            """INSERT OR IGNORE INTO raw_launch_observations(
+                 signature,slot,transaction_index,capture_mode,captured_at,
+                 block_time,source_provider,payload_hash,canonical_match)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (payload["signature"], int(payload["slot"]),
+             payload.get("transaction_index"), capture_mode, captured,
+             normalized_block_time, provider, payload_hash,
+             1 if canonical_match else 0),
+        )
         c.commit()
+        if conflict_reason:
+            raise SourceEvidenceConflict(conflict_reason)
+    except SourceEvidenceConflict:
+        raise
+    except Exception:
+        c.rollback()
+        raise
     finally:
         c.close()
 
@@ -1220,34 +1368,96 @@ def _hydration_retry_delay(retry_count: int) -> int:
 
 def _set_hydration(signature: str, tx: dict | None, error: str | None,
                    *, at: datetime | None = None,
-                   retry_after_seconds: int | None = None) -> str:
+                   retry_after_seconds: int | None = None,
+                   source_provider: str | None = None) -> str:
     now_dt = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     now = now_dt.isoformat()
+    provider = str(source_provider or rpc_provider_id())
     creator = mint = None
+    response_hash = _hash(tx) if tx is not None else None
+    identity_error = None
     if tx is not None and error is None:
-        creator, mint, error = _extract_identity(tx)
+        signatures = ((tx.get("transaction") or {}).get("signatures") or [])
+        if not signatures:
+            error = "transaction did not prove its requested signature"
+        elif str(signatures[0]) != str(signature):
+            identity_error = "hydration transaction signature conflicts with raw launch"
+        else:
+            creator, mint, error = _extract_identity(tx)
     state = "complete" if creator and mint else ("rpc_unavailable" if tx is None
                                                    else "incomplete")
     c = _conn()
     try:
         c.execute("BEGIN IMMEDIATE")
         row = c.execute(
-            "SELECT hydration_retry_count,evidence_state FROM raw_launches "
-            "WHERE signature=?",
+            """SELECT hydration_retry_count,evidence_state,creator,mint,
+                      slot,qualification_state
+               FROM raw_launches WHERE signature=?""",
             (signature,),
         ).fetchone()
         if row is None:
             raise KeyError(f"unknown Solana launch signature: {signature}")
         current_retry = int(row[0] or 0)
         previous_state = str(row[1])
+        previous_creator, previous_mint = row[2:4]
+        raw_slot, qualification_state = int(row[4]), str(row[5])
+        tx_slot = tx.get("slot") if isinstance(tx, dict) else None
+        if (tx_slot is not None
+                and (isinstance(tx_slot, bool) or int(tx_slot) != raw_slot)):
+            identity_error = "hydration transaction slot conflicts with raw launch"
+        identity_hash = (
+            _hash({
+                "signature": signature, "slot": raw_slot,
+                "program": PUMP_FUN_PROGRAM, "creator": creator, "mint": mint,
+            }) if creator and mint else None
+        )
+        if previous_state == "complete" and state == "complete" \
+                and (str(previous_creator) != str(creator)
+                     or str(previous_mint) != str(mint)):
+            identity_error = "complete hydration identity conflicts with first observation"
+        if identity_error:
+            state = "source_conflict"
+            c.execute(
+                """UPDATE raw_launches SET evidence_state='source_conflict',
+                     source_conflict_at=?,source_conflict_reason=?,
+                     hydration_attempted_at=? WHERE signature=?""",
+                (now, identity_error, now, signature),
+            )
+            if qualification_state in RETRYABLE_QUALIFICATION_STATES:
+                c.execute(
+                    """UPDATE raw_launches SET
+                         qualification_state='provenance_conflict',
+                         qualification_error=? WHERE signature=?""",
+                    (identity_error, signature),
+                )
+            c.execute(
+                """INSERT OR IGNORE INTO hydration_observations(
+                     signature,observed_at,source_provider,response_hash,
+                     identity_hash,creator,mint,evidence_state,error)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (signature, now, provider, response_hash, identity_hash,
+                 creator, mint, state, identity_error),
+            )
+            c.commit()
+            raise SourceEvidenceConflict(identity_error)
         rpc_failed = tx is None
-        if previous_state == "complete" and state != "complete":
+        preserve_complete = previous_state == "complete" and state != "complete"
+        exact_complete_replay = previous_state == "complete" and state == "complete"
+        if preserve_complete or exact_complete_replay:
             # Two workers may have selected the same raw row before either wrote.
-            # A slower ambiguous response must never downgrade complete identity
-            # evidence committed by the winner.
+            # Neither a slower ambiguous response nor an equivalent provider
+            # replay may overwrite first-complete identity/hash evidence.
             c.execute(
                 "UPDATE raw_launches SET hydration_attempted_at=? WHERE signature=?",
                 (now, signature),
+            )
+            c.execute(
+                """INSERT OR IGNORE INTO hydration_observations(
+                     signature,observed_at,source_provider,response_hash,
+                     identity_hash,creator,mint,evidence_state,error)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (signature, now, provider, response_hash, identity_hash,
+                 creator, mint, state, str(error)[:240] if error else None),
             )
             c.commit()
             return "complete"
@@ -1281,10 +1491,20 @@ def _set_hydration(signature: str, tx: dict | None, error: str | None,
                          evidence_state=?,hydration_error=?,
                          hydration_last_rpc_error=NULL,hydration_retry_count=0,
                          hydration_next_retry_at=NULL WHERE signature=?""",
-                      (creator, mint, now, now, _hash(tx), state,
+                      (creator, mint, now, now, identity_hash, state,
                        str(error)[:240] if error else None, signature))
+        c.execute(
+            """INSERT OR IGNORE INTO hydration_observations(
+                 signature,observed_at,source_provider,response_hash,
+                 identity_hash,creator,mint,evidence_state,error)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (signature, now, provider, response_hash, identity_hash,
+             creator, mint, state, str(error)[:240] if error else None),
+        )
         c.commit()
         return state
+    except SourceEvidenceConflict:
+        raise
     except Exception:
         c.rollback()
         raise
@@ -1365,14 +1585,26 @@ def _transaction(rpc: JsonRpc, signature: str, *,
 
 
 def persist(payload: object, *, rpc: JsonRpc | None = None,
-            transaction: dict | None = None) -> None:
+            transaction: dict | None = None,
+            capture_mode: str = "live_ws",
+            captured_at: datetime | str | None = None,
+            block_time: datetime | str | None = None,
+            source_provider: str | None = None) -> None:
     if not isinstance(payload, dict) or payload.get("kind") != "launch":
         return
-    _insert_raw(payload)
+    provider = source_provider or rpc_provider_id(
+        getattr(rpc, "endpoint", None) if rpc is not None else None
+    )
+    _insert_raw(
+        payload, capture_mode=capture_mode, captured_at=captured_at,
+        block_time=block_time, source_provider=provider,
+    )
     if transaction is not None:
         # A database/evidence failure must propagate to gap recovery. It is not
         # an RPC outage and must never be relabelled as one by the handler below.
-        _set_hydration(payload["signature"], transaction, None)
+        _set_hydration(
+            payload["signature"], transaction, None, source_provider=provider,
+        )
         return
     if rpc is None:
         return
@@ -1383,11 +1615,12 @@ def persist(payload: object, *, rpc: JsonRpc | None = None,
         _set_hydration(
             payload["signature"], None, str(exc),
             retry_after_seconds=(pressure.retry_after_seconds if pressure else None),
+            source_provider=provider,
         )
         logger.warning("solana_launch_hydration_failed",
                        signature=payload["signature"][:12], error=str(exc)[:120])
         return
-    _set_hydration(payload["signature"], tx, None)
+    _set_hydration(payload["signature"], tx, None, source_provider=provider)
 
 
 def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
@@ -1397,6 +1630,7 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
                       monotonic: Callable[[], float] = time.monotonic) -> dict:
     """Retry due evidence oldest-first without repeatedly guessing ambiguous rows."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    provider = rpc_provider_id(getattr(rpc, "endpoint", None))
     states = ["raw_only", "rpc_unavailable"]
     if include_incomplete:
         states.append("incomplete")
@@ -1436,7 +1670,9 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
             break
         except TransactionUnavailableError as exc:
             try:
-                _set_hydration(signature, None, str(exc), at=now)
+                _set_hydration(
+                    signature, None, str(exc), at=now, source_provider=provider,
+                )
             except Exception as persist_exc:
                 persistence_failed += 1
                 persistence_error = str(persist_exc)[:240]
@@ -1455,6 +1691,7 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
                     retry_after_seconds=(
                         pressure.retry_after_seconds if pressure else None
                     ),
+                    source_provider=provider,
                 )
             except Exception as persist_exc:
                 persistence_failed += 1
@@ -1475,7 +1712,9 @@ def rehydrate_pending(rpc: JsonRpc, *, limit: int = 100,
                 break
         else:
             try:
-                state = _set_hydration(signature, tx, None, at=now)
+                state = _set_hydration(
+                    signature, tx, None, at=now, source_provider=provider,
+                )
             except Exception as persist_exc:
                 persistence_failed += 1
                 persistence_error = str(persist_exc)[:240]
@@ -1833,6 +2072,7 @@ def _launch_from_block_transaction(item: dict, slot: int, index: int) -> tuple[d
 def _backfill_finalized_slot(
     slot: int, *, rpc: JsonRpc, deadline: float | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    capture_mode: str = "gap_backfill",
 ) -> dict:
     """Verify one finalized produced/skipped slot, raising on partial evidence."""
     slot = int(slot)
@@ -1898,6 +2138,15 @@ def _backfill_finalized_slot(
     if not isinstance(transactions, list):
         raise RuntimeError(f"finalized block {slot} has no transaction list")
     launches = 0
+    raw_block_time = block.get("blockTime")
+    block_time = None
+    if raw_block_time is not None:
+        try:
+            block_time = datetime.fromtimestamp(
+                float(raw_block_time), tz=timezone.utc,
+            )
+        except (TypeError, ValueError, OverflowError, OSError) as exc:
+            raise RuntimeError(f"finalized block {slot} has invalid blockTime") from exc
     for index, item in enumerate(transactions):
         if not isinstance(item, dict):
             raise RuntimeError(f"slot {slot} transaction {index} is malformed")
@@ -1908,7 +2157,11 @@ def _backfill_finalized_slot(
         # Gap completeness means the matching raw event was durably captured.
         # Identity qualification is a separate, retriable evidence state; a new
         # Pump account layout must not permanently pin the entire stream gap.
-        persist(payload, transaction=tx)
+        persist(
+            payload, transaction=tx, capture_mode=capture_mode,
+            block_time=block_time,
+            source_provider=rpc_provider_id(getattr(rpc, "endpoint", None)),
+        )
         launches += 1
     return {"state": "produced", "slot": slot, "launches": launches}
 
