@@ -10,10 +10,10 @@ def test_homepage_exposes_the_full_opportunity_funnel_and_data_health():
 
     for phrase in (
         'aria-label="机会漏斗"',
-        "发现 → 证据门 → 可执行 → 跟踪验证",
+        "发现 → 来源/证据准入 → 人工验证 → 跟踪验证",
         "已发现 / 入账",
-        "Launch 证据门",
-        "当前可执行",
+        "Launch 来源/协议准入",
+        "当前可人工验证",
         "跟踪验证样本",
         "只统计已加载记录；不是全市场机会总数",
         "覆盖与视图按时只说明当前可判范围，不证明没有漏掉机会",

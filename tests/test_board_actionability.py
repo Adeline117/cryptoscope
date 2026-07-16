@@ -151,12 +151,12 @@ def test_cascade_distinguishes_watch_from_expired_and_shows_full_lifecycle():
 def test_launch_action_requires_statistical_evidence_gate():
     html = BOARD.read_text()
 
-    assert "完整成本+报价+证据+送达SLA" in html
-    assert "成本后 24h 试验组相对同期 WATCH 对照的证据门" in html
+    assert "准入+独立对账+完整成本+报价+纸面证据+送达SLA" in html
+    assert "成本后 24h 试验组相对同期 WATCH 对照的纸面证据门" in html
     assert "当前预注册协议的前向固定前缀" in html
     assert "launchValidation.cohort_version" in html
     assert "ev.cohort_version" in html
-    assert "union UTC 日历" in html
+    assert "连续 UTC 日历" in html
     assert "sequential SPA/Reality Check" in html
     assert "20 个样本的漂亮区间或反复刷新都不能放行" in html
     assert "安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场" in html
@@ -327,7 +327,7 @@ def test_decision_overview_separates_actionable_windows_from_paper_candidates():
 
     assert 'aria-label="当前决策"' in html
     assert "等待 · 当前不入场" in html
-    assert "新鲜报价+完整成本+证据门+送达SLA" in html
+    assert "准入+独立对账+新鲜报价+完整成本+纸面证据+送达SLA" in html
     assert "模型代理为正，成本组件仍不全" in html
     assert "不代表全市场覆盖" in html
     assert 'data-jump="launch"' in html
@@ -346,7 +346,7 @@ def test_overview_has_fail_closed_five_lane_source_coverage_matrix():
     for lane in ("Launch", "Cascade", "Structure", "Airdrop", "Carry"):
         assert f'>{lane}<' in html
     for scope in (
-        "Solana + EVM 首池发行流",
+        "Solana v6 对账入组 + EVM 研究扩展",
         "目前仅覆盖 Hyperliquid",
         "sourceHealth=structure?.source_health||[]",
         "逐源失败不计覆盖",
@@ -392,7 +392,7 @@ def test_launch_defaults_to_actionable_only_instead_of_burying_decision_in_watch
 def test_launch_uses_fail_closed_a0_to_a4_action_levels():
     html = BOARD.read_text()
 
-    assert "function actionLevel(r)" in html
+    assert "function actionLevel(r,launchPayload)" in html
     for level in ("A0_BLOCKED", "A1_WATCH", "A2_PAPER_READY",
                   "A3_MANUAL_PROBE", "A4_REAL_FILL_VALIDATED"):
         assert level in html
@@ -423,3 +423,69 @@ def test_launch_discloses_primary_stream_coverage_and_known_gaps():
     assert "可追溯唯一账本事件" in html
     assert "BSC / Base / Ethereum 共 5 条工厂流" in html
     assert "只匹配工厂原始 pool" in html
+
+
+def test_launch_ui_fails_closed_on_source_readiness_and_protocol_admission():
+    html = BOARD.read_text()
+
+    for token in (
+        "function launchProtocolUiState(d,now=Date.now())",
+        "d?.research_protocol",
+        "solana.source_readiness",
+        "solana.protocol_admission",
+        'protocol?.enrollment_state==="open"',
+        'protocol?.enrollment_open===true',
+        'admission?.state==="open"',
+        'admission?.enrollment_open===true',
+        'readiness?.state==="ready"',
+        'readiness?.ready===true',
+        "launch_view_stale",
+        "readiness_epoch_proof_missing",
+        "readiness_runtime_unhealthy",
+        "source_readiness_breached_after_open",
+        "协议未开放 · 仅研究/观察",
+        "为什么协议未开放",
+        "A3 全局降级为 A1",
+    ):
+        assert token in html
+    assert 'level==="A3_MANUAL_PROBE"&&(!launchProtocolUiState' in html
+    assert 'launchReconciliationProofState(r).state!=="pass"' in html
+    assert "当前可执行" not in html
+    assert "当前可人工验证" in html
+    assert "Launch 执行与观察队列" not in html
+    assert "Launch 研究与人工验证队列" in html
+
+
+def test_launch_ui_shows_independent_finalized_reconciliation_without_overclaiming():
+    html = BOARD.read_text()
+
+    for token in (
+        "function launchReconciliationProofState(r)",
+        "function launchReconciliationProofHtml(r)",
+        "entry_observation?.source_snapshot",
+        "source?.reconciliation_proof",
+        'proof?.status!=="sealed_clean"',
+        "proof?.finalized_head",
+        "proof?.live_provider",
+        "proof?.archive_provider",
+        "proof?.evidence_hash",
+        "proof?.live_observation_hash",
+        "proof?.archive_observation_hash",
+        "proof?.hydration_identity_hash",
+        "独立 finalized 对账",
+        "未核验 · 研究态",
+        "不证明代币安全、报价可成交、存在收益或允许自动交易",
+    ):
+        assert token in html
+    assert "${launchReconciliationProofHtml(r)}" in html
+
+
+def test_launch_protocol_reasons_render_chinese_and_raw_codes():
+    html = BOARD.read_text()
+
+    assert "LAUNCH_PROTOCOL_REASON_LABELS" in html
+    assert "function launchReasonLabel(code)" in html
+    assert "独立归档 RPC 未配置" in html
+    assert "finalized 对账发现漏捕或多捕" in html
+    assert "协议开放后来源 readiness 失守，已永久 breach" in html
+    assert "<code>${esc(code)}</code>" in html

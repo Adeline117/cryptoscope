@@ -5,6 +5,8 @@ import pytest
 
 
 def _envelope(event: dict) -> dict:
+    from tests.test_board_data_contract import _launch_body
+
     now = datetime.now(timezone.utc)
     return {
         "schema_version": 1,
@@ -14,7 +16,7 @@ def _envelope(event: dict) -> dict:
         "freshness_grace_min": 1.0,
         "next_expected_at": (now + timedelta(minutes=1)).isoformat(),
         "stale_after_at": (now + timedelta(minutes=2)).isoformat(),
-        "events": [event],
+        **_launch_body([event]),
     }
 
 

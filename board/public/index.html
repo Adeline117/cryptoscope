@@ -165,6 +165,29 @@
   .coverage-card .ck{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;font-weight:700;color:var(--muted)}
   .coverage-card .cv{margin-top:8px;font:700 18px/1.25 var(--mono);color:var(--text)}
   .coverage-card .cs{margin-top:5px;font-size:11px;line-height:1.45;color:var(--dim)}
+  .launch-protocol{margin:0 0 12px;padding:18px 20px;border:1px solid var(--border2);border-left:5px solid var(--danger);border-radius:14px;background:var(--s1);box-shadow:var(--shadow)}
+  .launch-protocol.scheduled,.launch-protocol.armed{border-left-color:var(--warn)}.launch-protocol.open{border-left-color:var(--good)}
+  .launch-protocol-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+  .launch-protocol-head h3{margin:0;font-size:15px;line-height:1.35;color:var(--text)}
+  .launch-protocol-head p{margin:4px 0 0;max-width:850px;font-size:11px;line-height:1.55;color:var(--dim)}
+  .launch-protocol-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:13px}
+  .protocol-cell{min-width:0;padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--s2)}
+  .protocol-cell .pk{display:block;font-size:9.5px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;color:var(--dim)}
+  .protocol-cell .pv{display:block;margin-top:4px;font:700 12px/1.45 var(--mono);color:var(--text);overflow-wrap:anywhere}
+  .protocol-cell .ps{display:block;margin-top:3px;font-size:10px;line-height:1.45;color:var(--dim);overflow-wrap:anywhere}
+  .protocol-reasons{margin-top:11px;padding-top:10px;border-top:1px solid var(--border);font-size:10.5px;color:var(--muted)}
+  .protocol-reasons summary{cursor:pointer;font-weight:650;color:var(--danger)}
+  .protocol-reasons ul{display:grid;gap:5px;margin:8px 0 0;padding:0;list-style:none}
+  .protocol-reasons li{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:6px 8px;border:1px solid var(--border);border-radius:7px;background:var(--s2)}
+  .protocol-reasons code{font:9.5px/1.35 var(--mono);color:var(--dim);overflow-wrap:anywhere;text-align:right}
+  .reconciliation-proof{margin:13px 0 4px;padding:13px 14px;border:1px solid var(--border2);border-left:4px solid var(--accent);border-radius:11px;background:var(--s1);color:var(--muted)}
+  .reconciliation-proof.blocked{border-left-color:var(--danger)}
+  .reconciliation-proof-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .reconciliation-proof-head b{font-size:12px;color:var(--text)}
+  .reconciliation-proof-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:9px}
+  .proof-cell{padding:8px 9px;border:1px solid var(--border);border-radius:8px;background:var(--s2);font:10px/1.45 var(--mono);overflow-wrap:anywhere}
+  .proof-cell span{display:block;margin-bottom:2px;font:650 9px/1.3 var(--sans);letter-spacing:.04em;color:var(--dim)}
+  .proof-note{margin-top:8px;font-size:10px;line-height:1.5;color:var(--dim)}
   .skl{height:var(--row-h);border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--s1) 25%,var(--s3) 50%,var(--s1) 75%);background-size:200% 100%;animation:sk 1.3s infinite}
   @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
 
@@ -317,6 +340,7 @@
     .opportunity-queue{padding:17px 14px}.opportunity-queue-head{flex-direction:column;gap:7px}.opportunity-grid{grid-template-columns:1fr}.opportunity-metrics{grid-template-columns:1fr}.gate-summary{align-items:flex-start;flex-direction:column;gap:2px}.risk-line{align-items:flex-start;flex-direction:column}.risk-line .jump{width:100%}
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
     .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}.coverage-strip{grid-template-columns:1fr}
+    .launch-protocol{padding:15px 14px}.launch-protocol-head{flex-direction:column}.launch-protocol-grid{grid-template-columns:1fr}.protocol-reasons li{align-items:flex-start;flex-direction:column}.protocol-reasons code{text-align:left}.reconciliation-proof-grid{grid-template-columns:1fr}
     .market-coverage{padding:17px 14px}.market-coverage-head{flex-direction:column;gap:7px}.market-coverage-grid{grid-template-columns:1fr}.market-coverage-card:last-child{grid-column:auto}.market-coverage-card .mch{gap:6px}
     .swipe-hint{display:block;position:sticky;left:0;width:100%;padding:6px 10px;background:var(--s2);border-bottom:1px solid var(--border);color:var(--dim);font-size:10px;text-align:right}
     body[data-view="perp"] .stat{grid-template-columns:repeat(2,1fr)}body[data-view="perp"] .stat>div:nth-child(n){border-left:1px solid var(--border);padding-left:10px}body[data-view="perp"] .stat>div:nth-child(2n+1){border-left:0;padding-left:0}
@@ -386,17 +410,124 @@ function effectiveDecision(r){
   if(expiry&&Date.now()>=expiry&&["SMALL_PROBE","CLAIM_CHECK"].includes(recorded))return "EXPIRED";
   return r?.effective_decision||recorded;
 }
+const LAUNCH_PROTOCOL_REASON_LABELS=Object.freeze({
+  source_readiness_unavailable:"来源 readiness 无法读取",
+  source_readiness_blocked:"来源 readiness 未通过",
+  source_readiness_not_ready:"独立来源尚未达到准入要求",
+  source_readiness_not_rechecked:"本轮尚未重新检查来源 readiness",
+  archive_provider_not_configured:"独立归档 RPC 未配置",
+  archive_provider_not_independent:"实时与归档 RPC 不独立",
+  clean_epoch_burn_in_incomplete:"连续 clean epoch burn-in 未完成",
+  reconciliation_epochs_not_contiguous:"finalized 对账 epoch 不连续",
+  reconciliation_epoch_breached:"finalized 对账发现漏捕或多捕",
+  reconciliation_evidence_stale:"finalized 对账证据已陈旧",
+  reconciliation_slot_lag_exceeded:"finalized 对账 slot 距离实时头部过远",
+  live_stream_health_not_ready:"实时流或维护流未达到准入健康要求",
+  protocol_gate_not_initialized:"持久化协议闸门尚未初始化",
+  protocol_start_not_reached:"预注册协议开始边界尚未到达",
+  protocol_activation_late:"协议未在预注册激活窗口内开放",
+  protocol_not_armed_and_ready_at_boundary:"协议边界到达时未同时完成 armed 与 readiness",
+  source_readiness_breached_after_open:"协议开放后来源 readiness 失守，已永久 breach",
+  protocol_admission_not_open:"持久化协议准入闸门未开放",
+  protocol_admission_protocol_id_mismatch:"协议准入 ID 与公开合同不一致",
+  protocol_admission_cohort_version_mismatch:"协议准入 cohort 版本不一致",
+  protocol_admission_protocol_start_at_mismatch:"协议准入开始时钟不一致",
+  launch_view_missing:"Launch 视图缺失",
+  launch_view_stale:"Launch 视图已陈旧",
+  research_protocol_missing:"公开研究协议合同缺失",
+  source_readiness_contract_missing:"独立来源 readiness 合同缺失",
+  protocol_admission_contract_missing:"持久化协议准入合同缺失",
+  readiness_epoch_proof_missing:"最新 clean epoch 证明缺失或不完整",
+  readiness_runtime_unhealthy:"实时/维护运行健康证明不完整",
+  readiness_burn_in_invalid:"clean epoch burn-in 数量不满足合同",
+  readiness_claim_inconsistent:"readiness 的 ready 声明与证据矛盾",
+  protocol_identity_inconsistent:"研究协议与持久化准入身份不一致",
+  protocol_semantics_inconsistent:"研究协议的样本或选择阶段合同不一致",
+  reason_codes_contract_missing:"阻断原因码数组缺失",
+  execution_policy_inconsistent:"公开协议错误声称执行或自动交易权限",
+});
+function launchReasonLabel(code){return LAUNCH_PROTOCOL_REASON_LABELS[code]||"未识别的阻断原因"}
+function launchReasonCodes(...sources){
+  const out=[];for(const source of sources){for(const code of (Array.isArray(source)?source:[])){if(typeof code==="string"&&code.trim()&&!out.includes(code))out.push(code)}}return out;
+}
+function launchProtocolUiState(d,now=Date.now()){
+  const protocol=d?.research_protocol,solana=d?.primary_sources?.solana||{},readiness=solana.source_readiness,admission=solana.protocol_admission;
+  const inferred=[],add=code=>{if(!inferred.includes(code))inferred.push(code)};
+  const generated=new Date(d?.generated_at||"").getTime(),staleAfter=new Date(d?.stale_after_at||"").getTime();
+  const viewFresh=Number.isFinite(generated)&&Number.isFinite(staleAfter)&&generated<=now+5_000&&generated<staleAfter&&now<staleAfter;
+  if(!d)add("launch_view_missing");else if(!viewFresh)add("launch_view_stale");
+  if(!protocol||typeof protocol!=="object")add("research_protocol_missing");
+  if(!readiness||typeof readiness!=="object")add("source_readiness_contract_missing");
+  if(!admission||typeof admission!=="object")add("protocol_admission_contract_missing");
+
+  const latest=readiness?.latest_epoch,runtime=readiness?.runtime||{};
+  const required=readiness?.required_clean_epochs,observed=readiness?.observed_epochs;
+  const burnInValid=Number.isInteger(required)&&required>0&&Number.isInteger(observed)&&observed>=required;
+  if(!burnInValid)add("readiness_burn_in_invalid");
+  const latestAge=readiness?.latest_age_seconds,maxAge=readiness?.max_age_seconds;
+  const providerHost=value=>typeof value==="string"?value.replace(/^solana_rpc:/,"").replace(/:\d+$/,"").toLowerCase():"";
+  const providersValid=typeof readiness?.live_provider==="string"&&typeof readiness?.archive_provider==="string"
+    &&providerHost(readiness.live_provider)&&providerHost(readiness.live_provider)!==providerHost(readiness.archive_provider);
+  const maxLag=readiness?.max_finalized_lag_slots,sealedLag=readiness?.latest_sealed_lag_slots,runtimeLag=readiness?.latest_runtime_lag_slots;
+  const lagValid=Number.isInteger(maxLag)&&maxLag>=0&&Number.isInteger(sealedLag)&&sealedLag>=0&&sealedLag<=maxLag
+    &&Number.isInteger(runtimeLag)&&runtimeLag>=0&&runtimeLag<=maxLag;
+  const epochValid=latest&&typeof latest==="object"&&typeof latest.epoch_id==="string"&&latest.epoch_id.length>0
+    &&Number.isInteger(latest.from_slot)&&Number.isInteger(latest.to_slot)&&latest.from_slot<=latest.to_slot
+    &&latest.status==="sealed_clean"&&latest.missing_live===0&&latest.extra_live===0
+    &&typeof latest.live_provider==="string"&&typeof latest.archive_provider==="string"
+    &&latest.live_provider===readiness?.live_provider&&latest.archive_provider===readiness?.archive_provider
+    &&providersValid&&Number.isInteger(latest.finalized_head)&&latest.finalized_head>=latest.to_slot
+    &&Number.isFinite(new Date(latest.checked_at||"").getTime())&&typeof latestAge==="number"&&Number.isFinite(latestAge)&&latestAge>=0
+    &&typeof maxAge==="number"&&Number.isFinite(maxAge)&&maxAge>0&&latestAge<=maxAge;
+  if(!epochValid)add("readiness_epoch_proof_missing");
+  const live=runtime.live,maintenance=runtime.maintenance;
+  const runtimeValid=live?.status==="live"&&live?.stale===false&&Number.isInteger(live?.open_gaps)&&live.open_gaps===0
+    &&maintenance?.status==="live"&&maintenance?.stale===false&&Number.isInteger(maintenance?.open_gaps)&&maintenance.open_gaps===0;
+  if(!runtimeValid)add("readiness_runtime_unhealthy");
+  const readinessClaim=readiness?.state==="ready"&&readiness?.ready===true
+    &&launchReasonCodes(readiness?.reason_codes).length===0&&burnInValid&&epochValid&&lagValid&&runtimeValid;
+  if(readiness?.state==="ready"&&readiness?.ready===true&&!readinessClaim)add("readiness_claim_inconsistent");
+
+  const protocolStart=new Date(protocol?.protocol_start_at||"").getTime();
+  const identityValid=typeof protocol?.protocol_id==="string"&&protocol.protocol_id.length>0
+    &&Number.isInteger(protocol?.cohort_version)&&Number.isFinite(protocolStart)
+    &&admission?.protocol_id===protocol.protocol_id&&admission?.cohort_version===protocol.cohort_version
+    &&new Date(admission?.protocol_start_at||"").getTime()===protocolStart;
+  if(!identityValid)add("protocol_identity_inconsistent");
+  const executionDenied=protocol?.real_edge_n===0&&protocol?.real_edge_eligible===false
+    &&protocol?.execution_edge_eligible===false&&protocol?.auto_execution_allowed===false
+    &&admission?.auto_execution_allowed===false;
+  if(!executionDenied)add("execution_policy_inconsistent");
+  const protocolSemantics=protocol?.sample_kind==="forward_paper_selector"
+    &&protocol?.selection_stage==="discovery_rule_before_security_and_route";
+  if(!protocolSemantics)add("protocol_semantics_inconsistent");
+  const reasonContracts=Array.isArray(protocol?.reason_codes)&&Array.isArray(readiness?.reason_codes)&&Array.isArray(admission?.reason_codes);
+  if(!reasonContracts)add("reason_codes_contract_missing");
+  const protocolReasons=launchReasonCodes(protocol?.reason_codes),admissionReasons=launchReasonCodes(admission?.reason_codes),readinessReasons=launchReasonCodes(readiness?.reason_codes);
+  const open=viewFresh&&readinessClaim&&identityValid&&executionDenied&&protocolSemantics&&reasonContracts
+    &&protocol?.source_readiness_state==="ready"&&protocol?.enrollment_state==="open"
+    &&protocol?.persistent_admission_state==="open"&&protocol?.enrollment_open===true
+    &&admission?.state==="open"&&admission?.enrollment_open===true&&now>=protocolStart
+    &&protocolReasons.length===0&&admissionReasons.length===0;
+  if(!open&&protocol&&admission)add("protocol_admission_not_open");
+  const reasons=launchReasonCodes(readinessReasons,admissionReasons,protocolReasons,inferred);
+  const breached=protocol?.enrollment_state==="breached"||protocol?.persistent_admission_state==="breached"||admission?.state==="breached"
+    ||reasons.some(code=>code.includes("breach"));
+  const scheduled=!breached&&[protocol?.enrollment_state,protocol?.persistent_admission_state,admission?.state].some(state=>["scheduled","armed"].includes(state));
+  return{open,state:open?"open":breached?"breached":scheduled?String(protocol?.enrollment_state||admission?.state||"scheduled"):"blocked",reasons,protocol,readiness,admission,viewFresh,epochValid,runtimeValid,burnInValid};
+}
 const ACTION_LEVELS=new Set(["A0_BLOCKED","A1_WATCH","A2_PAPER_READY","A3_MANUAL_PROBE","A4_REAL_FILL_VALIDATED"]);
-function actionLevel(r){
+function actionLevel(r,launchPayload){
   const hard=(r?.decision==="AVOID"||r?.recorded_decision==="AVOID"||r?.security_gate?.state==="avoid");
   if(hard)return "A0_BLOCKED";
   const level=ACTION_LEVELS.has(r?.action_level)?r.action_level:"A1_WATCH";
   const expiry=r?.current_assessment?.expires_at||r?.expires_at;
   if(["A2_PAPER_READY","A3_MANUAL_PROBE"].includes(level)&&(!expiry||Date.now()>=new Date(expiry).getTime()))return "A1_WATCH";
+  if(level==="A3_MANUAL_PROBE"&&(!launchProtocolUiState(launchPayload||data?.launch).open||launchReconciliationProofState(r).state!=="pass"))return "A1_WATCH";
   return level;
 }
 function actionChip(r){
-  const lv=actionLevel(r), labels={A0_BLOCKED:"A0 · 阻断",A1_WATCH:"A1 · 观察",A2_PAPER_READY:"A2 · 纸面就绪",A3_MANUAL_PROBE:"A3 · 人工小额验证",A4_REAL_FILL_VALIDATED:"A4 · 历史真实成交已核验"};
+  const lv=actionLevel(r), labels={A0_BLOCKED:"A0 · 阻断",A1_WATCH:"A1 · 观察",A2_PAPER_READY:"A2 · 研究纸面",A3_MANUAL_PROBE:"A3 · 人工小额验证",A4_REAL_FILL_VALIDATED:"A4 · 历史真实成交已核验"};
   const cls=lv==="A0_BLOCKED"?"b-danger":lv==="A3_MANUAL_PROBE"||lv==="A4_REAL_FILL_VALIDATED"?"b-good":lv==="A2_PAPER_READY"?"b-accent":"b-warn";
   return `<span class="chip ${cls}">${esc(labels[lv])}</span>`;
 }
@@ -414,6 +545,40 @@ function utcClock(ts){
 function invalidationCondition(r){
   const operator=String(r?.side||"LONG").toUpperCase()==="SHORT"?"≥":"≤";
   return `${operator} $${esc(r?.invalidation_price??"—")}`;
+}
+function launchReconciliationProofState(r){
+  const source=r?.entry_observation?.source_snapshot,proof=source?.reconciliation_proof,reasons=[];
+  const fail=reason=>{if(!reasons.includes(reason))reasons.push(reason)};
+  if(r?.chain!=="solana")fail("当前前向协议只接受 Solana Pump.fun 标准 create 事件");
+  if(!source||typeof source!=="object")fail("冻结的来源快照缺失");
+  if(source?.version!==2||source?.provider!=="solana_rpc_live_ws_plus_independent_finalized_reconciliation_v2"||source?.capture_mode!=="live_ws"||source?.reconciliation_state!=="verified_live"||source?.evidence_state!=="complete")fail("来源不是 v2 live_ws + verified_live 完整快照");
+  if(typeof source?.signature!=="string"||!source.signature||typeof source?.mint!=="string"||source.mint!==r?.token||!String(source?.event_type||"").startsWith("pump_fun_create"))fail("来源事件身份与公开候选不一致");
+  if(!proof||typeof proof!=="object")fail("独立 finalized reconciliation proof 缺失");
+  const slot=source?.slot,first=proof?.from_slot,last=proof?.to_slot,finalized=proof?.finalized_head;
+  if(!Number.isInteger(slot)||!Number.isInteger(first)||!Number.isInteger(last)||first>last||slot<first||slot>last)fail("事件 slot 不在封存 epoch 内");
+  if(proof?.version!==1||proof?.status!=="sealed_clean")fail("对账 epoch 不是 sealed_clean");
+  if(!Number.isInteger(finalized)||!Number.isInteger(last)||finalized<last)fail("finalized head 未覆盖 epoch 终点");
+  const live=proof?.live_provider,archive=proof?.archive_provider;
+  const providerHost=value=>typeof value==="string"?value.replace(/^solana_rpc:/,"").replace(/:\d+$/,"").toLowerCase():"";
+  if(typeof live!=="string"||typeof archive!=="string"||!live.startsWith("solana_rpc:")||!archive.startsWith("solana_rpc:")||!providerHost(live)||providerHost(live)===providerHost(archive)||source?.source_provider!==live)fail("实时与归档 provider 身份不独立或不一致");
+  const lowerHex=(value,length)=>typeof value==="string"&&value.length===length&&new RegExp(`^[0-9a-f]{${length}}$`).test(value);
+  if(!lowerHex(proof?.epoch_id,32)||!lowerHex(proof?.evidence_hash,64)||typeof proof?.genesis_hash!=="string"||!proof.genesis_hash)fail("epoch/genesis/evidence hash 合同无效");
+  if(!lowerHex(source?.raw_payload_hash,64)||proof?.live_observation_hash!==source?.raw_payload_hash||proof?.archive_observation_hash!==source?.raw_payload_hash)fail("实时与归档原始观察 hash 不一致");
+  if(!lowerHex(source?.hydration_payload_hash,64)||proof?.hydration_identity_hash!==source?.hydration_payload_hash)fail("hydration identity hash 不一致");
+  const detected=new Date(source?.detected_at||"").getTime(),captured=new Date(source?.captured_at||"").getTime(),proofCaptured=new Date(proof?.live_captured_at||"").getTime(),checked=new Date(proof?.checked_at||"").getTime(),reconciled=new Date(source?.reconciled_at||"").getTime(),decision=new Date(r?.decision_at||"").getTime();
+  if(!Number.isFinite(detected)||!Number.isFinite(captured)||!Number.isFinite(proofCaptured)||!Number.isFinite(checked)||!Number.isFinite(reconciled)||!Number.isFinite(decision)||detected!==captured||captured!==proofCaptured||checked!==reconciled||captured>checked||checked>decision||decision-detected>600_000)fail("捕获、对账与决策时钟不一致或超过 600 秒");
+  return{state:reasons.length?"block":"pass",reasons,source,proof};
+}
+function launchReconciliationProofHtml(r){
+  const result=launchReconciliationProofState(r),proof=result.proof||{},source=result.source||{};
+  if(result.state!=="pass")return `<section class="reconciliation-proof blocked" aria-label="独立 finalized 对账证明"><div class="reconciliation-proof-head"><b>独立 finalized 对账</b><span class="chip b-danger">未核验 · 研究态</span></div><div class="proof-note">${esc(result.reasons.join("；")||"冻结证明缺失")}。该事件不得进入当前协议分母，也不能显示为 A3 人工验证窗。</div></section>`;
+  const shortHash=value=>typeof value==="string"&&value.length>20?`${value.slice(0,10)}…${value.slice(-8)}`:(value||"—");
+  return `<section class="reconciliation-proof" aria-label="独立 finalized 对账证明"><div class="reconciliation-proof-head"><b>独立 finalized 对账</b><span class="chip b-accent">sealed_clean · 来源已对账</span></div><div class="reconciliation-proof-grid">
+    <div class="proof-cell"><span>事件 / epoch slot</span>${esc(source.slot)} ∈ [${esc(proof.from_slot)}, ${esc(proof.to_slot)}] · finalized ${esc(proof.finalized_head)}</div>
+    <div class="proof-cell"><span>实时 / 独立归档 provider</span>${esc(proof.live_provider)}<br>${esc(proof.archive_provider)}</div>
+    <div class="proof-cell"><span>封存时钟 UTC</span>${esc(utcClock(proof.checked_at))}</div>
+    <div class="proof-cell" title="${esc(proof.evidence_hash||"")}"><span>epoch / evidence hash</span>${esc(shortHash(proof.epoch_id))}<br>${esc(shortHash(proof.evidence_hash))}</div>
+  </div><div class="proof-note">这只证明该 live_ws 事件与独立归档 RPC 的 finalized epoch 集合一致；不证明代币安全、报价可成交、存在收益或允许自动交易。</div></section>`;
 }
 function launchLifecycleHtml(r){
   const detected=new Date(r?.detected_at||"");
@@ -494,13 +659,34 @@ function mountEventChart(node){
 function mountEventCharts(root){root.querySelectorAll("[data-event-chart]").forEach(mountEventChart)}
 function disposeEventCharts(root){for(const item of [...mountedEventCharts]){if(root&&!root.contains(item.node))continue;item.chart.remove();delete item.node.dataset.chartMounted;mountedEventCharts.delete(item)}}
 
+function renderLaunchProtocolStatus(d){
+  const status=launchProtocolUiState(d),protocol=status.protocol||{},readiness=status.readiness||{},admission=status.admission||{},latest=readiness.latest_epoch||{};
+  const cfg=status.open?["前向研究入组已开放","b-good"]:status.state==="breached"?["协议已 breach · 永久阻断","b-danger"]:["协议未开放 · 仅研究/观察",status.state==="scheduled"||status.state==="armed"?"b-warn":"b-danger"];
+  const observed=Number.isInteger(readiness.observed_epochs)?readiness.observed_epochs:"?",required=Number.isInteger(readiness.required_clean_epochs)?readiness.required_clean_epochs:"?";
+  const latestCopy=latest.epoch_id?`${latest.status||"unknown"} · slot ${latest.from_slot??"?"}–${latest.to_slot??"?"}`:"无可核验 epoch";
+  const reasons=status.reasons.length?status.reasons:["protocol_admission_not_open"];
+  const reasonHtml=reasons.map(code=>`<li><span>${esc(launchReasonLabel(code))}</span><code>${esc(code)}</code></li>`).join("");
+  const admissionClock=protocol.protocol_start_at||admission.protocol_start_at;
+  const sourceState=readiness.state==="ready"&&readiness.ready===true?"ready":"blocked";
+  return `<section class="launch-protocol ${esc(status.state)}" aria-label="Launch 来源 readiness 与研究协议准入">
+    <div class="launch-protocol-head"><div><h3>Launch v${esc(protocol.cohort_version??"?")} · 来源与准入状态</h3><p>先证明候选来自完整、独立对账的发现集合，再谈前向纸面 selector。来源 ready 只允许新样本入组，不代表有执行优势、可成交或应该买入。</p></div><span class="chip ${cfg[1]}">${cfg[0]}</span></div>
+    <div class="launch-protocol-grid">
+      <div class="protocol-cell"><span class="pk">独立 finalized 来源 readiness</span><span class="pv">${esc(sourceState)} · clean epoch ${esc(observed)}/${esc(required)}</span><span class="ps">${esc(latestCopy)} · age ${Number.isFinite(readiness.latest_age_seconds)?esc(Math.round(readiness.latest_age_seconds))+"s":"不可判"}/${Number.isFinite(readiness.max_age_seconds)?esc(readiness.max_age_seconds)+"s":"?"}<br>live ${esc(readiness.live_provider||"缺失")} · archive ${esc(readiness.archive_provider||"未配置")}</span></div>
+      <div class="protocol-cell"><span class="pk">持久化 protocol admission</span><span class="pv">${esc(admission.state||"unavailable")} · enrollment ${status.open?"open":"closed"}</span><span class="ps">${esc(protocol.protocol_id||"协议 ID 缺失")}<br>预注册边界 ${esc(utcClock(admissionClock))} · latch ${esc(protocol.persistent_admission_state||"不可判")}</span></div>
+      <div class="protocol-cell"><span class="pk">人工验证 / 执行边界</span><span class="pv">${status.open?"仅允许继续逐行复核":"A3 全局降级为 A1"}</span><span class="ps">纸面 selector ≠ 执行 edge；真实优势样本 ${esc(protocol.real_edge_n??0)} · execution eligible 必须为 false · 自动交易永不允许。</span></div>
+    </div>
+    ${status.open?'<div class="proof-note">当前只表示来源入组协议开放；每个候选仍必须有独立 reconciliation proof、安全、双向路由、完整成本、纸面 edge 与送达证据，才能显示人工验证窗。</div>':`<details class="protocol-reasons" open><summary>为什么协议未开放 · ${reasons.length} 个阻断原因</summary><ul>${reasonHtml}</ul></details>`}
+  </section>`;
+}
+
 function renderLaunchCoverage(d){
   const p=d?.primary_sources?.solana||{}, q=p.qualification||{}, states=q.qualification||{};
   const ep=d?.primary_sources?.evm||{}, eq=ep.qualification||{}, es=eq.qualification||{}, evmStreams=ep.streams||[];
+  const protocol=launchProtocolUiState(d);
   const stream=(p.streams||[])[0];
   const status=!p.available?"unavailable":stream?.stale?"stale":stream?.status||"unavailable";
   const labels={live:"实时",degraded:"有缺口",stale:"已陈旧",disconnected:"已断开",unavailable:"不可用"};
-  const cls=status==="live"?"b-good":status==="degraded"||status==="stale"?"b-warn":"b-danger";
+  const cls=status==="live"&&protocol.open?"b-good":status==="live"||status==="degraded"||status==="stale"?"b-warn":"b-danger";
   const complete=q.evidence?.complete||0, recent=q.recent_complete||0;
   const trace=q.traceability||{},traceAvailable=["ok","partial"].includes(trace.state);
   const recorded=traceAvailable?(trace.traceable_unique_ledger_events??"不可判"):"不可判";
@@ -515,12 +701,12 @@ function renderLaunchCoverage(d){
   const evmReadbackUnavailable=evmTrace&&["ok","partial","unavailable"].includes(evmTrace.state)?(evmTrace.readback_unavailable_rows??0)+(evmTrace.readback_error_rows??0):"不可判";
   const evmTraceLabel=!evmTraceAvailable?"账本回读不可用":evmTrace.state==="partial"?`${evmOrphan} 条 orphan 已隔离`:"精确回读正常";
   const last=stream?.last_received_at?relMs(new Date(stream.last_received_at).getTime()):"无接收时钟";
-  return `<section class="coverage-strip" aria-label="Launch 数据覆盖与缺口">
-    <div class="coverage-card"><div class="ck"><span>Pump.fun 主链发行流</span><span class="chip ${cls}">${esc(labels[status]||status)}</span></div><div class="cv">${esc(recent)} <small class="dim">/ 近${esc(q.recent_hours??24)}h</small></div><div class="cs">身份完整证据累计 ${esc(complete)}；最后接收 ${esc(last)}。状态只证明监听情况，不等于无漏单。</div></div>
+  return `${renderLaunchProtocolStatus(d)}<section class="coverage-strip" aria-label="Launch 数据覆盖与缺口">
+    <div class="coverage-card"><div class="ck"><span>Pump.fun 主链发行流</span><span class="chip ${cls}">${esc(labels[status]||status)}${status==="live"&&!protocol.open?" · 准入仍关闭":""}</span></div><div class="cv">${esc(recent)} <small class="dim">/ 近${esc(q.recent_hours??24)}h</small></div><div class="cs">身份完整证据累计 ${esc(complete)}；最后接收 ${esc(last)}。监听实时不等于 finalized 独立对账通过，也不等于无漏单。</div></div>
     <div class="coverage-card"><div class="ck"><span>资格检查队列 / 账本回读</span><span class="chip ${traceUnavailable?"b-danger":orphan||pending?"b-warn":"b-accent"}">${esc(traceLabel)}</span></div><div class="cv">${esc(recorded)} <small class="dim">可追溯唯一账本事件</small></div><div class="cs">原始待检查 ${esc(raw)} · 待索引/错误重试 ${esc(pending)} · 规则筛除 ${esc(states.screened_out||0)} · orphan 隔离 ${esc(orphan)} 行/${esc(trace.orphan_unique_ledger_ids??"不可判")} ID。只有能从 opportunity ledger 精确回读的唯一 ID 才计入账；失败会退避，不会伪装成无机会。</div></div>
-    <div class="coverage-card"><div class="ck"><span>EVM 官方工厂流</span><span class="chip ${evmHealthy===evmStreams.length&&evmStreams.length?"b-good":"b-warn"}">${esc(evmHealthy)}/${esc(evmStreams.length||5)} 新鲜</span></div><div class="cv">${esc(eq.evidence?.complete||0)} <small class="dim">完整原始池</small></div><div class="cs">BSC / Base / Ethereum 共 5 条工厂流；前向实验边界 ${esc(utcClock(eq.bridge_started_at))}，边界前 ${esc(es.historical_raw_only||0)} 条仅作历史覆盖。</div></div>
+    <div class="coverage-card"><div class="ck"><span>EVM 官方工厂流</span><span class="chip ${evmHealthy===evmStreams.length&&evmStreams.length?"b-accent":"b-warn"}">${esc(evmHealthy)}/${esc(evmStreams.length||5)} 新鲜 · 研究扩展</span></div><div class="cv">${esc(eq.evidence?.complete||0)} <small class="dim">完整原始池</small></div><div class="cs">BSC / Base / Ethereum 共 5 条工厂流；EVM 不进入当前 Solana v6 前向分母，也不能据此显示 A3。边界前 ${esc(es.historical_raw_only||0)} 条仅作历史覆盖。</div></div>
     <div class="coverage-card"><div class="ck"><span>EVM 精确池资格 / 账本回读</span><span class="chip ${!evmTraceAvailable?"b-danger":evmTrace.state==="partial"||evmPending?"b-warn":"b-accent"}">${esc(evmTraceLabel)}</span></div><div class="cv">${esc(evmRecorded)} <small class="dim">可追溯唯一账本事件</small></div><div class="cs">原始标记已入账 ${esc(evmTrace.raw_marked_recorded_rows??"不可判")} 行 · orphan 隔离 ${esc(evmOrphan)} 行/${esc(evmTrace.orphan_unique_ledger_ids??"不可判")} ID · 回读不可用 ${esc(evmReadbackUnavailable)}。待检查/重试 ${esc(evmPending)}；只匹配工厂原始 pool。</div></div>
-    <div class="coverage-card"><div class="ck"><span>已知覆盖缺口</span><span class="chip ${(stream?.open_gaps||evmGaps)?"b-danger":"b-good"}">${esc((stream?.open_gaps||0)+evmGaps)} 个 open gap</span></div><div class="cv">${p.available&&ep.available?"链上证据优先":"不可判"}</div><div class="cs">DEX Screener 池与 profiles 仅负责市场水合/补充发现，不代表全市场覆盖；链上缺口、RPC 与索引延迟都会漏掉机会。</div></div>
+    <div class="coverage-card"><div class="ck"><span>已知覆盖缺口</span><span class="chip ${(stream?.open_gaps||evmGaps)||!protocol.open?"b-danger":"b-good"}">${esc((stream?.open_gaps||0)+evmGaps)} 个 open gap · 准入 ${protocol.open?"open":"closed"}</span></div><div class="cv">${protocol.open?"当前来源可入组":"协议未开放"}</div><div class="cs">DEX Screener 池与 profiles 仅负责市场水合/补充发现，不代表全市场覆盖；链上缺口、RPC、索引延迟或 finalized 对账失败都会阻断准入。</div></div>
   </section>`;
 }
 
@@ -538,7 +724,7 @@ function renderTable(laneId, rows, cols, cfg){
   if(query)rows=rows.filter(r=>(cfg.searchText?cfg.searchText(r):`${r.symbol||""} ${r.token||""}`).toLowerCase().includes(query));
   const tools=filters.length?`<div class="table-tools"><div class="filters" role="group" aria-label="决策过滤">${filters.map(f=>`<button class="filter ${f.k===activeFilter?'on':''}" data-filter="${f.k}" aria-pressed="${f.k===activeFilter}">${f.label}<span class="fc">${allRows.filter(f.test).length}</span></button>`).join("")}</div><input class="search" type="search" value="${esc(searchState[laneId]||'')}" placeholder="搜索代币 / 合约" aria-label="搜索当前列表"></div>`:"";
   if(!allRows.length) return `<div class="scroll"><div class="empty">${cfg.empty||"这轮没有信号 —— 好机会本就稀疏,不是坏了。"}</div></div>`;
-  if(!rows.length)return `${tools}<div class="scroll"><div class="empty">${query?'没有匹配的代币。':activeFilter==='actionable'?'当前没有通过全部门禁且报价仍有效的机会。切换到「观察」可查看仍在积累证据的事件。':'这个状态当前没有事件。'}</div></div>`;
+  if(!rows.length){const emptyCopy=query?'没有匹配的代币。':activeFilter==='actionable'&&laneId==='launch'&&!launchProtocolUiState(data.launch).open?'来源 readiness / protocol admission 未开放，A3 已全局降为 A1。切换到「观察」查看研究事件和阻断原因。':activeFilter==='actionable'?'当前没有通过全部门禁且报价仍有效的机会。切换到「观察」可查看仍在积累证据的事件。':'这个状态当前没有事件。';return `${tools}<div class="scroll"><div class="empty">${emptyCopy}</div></div>`}
   // sort
   const ss=sortState[laneId];
   if(ss){const c=cols.find(x=>x.k===ss.col); if(c&&c.sort){rows=rows.slice().sort((a,b)=>{const x=c.sort(a),y=c.sort(b);const r=(x>y?1:x<y?-1:0);return ss.dir==="asc"?r:-r})}}
@@ -579,9 +765,9 @@ const LANES={
     custom:true,
   },
   launch:{
-    title:d=>{const e=d?.events||[];const p=e.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const s=d?.primary_sources?.solana?.streams?.[0];return `<b style="color:var(--good)">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${p?`其中 <b>${p}</b> 个 A3 人工验证窗仍有效`:'暂无通过新报价合同的 A3 人工验证窗'}；Pump.fun 主链流 ${esc(s?.status||"不可判")}${s?.open_gaps?`，有 ${esc(s.open_gaps)} 个已知缺口`:''}。`},
-    stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{},eq=d?.primary_sources?.evm?.qualification||{};return [["首池事件",e.length,"首次发现价已锁定"],["SOL主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["EVM工厂完整证据",eq.evidence?.complete??"—","5条官方工厂流"],["A3人工验证窗",e.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"完整成本+报价+证据+送达SLA"],["A2纸面就绪",e.filter(x=>actionLevel(x)==="A2_PAPER_READY").length,"不得当作入场指令"],["A1观察",e.filter(x=>actionLevel(x)==="A1_WATCH").length,"旧数据/条件未齐/已过期"],["A0阻断",e.filter(x=>actionLevel(x)==="A0_BLOCKED").length,"已知安全红旗"]]},
-    readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。<b>SMALL_PROBE</b> 必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的证据门。优势门只认当前预注册协议的前向固定前缀、至少 14 个共享 UTC 市场日、union UTC 日历（缺席组按现金效用 0）和 sequential SPA/Reality Check；旧 cohort、20 个样本的漂亮区间或反复刷新都不能放行。样本不足时保留原始 cohort 做纸面结算，但当前动作降为 WATCH；缺 API key、取数失败或路由未知也只观察，已知蜜罐/权限雷或无法卖出直接避开。",
+    title:d=>{const e=d?.events||[];const p=e.filter(x=>actionLevel(x,d)==="A3_MANUAL_PROBE").length,s=d?.primary_sources?.solana?.streams?.[0],protocol=launchProtocolUiState(d);return `<b style="color:${protocol.open?'var(--good)':'var(--warn)'}">低流通 · 早期重定价</b>: ${e.length} 个已记录首池事件，${protocol.open?(p?`其中 <b>${p}</b> 个 A3 人工验证窗仍有效`:'协议已开放，但暂无逐行 A3 人工验证窗'):'来源/协议准入未开放，所有候选保持研究或观察'}；Pump.fun 主链流 ${esc(s?.status||"不可判")}${s?.open_gaps?`，有 ${esc(s.open_gaps)} 个已知缺口`:''}。`},
+    stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{},eq=d?.primary_sources?.evm?.qualification||{},protocol=launchProtocolUiState(d),ready=d?.primary_sources?.solana?.source_readiness||{};return [["v6 来源准入",protocol.open?"OPEN":"CLOSED",`${protocol.state} · clean epoch ${ready.observed_epochs??"?"}/${ready.required_clean_epochs??"?"}`],["首池事件",e.length,"首次发现价已锁定"],["SOL主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["EVM研究扩展",eq.evidence?.complete??"—","不进入当前 v6 分母"],["A3人工验证窗",e.filter(x=>actionLevel(x,d)==="A3_MANUAL_PROBE").length,"准入+独立对账+完整成本+报价+纸面证据+送达SLA"],["A2研究纸面",e.filter(x=>actionLevel(x,d)==="A2_PAPER_READY").length,"不得当作入场指令"],["A1观察",e.filter(x=>actionLevel(x,d)==="A1_WATCH").length,"旧数据/准入关闭/条件未齐/已过期"],["A0阻断",e.filter(x=>actionLevel(x,d)==="A0_BLOCKED").length,"已知安全红旗"]]},
+    readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。新候选先要通过 <b>live_ws + 独立 archive RPC finalized epoch 对账</b>与持久化 protocol admission；这只证明发现集合的来源完整性，不证明安全、成交或收益。<b>SMALL_PROBE</b> 还必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的纸面证据门。优势门只认当前预注册协议的前向固定前缀、至少 14 个共享 UTC 市场日、首尾活跃日之间的连续 UTC 日历（空仓日按现金效用 0）和 sequential SPA/Reality Check；旧 cohort、可变 outcome、20 个样本的漂亮区间或反复刷新都不能放行。来源 readiness、协议准入或逐行 reconciliation proof 任一缺失，A3 必须降为 A1；自动交易永不允许。",
     rows:d=>d?.events||[],
     id:r=>r.id||r.chain+r.token, flash:r=>r.entry_price,
     empty:"暂时没有合格首池事件。Launch 是事件流，不是热榜；空白是正常输出。",
@@ -602,7 +788,7 @@ const LANES={
       {k:"flow",label:"5m成交",n:1,cell:r=>`${r.buys_m5??0}/${r.sells_m5??0} <small class="dim">${usd(r.volume_m5)}</small>`,sort:r=>r.flow_ratio||0},
       {k:"risk",label:"计划",n:1,cell:r=>`≤${usd(r.max_notional_usd)} <small class="dim">失效 ≤$${esc(r.invalidation_price??"—")}</small>`,sort:r=>r.max_notional_usd||0},
     ],
-    detail:r=>{const ca=r.current_assessment||{},sg=ca.security_gate||r.security_gate||{},ep=ca.execution_probe||r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${eventEvidenceTimelineHtml(r)}${launchLifecycleHtml(r)}`},
+    detail:r=>{const ca=r.current_assessment||{},sg=ca.security_gate||r.security_gate||{},ep=ca.execution_probe||r.execution_probe||{},eg=r.evidence_gate||{},pe=r.primary_evidence||{},lv=actionLevel(r),protocol=launchProtocolUiState(data.launch),reconciliation=launchReconciliationProofState(r);const proof=pe.signature?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.signature)}</a> · creator ${esc(pe.creator||"—")} · slot ${esc(pe.slot||"—")}`:pe.transaction_hash?`<br>主链原始证据: <a href="${esc(pe.explorer_url||'#')}" target="_blank" rel="noreferrer">${esc(pe.transaction_hash)}</a> · pool ${esc(pe.pool||"—")} · block ${esc(pe.block_number||"—")}`:"";return `<span class="so">所以👉</span> ${lv==="A3_MANUAL_PROBE"?"这是人工小额验证窗，不是自动交易；只可使用当前 assessment 的只读报价参考与新失效价。":lv==="A2_PAPER_READY"?"安全与路由可供纸面追踪，但成本、优势或送达条件未齐，不可入场。":lv==="A0_BLOCKED"?"存在已知安全红旗或无法反向卖出，阻断。":r.action_level==="A3_MANUAL_PROBE"&&(!protocol.open||reconciliation.state!=="pass")?"原始行声称 A3，但来源 readiness、持久化协议准入或逐行独立对账未通过；浏览器已强制降为 A1。":"旧数据、未知项或报价过期，一律只观察。"}<br>当前动作: ${actionChip(r)} · 自动交易: <b>永不允许</b><br>首次发现价（不是当前入场价）: ${r.entry_price?`$${esc(r.entry_price)}`:"—"}<br>当前只读报价参考: ${ca.entry_reference_price!=null?`$${esc(ca.entry_reference_price)}`:"不可得"} · ${esc(expiryText(ca))}<br>优势门: ${esc(eg.state||"unknown")} · ${esc(eg.reason||r.actionability_reason||"—")}<br>安全门: ${esc(sg.state||"unknown")} ${esc((sg.hard_flags||sg.cautions||[]).join(", ")||sg.reason||"")}<br>路由门: ${esc(ep.state||"unknown")} ${ep.roundtrip_loss_pct!=null?`· 往返损耗 ${esc(ep.roundtrip_loss_pct)}%`:""} · ${esc(ep.reason||"")}<br><small>路由报价为只读快照，不是实盘成交；网络费是否包含: ${ep.network_fees_included===true?"是":"否/未知"}</small><br>首次池事件: ${esc(r.event_at||"—")} · 来源: ${esc(r.source||"—")}${proof}<br>最大名义仓位: ${usd(r.max_notional_usd)}<br>${(r.reasons||[]).map(esc).join(" · ")}<br>${esc(r.token||"")}${launchReconciliationProofHtml(r)}${eventEvidenceTimelineHtml(r)}${launchLifecycleHtml(r)}`},
   },
   structure:{
     title:d=>{const e=d?.events||[],h=d?.source_health||[],bad=h.filter(x=>x.status!=="ok"),canonical=d?.canonical_listings??e.filter(x=>x.event_type==="new_listing").length,legacy=d?.legacy_inventory_deltas??e.filter(x=>x.event_type==="legacy_inventory_delta").length;return `<b style="color:var(--violet)">公开市场结构事件</b>: ${canonical} 个资产级新增已入账；另有 ${legacy} 个旧库存差分组只观察。来源本轮可达 <b>${h.filter(x=>x.status==="ok").length}/${h.length||"?"}</b>${bad.length?`；失败: ${bad.map(x=>esc(x.exchange)+"("+esc(x.error||"unknown")+")").join(" · ")}`:""}。`},
@@ -744,6 +930,7 @@ function traceReadbackUnavailable(trace){
 function coverageCount(n,total){return total?`${n}/${total}`:"?/?"}
 function renderMarketCoverageMatrix(){
   const launch=data.launch, sol=launch?.primary_sources?.solana, evm=launch?.primary_sources?.evm;
+  const launchProtocol=launchProtocolUiState(launch),protocolCoverageState=launchProtocol.open?"ok":launchProtocol.state==="scheduled"||launchProtocol.state==="armed"?"partial":"unavailable";
   const solStreams=sol?.streams||[],evmStreams=evm?.streams||[];
   const solState=streamCoverageState(sol?.available,solStreams),evmState=streamCoverageState(evm?.available,evmStreams);
   const live=x=>x.status==="live"&&!x.stale&&!(x.open_gaps||0);
@@ -751,8 +938,8 @@ function renderMarketCoverageMatrix(){
   const launchGaps=[...solStreams,...evmStreams].reduce((n,x)=>n+(x.open_gaps||0),0);
   const solTrace=sol?.qualification?.traceability,evmTrace=evm?.qualification?.traceability;
   const solTraceState=ledgerTraceState(solTrace),evmTraceState=ledgerTraceState(evmTrace);
-  const launchState=worstCoverageState(solState,evmState,solTraceState,evmTraceState);
-  const traceText=`账本精确回读：SOL ${solTrace?.traceable_unique_ledger_events??"不可判"} 条 / orphan ${solTrace?.orphan_rows??"不可判"}；EVM ${evmTrace?.traceable_unique_ledger_events??"不可判"} 条 / orphan ${evmTrace?.orphan_rows??"不可判"}；回读不可用 SOL ${traceReadbackUnavailable(solTrace)} / EVM ${traceReadbackUnavailable(evmTrace)}；open gap ${launchGaps}`;
+  const launchState=worstCoverageState(solState,evmState,solTraceState,evmTraceState,protocolCoverageState);
+  const traceText=`v6 来源/协议准入 ${launchProtocol.open?"OPEN":"CLOSED"}（${launchProtocol.reasons.map(code=>`${launchReasonLabel(code)} [${code}]`).join(" · ")||"无阻断"}）；账本精确回读：SOL ${solTrace?.traceable_unique_ledger_events??"不可判"} 条 / orphan ${solTrace?.orphan_rows??"不可判"}；EVM ${evmTrace?.traceable_unique_ledger_events??"不可判"} 条 / orphan ${evmTrace?.orphan_rows??"不可判"}；回读不可用 SOL ${traceReadbackUnavailable(solTrace)} / EVM ${traceReadbackUnavailable(evmTrace)}；open gap ${launchGaps}`;
 
   const perp=data.perp,hl=perp?.carry_source_health?.hl||{};
   const cascadeState=!perp||!perp.carry_source_health||hl.state!=="ok"?"unavailable":"ok";
@@ -781,7 +968,7 @@ function renderMarketCoverageMatrix(){
   return `<section class="market-coverage" aria-label="五赛道数据覆盖矩阵">
     <div class="market-coverage-head"><div><h3>五赛道数据覆盖 · 不是全市场地图</h3><p>这里显示本轮实际拿到的逐源健康证据。绿色只表示已配置来源在当前合同下可判；缺数据、抓取失败或账本回读失败一律降为不可判，绝不解释成“市场没有机会”。</p></div>${coverageChip([launchState,cascadeState,structureState,airdropState,carryState].every(x=>x==="ok")?"ok":"partial","覆盖始终有限")}</div>
     <div class="market-coverage-grid">
-      <article class="market-coverage-card ${launchState}"><div class="mch"><div class="mct">Launch<small>Solana + EVM 首池发行流</small></div>${coverageChip(launchState)}</div><div class="mcv">SOL ${coverageCount(solLive,solStreams.length)} · EVM ${coverageCount(evmLive,evmStreams.length)} 无缺口新鲜</div><div class="mcs">${coverageChip(solState,"Pump.fun · "+(solState==="ok"?"新鲜":solState==="partial"?"有缺口":"不可用"))}${coverageChip(evmState,"EVM 工厂 · "+(evmState==="ok"?"新鲜":evmState==="partial"?"有缺口":"不可用"))}${coverageChip(worstCoverageState(solTraceState,evmTraceState),"精确账本回读 · "+(worstCoverageState(solTraceState,evmTraceState)==="ok"?"正常":worstCoverageState(solTraceState,evmTraceState)==="partial"?"有 orphan":"不可用"))}</div><div class="mcg"><b>已知缺口</b> · ${esc(traceText)}；只覆盖已配置的 Pump.fun 与 EVM 工厂，不覆盖所有链和 DEX。RPC、索引延迟与流缺口会漏单。</div></article>
+      <article class="market-coverage-card ${launchState}"><div class="mch"><div class="mct">Launch<small>Solana v6 对账入组 + EVM 研究扩展</small></div>${coverageChip(launchState,launchProtocol.open?"来源准入可判":"来源准入未开放")}</div><div class="mcv">SOL ${coverageCount(solLive,solStreams.length)} · EVM ${coverageCount(evmLive,evmStreams.length)} 无缺口新鲜</div><div class="mcs">${coverageChip(worstCoverageState(solState,protocolCoverageState),"Pump.fun + finalized 对账 · "+(launchProtocol.open?"准入开放":"准入关闭"))}${coverageChip(evmState==="unavailable"?"unavailable":"partial","EVM 工厂 · 研究扩展，不进 v6")}${coverageChip(worstCoverageState(solTraceState,evmTraceState,protocolCoverageState),"精确账本回读 · "+(worstCoverageState(solTraceState,evmTraceState,protocolCoverageState)==="ok"?"正常":worstCoverageState(solTraceState,evmTraceState,protocolCoverageState)==="partial"?"部分/未开放":"不可用"))}</div><div class="mcg"><b>已知缺口</b> · ${esc(traceText)}；只覆盖已配置的 Pump.fun 与 EVM 工厂，不覆盖所有链和 DEX。RPC、索引延迟、流缺口或独立 finalized 对账失守都会阻断 v6 新入组。</div></article>
       <article class="market-coverage-card ${cascadeState}"><div class="mch"><div class="mct">Cascade<small>清算 / 拥挤结构防御线</small></div>${coverageChip(cascadeState)}</div><div class="mcv">Hyperliquid ${Number.isFinite(hl.rows)?`${esc(hl.rows)} 行`:'行数未知'} · ${Number.isFinite(cascadeCount)?`${esc(cascadeCount)} 个账本事件`:'事件不可判'}</div><div class="mcs">${coverageChip(cascadeState,"Hyperliquid · "+(cascadeState==="ok"?"本轮快照正常":"本轮快照不可用"))}</div><div class="mcg"><b>已知缺口</b> · 目前仅覆盖 Hyperliquid 的 OI / 资金费 / 行情快照；未接 Binance、OKX、Bybit 清算流。拥挤代理不等于真实清算成交。</div></article>
       <article class="market-coverage-card ${structureState}"><div class="mch"><div class="mct">Structure<small>公开 CEX instruments 库存差分</small></div>${coverageChip(structureState)}</div><div class="mcv">${Number.isFinite(configured)?`${structureOk}/${configured}`:"?/?"} 个配置 CEX 本轮可达</div><div class="mcs">${structurePills}</div><div class="mcg"><b>已知缺口</b> · 逐源失败不计覆盖；当前库存差分不是官方公告确认，也不覆盖解锁、全部地区端点或所有交易所。</div></article>
       <article class="market-coverage-card ${airdropState}"><div class="mch"><div class="mct">Airdrop<small>官方活动人工登记与来源核验</small></div>${coverageChip(airdropState)}</div><div class="mcv">${adVerified==null||adAccepted==null?"?/?":`${adVerified}/${adAccepted}`} 个接受条目通过双页验证</div><div class="mcs">${coverageChip(trustRoots.length?"ok":"unavailable",trustRoots.length?`代码信任根 · ${trustRoots.join(" / ")}`:"代码信任根不可判")}${coverageChip(airdropFailuresState,`未验证 ${adUnverified??"?"} · 拒绝 ${adRejected??"?"}`)}</div><div class="mcg"><b>已知缺口</b> · 配置 ${adConfigured??"?"} 条；只接受代码审计信任根下的活动页 + 独立证据页。人工登记覆盖不完整，不是全市场空投发现器；源通过也不代表钱包有资格。</div></article>
@@ -812,13 +999,14 @@ function opportunityViewFreshness(){
 
 function opportunitySourceHeadline(){
   const launch=data.launch,sol=launch?.primary_sources?.solana,evm=launch?.primary_sources?.evm;
+  const protocol=launchProtocolUiState(launch);
   const streams=[...(sol?.streams||[]),...(evm?.streams||[])];
   const live=streams.filter(x=>x.status==="live"&&!x.stale&&!(x.open_gaps||0)).length;
   const structureHealth=data.structure?.source_health||[];
   const structureOk=structureHealth.filter(x=>x.status==="ok").length;
   const carry=data.perp?.carry_source_health||{};
   const carryState=["ok","partial"].includes(carry.state)?carry.state:"unavailable";
-  return `发行流 ${live}/${streams.length||"?"} · 上币源 ${structureOk}/${structureHealth.length||"?"} · Carry ${carryState}`;
+  return `Launch v6 准入 ${protocol.open?"OPEN":"CLOSED"} · 发行流 ${live}/${streams.length||"?"} · 上币源 ${structureOk}/${structureHealth.length||"?"} · Carry ${carryState}`;
 }
 
 function launchQuoteExpiry(r){
@@ -857,6 +1045,7 @@ function launchCostGateState(contract){
 
 function launchGateSummary(r){
   const ca=r?.current_assessment||{},sg=ca.security_gate||{},ep=ca.execution_probe||{};
+  const protocol=launchProtocolUiState(data?.launch),reconciliation=launchReconciliationProofState(r);
   const securityArrays=["hard_flags","cautions","unknown_fields"].every(k=>Array.isArray(sg[k]));
   const hardFlags=Array.isArray(sg.hard_flags)?sg.hard_flags:[];
   const cautions=Array.isArray(sg.cautions)?sg.cautions:[];
@@ -883,7 +1072,12 @@ function launchGateSummary(r){
   const evidenceGate=r?.evidence_gate||{};
   const evidence=evidenceState==="pass"&&evidenceGate.protocol_state==="pass"
     &&evidenceGate.lane==="launch"&&evidenceGate.cost_is_real_fill===false
-    &&evidenceGate.edge_verdict==="有前向纸面edge迹象"?"pass"
+    &&evidenceGate.edge_verdict==="有前向纸面selector edge迹象"
+    &&evidenceGate.sample_kind==="forward_paper_selector"
+    &&evidenceGate.selection_stage==="discovery_rule_before_security_and_route"
+    &&evidenceGate.real_edge_n===0&&evidenceGate.real_edge_eligible===false
+    &&evidenceGate.execution_edge_eligible===false
+    &&evidenceGate.auto_execution_allowed===false?"pass"
     :["blocked","no_edge_observed","no_edge"].includes(evidenceState)?"block":"unknown";
   const expiry=launchQuoteExpiry(r),quoteAt=new Date(ca.quote_at||"").getTime();
   const quoteExpiryAt=new Date(ca.quote_expires_at||"").getTime();
@@ -893,10 +1087,12 @@ function launchGateSummary(r){
     ?(now<expiry.ms?"pass":"block"):"unknown";
   const delivery=ca.delivery_sla_state==="pass"?"pass":"unknown";
   const gates=[
+    {name:"来源准入",state:protocol.open?"pass":"block"},
+    {name:"独立 finalized 对账",state:reconciliation.state},
     {name:"安全",state:securityState},
     {name:"可卖路由",state:route},
     {name:"全成本",state:cost},
-    {name:"优势证据",state:evidence},
+    {name:"前向纸面 selector",state:evidence},
     {name:"报价时钟",state:quote},
     {name:"送达 SLA",state:delivery},
   ];
@@ -954,7 +1150,7 @@ function launchOpportunityCard(r){
   const unavailable=Array.isArray(outcome?.unavailable_horizons)?outcome.unavailable_horizons.length:0;
   const tracking=outcome&&typeof outcome==="object"?`已结算 ${settled}/3${unavailable?` · 缺口 ${unavailable}`:""}`:"跟踪不可判";
   const unresolved=summary.gates.filter(x=>x.state!=="pass").map(x=>x.name);
-  const gateNote=unresolved.length?`未通过或未知：${unresolved.join("、")}`:"六项证据当前明确通过；仍只允许人工小额验证";
+  const gateNote=unresolved.length?`未通过或未知：${unresolved.join("、")}`:"全部来源与逐行证据当前明确通过；仍只允许人工小额验证";
   const riskCls=risk.state==="pass"?"b-good":risk.state==="block"?"b-danger":"b-warn";
   return `<article class="opportunity-card ${stage.key}">
     <div class="opportunity-card-head"><div class="opportunity-card-id"><b>${esc(r?.symbol||"未知代币")}</b><small>${esc(r?.chain||"链未知")} · ${esc(r?.source||"来源未知")} · 首次发现 ${esc(utcClock(r?.detected_at))}</small></div><span class="chip ${stage.cls}">${esc(stage.label)}</span></div>
@@ -974,13 +1170,14 @@ function launchOpportunityQueue(launches){
   const rows=launches.slice().sort((a,b)=>priority[launchCardStage(a).key]-priority[launchCardStage(b).key]).slice(0,6);
   const counts=launches.reduce((acc,row)=>{const key=launchCardStage(row).key;acc[key]=(acc[key]||0)+1;return acc},{});
   const body=rows.length?`<div class="opportunity-grid">${rows.map(launchOpportunityCard).join("")}</div>`:`<div class="empty">当前没有已入账的 Launch 候选。空白不代表全市场没有机会；先检查来源覆盖与视图时钟。</div>`;
-  return `<section class="opportunity-queue" aria-label="Launch 执行与观察队列"><div class="opportunity-queue-head"><div><h3>Launch 执行与观察队列</h3><p>同一张卡同时展示当前只读入场窗、论文失效条件、仓位上限、证据完整度和未知风险。排序仅按动作等级，不按“暴涨概率”。</p></div><span class="chip ${counts.actionable?"b-good":"b-warn"}">A3 ${counts.actionable||0} · 观察/纸面 ${(counts.watch||0)+(counts.paper||0)} · 失效 ${counts.expired||0} · 阻断 ${counts.blocked||0}</span></div>${body}</section>`;
+  return `<section class="opportunity-queue" aria-label="Launch 研究与人工验证队列"><div class="opportunity-queue-head"><div><h3>Launch 研究与人工验证队列</h3><p>同一张卡同时展示当前只读报价窗、论文失效条件、冻结仓位上限、来源准入、独立对账和未知风险。排序仅按动作等级，不按“暴涨概率”；A3 也不是系统执行指令。</p></div><span class="chip ${counts.actionable?"b-good":"b-warn"}">A3 ${counts.actionable||0} · 观察/纸面 ${(counts.watch||0)+(counts.paper||0)} · 失效 ${counts.expired||0} · 阻断 ${counts.blocked||0}</span></div>${body}</section>`;
 }
 
 // 📋 打法 — the synthesis: what to consider, what to avoid, what NOT to do. Turns the
 // board from a data dashboard into a clear, honest, ranked trading thesis.
 function renderPlay(){
   const launches=data.launch?.events||[];
+  const launchProtocol=launchProtocolUiState(data.launch);
   const allCarry=data.perp?.carry||[];
   const carry=allCarry.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0);
   const singleVenueCarry=allCarry.filter(x=>x.cross!==true);
@@ -1016,24 +1213,26 @@ function renderPlay(){
   const launchResolved=Number.isFinite(launchEvidence?.n)?launchEvidence.n:null;
   const trackingValue=`L ${launchResolved??"?"} · C ${carryValid??"?"}`;
   let h='<div class="scroll play">';
-  const verdict=!data.launch?'不可判 · Launch 视图缺失':actionCount?`${actionCount} 个小额试探窗口仍有效`:'等待 · 当前不入场';
+  const verdict=!data.launch?'不可判 · Launch 视图缺失':!launchProtocol.open?'等待 · Launch 来源准入未开放':actionCount?`${actionCount} 个人工小额验证窗仍有效`:'等待 · 当前不入场';
   const verdictCopy=!data.launch
     ?'Launch 当前视图未加载，不能把缺失解释成没有机会；请先检查关键视图时钟与来源覆盖。'
+    :!launchProtocol.open
+    ?`独立 finalized 来源 readiness 或持久化 protocol admission 未开放；所有原始 A3 已强制降为 A1。阻断：${launchProtocol.reasons.map(launchReasonLabel).join('、')||'不可判'}。`
     :actionCount
-    ?'这些候选同时通过安全、双向路由、报价时钟与证据门。仍只能按逐行仓位上限试错，价格失效或时钟到期立即停止使用旧报价。'
+    ?'这些候选同时通过来源准入、独立 finalized 对账、安全、双向路由、报价时钟与纸面证据门。仍只能人工按逐行仓位上限验证，价格失效或时钟到期立即停止使用旧报价。'
     :carry.length
       ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有固定情景的部分模型代理为正，尚未证明真实成本后优势。'
       :'当前没有通过完整门禁的 Launch 或 Carry 候选；数据缺失时保持不可判，不把抓取失败说成没有机会。';
   h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
-    <div><div class="decision-kicker">当前决策 · ${!data.launch?'数据缺失':actionCount?'可小额验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
+    <div><div class="decision-kicker">当前决策 · ${!data.launch?'数据缺失':!launchProtocol.open?'来源准入关闭':actionCount?'可人工验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
       <p class="decision-copy">${verdictCopy}</p>
-      <div class="command-actions"><button class="jump primary" data-jump="launch">查看入场门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
+      <div class="command-actions"><button class="jump primary" data-jump="launch">查看来源与人工验证门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
     <div class="funnel-panel" aria-label="机会漏斗">
-      <div class="funnel-head"><div><span class="fh-title">发现 → 证据门 → 可执行 → 跟踪验证</span><span class="fh-sub">只统计已加载记录；不是全市场机会总数</span></div><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span></div>
+      <div class="funnel-head"><div><span class="fh-title">发现 → 来源/证据准入 → 人工验证 → 跟踪验证</span><span class="fh-sub">只统计已加载记录；不是全市场机会总数</span></div><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span></div>
       <div class="funnel-steps">
         <div class="funnel-step"><span class="fi">01</span><span class="fk">已发现 / 入账</span><span class="fv">${esc(discoveredDisplay)}</span><span class="fs">${loadedLanes}/5 赛道已载入</span></div>
-        <div class="funnel-step ${actionCount?'pass':'warn'}"><span class="fi">02</span><span class="fk">Launch 证据门</span><span class="fv">${data.launch?`${actionCount}/${launches.length}`:'?/?'}</span><span class="fs">${data.launch?`${launchWatch} 个证据未齐`:'视图缺失，不可判'}</span></div>
-        <div class="funnel-step ${actionCount?'pass':'warn'}"><span class="fi">03</span><span class="fk">当前可执行</span><span class="fv">${data.launch?actionCount:'?'}</span><span class="fs">仅 A3：新鲜报价+完整成本+证据门+送达SLA；自动交易永不允许</span></div>
+        <div class="funnel-step ${launchProtocol.open?'pass':'warn'}"><span class="fi">02</span><span class="fk">Launch 来源/协议准入</span><span class="fv">${data.launch?(launchProtocol.open?'OPEN':'CLOSED'):'?'}</span><span class="fs">${data.launch?`${launchWatch} 个观察/纸面候选`:'视图缺失，不可判'}</span></div>
+        <div class="funnel-step ${actionCount?'pass':'warn'}"><span class="fi">03</span><span class="fk">当前可人工验证</span><span class="fv">${data.launch?actionCount:'?'}</span><span class="fs">仅 A3：准入+独立对账+新鲜报价+完整成本+纸面证据+送达SLA；自动交易永不允许</span></div>
         <div class="funnel-step"><span class="fi">04</span><span class="fk">跟踪验证样本</span><span class="fv">${esc(trackingValue)}</span><span class="fs">Launch 24h / Carry 有效代理关闭</span></div>
       </div>
       <div class="funnel-status"><span class="chip b-warn">Launch 观察/纸面 ${data.launch?launchWatch:'?'}</span><span class="chip ${launchExpired?'b-danger':''}">失效 ${data.launch?launchExpired:'?'}</span><span class="chip ${launchBlocked?'b-danger':''}">阻断 ${data.launch?launchBlocked:'?'}</span><span class="chip b-danger">应避开 ${dep.length+avoid.length}</span></div>
@@ -1045,7 +1244,7 @@ function renderPlay(){
   const carryTotal=Number.isFinite(pp.n_closed_total)?pp.n_closed_total:carryValid;
   const carryExcluded=Number.isFinite(pp.n_closed_excluded)?pp.n_closed_excluded:(carryValid!=null&&carryTotal!=null?Math.max(0,carryTotal-carryValid):null);
   h+=`<section class="evidence-grid" aria-label="证据与覆盖">
-    <div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 ${esc(launchProtocolLabel)} 前向 24h、union UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>
+    <div class="evidence-card"><div class="ek"><span>早期机会前向验证</span><span class="chip b-warn">${esc(launchEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${launchEligible.SMALL_PROBE??0}/${launchTarget} <small class="dim">预注册候选</small></div><div class="es">WATCH ${launchEligible.WATCH??0}/${launchTarget} · ${esc(launchValidation.protocol_state||launchValidation.state||'collecting')}；只认 ${esc(launchProtocolLabel)} 追加式精确池 24h、连续 UTC 日历与 sequential SPA。</div><div class="meter"><i style="width:${Math.min(100,(launchEligible.SMALL_PROBE||0)/launchTarget*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>Carry 报价代理</span><span class="chip b-warn">${esc(carryEvidence?.edge_verdict||'不可判')}</span></div><div class="ev">${carryValid??'?'}/20 <small class="dim">有效代理关闭</small></div><div class="es">总关闭 ${carryTotal??'?'} · 排除 ${carryExcluded??'?'} · 旧协议 open 隔离 ${pp.n_quarantined_total??0}；模型代理为正，成本组件仍不全时也只作纸面候选；真实优势样本 ${pp.real_edge_n??carryEvidence?.real_edge_n??0}，仍不可判。</div><div class="meter"><i style="width:${Math.min(100,(carryValid??0)/20*100)}%"></i></div></div>
     <div class="evidence-card"><div class="ek"><span>数据全面性</span><span class="chip ${sourceOk===sourceHealth.length&&sourceHealth.length?'b-good':'b-warn'}">部分覆盖</span></div><div class="ev">${sourceOk}/${sourceHealth.length||'?'} <small class="dim">上币源可达</small></div><div class="es">覆盖不等于全面：链、交易所、地区限制与 API 失败都会制造盲区。</div><div class="meter"><i style="width:${sourceHealth.length?sourceOk/sourceHealth.length*100:0}%"></i></div></div>
   </section>`;
