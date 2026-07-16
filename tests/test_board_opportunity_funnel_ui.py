@@ -32,15 +32,18 @@ def test_launch_cards_show_execution_bounds_without_inventing_missing_values():
         "入场窗口 · 只读",
         "失效 / 离场",
         "系统无真实持仓，也不会自动离场",
-        "仓位上限",
-        "最大名义金额；未知时不得自行补值",
+        "仓位上限 · 首次冻结",
+        "本轮报价测量额",
+        "与冻结上限不一致或路由未成 / 不可用",
         "证据完整度",
         "风险未知 / 未齐",
         "跟踪不可判",
     ):
         assert phrase in html
-    assert "const capRaw=ca.notional_usd??r?.max_notional_usd" in html
-    assert 'Number.isFinite(cap)&&cap>0?usd(cap):"未知"' in html
+    assert "const cap=Number(r?.max_notional_usd),quoteNotional=Number(ca.notional_usd)" in html
+    assert 'const capText=capKnown?usd(cap):"未知"' in html
+    assert 'quoteNotionalUsable=ca.route_state==="quoted"&&quoteMatchesCap' in html
+    assert "ca.notional_usd??r?.max_notional_usd" not in html
     assert 'entry==null?"不可得"' in html
     assert 'invalidation==null?"不可判"' in html
 

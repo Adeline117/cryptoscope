@@ -936,11 +936,20 @@ function launchCardStage(r,summary=null){
 function launchOpportunityCard(r){
   const ca=r?.current_assessment||{},summary=launchGateSummary(r),stage=launchCardStage(r,summary),risk=launchRiskSummary(r);
   const expiry=launchQuoteExpiry(r),entry=finitePrice(ca.entry_reference_price),invalidation=finitePrice(ca.invalidation_reference_price??r?.invalidation_price);
-  const capRaw=ca.notional_usd??r?.max_notional_usd,cap=Number(capRaw);
+  // The immutable discovery cap is the only amount that may be labelled as a
+  // position limit. A later read-only quote can use a different measurement size;
+  // surfacing that number as the cap would visually authorize an oversized probe.
+  const cap=Number(r?.max_notional_usd),quoteNotional=Number(ca.notional_usd);
+  const capKnown=Number.isFinite(cap)&&cap>0,quoteNotionalKnown=Number.isFinite(quoteNotional)&&quoteNotional>0;
+  const quoteMatchesCap=capKnown&&quoteNotionalKnown&&Math.abs(quoteNotional-cap)<=Math.max(1e-6,cap*1e-9);
+  const quoteNotionalUsable=ca.route_state==="quoted"&&quoteMatchesCap;
   const quoteClock=ca.quote_at&&expiry?`${utcClock(ca.quote_at)} → ${utcClock(expiry.value)}`:"报价时钟不完整";
   const entryText=entry==null?"不可得":`$${chartPrice(entry)}`;
   const invalidationText=invalidation==null?"不可判":`${String(r?.side||"LONG").toUpperCase()==="SHORT"?"≥":"≤"} $${chartPrice(invalidation)}`;
-  const capText=Number.isFinite(cap)&&cap>0?usd(cap):"未知";
+  const capText=capKnown?usd(cap):"未知";
+  const quoteNotionalText=!quoteNotionalKnown?"本轮报价测量额未知 / 不可用":quoteNotionalUsable
+    ?`本轮报价测量额 ${usd(quoteNotional)}，与冻结上限一致`
+    :`本轮报价测量额 ${usd(quoteNotional)}，与冻结上限不一致或路由未成 / 不可用`;
   const outcome=r?.outcome,points=outcome?.horizons||{},settled=["1h","24h","7d"].filter(k=>points[k]).length;
   const unavailable=Array.isArray(outcome?.unavailable_horizons)?outcome.unavailable_horizons.length:0;
   const tracking=outcome&&typeof outcome==="object"?`已结算 ${settled}/3${unavailable?` · 缺口 ${unavailable}`:""}`:"跟踪不可判";
@@ -952,7 +961,7 @@ function launchOpportunityCard(r){
     <div class="opportunity-metrics">
       <div class="opportunity-metric"><span class="mk">入场窗口 · 只读</span><span class="mv">${esc(entryText)} · ${esc(expiryText({expires_at:expiry?.value}))}</span><span class="ms">${esc(quoteClock)}；不是成交价</span></div>
       <div class="opportunity-metric"><span class="mk">失效 / 离场</span><span class="mv">论文失效 ${esc(invalidationText)}</span><span class="ms">系统无真实持仓，也不会自动离场</span></div>
-      <div class="opportunity-metric"><span class="mk">仓位上限</span><span class="mv">${esc(capText)}</span><span class="ms">最大名义金额；未知时不得自行补值</span></div>
+      <div class="opportunity-metric"><span class="mk">仓位上限 · 首次冻结</span><span class="mv">${esc(capText)}</span><span class="ms">${esc(quoteNotionalText)}；未知时不得自行补值</span></div>
     </div>
     <div class="gate-summary"><b>证据完整度 ${summary.passed}/${summary.gates.length} 明确通过</b><small>${summary.blocked} 阻断 · ${summary.unknown} 未知</small></div>
     <div class="gate-list">${summary.gates.map(g=>`<span class="gate-pill ${g.state}">${esc(g.name)} · ${g.state==="pass"?"通过":g.state==="block"?"阻断":"未知"}</span>`).join("")}</div>
