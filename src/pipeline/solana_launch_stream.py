@@ -1839,8 +1839,10 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
     retry_after = None
     deadline_stopped = 0
     deadline_exhausted = False
-    # Blocks can be several MB. Recovery stays sequential, checkpoints each slot,
-    # and never starts more than four units in one bounded maintenance cycle.
+    # Blocks can be several MB. Recovery stays sequential and never starts more
+    # than four proof units in one bounded maintenance cycle. One unit may prove
+    # a leading skipped run, but a produced block is still handled one slot at a
+    # time so partial evidence can never advance the gap cursor.
     remaining_budget = min(
         GAP_RETRY_MAX_SLOT_BUDGET, max(0, int(slot_budget)),
     )
@@ -1861,8 +1863,41 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                 evidence = _backfill_finalized_slot(
                     cursor, rpc=rpc, deadline=deadline, monotonic=monotonic,
                 )
+                if not isinstance(evidence, dict):
+                    raise RuntimeError(
+                        "Solana gap proof returned invalid evidence")
+                evidence_state = evidence.get("state")
+                evidence_slot = evidence.get("slot")
+                verified_through = evidence.get("verified_through")
+                if (isinstance(evidence_slot, bool)
+                        or not isinstance(evidence_slot, int)
+                        or evidence_slot != cursor
+                        or isinstance(verified_through, bool)
+                        or not isinstance(verified_through, int)
+                        or verified_through < cursor):
+                    raise RuntimeError(
+                        "Solana gap proof returned invalid verified_through")
+                if evidence_state == "produced":
+                    if verified_through != cursor:
+                        raise RuntimeError(
+                            "produced Solana gap proof crossed its slot")
+                elif evidence_state == "skipped_proven":
+                    next_slot = evidence.get("proof_next_slot")
+                    parent_slot = evidence.get("proof_parent_slot")
+                    if (isinstance(next_slot, bool)
+                            or not isinstance(next_slot, int)
+                            or isinstance(parent_slot, bool)
+                            or not isinstance(parent_slot, int)
+                            or parent_slot < 0 or parent_slot >= cursor
+                            or next_slot <= cursor
+                            or verified_through != next_slot - 1):
+                        raise RuntimeError(
+                            "skipped Solana gap proof contract is inconsistent")
+                else:
+                    raise RuntimeError("Solana gap proof state is invalid")
+                checkpoint = min(end, verified_through)
                 state = stream_health.advance_gap(
-                    gap["id"], cursor,
+                    gap["id"], checkpoint,
                     details={
                         "backfilled": True, "retry": True,
                         "slot": cursor, "gap_to": end, **evidence,
@@ -1875,7 +1910,7 @@ def retry_open_gaps(rpc: JsonRpc, *, limit: int = 10,
                     raise RuntimeError(
                         "verified Solana gap checkpoint was not persisted")
                 progressed += 1
-                cursor += 1
+                cursor = checkpoint + 1
                 if deadline is not None and monotonic() >= deadline:
                     deadline_exhausted = True
                     stop_lane = True
@@ -2170,7 +2205,7 @@ def _backfill_finalized_slot(
     monotonic: Callable[[], float] = time.monotonic,
     capture_mode: str = "gap_backfill",
 ) -> dict:
-    """Verify one finalized produced/skipped slot, raising on partial evidence."""
+    """Verify one produced slot or a leading skipped run, failing on partial proof."""
     slot = int(slot)
     finalized = int(_rpc_call(
         rpc, "getSlot", [{"commitment": "finalized"}],
@@ -2218,6 +2253,7 @@ def _backfill_finalized_slot(
         if int(parent) < slot:
             return {
                 "state": "skipped_proven", "slot": slot,
+                "verified_through": first_produced - 1,
                 "proof_next_slot": first_produced,
                 "proof_parent_slot": int(parent),
             }
@@ -2259,7 +2295,10 @@ def _backfill_finalized_slot(
             source_provider=rpc_provider_id(getattr(rpc, "endpoint", None)),
         )
         launches += 1
-    return {"state": "produced", "slot": slot, "launches": launches}
+    return {
+        "state": "produced", "slot": slot,
+        "verified_through": slot, "launches": launches,
+    }
 
 
 def backfill_slots(from_slot: int, to_slot: int, *, rpc: JsonRpc) -> bool:

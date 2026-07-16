@@ -996,6 +996,13 @@ def test_deadline_rpc_clamps_production_network_timeout(sol, monkeypatch):
 
 
 def test_adaptive_budgets_ramp_only_after_full_clean_cycles_and_reset(sol):
+    assert sol._adjust_gap_budget(
+        1, 0, _gap_stats(1, recovered=1),
+    ) == (1, 1)
+    assert sol._adjust_gap_budget(
+        1, 1, _gap_stats(1, recovered=1),
+    ) == (2, 0)
+
     gap_budget = 1
     gap_streak = 0
     used_gap_budgets = []
@@ -1137,6 +1144,89 @@ def test_open_slot_gap_is_retried_and_resolved(sol):
     assert stream_health.snapshot(stale_after_seconds=60)[0]["status"] == "live"
 
 
+def test_four_skipped_slots_resolve_in_one_proof_budget_unit(sol):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=15,
+                          expect_contiguous=True)
+
+    class Rpc:
+        def __init__(self):
+            self.calls = []
+
+        def call(self, method, params):
+            self.calls.append(method)
+            if method == "getSlot":
+                return 15
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                assert params[:2] == [11, 15]
+                return [15]
+            assert method == "getBlock" and params[0] == 15
+            assert params[1]["transactionDetails"] == "none"
+            return {"parentSlot": 10}
+
+    rpc = Rpc()
+    assert sol.retry_open_gaps(rpc) == _gap_stats(1, recovered=1)
+    assert rpc.calls == [
+        "getSlot", "getFirstAvailableBlock", "getBlocks", "getBlock",
+    ]
+    assert stream_health.open_gaps("solana", "pump_fun_launches") == []
+    c = stream_health._conn()
+    try:
+        status, details = c.execute(
+            "SELECT status,details FROM gaps"
+        ).fetchone()
+    finally:
+        c.close()
+    assert status == "resolved"
+    proof = json.loads(details)
+    assert proof["slot"] == 11
+    assert proof["verified_through"] == 14
+    assert proof["proof_next_slot"] == 15
+    assert proof["proof_parent_slot"] == 10
+
+
+def test_skipped_run_proof_is_clamped_to_the_open_gap_end(sol, monkeypatch):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=13,
+                          expect_contiguous=True)
+    checkpoints = []
+    advance = stream_health.advance_gap
+
+    def record_checkpoint(gap_id, through_cursor, **kwargs):
+        checkpoints.append(through_cursor)
+        return advance(gap_id, through_cursor, **kwargs)
+
+    monkeypatch.setattr(stream_health, "advance_gap", record_checkpoint)
+
+    class Rpc:
+        def call(self, method, params):
+            if method == "getSlot":
+                return 15
+            if method == "getFirstAvailableBlock":
+                return 0
+            if method == "getBlocks":
+                return [15]
+            assert method == "getBlock" and params[0] == 15
+            return {"parentSlot": 10}
+
+    assert sol.retry_open_gaps(Rpc()) == _gap_stats(1, recovered=1)
+    assert checkpoints == [12]
+    c = stream_health._conn()
+    try:
+        details = c.execute("SELECT details FROM gaps").fetchone()[0]
+    finally:
+        c.close()
+    assert json.loads(details)["verified_through"] == 14
+
+
 def test_empty_getblocks_without_successor_proof_keeps_gap_open(sol):
     from src.pipeline import stream_health
 
@@ -1157,6 +1247,13 @@ def test_empty_getblocks_without_successor_proof_keeps_gap_open(sol):
     assert sol.retry_open_gaps(Rpc()) == _gap_stats(1, failed=1)
     health = stream_health.snapshot(stale_after_seconds=60)[0]
     assert health["status"] == "degraded" and health["open_gaps"] == 1
+    c = stream_health._conn()
+    try:
+        assert c.execute(
+            "SELECT from_cursor,to_cursor,status FROM gaps"
+        ).fetchone() == (11, 11, "open")
+    finally:
+        c.close()
 
 
 def test_successor_parent_exposes_provider_omission_instead_of_resolving_gap(sol):
@@ -1183,9 +1280,12 @@ def test_successor_parent_exposes_provider_omission_instead_of_resolving_gap(sol
     assert health["status"] == "degraded" and health["open_gaps"] == 1
     c = stream_health._conn()
     try:
-        error = c.execute("SELECT last_error FROM gaps").fetchone()[0]
+        start, end, status, error = c.execute(
+            "SELECT from_cursor,to_cursor,status,last_error FROM gaps"
+        ).fetchone()
     finally:
         c.close()
+    assert (start, end, status) == (11, 11, "open")
     assert "omitted produced" in error
 
 
@@ -1274,7 +1374,10 @@ def test_gap_budget_stops_after_first_failure_without_touching_later_slots(
         calls.append(slot)
         if slot == 12:
             raise RuntimeError("provider omitted block")
-        return {"state": "produced", "slot": slot, "launches": 0}
+        return {
+            "state": "produced", "slot": slot,
+            "verified_through": slot, "launches": 0,
+        }
 
     monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
     result = sol.retry_open_gaps(object(), slot_budget=4)
@@ -1312,7 +1415,10 @@ def test_gap_deadline_checkpoints_completed_slot_then_stops(sol, monkeypatch):
     def recover(slot, **kwargs):
         calls.append(slot)
         clock.value = 21
-        return {"state": "produced", "slot": slot, "launches": 0}
+        return {
+            "state": "produced", "slot": slot,
+            "verified_through": slot, "launches": 0,
+        }
 
     monkeypatch.setattr(sol, "_backfill_finalized_slot", recover)
     result = sol.retry_open_gaps(
@@ -1394,6 +1500,47 @@ def test_default_gap_retry_budget_caps_block_rpc_load(sol):
     assert rpc.blocks == [11]
     gap = stream_health.open_gaps("solana", "pump_fun_launches")[0]
     assert gap["from_cursor"] == 12
+    assert json.loads(gap["details"])["verified_through"] == 11
+
+
+@pytest.mark.parametrize("evidence", [
+    {"state": "produced", "slot": 11, "launches": 0},
+    {"state": "produced", "slot": 11, "verified_through": True, "launches": 0},
+    {"state": "produced", "slot": 11, "verified_through": 10, "launches": 0},
+    {"state": "produced", "slot": 11, "verified_through": 11.0, "launches": 0},
+    {"state": "unknown", "slot": 11, "verified_through": 11},
+    {"state": "produced", "slot": 11, "verified_through": 12, "launches": 0},
+    {"state": "produced", "slot": 12, "verified_through": 12, "launches": 0},
+    {"state": "skipped_proven", "slot": 11, "verified_through": 14,
+     "proof_next_slot": 15, "proof_parent_slot": 11},
+    {"state": "skipped_proven", "slot": 11, "verified_through": 13,
+     "proof_next_slot": 15, "proof_parent_slot": 10},
+])
+def test_gap_proof_requires_strict_monotonic_verified_through(
+        sol, monkeypatch, evidence):
+    from src.pipeline import stream_health
+
+    stream_health.observe("solana", "pump_fun_launches", cursor=10,
+                          expect_contiguous=True)
+    stream_health.observe("solana", "pump_fun_launches", cursor=12,
+                          expect_contiguous=True)
+    monkeypatch.setattr(
+        sol, "_backfill_finalized_slot", lambda _slot, **_kwargs: evidence,
+    )
+
+    assert sol.retry_open_gaps(object()) == _gap_stats(1, failed=1)
+    c = stream_health._conn()
+    try:
+        start, end, status, error = c.execute(
+            "SELECT from_cursor,to_cursor,status,last_error FROM gaps"
+        ).fetchone()
+    finally:
+        c.close()
+    assert (start, end, status) == (11, 11, "open")
+    assert any(fragment in error for fragment in (
+        "invalid verified_through", "crossed its slot",
+        "proof state is invalid", "proof contract is inconsistent",
+    ))
 
 
 def test_failed_gap_recovery_is_deferred_but_remains_fail_visible(sol):
