@@ -10,7 +10,13 @@
       { "key": "CDN-Cache-Control", "value": "max-age=5" },
       { "key": "Vercel-CDN-Cache-Control", "value": "max-age=5" }
     ]},
-    { "source": "/data/((?!launch.json).*)", "headers": [
+    { "source": "/data/meta.json", "headers": [
+      { "key": "x-vercel-enable-rewrite-caching", "value": "1" },
+      { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" },
+      { "key": "CDN-Cache-Control", "value": "max-age=5" },
+      { "key": "Vercel-CDN-Cache-Control", "value": "max-age=5" }
+    ]},
+    { "source": "/data/((?!launch.json|meta.json).*)", "headers": [
       { "key": "x-vercel-enable-rewrite-caching", "value": "1" },
       { "key": "Cache-Control", "value": "public, max-age=15, must-revalidate" },
       { "key": "CDN-Cache-Control", "value": "max-age=60, stale-while-revalidate=30" },

@@ -1643,10 +1643,13 @@ let launchLoading=false;
 async function loadLaunch(){
   if(launchLoading)return; launchLoading=true;
   try{
-    const b="?t="+Math.floor(Date.now()/5e3);
-    const response=await fetch("/data/launch.json"+b,{cache:"no-store"});
-    const launch=response.ok?await response.json():null;
-    if(launch&&launch.schema_version===1){data.launch=launch;queueLaunchDeliveryVerifications(launch);if(view==="launch"||view==="play")paint()}
+    const b="?t="+Date.now();
+    const results=await Promise.allSettled(["launch","meta"].map(name=>fetch("/data/"+name+".json"+b,{cache:"no-store"}).then(response=>response.ok?response.json():null)));
+    const [launch,meta]=results.map(result=>result.status==="fulfilled"?result.value:null);
+    let changed=false;
+    if(launch&&launch.schema_version===1){data.launch=launch;queueLaunchDeliveryVerifications(launch);changed=true}
+    if(meta&&meta.schema_version===1){data.meta=meta;changed=true}
+    if(changed&&(view==="launch"||view==="play"))paint();
   }catch(e){}finally{launchLoading=false}
 }
 $("view").innerHTML=`<div class="scroll">${'<div class="skl"></div>'.repeat(6)}</div>`;

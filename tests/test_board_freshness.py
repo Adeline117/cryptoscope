@@ -85,7 +85,7 @@ def test_overview_names_stale_inputs_and_mobile_shows_every_tab():
     assert ".grp{display:contents}" in board
 
 
-def test_launch_delivery_cache_and_poll_fit_inside_quote_ttl():
+def test_launch_and_meta_cache_and_poll_fit_inside_quote_ttl():
     import json
 
     from src.pipeline.launch_execution import QUOTE_TTL_SECONDS
@@ -93,10 +93,18 @@ def test_launch_delivery_cache_and_poll_fit_inside_quote_ttl():
     root = Path(__file__).parents[1]
     board = (root / "board" / "public" / "index.html").read_text()
     config = json.loads((root / "board" / "vercel.json").read_text())
-    launch_headers = next(row["headers"] for row in config["headers"]
-                          if row["source"] == "/data/launch.json")
-    values = {row["key"]: row["value"] for row in launch_headers}
-    assert values["Vercel-CDN-Cache-Control"] == "max-age=5"
+    fast_sources = {"/data/launch.json", "/data/meta.json"}
+    fast_headers = {
+        row["source"]: {header["key"]: header["value"] for header in row["headers"]}
+        for row in config["headers"] if row["source"] in fast_sources
+    }
+    assert fast_headers.keys() == fast_sources
+    assert all(headers["Vercel-CDN-Cache-Control"] == "max-age=5"
+               for headers in fast_headers.values())
+    assert all(headers["Cache-Control"] == "public, max-age=0, must-revalidate"
+               for headers in fast_headers.values())
+    assert '["launch","meta"].map(name=>fetch(' in board
+    assert '{cache:"no-store"}' in board
     assert 'setInterval(loadLaunch,1e4)' in board
     assert 5 + 10 < QUOTE_TTL_SECONDS
 

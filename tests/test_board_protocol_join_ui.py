@@ -304,3 +304,75 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
         assert "NEW-LAUNCH-EVENT" in text
         assert "CARRY-EDGE-UNAFFECTED" in text
         browser.close()
+
+
+def test_fast_poll_fail_closes_on_old_meta_then_recovers_with_new_certificate():
+    playwright = pytest.importorskip("playwright.sync_api")
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    old_clock, new_clock = now.isoformat(), (now + timedelta(seconds=1)).isoformat()
+    admission = _admission("scheduled", old_clock)
+    old_launch = _launch(old_clock, admission, "OLD-POLL-EVENT")
+    new_launch = _launch(new_clock, admission, "NEW-POLL-EVENT")
+    stats = _stats(old_clock, admission, "EDGE-RETURNS-AFTER-META-JOIN")
+    payloads = {
+        "launch": old_launch,
+        "stats": stats,
+        "meta": _meta(old_launch, stats, admission, admission),
+        "structure": {"schema_version": 1, "events": [], "source_health": []},
+        "airdrop": {"schema_version": 1, "events": []},
+        "watch": {"schema_version": 1, "watch": []},
+        "perps": {"schema_version": 1, "perps": [], "carry": [], "cascade_events": []},
+        "opportunities": {"schema_version": 1, "opportunities": []},
+        "operators": {"schema_version": 1, "operators": []},
+    }
+    fast_requests = []
+
+    with playwright.sync_playwright() as driver:
+        if not Path(driver.chromium.executable_path).exists():
+            pytest.skip("Playwright Chromium is not installed")
+        browser = driver.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1280, "height": 900})
+
+        def route_request(route, request):
+            parsed = urlparse(request.url)
+            path = parsed.path
+            if path == "/":
+                route.fulfill(status=200, content_type="text/html", body=BOARD.read_text())
+            elif path == "/protocol-join.js":
+                route.fulfill(status=200, content_type="text/javascript", body=JOIN.read_text())
+            elif path == "/vendor/lightweight-charts-5.2.0.js":
+                route.fulfill(status=200, content_type="text/javascript", body=CHARTS.read_bytes())
+            elif path.startswith("/data/") and path.endswith(".json"):
+                name = Path(path).stem
+                if name in {"launch", "meta"} and parsed.query:
+                    fast_requests.append((name, parsed.query))
+                route.fulfill(status=200, json=payloads[name])
+            else:
+                route.abort("blockedbyclient")
+
+        page.route("**/*", route_request)
+        page.goto("https://board.test/", wait_until="networkidle")
+        body = page.locator("body")
+        assert "EDGE-RETURNS-AFTER-META-JOIN" in body.inner_text()
+
+        fast_requests.clear()
+        payloads["launch"] = new_launch
+        page.evaluate("loadLaunch()")
+        text = body.inner_text()
+        assert "协议同步中·不可判" in text
+        assert "EDGE-RETURNS-AFTER-META-JOIN" not in text
+        assert "NEW-POLL-EVENT" in text
+        first_poll = fast_requests.copy()
+
+        fast_requests.clear()
+        payloads["meta"] = _meta(new_launch, stats, admission, admission)
+        page.evaluate("loadLaunch()")
+        text = body.inner_text()
+        assert "EDGE-RETURNS-AFTER-META-JOIN" in text
+        assert "协议同步中·不可判" not in text
+        second_poll = fast_requests.copy()
+
+        for poll in (first_poll, second_poll):
+            assert {name for name, _ in poll} == {"launch", "meta"}
+            assert len({query for _, query in poll}) == 1
+        browser.close()
