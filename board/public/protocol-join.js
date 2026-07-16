@@ -19,6 +19,14 @@
     return Number.isFinite(parsed) ? parsed : null;
   };
 
+  function legalAdmissionTransition(older, newer) {
+    if (RANK[newer.admission.state] >= RANK[older.admission.state]) return true;
+    if (older.admission.state !== "armed" || newer.admission.state !== "scheduled") return false;
+    const transitionAt = clock(newer.admission_updated_at);
+    const protocolStartAt = clock(newer.identity.protocol_start_at);
+    return transitionAt !== null && protocolStartAt !== null && transitionAt < protocolStartAt;
+  }
+
   function projectMember(view, payload) {
     if (!object(payload)) return null;
     let identitySource, admission;
@@ -77,7 +85,7 @@
         } else {
           const older = leftClock < rightClock ? left : right;
           const newer = leftClock < rightClock ? right : left;
-          if (RANK[newer.admission.state] < RANK[older.admission.state]) {
+          if (!legalAdmissionTransition(older, newer)) {
             state = "contradiction";
             reasonCodes = ["admission_state_regressed"];
           } else {
@@ -100,15 +108,16 @@
     if (launchClock === null || statsClock === null || launchClock === statsClock) {
       return {block: true, reasonCodes: ["conflicting_admission_clock_ambiguous"]};
     }
-    if (statsClock < launchClock) return {block: false, reasonCodes: []};
-    if (stats.admission.state === launch.admission.state) {
-      return {block: true, reasonCodes: ["newer_stats_same_state_safety_conflict"]};
+    const older = launchClock < statsClock ? launch : stats;
+    const newer = launchClock < statsClock ? stats : launch;
+    if (newer.admission.state === older.admission.state) {
+      return {block: true, reasonCodes: [`newer_${newer.view}_same_state_safety_conflict`]};
     }
-    if (stats.admission.state === "breached") {
-      return {block: true, reasonCodes: ["newer_stats_admission_breached"]};
+    if (newer.admission.state === "breached") {
+      return {block: true, reasonCodes: [`newer_${newer.view}_admission_breached`]};
     }
-    if (RANK[stats.admission.state] < RANK[launch.admission.state]) {
-      return {block: true, reasonCodes: ["newer_stats_admission_regressed"]};
+    if (!legalAdmissionTransition(older, newer)) {
+      return {block: true, reasonCodes: [`newer_${newer.view}_admission_regressed`]};
     }
     return {block: false, reasonCodes: []};
   }

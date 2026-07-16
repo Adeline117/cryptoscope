@@ -786,6 +786,90 @@ def test_single_view_protocol_transition_marks_sync_pending_then_recovers():
     assert recovered["cross_view_edge_usable"] is True
 
 
+@pytest.mark.parametrize("newer_view", ["launch", "stats"])
+def test_prestart_armed_to_scheduled_transition_is_sync_pending(newer_view):
+    from src.contract.board_view import launch_protocol_join
+
+    older_clock = "2026-08-02T23:58:00+00:00"
+    newer_clock = "2026-08-02T23:59:00+00:00"
+    armed = _protocol_admission(state="armed")
+    armed.update({"armed_at": older_clock, "updated_at": older_clock})
+    scheduled = deepcopy(armed)
+    scheduled.update({
+        "state": "scheduled", "enrollment_open": False,
+        "armed_at": None, "updated_at": newer_clock,
+    })
+    launch_admission = scheduled if newer_view == "launch" else armed
+    stats_admission = scheduled if newer_view == "stats" else armed
+    launch = {
+        "generated_at": launch_admission["updated_at"],
+        "research_protocol": {
+            field: launch_admission[field] for field in (
+                "protocol_id", "cohort_version", "protocol_start_at",
+            )
+        },
+        "primary_sources": {"solana": {"protocol_admission": launch_admission}},
+    }
+    stats = {
+        "generated_at": stats_admission["updated_at"],
+        "lanes": {"launch": {"edge_validation": {
+            **{field: stats_admission[field] for field in (
+                "protocol_id", "cohort_version", "protocol_start_at",
+            )},
+            "protocol_admission": stats_admission,
+        }}},
+    }
+
+    joined = launch_protocol_join(launch, stats)
+
+    assert joined["state"] == "sync_pending"
+    assert joined["reason_codes"] == ["admission_state_not_yet_joined"]
+    assert joined["cross_view_edge_usable"] is False
+
+
+@pytest.mark.parametrize(
+    ("older_state", "newer_state", "newer_clock"),
+    [
+        ("armed", "scheduled", "2026-08-03T00:00:00+00:00"),
+        ("open", "armed", "2026-08-03T00:02:00+00:00"),
+        ("breached", "open", "2026-08-03T00:02:00+00:00"),
+    ],
+)
+def test_terminal_or_post_boundary_admission_relaxation_is_contradiction(
+        older_state, newer_state, newer_clock):
+    from src.contract.board_view import launch_protocol_join
+
+    older_clock = "2026-08-02T23:59:00+00:00"
+    older = _protocol_admission(state=older_state)
+    newer = _protocol_admission(state=newer_state)
+    older["updated_at"] = older_clock
+    newer["updated_at"] = newer_clock
+    launch = {
+        "generated_at": older_clock,
+        "research_protocol": {
+            field: older[field] for field in (
+                "protocol_id", "cohort_version", "protocol_start_at",
+            )
+        },
+        "primary_sources": {"solana": {"protocol_admission": older}},
+    }
+    stats = {
+        "generated_at": newer_clock,
+        "lanes": {"launch": {"edge_validation": {
+            **{field: newer[field] for field in (
+                "protocol_id", "cohort_version", "protocol_start_at",
+            )},
+            "protocol_admission": newer,
+        }}},
+    }
+
+    joined = launch_protocol_join(launch, stats)
+
+    assert joined["state"] == "contradiction"
+    assert joined["reason_codes"] == ["admission_state_regressed"]
+    assert joined["cross_view_edge_usable"] is False
+
+
 def test_same_batch_protocol_identity_mismatch_preserves_every_file(
         tmp_path, monkeypatch):
     from src.contract import board_view

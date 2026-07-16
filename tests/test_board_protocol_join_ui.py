@@ -157,11 +157,14 @@ def test_pure_join_requires_meta_to_bind_both_actual_payload_clocks():
         ("open", "2026-07-16T00:00:00+00:00", "breached", "2026-07-16T00:01:00+00:00", True),
         ("open", "2026-07-16T00:00:00+00:00", "armed", "2026-07-16T00:01:00+00:00", True),
         ("open", "2026-07-16T00:00:00+00:00", "open", "2026-07-16T00:01:00+00:00", True),
-        ("open", "2026-07-16T00:02:00+00:00", "breached", "2026-07-16T00:01:00+00:00", False),
+        ("armed", "2026-08-02T23:58:00+00:00", "scheduled", "2026-08-02T23:59:00+00:00", False),
+        ("armed", "2026-08-02T23:59:00+00:00", "scheduled", "2026-08-03T00:00:00+00:00", True),
+        ("breached", "2026-08-03T00:00:00+00:00", "open", "2026-08-03T00:01:00+00:00", True),
+        ("open", "2026-07-16T00:02:00+00:00", "breached", "2026-07-16T00:01:00+00:00", True),
         ("open", "2026-07-16T00:00:00+00:00", "breached", "2026-07-16T00:00:00+00:00", True),
     ],
 )
-def test_a3_only_obeys_newer_stats_breach_or_regression_and_ambiguous_conflict(
+def test_a3_blocks_any_temporally_impossible_or_breached_cross_view_transition(
         launch_state, launch_clock, stats_state, stats_clock, blocked):
     launch_admission = _admission(launch_state, launch_clock)
     stats_admission = _admission(stats_state, stats_clock)
@@ -169,6 +172,30 @@ def test_a3_only_obeys_newer_stats_breach_or_regression_and_ambiguous_conflict(
     stats = _stats(stats_clock, stats_admission)
 
     assert _evaluate(launch, stats, None)["actionBlock"] is blocked
+
+
+@pytest.mark.parametrize(
+    ("newer_clock", "expected_state"),
+    [
+        ("2026-08-02T23:59:00+00:00", "sync_pending"),
+        ("2026-08-03T00:00:00+00:00", "contradiction"),
+    ],
+)
+def test_join_distinguishes_prestart_readiness_reset_from_unsafe_regression(
+        newer_clock, expected_state):
+    older_clock = "2026-08-02T23:58:00+00:00"
+    launch_admission = _admission("armed", older_clock)
+    stats_admission = _admission("scheduled", newer_clock)
+
+    joined = _evaluate(
+        _launch(older_clock, launch_admission),
+        _stats(newer_clock, stats_admission),
+        None,
+    )
+
+    assert joined["state"] == expected_state
+    assert joined["edgeUsable"] is False
+    assert joined["actionBlock"] is (expected_state == "contradiction")
 
 
 def test_missing_or_old_identity_stats_quarantines_edge_without_dragging_a3():

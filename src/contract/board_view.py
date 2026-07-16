@@ -112,6 +112,28 @@ def _launch_protocol_join_member(view: str, payload: Any) -> dict | None:
         return None
 
 
+def _legal_admission_transition(older: Mapping[str, Any],
+                                newer: Mapping[str, Any]) -> bool:
+    """Match the persistent gate, including its pre-start readiness reset."""
+    rank = {"scheduled": 0, "armed": 1, "open": 2, "breached": 3}
+    older_state = older["admission"]["state"]
+    newer_state = newer["admission"]["state"]
+    if rank[newer_state] >= rank[older_state]:
+        return True
+    if older_state != "armed" or newer_state != "scheduled":
+        return False
+    try:
+        transition_at = _aware_clock(
+            newer["admission_updated_at"], path="newer admission updated_at",
+        )
+        protocol_start_at = _aware_clock(
+            newer["identity"]["protocol_start_at"], path="protocol start_at",
+        )
+    except BoardViewContractError:
+        return False
+    return transition_at < protocol_start_at
+
+
 def launch_protocol_join(launch: Any, stats: Any) -> dict:
     """Build a fail-closed certificate for independently cached Launch views."""
     members = {
@@ -144,8 +166,7 @@ def launch_protocol_join(launch: Any, stats: Any) -> dict:
                 state, reasons = "contradiction", ["admission_state_clock_ambiguous"]
             else:
                 older, newer = ((left, right) if left_clock < right_clock else (right, left))
-                rank = {"scheduled": 0, "armed": 1, "open": 2, "breached": 3}
-                if rank[newer["admission"]["state"]] < rank[older["admission"]["state"]]:
+                if not _legal_admission_transition(older, newer):
                     state, reasons = "contradiction", ["admission_state_regressed"]
                 else:
                     state, reasons = "sync_pending", ["admission_state_not_yet_joined"]

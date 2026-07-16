@@ -44,6 +44,34 @@ def test_protocol_must_arm_before_boundary_and_open_near_it(tmp_path, monkeypatc
     assert opened["auto_execution_allowed"] is False
 
 
+def test_prestart_readiness_loss_returns_to_scheduled_and_can_rearm(
+        tmp_path, monkeypatch):
+    from src.pipeline import launch_protocol_gate as gate
+    from src.pipeline import solana_launch_stream as stream
+
+    monkeypatch.setattr(stream, "DB", tmp_path / "launches.db")
+    start = datetime(2026, 8, 3, tzinfo=timezone.utc)
+
+    armed = _admit(
+        gate, now=start - timedelta(minutes=5), start=start, readiness=_ready(),
+    )
+    reset = _admit(
+        gate, now=start - timedelta(minutes=4), start=start,
+        readiness=_blocked("archive_provider_unavailable"),
+    )
+    rearmed = _admit(
+        gate, now=start - timedelta(minutes=3), start=start, readiness=_ready(),
+    )
+    opened = _admit(
+        gate, now=start, start=start, readiness=_ready(),
+    )
+
+    assert armed["state"] == "armed" and armed["armed_at"] is not None
+    assert reset["state"] == "scheduled" and reset["armed_at"] is None
+    assert rearmed["state"] == "armed" and rearmed["armed_at"] is not None
+    assert opened["state"] == "open" and opened["enrollment_open"] is True
+
+
 def test_unarmed_or_late_protocol_is_permanently_breached(tmp_path, monkeypatch):
     from src.pipeline import launch_protocol_gate as gate
     from src.pipeline import solana_launch_stream as stream
