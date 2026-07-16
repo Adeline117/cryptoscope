@@ -2019,6 +2019,49 @@ def test_maintenance_hydration_limit_ramps_to_backlog_capacity(sol, monkeypatch)
     assert limits == [5, 5, 10, 10, 15, 15, 20]
 
 
+def test_total_deadline_halves_gap_budget_instead_of_flooring(sol, monkeypatch):
+    budgets = []
+
+    def retry(rpc, *, slot_budget, **kwargs):
+        budgets.append(slot_budget)
+        return _gap_stats(slot_budget, progressed=slot_budget)
+
+    monkeypatch.setattr(sol, "retry_open_gaps", retry)
+    ticks = {"count": 0}
+
+    def hydrate(_rpc, **kwargs):
+        ticks["count"] += 1
+        return _hydration_stats(0, deadline_exhausted=ticks["count"] == 5)
+
+    monkeypatch.setattr(sol, "rehydrate_pending", hydrate)
+
+    class Clock:
+        value = 0.0
+
+        def __call__(self):
+            return self.value
+
+    clock = Clock()
+
+    class StopAfterSixTicks:
+        waits = 0
+
+        def is_set(self):
+            return False
+
+        def wait(self, timeout):
+            clock.value += timeout
+            self.waits += 1
+            return self.waits >= 6
+
+    sol._rehydrate_loop(
+        StopAfterSixTicks(), object(), interval_seconds=60, monotonic=clock,
+    )
+    # The ramp reaches 4, hydration then exhausts the total budget once; the
+    # gap lane did nothing wrong, so its budget halves rather than floors.
+    assert budgets == [1, 1, 2, 2, 4, 2]
+
+
 def test_gap_pressure_skips_hydration_in_same_maintenance_cycle(sol, monkeypatch):
     from src.pipeline import stream_health
 

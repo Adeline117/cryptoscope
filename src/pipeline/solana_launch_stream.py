@@ -2114,7 +2114,12 @@ def _rehydrate_loop(stop: threading.Event, rpc: JsonRpc,
                         circuit_seconds=cooldown,
                     )
                 elif total_deadline_hit:
-                    gap_budget = GAP_RETRY_SLOT_BUDGET
+                    # Total wall-clock exhaustion is not provider pressure —
+                    # usually the hydration lane ran long. Mirror
+                    # _adjust_gap_budget and halve the gap ramp instead of
+                    # restarting it from the floor, or a saturated hydration
+                    # backlog would pin gap drain at 1 unit per cycle.
+                    gap_budget = max(GAP_RETRY_SLOT_BUDGET, int(gap_budget) // 2)
                     gap_clean_cycles = 0
                     hydration_limit = HYDRATION_BATCH_LIMIT
                     hydration_clean_cycles = 0
