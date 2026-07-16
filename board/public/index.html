@@ -572,6 +572,46 @@ function launchProtocolUiState(d,now=Date.now()){
   const scheduled=!breached&&[protocol?.enrollment_state,protocol?.persistent_admission_state,admission?.state].some(state=>["scheduled","armed"].includes(state));
   return{open,state:open?"open":breached?"breached":scheduled?String(protocol?.enrollment_state||admission?.state||"scheduled"):"blocked",reasons,protocol,readiness,admission,viewFresh,epochValid,runtimeValid,burnInValid};
 }
+function carryEvidenceUiState(paper,evidence){
+  const uint=value=>Number.isInteger(value)&&value>=0&&value<=1_000_000_000;
+  const exclusionsValid=(value,excluded)=>{
+    if(!value||typeof value!=="object"||Array.isArray(value))return false;
+    const counts=Object.entries(value);
+    if(counts.some(([key,count])=>!key.trim()||!uint(count)))return false;
+    const total=counts.reduce((sum,[,count])=>sum+count,0);
+    return excluded===0?total===0:total>=excluded;
+  };
+  const common=(value,fillField)=>value&&typeof value==="object"&&!Array.isArray(value)
+    &&value.cohort_kind==="descriptive_quote_proxy"
+    &&value.cost_completeness==="partial"&&value.all_in_total_pct===null
+    &&value[fillField]===false&&value.real_edge_n===0
+    &&value.real_edge_eligible===false
+    &&(!Object.hasOwn(value,"auto_execution_allowed")||value.auto_execution_allowed===false);
+  const pn=paper?.n_proxy_closed,pc=paper?.n_closed,pt=paper?.n_closed_total,px=paper?.n_closed_excluded;
+  const po=paper?.n_open,pe=paper?.n_exit_pending;
+  const paperValid=common(paper,"is_real_fill")&&[pn,pc,pt,px,po,pe,paper?.n_quarantined_total].every(uint)
+    &&pn===pc&&pt===pc+px&&pe<=po
+    &&Array.isArray(paper.open_positions)&&paper.open_positions.length===po
+    &&Array.isArray(paper.recent??[])&&(paper.recent??[]).length===Math.min(pn,8)
+    &&exclusionsValid(paper.excluded_by_reason,px);
+  const en=evidence?.n,ep=evidence?.n_proxy,et=evidence?.total_closed,ex=evidence?.excluded_closed;
+  const evidenceValid=common(evidence,"cost_is_real_fill")
+    &&evidence?.metric==="quote_rate_integral_minus_book_quotes_and_modeled_fee_proxy"
+    &&evidence?.execution_mode==="paper_orderbook_measurement"
+    &&evidence?.edge_verdict==="不可判"
+    &&[en,ep,evidence?.hits,et,ex,evidence?.pending].every(uint)
+    &&en===ep&&evidence.hits<=en&&et===en+ex
+    &&evidence.verdict===(en>=20?"measured":"不可判")
+    &&exclusionsValid(evidence.excluded_by_reason,ex);
+  const available=paperValid&&evidenceValid;
+  return{
+    available,
+    paper:available?paper:{},
+    evidence:available?evidence:{edge_verdict:"合同无效·不可判"},
+    realEdgeDisplay:available?0:"不可判",
+    reason:available?null:"Carry 公开优势合同缺失或无效",
+  };
+}
 const ACTION_LEVELS=new Set(["A0_BLOCKED","A1_WATCH","A2_PAPER_READY","A3_MANUAL_PROBE","A4_REAL_FILL_VALIDATED"]);
 function actionLevel(r,launchPayload){
   const hard=(r?.decision==="AVOID"||r?.recorded_decision==="AVOID"||r?.security_gate?.state==="avoid");
@@ -1060,8 +1100,8 @@ const LANES={
     detail:r=>{const f=[...(r.rug?.facts||[]),...(r.manipulation?.reasons||[]),...(r.exit_risk?.reasons||[])];return `<span class="so">所以👉</span> 聪明钱在买也别碰——很可能在钓你接盘或合约能作恶。<br>${f.map(esc).join("、")}<br>${esc(r.token||"")}`},
   },
   perp:{
-    title:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),single=c.filter(x=>x.cross!==true),health=d?.carry_source_health||{};const pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0);const top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos.length}/${cross.length}${top?`，最高代理 +${top.partial_model_proxy_ann_pct}%(${esc(top.symbol)})`:''}。另有单所现货对冲候选 ${single.length} 个，不进入双腿纸面账本。真实优势样本 ${pp.real_edge_n??ev?.real_edge_n??0}。`},
-    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],ev=data.stats?.lanes?.carry,pp=d?.carry_paper||{};return[["跨所代理>0",`${pos.length}/${cross.length}`,`14天部分情景 · 本轮新入场盘口 ${pp.new_entry_quote_attempted??"?"}/${pp.new_entry_quote_cap??"?"} · 容量延后 ${pp.new_entry_candidates_deferred??"?"}`],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"} · 旧open隔离 ${pp.n_quarantined_total??0}`],["真实优势样本",pp.real_edge_n??ev?.real_edge_n??0,"仍不可判"]]},
+    title:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),single=c.filter(x=>x.cross!==true),health=d?.carry_source_health||{};const pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0);const top=pos[0],proof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry);const hs=health.state==="ok"?"本轮源正常":health.state==="partial"?"本轮源部分缺失":"本轮源不可用";return `<b style="color:var(--accent-t)">跨所资金费差(HL vs OKX)</b>:空 HL + 多 OKX 是待验证假设，不是已证 edge。${esc(hs)}；部分模型代理为正 ${pos.length}/${cross.length}${top?`，最高代理 +${top.partial_model_proxy_ann_pct}%(${esc(top.symbol)})`:''}。另有单所现货对冲候选 ${single.length} 个，不进入双腿纸面账本。真实优势样本 ${esc(proof.realEdgeDisplay)}。`},
+    stat:d=>{const c=d?.carry||[],cross=c.filter(x=>x.cross===true),pos=cross.filter(x=>x.partial_model_proxy_ann_pct>0),top=pos[0],proof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry),pp=proof.paper,ev=proof.evidence;return[["跨所代理>0",`${pos.length}/${cross.length}`,`14天部分情景 · 本轮新入场盘口 ${pp.new_entry_quote_attempted??"?"}/${pp.new_entry_quote_cap??"?"} · 容量延后 ${pp.new_entry_candidates_deferred??"?"}`],["最高部分代理",top?`+${top.partial_model_proxy_ann_pct}%`:"—",top?top.symbol:""],["代理/总关闭",`${pp.n_proxy_closed??ev?.n_proxy??"?"}/${pp.n_closed_total??"?"}`,`排除 ${pp.n_closed_excluded??"?"} · 旧open隔离 ${pp.n_quarantined_total??"?"}`],["真实优势样本",proof.realEdgeDisplay,proof.available?"仍不可判":"合同无效·不可判"]]},
     readme:"💰资金费 Carry 是当前值得验证的 delta 中性结构假设：空高资金费腿、多低资金费腿，尝试吃跨所差价；<b>它尚不是已证明的正 EV</b>。当前关闭样本也只是报价率积分减盘口报价和费用假设的描述性代理；basis、账户费率、抵押成本、调仓和实际结算都缺失，因此真实优势样本仍为 0。下面的拥挤/点火仅作方向防御观察。",
     rows:d=>d?.perps||[],
     custom:true,
@@ -1368,9 +1408,10 @@ function renderPlay(){
   const allCarry=data.perp?.carry||[];
   const carry=allCarry.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0);
   const singleVenueCarry=allCarry.filter(x=>x.cross!==true);
-  const pp=data.perp?.carry_paper||{};
+  const carryProof=carryEvidenceUiState(data.perp?.carry_paper,data.stats?.lanes?.carry);
+  const pp=carryProof.paper;
   const carryHealth=data.perp?.carry_source_health||{};
-  const carryEvidence=data.stats?.lanes?.carry;
+  const carryEvidence=carryProof.evidence;
   const launchJoin=launchStatsJoinState();
   const launchEvidence=launchJoin.edgeUsable?data.stats?.lanes?.launch:null;
   const launchValidation=launchEvidence?.edge_validation||{};
@@ -1481,6 +1522,7 @@ function carryHealthHtml(health){
 }
 
 function carryEvidenceHtml(pp,evidence,scorecard){
+  const proof=carryEvidenceUiState(pp,evidence);pp=proof.paper;evidence=proof.evidence;
   const valid=Number.isFinite(pp?.n_proxy_closed)?pp.n_proxy_closed:(Number.isFinite(evidence?.n_proxy)?evidence.n_proxy:null);
   const total=Number.isFinite(pp?.n_closed_total)?pp.n_closed_total:valid;
   const excluded=Number.isFinite(pp?.n_closed_excluded)?pp.n_closed_excluded:(valid!=null&&total!=null?Math.max(0,total-valid):null);
@@ -1491,7 +1533,7 @@ function carryEvidenceHtml(pp,evidence,scorecard){
     <span class="v"><span class="num">${valid??"?"}/20</span><small>有效报价代理关闭</small></span>
     <span class="v"><span class="num">${total??"?"}</span><small>总关闭</small></span>
     <span class="v"><span class="num">${excluded??"?"}</span><small>排除，不进入优势判决</small></span>
-    <span class="v"><span class="num">${pp?.real_edge_n??evidence?.real_edge_n??0}</span><small>真实优势样本 · 判决 ${esc(evidence?.edge_verdict||"不可判")}</small></span>
+    <span class="v"><span class="num">${esc(proof.realEdgeDisplay)}</span><small>真实优势样本 · 判决 ${esc(evidence?.edge_verdict||"不可判")}</small></span>
     ${reasonText?`<details class="evidence-reasons" data-evidence-key="carry-exclusion-reasons"><summary>查看排除原因</summary>${esc(reasonText)}</details>`:""}</div>`;
   if(scorecard?.verdict==="measured"){
     const proxy=scorecard.quoted_hl_funding_rate_proxy_ann;
@@ -1545,7 +1587,7 @@ function carryLifecycleHtml(pp,limit=5){
 // perp: source health → open lifecycle → evidence → candidates → defensive structure
 function renderPerp(d){
   const carry=d?.carry||[], s=d?.perps||[], cascadeEvents=d?.cascade_events||[];
-  const carryEvidence=data.stats?.lanes?.carry, pp=d?.carry_paper||{}, health=d?.carry_source_health||{};
+  const carryProof=carryEvidenceUiState(d?.carry_paper,data.stats?.lanes?.carry),carryEvidence=carryProof.evidence,pp=carryProof.paper,health=d?.carry_source_health||{};
   const healthState=["ok","partial","unavailable"].includes(health.state)?health.state:"unavailable";
   let html=carryHealthHtml(health);
   html+=carryLifecycleHtml(pp);
