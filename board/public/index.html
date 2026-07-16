@@ -715,6 +715,54 @@ const prevKey={};   // per-lane {rowId: heroValue} for flash
 let sortState={};   // per-lane {col, dir}
 let filterState={launch:"actionable"}, searchState={};
 
+function launchRowId(r){return String(r?.id||`${r?.chain||""}${r?.token||""}`)}
+function expandableRowById(id){
+  return [...document.querySelectorAll('tr[data-row][aria-controls]')].find(row=>row.dataset.row===String(id));
+}
+function setExpandableRowState(row,expanded){
+  const ex=row&&document.getElementById(row.getAttribute("aria-controls"));if(!ex)return;
+  ex.hidden=!expanded;row.setAttribute("aria-expanded",String(expanded));
+  if(expanded)requestAnimationFrame(()=>mountEventCharts(ex));else disposeEventCharts(ex);
+}
+function renderFocusState(panel,active){
+  if(!active||!panel.contains(active))return null;
+  const directRow=active.closest?.('tr[data-row][aria-controls]');
+  const detailRow=active.closest?.('tr.exp[id]');
+  const row=directRow||([...document.querySelectorAll('tr[data-row][aria-controls]')].find(item=>item.getAttribute("aria-controls")===detailRow?.id));
+  if(row)return{kind:"row",id:row.dataset.row};
+  const evidence=active.closest?.('details[data-evidence-key]');
+  if(evidence)return{kind:"evidence",key:evidence.dataset.evidenceKey};
+  const filter=active.closest?.('[data-filter]');if(filter)return{kind:"filter",key:filter.dataset.filter};
+  if(active.matches?.('.search'))return{kind:"search"};
+  const jump=active.closest?.('[data-jump]');if(jump)return{kind:"jump",view:jump.dataset.jump,target:jump.dataset.launchTarget||""};
+  return active===panel?{kind:"panel"}:null;
+}
+function captureRenderState(){
+  const panel=$("view"),renderedView=document.body.dataset.view;if(!panel||!renderedView)return null;
+  return{view:renderedView,filter:filterState[renderedView],
+    expandedRows:[...panel.querySelectorAll('tr[data-row][aria-expanded="true"]')].map(row=>row.dataset.row),
+    openEvidence:[...panel.querySelectorAll('details[data-evidence-key][open]')].map(item=>item.dataset.evidenceKey),
+    focus:renderFocusState(panel,document.activeElement)};
+}
+function restoreRenderState(state){
+  if(!state||state.view!==view)return;
+  for(const id of state.expandedRows||[]){const row=expandableRowById(id);if(row)setExpandableRowState(row,true)}
+  for(const key of state.openEvidence||[]){const item=[...document.querySelectorAll('details[data-evidence-key]')].find(node=>node.dataset.evidenceKey===key);if(item){item.open=true;requestAnimationFrame(()=>mountEventCharts(item))}}
+  const focus=state.focus;let target=null;
+  if(focus?.kind==="row")target=expandableRowById(focus.id);
+  else if(focus?.kind==="evidence")target=[...document.querySelectorAll('details[data-evidence-key]')].find(node=>node.dataset.evidenceKey===focus.key)?.querySelector("summary");
+  else if(focus?.kind==="filter")target=[...document.querySelectorAll('[data-filter]')].find(node=>node.dataset.filter===focus.key);
+  else if(focus?.kind==="search")target=document.querySelector(".search");
+  else if(focus?.kind==="jump")target=[...document.querySelectorAll('[data-jump]')].find(node=>node.dataset.jump===focus.view&&(node.dataset.launchTarget||"")===focus.target);
+  else if(focus?.kind==="panel")target=$("view");
+  target?.focus({preventScroll:true});
+}
+function revealLaunchEvidence(id){
+  filterState.launch="all";setView("launch");
+  const row=expandableRowById(id);if(!row)return;
+  setExpandableRowState(row,true);row.focus({preventScroll:true});row.scrollIntoView({behavior:"smooth",block:"center"});
+}
+
 // ---------- generic table renderer ----------
 function renderTable(laneId, rows, cols, cfg){
   const allRows=rows||[], filters=cfg.filters||[], activeFilter=filterState[laneId]||filters[0]?.k;
@@ -769,7 +817,7 @@ const LANES={
     stat:d=>{const e=d?.events||[],q=d?.primary_sources?.solana?.qualification||{},eq=d?.primary_sources?.evm?.qualification||{},protocol=launchProtocolUiState(d),ready=d?.primary_sources?.solana?.source_readiness||{};return [["v6 来源准入",protocol.open?"OPEN":"CLOSED",`${protocol.state} · clean epoch ${ready.observed_epochs??"?"}/${ready.required_clean_epochs??"?"}`],["首池事件",e.length,"首次发现价已锁定"],["SOL主链完整证据",q.evidence?.complete??"—",`近24h ${q.recent_complete??"—"}`],["EVM研究扩展",eq.evidence?.complete??"—","不进入当前 v6 分母"],["A3人工验证窗",e.filter(x=>actionLevel(x,d)==="A3_MANUAL_PROBE").length,"准入+独立对账+完整成本+报价+纸面证据+送达SLA"],["A2研究纸面",e.filter(x=>actionLevel(x,d)==="A2_PAPER_READY").length,"不得当作入场指令"],["A1观察",e.filter(x=>actionLevel(x,d)==="A1_WATCH").length,"旧数据/准入关闭/条件未齐/已过期"],["A0阻断",e.filter(x=>actionLevel(x,d)==="A0_BLOCKED").length,"已知安全红旗"]]},
     readme:"这是主攻线：在低 FDV、低流通且扩散刚开始时捕捉定价错误。新候选先要通过 <b>live_ws + 独立 archive RPC finalized epoch 对账</b>与持久化 protocol admission；这只证明发现集合的来源完整性，不证明安全、成交或收益。<b>SMALL_PROBE</b> 还必须同时通过池龄/成交门、GoPlus 安全门、拟议仓位的买入→卖出双向路由报价，以及成本后 24h 试验组相对同期 WATCH 对照的纸面证据门。优势门只认当前预注册协议的前向固定前缀、至少 14 个共享 UTC 市场日、首尾活跃日之间的连续 UTC 日历（空仓日按现金效用 0）和 sequential SPA/Reality Check；旧 cohort、可变 outcome、20 个样本的漂亮区间或反复刷新都不能放行。来源 readiness、协议准入或逐行 reconciliation proof 任一缺失，A3 必须降为 A1；自动交易永不允许。",
     rows:d=>d?.events||[],
-    id:r=>r.id||r.chain+r.token, flash:r=>r.entry_price,
+    id:launchRowId, flash:r=>r.entry_price,
     empty:"暂时没有合格首池事件。Launch 是事件流，不是热榜；空白是正常输出。",
     filters:[
       {k:"actionable",label:"A3 人工验证窗",test:r=>actionLevel(r)==="A3_MANUAL_PROBE"},
@@ -1161,7 +1209,7 @@ function launchOpportunityCard(r){
     </div>
     <div class="gate-summary"><b>证据完整度 ${summary.passed}/${summary.gates.length} 明确通过</b><small>${summary.blocked} 阻断 · ${summary.unknown} 未知</small></div>
     <div class="gate-list">${summary.gates.map(g=>`<span class="gate-pill ${g.state}">${esc(g.name)} · ${g.state==="pass"?"通过":g.state==="block"?"阻断":"未知"}</span>`).join("")}</div>
-    <div class="risk-line"><span><span class="chip ${riskCls}">${esc(risk.label)}</span> ${esc(risk.detail)} · ${esc(tracking)} · ${esc(gateNote)}</span><button class="jump" data-jump="launch">完整证据</button></div>
+    <div class="risk-line"><span><span class="chip ${riskCls}">${esc(risk.label)}</span> ${esc(risk.detail)} · ${esc(tracking)} · ${esc(gateNote)}</span><button class="jump" data-jump="launch" data-launch-target="${esc(launchRowId(r))}">完整证据</button></div>
   </article>`;
 }
 
@@ -1304,7 +1352,7 @@ function carryEvidenceHtml(pp,evidence,scorecard){
     <span class="v"><span class="num">${total??"?"}</span><small>总关闭</small></span>
     <span class="v"><span class="num">${excluded??"?"}</span><small>排除，不进入优势判决</small></span>
     <span class="v"><span class="num">${pp?.real_edge_n??evidence?.real_edge_n??0}</span><small>真实优势样本 · 判决 ${esc(evidence?.edge_verdict||"不可判")}</small></span>
-    ${reasonText?`<details class="evidence-reasons"><summary>查看排除原因</summary>${esc(reasonText)}</details>`:""}</div>`;
+    ${reasonText?`<details class="evidence-reasons" data-evidence-key="carry-exclusion-reasons"><summary>查看排除原因</summary>${esc(reasonText)}</details>`:""}</div>`;
   if(scorecard?.verdict==="measured"){
     const proxy=scorecard.quoted_hl_funding_rate_proxy_ann;
     const positive=scorecard.positive_quote_fraction;
@@ -1384,7 +1432,7 @@ function renderPerp(d){
 
   if(cascadeEvents.length){
     html+=`<div class="play-sec" style="margin:14px 0"><div class="ph">⚡ 已入账的级联/点火事件 <span class="pd">首次价已锁定 · 仅强触发</span></div>`+
-      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small><details class="cascade-evidence" data-chart-details><summary>查看入场 / 失效 / 结果时间线</summary>${eventEvidenceTimelineHtml(e)}${launchLifecycleHtml(e)}</details></div>`}).join("")+`</div>`;
+      cascadeEvents.slice(0,4).map(e=>{const ed=effectiveDecision(e);const label=ed==='SMALL_PROBE'?esc(e.side):ed==='EXPIRED'?'已过期·历史方向 '+esc(e.side):'观察·历史方向 '+esc(e.side);return `<div class="prow"><span class="chip ${ed==='SMALL_PROBE'?(e.side==='SHORT'?'b-warn':'b-good'):ed==='EXPIRED'?'':'b-warn'}">${label}</span> <b>${esc(e.symbol)}</b> <span class="num">$${esc(e.entry_price)}</span> <small class="dim">${esc(expiryText(e))} · 失效 $${esc(e.invalidation_price)} · ≤${usd(e.max_notional_usd)} · 只读报价非成交 · ${esc(e.signal)}${e.actionability_reason?` · ${esc(e.actionability_reason)}`:''}</small><details class="cascade-evidence" data-chart-details data-evidence-key="${esc(e.id||`${e.symbol||"event"}-${e.detected_at||"unknown"}`)}"><summary>查看入场 / 失效 / 结果时间线</summary>${eventEvidenceTimelineHtml(e)}${launchLifecycleHtml(e)}</details></div>`}).join("")+`</div>`;
   }
   if(s.length){
     const col=p=>{const fa=p.funding_ann;const a=Math.min(Math.abs(fa)/300,1);if(p.signal==="ignition")return{bg:`color-mix(in srgb,var(--good) ${20+a*30}%,var(--s1))`,b:"var(--good-b)"};return{bg:`color-mix(in srgb,var(--${fa>0?'danger':'warn'}) ${15+a*35}%,var(--s1))`,b:`var(--${fa>0?'danger':'warn'}-b)`}};
@@ -1395,6 +1443,8 @@ function renderPerp(d){
 
 // ---------- paint ----------
 function paint(){
+  const renderState=captureRenderState();
+  if(renderState?.view===view&&renderState.filter!==undefined)filterState[view]=renderState.filter;
   disposeEventCharts();eventChartRows.clear();eventChartSeq=0;
   const L=LANES[view], d=data[view==="avoid"?"opp":view];
   document.body.dataset.view=view;
@@ -1425,14 +1475,15 @@ function paint(){
   for(const [k,l] of Object.entries(LANES)){const dd=data[k==="avoid"?"opp":k];const n=dd?(l.rows?l.rows(dd).length:0):0;const el=$("ct-"+k);if(el)el.textContent=n||""}
   document.querySelectorAll(".tab").forEach(t=>{const on=t.dataset.v===view;t.classList.toggle("on",on);t.setAttribute("aria-selected",String(on));t.tabIndex=on?0:-1});
   wireRows();
+  restoreRenderState(renderState);
   staleness();
 }
 function wireRows(){
-  document.querySelectorAll("[data-jump]").forEach(btn=>btn.onclick=()=>{setView(btn.dataset.jump);document.getElementById("tabs").scrollIntoView({behavior:"smooth",block:"start"})});
+  document.querySelectorAll("[data-jump]").forEach(btn=>btn.onclick=()=>{if(btn.dataset.jump==="launch"&&btn.dataset.launchTarget){revealLaunchEvidence(btn.dataset.launchTarget);return}setView(btn.dataset.jump);document.getElementById("tabs").scrollIntoView({behavior:"smooth",block:"start"})});
   document.querySelectorAll("[data-filter]").forEach(btn=>btn.onclick=()=>{filterState[view]=btn.dataset.filter;paint()});
   document.querySelectorAll(".search").forEach(input=>input.oninput=()=>{const value=input.value;searchState[view]=value;paint();const next=document.querySelector(".search");if(next){next.focus();next.setSelectionRange(value.length,value.length)}});
   document.querySelectorAll("tr[data-row][aria-controls]").forEach(tr=>{
-    const toggle=()=>{const ex=document.getElementById(tr.getAttribute("aria-controls"));if(!ex)return;ex.hidden=!ex.hidden;tr.setAttribute("aria-expanded",String(!ex.hidden));if(!ex.hidden)requestAnimationFrame(()=>mountEventCharts(ex));else disposeEventCharts(ex)};
+    const toggle=()=>setExpandableRowState(tr,tr.getAttribute("aria-expanded")!=="true");
     tr.onclick=toggle;tr.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle()}};
   });
   document.querySelectorAll("details[data-chart-details]").forEach(item=>item.addEventListener("toggle",()=>{if(item.open)requestAnimationFrame(()=>mountEventCharts(item));else disposeEventCharts(item)}));

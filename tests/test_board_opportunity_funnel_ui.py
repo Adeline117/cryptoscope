@@ -74,3 +74,35 @@ def test_opportunity_funnel_and_cards_collapse_for_mobile():
     assert ".opportunity-grid{grid-template-columns:1fr}" in html
     assert ".opportunity-metrics{grid-template-columns:1fr}" in html
     assert ".funnel-steps{grid-template-columns:1fr 1fr}" in html
+
+
+def test_launch_refresh_restores_filter_expanded_evidence_and_focus():
+    html = BOARD.read_text()
+
+    for phrase in (
+        "function captureRenderState()",
+        "filter:filterState[renderedView]",
+        'tr[data-row][aria-expanded="true"]',
+        "function restoreRenderState(state)",
+        "setExpandableRowState(row,true)",
+        'target?.focus({preventScroll:true})',
+        "const renderState=captureRenderState();",
+        "restoreRenderState(renderState);",
+    ):
+        assert phrase in html
+    assert html.index("const renderState=captureRenderState();") < html.index(
+        "disposeEventCharts();eventChartRows.clear();eventChartSeq=0"
+    )
+    assert html.index("wireRows();") < html.index("restoreRenderState(renderState);")
+
+
+def test_launch_card_reveals_its_exact_evidence_row():
+    html = BOARD.read_text()
+
+    assert 'data-launch-target="${esc(launchRowId(r))}"' in html
+    assert 'filterState.launch="all";setView("launch")' in html
+    assert "const row=expandableRowById(id)" in html
+    assert "setExpandableRowState(row,true)" in html
+    assert 'row.scrollIntoView({behavior:"smooth",block:"center"})' in html
+    assert 'btn.dataset.jump==="launch"&&btn.dataset.launchTarget' in html
+    assert "revealLaunchEvidence(btn.dataset.launchTarget)" in html
