@@ -34,6 +34,7 @@ def test_structure_scan_uses_public_detector_and_returns_ledger(tmp_path, monkey
     import src.pipeline.structure_radar as sr
     monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
     monkeypatch.setattr(sr, "SOURCE_HEALTH_FILE", tmp_path / "source_health.json")
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", tmp_path / "product_metadata.json")
     monkeypatch.setattr(ld, "check_all_exchanges_with_status", lambda: {
         "alerts": [_listing()],
         "sources": [
@@ -44,6 +45,7 @@ def test_structure_scan_uses_public_detector_and_returns_ledger(tmp_path, monkey
             {"exchange": "bybit", "status": "failed", "error": "403",
              "checked_at": "2026-07-13T12:00:00+00:00", "symbol_count": None},
         ],
+        "product_metadata_catalog": {},
     })
     got = sr.scan()
     assert got["scanned"] == 1 and got["configured_sources"] == 3
@@ -52,6 +54,12 @@ def test_structure_scan_uses_public_detector_and_returns_ledger(tmp_path, monkey
     view = sr.view()
     assert view["scanned"] == 1 and view["configured_sources"] == 3
     assert [s["status"] for s in view["source_health"]] == ["failed", "ok", "failed"]
+    assert view["events"][0]["instrument_classification"] == {
+        "state": "unclassified_metadata_unavailable",
+        "metadata_observed_at": None,
+        "time_semantics": "current_inventory_metadata_not_event_time_evidence",
+        "event_time_evidence": False,
+    }
 
 
 def test_listing_fetch_failure_is_not_reported_as_empty_success(monkeypatch):
@@ -181,6 +189,92 @@ def test_inventory_delta_retains_okx_taxonomy_and_unverified_schedule(
     assert metadata["source_fields"]["contTdSwTime"] == "1784185200000"
 
 
+def test_detector_exposes_current_catalog_separately_from_source_health(monkeypatch):
+    import src.collectors.listing_detector as ld
+
+    checked_at = "2026-07-16T09:59:59+00:00"
+    observed_at = "2026-07-16T10:00:00+00:00"
+    metadata = {
+        "version": 1, "source": "okx", "instrument_id": "XAAPL-USDT",
+        "market_type": "spot", "source_fields": {"instCategory": "3"},
+    }
+    monkeypatch.setattr(ld, "EXCHANGES", {"okx": {}, "bybit": {}})
+
+    def check(exchange, timeout):
+        return {
+            "exchange": exchange, "checked_at": checked_at, "status": "ok",
+            "product_metadata_observed_at": observed_at,
+            "symbol_count": 1, "baseline_ready": True, "new_count": 0,
+            "alerts": [],
+            "product_metadata_catalog": (
+                {"XAAPL-USDT": metadata} if exchange == "okx" else {}
+            ),
+        }
+
+    monkeypatch.setattr(ld, "check_exchange_result", check)
+    result = ld.check_all_exchanges_with_status()
+
+    assert result["product_metadata_catalog"]["okx"] == {
+        "observed_at": observed_at,
+        "products": {"XAAPL-USDT": metadata},
+    }
+    assert result["sources"][0]["checked_at"] == checked_at
+    assert result["sources"][0]["product_metadata_observed_at"] == observed_at
+    assert all("product_metadata_catalog" not in source for source in result["sources"])
+
+
+def test_metadata_observation_clock_is_taken_after_http_parse_and_extraction(
+        tmp_path, monkeypatch):
+    import src.collectors.listing_detector as ld
+
+    monkeypatch.setattr(ld, "SNAPSHOT_DIR", tmp_path)
+    steps = []
+    clocks = iter([
+        "2026-07-16T09:59:59+00:00",
+        "2026-07-16T10:00:00+00:00",
+    ])
+
+    def clock():
+        value = next(clocks)
+        steps.append("clock")
+        return value
+
+    class Response:
+        def raise_for_status(self):
+            steps.append("http_ok")
+
+        def json(self):
+            steps.append("json")
+            return {"symbols": [{"symbol": "ABCUSDT", "status": "TRADING"}]}
+
+    def parse(_data):
+        steps.append("parse")
+        return {"ABCUSDT"}
+
+    def extract(_exchange, _data, _symbols):
+        steps.append("extract")
+        return {
+            "ABCUSDT": {
+                "version": 1, "source": "binance", "instrument_id": "ABCUSDT",
+                "market_type": "spot", "source_fields": {},
+            },
+        }
+
+    monkeypatch.setattr(ld, "_utc_now_iso", clock)
+    monkeypatch.setattr(
+        ld.httpx, "get",
+        lambda *_args, **_kwargs: steps.append("http") or Response(),
+    )
+    monkeypatch.setitem(ld._PARSERS, "_parse_binance", parse)
+    monkeypatch.setattr(ld, "_extract_product_metadata", extract)
+
+    result = ld.check_exchange_result("binance")
+
+    assert steps == ["clock", "http", "http_ok", "json", "parse", "extract", "clock"]
+    assert result["checked_at"] == "2026-07-16T09:59:59+00:00"
+    assert result["product_metadata_observed_at"] == "2026-07-16T10:00:00+00:00"
+
+
 def test_okx_stock_taxonomy_is_conservatively_stock_or_etf(tmp_path, monkeypatch):
     import src.pipeline.opportunity_ledger as ol
     import src.pipeline.structure_radar as sr
@@ -210,6 +304,211 @@ def test_okx_stock_taxonomy_is_conservatively_stock_or_etf(tmp_path, monkeypatch
     assert schedule["basis"] == "instrument_metadata_only"
     assert schedule["official_announcement_verified"] is False
     assert event["scheduled_open_at"] is None
+
+
+def test_current_catalog_enriches_existing_ledger_without_rewriting_it(
+        tmp_path, monkeypatch):
+    from copy import deepcopy
+    import json
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", tmp_path / "metadata.json")
+    observed_at = "2026-07-16T10:00:00+00:00"
+    row = {
+        "id": "old-1", "source": "okx", "symbol": "XAAPL-USDT",
+        "event_at": "2026-07-14T00:02:00+00:00",
+        "detected_at": "2026-07-14T00:02:00+00:00",
+        "event_type": "new_listing",
+    }
+    original = deepcopy(row)
+    xaapl = {
+        "version": 1, "source": "okx", "instrument_id": "XAAPL-USDT",
+        "market_type": "spot", "base_asset": "XAAPL", "quote_asset": "USDT",
+        "source_fields": {
+            "instCategory": "3", "contTdSwTime": "1784185200000",
+        },
+    }
+    unrelated = {
+        "version": 1, "source": "okx", "instrument_id": "BTC-USDT",
+        "market_type": "spot", "source_fields": {"instCategory": "1"},
+    }
+
+    sr._save_product_metadata_catalog({
+        "okx": {
+            "observed_at": observed_at,
+            "products": {"XAAPL-USDT": xaapl, "BTC-USDT": unrelated},
+        },
+    }, [row])
+    saved = json.loads((tmp_path / "metadata.json").read_text())
+    catalog = sr._load_product_metadata_catalog()
+    events, _summary = sr._view_events([row], catalog["products"])
+
+    assert row == original
+    assert [item["market"] for item in saved["products"]] == ["XAAPL-USDT"]
+    assert not (tmp_path / "metadata.json.tmp").exists()
+    assert events[0]["instrument_class"] == "tokenized_equity_or_etf"
+    assert events[0]["instrument_classification"] == {
+        "state": "current_metadata_observed",
+        "metadata_observed_at": observed_at,
+        "time_semantics": "current_inventory_metadata_not_event_time_evidence",
+        "event_time_evidence": False,
+    }
+    schedule = events[0]["products"][0]["source_reported_schedule"]
+    assert schedule["official_announcement_verified"] is False
+    assert schedule["metadata_observed_at"] == observed_at
+    assert events[0]["scheduled_open_at"] is None
+    assert events[0]["event_at"] == row["detected_at"]
+
+
+def test_view_uses_current_metadata_for_at_most_five_minutes(tmp_path, monkeypatch):
+    from datetime import timedelta
+    import src.pipeline.structure_radar as sr
+
+    metadata_path = tmp_path / "metadata.json"
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", metadata_path)
+    monkeypatch.setattr(sr, "SOURCE_HEALTH_FILE", tmp_path / "health.json")
+    updated_at = datetime(2026, 7, 16, 10, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(sr, "_now_utc", lambda: updated_at)
+    row = {
+        "id": "existing", "source": "okx", "symbol": "XAAPL",
+        "event_at": "2026-07-14T00:02:00+00:00",
+        "detected_at": "2026-07-14T00:02:00+00:00",
+        "event_type": "instrument_inventory_addition",
+        "markets": ["XAAPL-USDT"],
+    }
+    metadata = {
+        "version": 1, "source": "okx", "instrument_id": "XAAPL-USDT",
+        "market_type": "spot", "source_fields": {"instCategory": "3"},
+    }
+    sr._save_product_metadata_catalog({
+        "okx": {
+            "observed_at": "2026-07-16T09:59:59+00:00",
+            "products": {"XAAPL-USDT": metadata},
+        },
+    }, [row])
+    monkeypatch.setattr(sr, "active", lambda _lane, limit: [row])
+
+    assert sr.PRODUCT_METADATA_MAX_AGE_SECONDS == 300
+    for offset, expected_class in (
+        (timedelta(seconds=300), "tokenized_equity_or_etf"),
+        (timedelta(seconds=301), "unclassified_spot"),
+        (timedelta(seconds=-1), "unclassified_spot"),
+    ):
+        moment = updated_at + offset
+        monkeypatch.setattr(sr, "_now_utc", lambda moment=moment: moment)
+        projected = sr.view()
+        assert projected["product_metadata_at"] == updated_at.isoformat()
+        assert projected["events"][0]["instrument_class"] == expected_class
+        assert projected["events"][0]["scheduled_open_at"] is None
+
+
+def test_missing_or_corrupt_current_catalog_fails_closed_even_if_ledger_had_taxonomy(
+        tmp_path, monkeypatch):
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", tmp_path / "metadata.json")
+    row = {
+        "id": "existing", "source": "okx", "symbol": "XAAPL",
+        "event_at": "2026-07-14T00:02:00+00:00",
+        "detected_at": "2026-07-14T00:02:00+00:00",
+        "event_type": "instrument_inventory_addition",
+        "markets": ["XAAPL-USDT"],
+        "products": [{
+            "market": "XAAPL-USDT",
+            "metadata": {
+                "version": 1, "source": "okx", "instrument_id": "XAAPL-USDT",
+                "market_type": "spot", "source_fields": {"instCategory": "3"},
+            },
+            "classification": {
+                "category": "tokenized_equity_or_etf",
+                "basis": "official_instrument_metadata",
+                "source_field": "instCategory", "source_value": "3",
+            },
+        }],
+    }
+
+    missing, _ = sr._view_events([row], sr._load_product_metadata_catalog()["products"])
+    (tmp_path / "metadata.json").write_text("{broken")
+    corrupt, _ = sr._view_events([row], sr._load_product_metadata_catalog()["products"])
+
+    for projected in (missing[0], corrupt[0]):
+        assert projected["instrument_class"] == "unclassified_spot"
+        assert projected["products"][0]["classification"]["basis"] == (
+            "current_inventory_metadata_unavailable"
+        )
+        assert projected["instrument_classification"]["state"] == (
+            "unclassified_metadata_unavailable"
+        )
+
+
+def test_invalid_utf8_product_catalog_fails_closed(tmp_path, monkeypatch):
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", tmp_path / "metadata.json")
+    (tmp_path / "metadata.json").write_bytes(b"\xff\xfe\x80")
+
+    assert sr._load_product_metadata_catalog() == {
+        "updated_at": None,
+        "products": {},
+    }
+
+
+def test_nonfinite_or_recursively_invalid_product_catalog_fails_closed(
+        tmp_path, monkeypatch):
+    import src.pipeline.structure_radar as sr
+
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", tmp_path / "metadata.json")
+    invalid_payloads = [
+        b'{"bad":NaN}',
+        b'{"bad":Infinity}',
+        b"[" * 10_000 + b"0" + b"]" * 10_000,
+    ]
+    for payload in invalid_payloads:
+        (tmp_path / "metadata.json").write_bytes(payload)
+        assert sr._load_product_metadata_catalog() == {
+            "updated_at": None,
+            "products": {},
+        }
+
+
+def test_oversized_product_catalog_never_replaces_last_good_sidecar(
+        tmp_path, monkeypatch):
+    import pytest
+    import src.pipeline.structure_radar as sr
+
+    path = tmp_path / "metadata.json"
+    monkeypatch.setattr(sr, "PRODUCT_METADATA_FILE", path)
+    observed_at = "2026-07-16T10:00:00+00:00"
+    row = {
+        "source": "okx", "event_type": "instrument_inventory_addition",
+        "markets": ["XAAPL-USDT"],
+    }
+    base = {
+        "version": 1, "source": "okx", "instrument_id": "XAAPL-USDT",
+        "market_type": "spot", "source_fields": {"instCategory": "3"},
+    }
+    sr._save_product_metadata_catalog({
+        "okx": {"observed_at": observed_at, "products": {"XAAPL-USDT": base}},
+    }, [row])
+    last_good = path.read_bytes()
+    oversized = {
+        **base,
+        # ensure_ascii=False means this is nine million encoded UTF-8 bytes, while
+        # its Python character count is only three million.
+        "source_fields": {"blob": "界" * 3_000_000},
+    }
+
+    assert sr.MAX_PRODUCT_METADATA_BYTES == 8 * 1024 * 1024
+    with pytest.raises(ValueError, match="exceeds 8 MiB"):
+        sr._save_product_metadata_catalog({
+            "okx": {
+                "observed_at": observed_at,
+                "products": {"XAAPL-USDT": oversized},
+            },
+        }, [row])
+
+    assert path.read_bytes() == last_good
+    assert not (tmp_path / "metadata.json.tmp").exists()
 
 
 def test_untrusted_or_incomplete_announcement_never_promotes_inventory(

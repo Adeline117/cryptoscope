@@ -63,6 +63,14 @@ _STRUCTURE_INSTRUMENT_CLASSES = {
     "tokenized_equity_or_etf", "tokenized_commodity", "tokenized_forex",
     "tokenized_bond", "unclassified_spot", "mixed",
 }
+_STRUCTURE_TAXONOMY_FIELDS = {
+    "okx": frozenset({"instCategory"}),
+    "coinbase": frozenset({"product_type"}),
+}
+_STRUCTURE_SCHEDULE_FIELDS = {
+    "okx": frozenset({"contTdSwTime", "listTime"}),
+    "bybit": frozenset({"launchTime"}),
+}
 
 
 def _reason_codes(value: Any, *, path: str, required: bool) -> list[str]:
@@ -575,6 +583,31 @@ def _aware_clock(value: Any, *, path: str) -> datetime:
     return clock
 
 
+def _epoch_millis_clock(value: Any, *, path: str) -> datetime:
+    """Parse an exchange epoch-millisecond field without lossy float rounding."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise BoardViewContractError(f"{path} must be a positive epoch-ms integer")
+    text = str(value).strip()
+    if not text.isdecimal():
+        raise BoardViewContractError(f"{path} must be a positive epoch-ms integer")
+    try:
+        millis = int(text)
+    except ValueError as exc:
+        raise BoardViewContractError(
+            f"{path} must be a representable epoch-ms integer"
+        ) from exc
+    if millis <= 0:
+        raise BoardViewContractError(f"{path} must be a positive epoch-ms integer")
+    try:
+        return datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(
+            milliseconds=millis,
+        )
+    except OverflowError as exc:
+        raise BoardViewContractError(
+            f"{path} must be a representable epoch-ms integer"
+        ) from exc
+
+
 def _validate_cost_contract(value: Any, *, path: str) -> dict | None:
     if value is None:
         return None
@@ -690,7 +723,8 @@ def _validate_structure_products(row: Mapping[str, Any], *, path: str) -> None:
         )
         if category == "unclassified_spot":
             if classification.get("basis") not in {
-                    "no_explicit_product_taxonomy", "legacy_row_has_no_product_taxonomy"}:
+                    "no_explicit_product_taxonomy", "legacy_row_has_no_product_taxonomy",
+                    "current_inventory_metadata_unavailable"}:
                 raise BoardViewContractError(
                     f"{product_path}.classification has an invalid unknown basis"
                 )
@@ -701,9 +735,14 @@ def _validate_structure_products(row: Mapping[str, Any], *, path: str) -> None:
                 )
             source_field = classification.get("source_field")
             source_value = classification.get("source_value")
+            source = metadata.get("source")
+            if (not isinstance(source_field, str)
+                    or source_field not in _STRUCTURE_TAXONOMY_FIELDS.get(source, ())):
+                raise BoardViewContractError(
+                    f"{product_path}.classification source taxonomy field is not allowed"
+                )
             raw_value = metadata["source_fields"].get(source_field)
-            if (not isinstance(source_field, str) or not isinstance(source_value, str)
-                    or not isinstance(raw_value, str)
+            if (not isinstance(source_value, str) or not isinstance(raw_value, str)
                     or raw_value.strip().lower() != source_value):
                 raise BoardViewContractError(
                     f"{product_path}.classification is not bound to source_fields"
@@ -743,14 +782,32 @@ def _validate_structure_products(row: Mapping[str, Any], *, path: str) -> None:
                 raise BoardViewContractError(
                     f"{product_path}.source_reported_schedule must remain unverified"
                 )
-            _required_text(
-                schedule.get("source_field"),
-                path=f"{product_path}.source_reported_schedule.source_field",
+            schedule_path = f"{product_path}.source_reported_schedule"
+            source_field = _required_text(
+                schedule.get("source_field"), path=f"{schedule_path}.source_field",
             )
-            _aware_clock(
+            source = metadata.get("source")
+            if source_field not in _STRUCTURE_SCHEDULE_FIELDS.get(source, ()):
+                raise BoardViewContractError(
+                    f"{schedule_path}.source_field is not allowed for {source}"
+                )
+            source_fields = metadata["source_fields"]
+            if source_field not in source_fields:
+                raise BoardViewContractError(
+                    f"{schedule_path}.source_field is absent from source_fields"
+                )
+            reported_open = _aware_clock(
                 schedule.get("reported_open_at"),
-                path=f"{product_path}.source_reported_schedule.reported_open_at",
+                path=f"{schedule_path}.reported_open_at",
             )
+            source_open = _epoch_millis_clock(
+                source_fields[source_field],
+                path=f"{product_path}.metadata.source_fields.{source_field}",
+            )
+            if source_open != reported_open:
+                raise BoardViewContractError(
+                    f"{schedule_path}.reported_open_at contradicts source_fields"
+                )
     if set(product_markets) != set(markets) or len(set(product_markets)) != len(markets):
         raise BoardViewContractError(f"{path}.products do not match markets")
     declared_classes = row.get("instrument_classes")
@@ -764,7 +821,7 @@ def _validate_structure_products(row: Mapping[str, Any], *, path: str) -> None:
 
 
 def _validate_structure_event(
-    row: Mapping[str, Any], *, path: str,
+    row: Mapping[str, Any], *, generated_at: datetime, path: str,
 ) -> None:
     event_type = row.get("event_type")
     if event_type not in _STRUCTURE_EVENT_TYPES:
@@ -775,6 +832,74 @@ def _validate_structure_event(
     ):
         raise BoardViewContractError(f"{path}.inventory_detected_at is unbound")
     _validate_structure_products(row, path=path)
+    classification = row.get("instrument_classification")
+    if not isinstance(classification, Mapping):
+        raise BoardViewContractError(
+            f"{path}.instrument_classification must expose metadata time semantics"
+        )
+    if (classification.get("time_semantics")
+            != "current_inventory_metadata_not_event_time_evidence"
+            or classification.get("event_time_evidence") is not False):
+        raise BoardViewContractError(
+            f"{path}.instrument_classification cannot claim event-time evidence"
+        )
+    classification_state = classification.get("state")
+    metadata_observed_at = classification.get("metadata_observed_at")
+    products = row.get("products")
+    if classification_state == "current_metadata_observed":
+        observed_clock = _aware_clock(
+            metadata_observed_at,
+            path=f"{path}.instrument_classification.metadata_observed_at",
+        )
+        if observed_clock > generated_at + timedelta(seconds=5):
+            raise BoardViewContractError(
+                f"{path}.instrument_classification is ahead of the board clock"
+            )
+        if any(
+            (product.get("classification") or {}).get("basis")
+            == "current_inventory_metadata_unavailable"
+            for product in products
+        ):
+            raise BoardViewContractError(
+                f"{path}.instrument_classification claims unavailable metadata"
+            )
+        for index, product in enumerate(products):
+            schedule = product.get("source_reported_schedule")
+            if schedule is not None and (
+                    schedule.get("metadata_observed_at") != metadata_observed_at
+                    or schedule.get("time_semantics")
+                    != "current_inventory_metadata_not_event_time_evidence"):
+                raise BoardViewContractError(
+                    f"{path}.products[{index}].source_reported_schedule has "
+                    "ambiguous time semantics"
+                )
+    elif classification_state == "unclassified_metadata_unavailable":
+        if metadata_observed_at is not None or row.get("instrument_class") != "unclassified_spot":
+            raise BoardViewContractError(
+                f"{path}.instrument_classification must fail closed"
+            )
+        if any(
+            (product.get("classification") or {}).get("basis")
+            != "current_inventory_metadata_unavailable"
+            for product in products
+        ):
+            raise BoardViewContractError(
+                f"{path}.instrument_classification hides unavailable metadata"
+            )
+        if any(product.get("source_reported_schedule") is not None for product in products):
+            raise BoardViewContractError(
+                f"{path}.instrument_classification cannot publish a schedule "
+                "when metadata is unavailable"
+            )
+        if any(bool(product["metadata"]["source_fields"]) for product in products):
+            raise BoardViewContractError(
+                f"{path}.instrument_classification cannot retain source_fields "
+                "when metadata is unavailable"
+            )
+    else:
+        raise BoardViewContractError(
+            f"{path}.instrument_classification.state is invalid"
+        )
     verification = row.get("listing_verification")
     if not isinstance(verification, Mapping):
         raise BoardViewContractError(f"{path}.listing_verification must be an object")
@@ -900,7 +1025,7 @@ def _validate_nonlaunch_action(row: Mapping[str, Any], *, view: str,
     if view == "structure":
         if row.get("event_at") is None:
             raise BoardViewContractError(f"{path}.event_at is required")
-        _validate_structure_event(row, path=path)
+        _validate_structure_event(row, generated_at=generated_at, path=path)
     elif view == "airdrop":
         _validate_airdrop_event(row, generated_at=generated_at, path=path)
     else:
@@ -1040,6 +1165,19 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         _validate_stats_view(payload)
     if name == "perps":
         _validate_perps_view(payload)
+    if name == "structure":
+        if (payload.get("product_metadata_time_semantics")
+                != "current_inventory_metadata_not_event_time_evidence"):
+            raise BoardViewContractError(
+                "structure product metadata must disclose current-not-event-time semantics"
+            )
+        metadata_at = payload.get("product_metadata_at")
+        if metadata_at is not None:
+            if _aware_clock(metadata_at, path="structure.product_metadata_at") \
+                    > envelope.generated_at + timedelta(seconds=5):
+                raise BoardViewContractError(
+                    "structure.product_metadata_at is ahead of the board clock"
+                )
 
     collection = _CANONICAL_EVENT_COLLECTIONS.get(name)
     if collection:
@@ -1060,4 +1198,33 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
             seen.add(ident)
             _validate_event(row, view=name, lane=lane,
                             generated_at=envelope.generated_at, path=path)
+        if name == "structure":
+            metadata_at = payload.get("product_metadata_at")
+            metadata_clock = (
+                _aware_clock(metadata_at, path="structure.product_metadata_at")
+                if metadata_at is not None else None
+            )
+            for index, row in enumerate(rows):
+                classification = row.get("instrument_classification")
+                if (isinstance(classification, Mapping)
+                        and classification.get("state") == "current_metadata_observed"):
+                    if metadata_clock is None:
+                        raise BoardViewContractError(
+                            "structure.product_metadata_at cannot be null while "
+                            "current metadata is published"
+                        )
+                    if metadata_clock < envelope.generated_at - timedelta(minutes=5):
+                        raise BoardViewContractError(
+                            "structure.product_metadata_at is too old for current metadata"
+                        )
+                    observed = _aware_clock(
+                        classification.get("metadata_observed_at"),
+                        path=(f"structure.events[{index}].instrument_classification."
+                              "metadata_observed_at"),
+                    )
+                    if observed > metadata_clock:
+                        raise BoardViewContractError(
+                            f"structure.events[{index}] metadata observation is newer "
+                            "than its sidecar"
+                        )
     return payload

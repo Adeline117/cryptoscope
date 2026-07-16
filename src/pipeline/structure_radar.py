@@ -14,6 +14,12 @@ from src.pipeline.opportunity_ledger import active, record
 
 
 SOURCE_HEALTH_FILE = DATA_DIR / "structure_source_health.json"
+PRODUCT_METADATA_FILE = DATA_DIR / "structure_product_metadata.json"
+PRODUCT_METADATA_TIME_SEMANTICS = (
+    "current_inventory_metadata_not_event_time_evidence"
+)
+MAX_PRODUCT_METADATA_BYTES = 8 * 1024 * 1024
+PRODUCT_METADATA_MAX_AGE_SECONDS = 300
 
 _KNOWN_QUOTES = ("FDUSD", "USDT", "USDC", "TUSD", "BUSD", "DAI", "USD",
                  "EUR", "TRY", "BTC", "ETH", "BNB")
@@ -160,6 +166,165 @@ def _load_source_health() -> dict:
     return {"updated_at": None, "sources": []}
 
 
+def _aware_utc_iso(value: object) -> str | None:
+    """Normalize a timezone-aware clock, rejecting ambiguous sidecar evidence."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        clock = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if clock.tzinfo is None:
+        return None
+    return clock.astimezone(timezone.utc).isoformat()
+
+
+def _now_utc() -> datetime:
+    """Injectable wall clock for current-metadata freshness decisions."""
+    return datetime.now(timezone.utc)
+
+
+def _ledger_market_keys(rows: list[dict]) -> set[tuple[str, str]]:
+    """Return only source/market identities already represented in the ledger."""
+    keys: set[tuple[str, str]] = set()
+    for row in rows:
+        source = str(row.get("source") or "").strip().lower()
+        if not source:
+            continue
+        markets = row.get("markets")
+        if isinstance(markets, list):
+            candidates = markets
+        elif row.get("event_type") == "new_listing":
+            # The oldest immutable rows were one pair per event and had no markets
+            # array. Their symbol is still a source-bound market identity.
+            candidates = [row.get("symbol")]
+        else:
+            candidates = []
+        for market in candidates:
+            if isinstance(market, str) and market.strip():
+                keys.add((source, market.strip()))
+    return keys
+
+
+def _valid_current_metadata(source: str, market: str, value: object) -> bool:
+    return bool(
+        isinstance(value, dict)
+        and value.get("version") == 1
+        and value.get("source") == source
+        and value.get("instrument_id") == market
+        and value.get("market_type") == "spot"
+        and isinstance(value.get("source_fields"), dict)
+    )
+
+
+def _save_product_metadata_catalog(catalog: object, rows: list[dict]) -> dict:
+    """Atomically retain only current metadata for ledger-bound markets.
+
+    This sidecar is deliberately separate from the append-only opportunity rows.
+    A later inventory observation can improve the *current* product classification,
+    but can never rewrite what was known when the event was first detected.
+    """
+    relevant = _ledger_market_keys(rows)
+    source_catalog = catalog if isinstance(catalog, dict) else {}
+    products: list[dict] = []
+    for source, market in sorted(relevant):
+        source_entry = source_catalog.get(source)
+        if not isinstance(source_entry, dict):
+            continue
+        observed_at = _aware_utc_iso(source_entry.get("observed_at"))
+        metadata_by_market = source_entry.get("products")
+        metadata = (metadata_by_market.get(market)
+                    if isinstance(metadata_by_market, dict) else None)
+        if observed_at is None or not _valid_current_metadata(source, market, metadata):
+            continue
+        products.append({
+            "source": source,
+            "market": market,
+            "observed_at": observed_at,
+            "metadata": metadata,
+        })
+
+    payload = {
+        "version": 1,
+        "updated_at": _now_utc().isoformat(),
+        "time_semantics": PRODUCT_METADATA_TIME_SEMANTICS,
+        "products": products,
+    }
+    # Strict serialization rejects non-finite or non-JSON upstream values before
+    # the atomic replace. The prior complete sidecar remains intact on failure.
+    encoded = json.dumps(
+        payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+    )
+    if len(encoded.encode("utf-8")) > MAX_PRODUCT_METADATA_BYTES:
+        raise ValueError("structure product metadata sidecar exceeds 8 MiB")
+    PRODUCT_METADATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PRODUCT_METADATA_FILE.with_suffix(PRODUCT_METADATA_FILE.suffix + ".tmp")
+    tmp.write_text(encoded)
+    tmp.replace(PRODUCT_METADATA_FILE)
+    return payload
+
+
+def _load_product_metadata_catalog() -> dict:
+    """Load a strict current-metadata sidecar; any damage fails closed."""
+    empty = {"updated_at": None, "products": {}}
+
+    def reject_nonfinite(value: str) -> None:
+        raise ValueError(f"non-finite JSON constant: {value}")
+
+    try:
+        if PRODUCT_METADATA_FILE.stat().st_size > MAX_PRODUCT_METADATA_BYTES:
+            return empty
+        payload = json.loads(
+            PRODUCT_METADATA_FILE.read_text(), parse_constant=reject_nonfinite,
+        )
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        return empty
+    if (not isinstance(payload, dict) or payload.get("version") != 1
+            or payload.get("time_semantics") != PRODUCT_METADATA_TIME_SEMANTICS
+            or _aware_utc_iso(payload.get("updated_at")) is None
+            or not isinstance(payload.get("products"), list)):
+        return empty
+
+    products: dict[tuple[str, str], dict] = {}
+    for item in payload["products"]:
+        if not isinstance(item, dict):
+            return empty
+        source, market = item.get("source"), item.get("market")
+        observed_at = _aware_utc_iso(item.get("observed_at"))
+        metadata = item.get("metadata")
+        if (not isinstance(source, str) or source != source.strip().lower()
+                or not source or not isinstance(market, str) or not market.strip()
+                or market != market.strip() or observed_at is None
+                or not _valid_current_metadata(source, market, metadata)):
+            return empty
+        key = (source, market)
+        if key in products:
+            return empty
+        products[key] = {"observed_at": observed_at, "metadata": metadata}
+    return {
+        "updated_at": _aware_utc_iso(payload["updated_at"]),
+        "products": products,
+    }
+
+
+def _fresh_product_metadata(catalog: dict) -> dict[tuple[str, str], dict]:
+    """Expose products only while the sidecar is current and not future-dated."""
+    updated_at = _aware_utc_iso(catalog.get("updated_at"))
+    products = catalog.get("products")
+    if updated_at is None or not isinstance(products, dict):
+        return {}
+    updated_clock = datetime.fromisoformat(updated_at)
+    now = _now_utc()
+    if now.tzinfo is None:
+        return {}
+    age_seconds = (
+        now.astimezone(timezone.utc) - updated_clock.astimezone(timezone.utc)
+    ).total_seconds()
+    if age_seconds < 0 or age_seconds > PRODUCT_METADATA_MAX_AGE_SECONDS:
+        return {}
+    return products
+
+
 def record_listings(listings: list[dict]) -> int:
     grouped: dict[tuple[str, str, str], dict] = {}
     for listing in listings:
@@ -233,29 +398,88 @@ def record_listings(listings: list[dict]) -> int:
     return inserted
 
 
-def _inventory_projection(row: dict, *, recorded_new_listing: bool = False) -> dict:
-    """Project an inventory-only row without rewriting its append-only ledger row."""
-    detected_at = str(row.get("detected_at") or row.get("event_at") or "")
-    markets = row.get("markets") if isinstance(row.get("markets"), list) else []
-    products = row.get("products") if isinstance(row.get("products"), list) else []
-    if not products:
+def _current_classification_projection(
+    row: dict,
+    markets: list[str],
+    catalog: dict[tuple[str, str], dict],
+) -> dict:
+    """Project current taxonomy without borrowing it as event-time knowledge."""
+    source = str(row.get("source") or "unknown")
+    entries = [catalog.get((source.lower(), market)) for market in markets]
+    observed = {
+        entry.get("observed_at") for entry in entries if isinstance(entry, dict)
+    }
+    complete = (
+        bool(markets)
+        and all(isinstance(entry, dict) for entry in entries)
+        and len(observed) == 1
+        and None not in observed
+    )
+    if not complete:
         products = [{
-            "market": str(market),
+            "market": market,
             "metadata": {
-                "version": 1, "source": str(row.get("source") or "unknown"),
-                "instrument_id": str(market), "market_type": "spot",
-                "source_fields": {},
+                "version": 1, "source": source, "instrument_id": market,
+                "market_type": "spot", "source_fields": {},
             },
             "classification": {
                 "category": "unclassified_spot",
-                "basis": "legacy_row_has_no_product_taxonomy",
+                "basis": "current_inventory_metadata_unavailable",
             },
         } for market in markets]
-    classes = sorted({
-        str((product.get("classification") or {}).get("category")
-            or "unclassified_spot")
-        for product in products if isinstance(product, dict)
-    }) or ["unclassified_spot"]
+        return {
+            "instrument_class": "unclassified_spot",
+            "instrument_classes": ["unclassified_spot"],
+            "products": products,
+            "instrument_classification": {
+                "state": "unclassified_metadata_unavailable",
+                "metadata_observed_at": None,
+                "time_semantics": PRODUCT_METADATA_TIME_SEMANTICS,
+                "event_time_evidence": False,
+            },
+        }
+
+    products = []
+    for market, entry in zip(markets, entries):
+        metadata = entry["metadata"]
+        product = {
+            "market": market,
+            "metadata": metadata,
+            "classification": _instrument_classification(metadata),
+        }
+        schedule = _source_reported_schedule(metadata)
+        if schedule:
+            schedule.update({
+                "metadata_observed_at": entry["observed_at"],
+                "time_semantics": PRODUCT_METADATA_TIME_SEMANTICS,
+            })
+            product["source_reported_schedule"] = schedule
+        products.append(product)
+    classes = sorted({product["classification"]["category"] for product in products})
+    return {
+        "instrument_class": classes[0] if len(classes) == 1 else "mixed",
+        "instrument_classes": classes,
+        "products": products,
+        "instrument_classification": {
+            "state": "current_metadata_observed",
+            "metadata_observed_at": next(iter(observed)),
+            "time_semantics": PRODUCT_METADATA_TIME_SEMANTICS,
+            "event_time_evidence": False,
+        },
+    }
+
+
+def _inventory_projection(
+    row: dict,
+    *,
+    recorded_new_listing: bool = False,
+    catalog: dict[tuple[str, str], dict] | None = None,
+) -> dict:
+    """Project an inventory-only row without rewriting its append-only ledger row."""
+    detected_at = str(row.get("detected_at") or row.get("event_at") or "")
+    markets = [str(market) for market in row.get("markets", [])] \
+        if isinstance(row.get("markets"), list) else []
+    current = _current_classification_projection(row, markets, catalog or {})
     reasons = list(row.get("reasons") or [])
     if recorded_new_listing:
         reasons.extend([
@@ -283,14 +507,15 @@ def _inventory_projection(row: dict, *, recorded_new_listing: bool = False) -> d
             "state": "unverified",
             "reason_code": "official_announcement_and_open_time_not_verified",
         },
-        "instrument_class": classes[0] if len(classes) == 1 else "mixed",
-        "instrument_classes": classes,
-        "products": products,
+        **current,
         "reasons": reasons,
     }
 
 
-def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
+def _view_events(
+    rows: list[dict],
+    catalog: dict[tuple[str, str], dict] | None = None,
+) -> tuple[list[dict], dict]:
     """Collapse old pair rows and quarantine every unsupported listing label.
 
     The ledger remains untouched.  Pre-upgrade ``new_listing`` rows either collapse
@@ -304,11 +529,13 @@ def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
         markets = row.get("markets")
         event_type = row.get("event_type")
         if event_type == "new_listing" and isinstance(markets, list) and markets:
-            canonical.append(_inventory_projection(row, recorded_new_listing=True))
+            canonical.append(_inventory_projection(
+                row, recorded_new_listing=True, catalog=catalog,
+            ))
             downgraded_new_listing_labels += 1
             continue
         if event_type != "new_listing":
-            projected = (_inventory_projection(row)
+            projected = (_inventory_projection(row, catalog=catalog)
                          if event_type == "instrument_inventory_addition"
                          else {**row, "auto_execution_allowed": False})
             canonical.append(projected)
@@ -324,7 +551,7 @@ def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
                           if row.get("symbol")})
         first = min(group, key=lambda row: str(row.get("detected_at") or ""))
         detected_at = str(first.get("detected_at") or batch_at)
-        legacy.append({
+        legacy_row = {
             **first,
             "id": f"legacy-inventory:{source}:{base}:{batch_at}",
             "token": base,
@@ -348,19 +575,6 @@ def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
                 "state": "unverified",
                 "reason_code": "legacy_inventory_rows_have_no_announcement_evidence",
             },
-            "instrument_class": "unclassified_spot",
-            "instrument_classes": ["unclassified_spot"],
-            "products": [{
-                "market": market,
-                "metadata": {
-                    "version": 1, "source": source, "instrument_id": market,
-                    "market_type": "spot", "source_fields": {},
-                },
-                "classification": {
-                    "category": "unclassified_spot",
-                    "basis": "legacy_row_has_no_product_taxonomy",
-                },
-            } for market in markets],
             "legacy_row_count": len(group),
             "ledger_event_ids": [row.get("id") for row in group if row.get("id")],
             "message": (f"{source.upper()} 旧版 instrument inventory delta: "
@@ -370,6 +584,10 @@ def _view_events(rows: list[dict]) -> tuple[list[dict], dict]:
                 "仅证明公开 instruments 库存差分，未独立核验为官方上币公告",
                 "只观察，不进入方向优势判决",
             ],
+        }
+        legacy.append({
+            **legacy_row,
+            **_current_classification_projection(legacy_row, markets, catalog or {}),
         })
 
     events = sorted(canonical + legacy,
@@ -400,19 +618,30 @@ def scan() -> dict:
     _save_source_health(sources)
     reachable = sum(source.get("status") == "ok" for source in sources)
     inserted = record_listings(result["alerts"])
-    events, summary = _view_events(active("structure", limit=VIEW_LEDGER_LIMIT))
+    rows = active("structure", limit=VIEW_LEDGER_LIMIT)
+    _save_product_metadata_catalog(result.get("product_metadata_catalog"), rows)
+    catalog = _load_product_metadata_catalog()
+    events, summary = _view_events(rows, _fresh_product_metadata(catalog))
     return {"scanned": reachable, "configured_sources": len(sources),
             "source_health": sources, "source_health_at": datetime.now(timezone.utc).isoformat(),
             "inserted": inserted, "events": events, **summary,
+            "product_metadata_at": catalog["updated_at"],
+            "product_metadata_time_semantics": PRODUCT_METADATA_TIME_SEMANTICS,
             "source": "Public exchange instrument inventory with per-source health"}
 
 
 def view() -> dict:
     health = _load_source_health()
     sources = health["sources"]
-    events, summary = _view_events(active("structure", limit=VIEW_LEDGER_LIMIT))
+    catalog = _load_product_metadata_catalog()
+    events, summary = _view_events(
+        active("structure", limit=VIEW_LEDGER_LIMIT),
+        _fresh_product_metadata(catalog),
+    )
     return {"events": events, **summary, "source_health": sources,
             "source_health_at": health["updated_at"],
+            "product_metadata_at": catalog["updated_at"],
+            "product_metadata_time_semantics": PRODUCT_METADATA_TIME_SEMANTICS,
             "scanned": sum(source.get("status") == "ok" for source in sources),
             "configured_sources": len(sources),
             "source": "Public structure inventory ledger with per-source health"}

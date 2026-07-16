@@ -101,6 +101,11 @@ class _SourcePayloadError(ValueError):
         self.upstream_code = upstream_code
 
 
+def _utc_now_iso() -> str:
+    """Return one injectable UTC observation clock."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _response_excerpt(response: httpx.Response | None) -> str:
     """Return a finite response hint for evidence-based HTTP classification."""
     if response is None:
@@ -279,7 +284,8 @@ def _extract_product_metadata(
     """Keep bounded official product metadata for every accepted instrument.
 
     Snapshot compatibility deliberately stays unchanged: the baseline remains a
-    sorted string array, while metadata travels only with a newly observed delta.
+    sorted string array. Metadata is attached to a newly observed delta and also
+    exposed as a separate current-inventory catalog for the read-model sidecar.
     """
     ident_field = _PRODUCT_ID_FIELDS.get(exchange)
     allowed = _PRODUCT_METADATA_FIELDS.get(exchange)
@@ -381,7 +387,7 @@ def check_exchange_result(
     listing. ``baseline_ready`` is false on the first successful scan because that
     scan can establish inventory but cannot detect a delta.
     """
-    checked_at = datetime.now(timezone.utc).isoformat()
+    checked_at = _utc_now_iso()
     result: dict[str, Any] = {
         "exchange": exchange, "checked_at": checked_at, "status": "failed",
         "symbol_count": None, "baseline_ready": False, "new_count": 0,
@@ -461,6 +467,9 @@ def check_exchange_result(
         result["error_kind"] = "suspicious_empty_inventory"
         return result
     product_metadata = _extract_product_metadata(exchange, data, current_symbols)
+    # This clock is intentionally later and semantically distinct from checked_at:
+    # it proves the HTTP payload passed source parsing and metadata extraction.
+    product_metadata_observed_at = _utc_now_iso()
 
     previous_symbols = _load_snapshot(exchange)
     # A non-empty response can still be truncated by a gateway or upstream partial
@@ -480,8 +489,17 @@ def check_exchange_result(
         result["error"] = f"snapshot write failed: {str(exc)[:120]}"
         result["error_kind"] = "snapshot_write_failed"
         return result
-    result.update({"status": "ok", "symbol_count": len(current_symbols),
-                   "baseline_ready": bool(previous_symbols)})
+    result.update({
+        "status": "ok",
+        "symbol_count": len(current_symbols),
+        "baseline_ready": bool(previous_symbols),
+        "product_metadata_observed_at": product_metadata_observed_at,
+        # This is a current-inventory catalog, not event-time listing evidence.
+        # ``check_all_exchanges_with_status`` removes it from source-health rows
+        # and exposes it separately so the Structure read model can retain only
+        # markets already bound to its ledger.
+        "product_metadata_catalog": product_metadata,
+    })
 
     if not previous_symbols:
         # First run — nothing to compare against
@@ -545,16 +563,30 @@ def check_all_exchanges_with_status(timeout: float = 25.0) -> dict[str, Any]:
             # from every other exchange in the same scan.
             sources.append({
                 "exchange": exchange,
-                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "checked_at": _utc_now_iso(),
                 "status": "failed", "symbol_count": None,
                 "baseline_ready": False, "new_count": 0, "alerts": [],
                 "error_kind": "unexpected_source_failure",
                 "error": f"unexpected source failure: {str(exc)[:160]}",
             })
+    catalog: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        metadata = source.get("product_metadata_catalog")
+        observed_at = source.get("product_metadata_observed_at")
+        if (source.get("status") == "ok" and isinstance(metadata, dict)
+                and isinstance(observed_at, str) and observed_at):
+            catalog[str(source["exchange"])] = {
+                "observed_at": observed_at,
+                "products": metadata,
+            }
     return {
         "alerts": [alert for source in sources for alert in source["alerts"]],
-        "sources": [{k: v for k, v in source.items() if k != "alerts"}
-                    for source in sources],
+        "sources": [
+            {k: v for k, v in source.items()
+             if k not in {"alerts", "product_metadata_catalog"}}
+            for source in sources
+        ],
+        "product_metadata_catalog": catalog,
     }
 
 

@@ -104,9 +104,24 @@ def test_structure_view_exposes_conservative_tokenized_product_taxonomy():
     html = BOARD.read_text()
 
     assert 'tokenized_equity_or_etf:"代币化股票/ETF"' in html
-    assert "按产品接口显式 taxonomy；不按 ticker 猜" in html
+    assert "当前库存 metadata" in html
+    assert "非事件时证据" in html
+    assert "metadata_observed_at" in html
+    assert "tokenizedProducts" in html and "产品 / ${tokenizedRows.length} 事件" in html
+    assert "逐产品读取当前显式 taxonomy；不按 ticker 猜" in html
+    assert 'metadataRows?`${metadataRows}/${e.length} 事件`:"不可用"' in html
     assert "产品接口报告时间（不是公告核验）" in html
-    assert "仅 instruments 字段，未由公告核验" in html
+    assert "当前 instruments metadata，未由公告核验" in html
+
+
+def test_structure_source_failures_are_short_and_times_are_human_readable():
+    html = BOARD.read_text()
+
+    assert "const structureSourceFailure=" in html
+    assert 'geo_blocked:"地区限制"' in html
+    assert 'esc(x.error||"unknown")' not in html
+    assert "发现 ${utcClock(r.inventory_detected_at||r.detected_at)}" in html
+    assert "库存首次观测: ${utcClock(r.inventory_detected_at||r.detected_at)}" in html
 
 
 def test_airdrop_view_exposes_source_coverage_cost_and_risk_without_guessing():

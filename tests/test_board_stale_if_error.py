@@ -13,7 +13,12 @@ async def test_structure_render_failure_preserves_last_good_view(tmp_path, monke
     from src.pipeline import board_export, scheduler, structure_radar
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
-    old = board_export._envelope({"events": []}, view="structure")
+    old = board_export._envelope({
+        "events": [], "product_metadata_at": None,
+        "product_metadata_time_semantics": (
+            "current_inventory_metadata_not_event_time_evidence"
+        ),
+    }, view="structure")
     board_export.write_views(structure=old)
     before = _files(tmp_path)
     monkeypatch.setattr(structure_radar, "scan", lambda: {
@@ -48,7 +53,12 @@ async def test_airdrop_render_failure_preserves_last_good_view(tmp_path, monkeyp
     monkeypatch.setattr(
         board_export,
         "render_structure",
-        lambda: board_export._envelope({"events": []}, view="structure"),
+        lambda: board_export._envelope({
+            "events": [], "product_metadata_at": None,
+            "product_metadata_time_semantics": (
+                "current_inventory_metadata_not_event_time_evidence"
+            ),
+        }, view="structure"),
     )
     monkeypatch.setattr(board_export, "render_stats", lambda _opportunities: None)
     monkeypatch.setattr(

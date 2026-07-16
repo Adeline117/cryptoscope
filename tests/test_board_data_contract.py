@@ -270,7 +270,12 @@ def test_batch_preflight_rejects_nan_without_partial_update(tmp_path, monkeypatc
 
     monkeypatch.setattr(board_export, "EXPORT_DIR", tmp_path)
     old_launch = _view(board_export, "launch", _launch_body([_launch_event()]))
-    old_structure = _view(board_export, "structure", {"events": []})
+    old_structure = _view(board_export, "structure", {
+        "events": [], "product_metadata_at": None,
+        "product_metadata_time_semantics": (
+            "current_inventory_metadata_not_event_time_evidence"
+        ),
+    })
     board_export.write_views(launch=old_launch, structure=old_structure)
     before = {path.name: path.read_bytes() for path in tmp_path.glob("*.json")}
 
@@ -278,7 +283,10 @@ def test_batch_preflight_rejects_nan_without_partial_update(tmp_path, monkeypatc
         board_export, "launch", _launch_body([_launch_event(symbol="NEW")]),
     )
     bad_structure = _view(board_export, "structure", {
-        "events": [], "coverage_ratio": float("nan"),
+        "events": [], "coverage_ratio": float("nan"), "product_metadata_at": None,
+        "product_metadata_time_semantics": (
+            "current_inventory_metadata_not_event_time_evidence"
+        ),
     })
     with pytest.raises(ValueError, match="Out of range float values"):
         board_export.write_views(launch=new_launch, structure=bad_structure)
