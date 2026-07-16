@@ -341,6 +341,7 @@
     .funnel-panel{padding:12px}.funnel-head{align-items:flex-start;flex-direction:column}.funnel-steps{grid-template-columns:1fr 1fr}.funnel-step{padding:9px}.funnel-step .fv{font-size:16px}
     .opportunity-queue{padding:17px 14px}.opportunity-queue-head{flex-direction:column;gap:7px}.opportunity-grid{grid-template-columns:1fr}.opportunity-metrics{grid-template-columns:1fr}.gate-summary{align-items:flex-start;flex-direction:column;gap:2px}.risk-line{align-items:flex-start;flex-direction:column}.risk-line .jump{width:100%}
     .fact{min-height:82px;padding:12px}.fact .fv{font-size:17px}.evidence-grid{grid-template-columns:1fr}.play-sec .ph{align-items:flex-start;flex-direction:column;gap:2px}.scroll{border-radius:12px;margin-left:-1px;margin-right:-1px}
+    .exp>td{padding:0}.exp-detail{position:sticky;left:0;width:calc(100vw - 24px);max-width:calc(100vw - 24px);box-sizing:border-box;padding:12px 14px;overflow-wrap:anywhere;word-break:break-word}.exp-detail a,.exp-detail code{overflow-wrap:anywhere;word-break:break-word}
     .table-tools{align-items:stretch;flex-direction:column;margin-bottom:8px}.search{width:100%}.coverage-strip{grid-template-columns:1fr}
     .launch-protocol{padding:15px 14px}.launch-protocol-head{flex-direction:column}.launch-protocol-grid{grid-template-columns:1fr}.protocol-reasons li{align-items:flex-start;flex-direction:column}.protocol-reasons code{text-align:left}.reconciliation-proof-grid{grid-template-columns:1fr}
     .market-coverage{padding:17px 14px}.market-coverage-head{flex-direction:column;gap:7px}.market-coverage-grid{grid-template-columns:1fr}.market-coverage-card:last-child{grid-column:auto}.market-coverage-card .mch{gap:6px}
@@ -877,7 +878,7 @@ function renderTable(laneId, rows, cols, cfg){
     let fc=""; if(hv!=null&&prev[id]!=null&&prev[id]!==hv)fc=hv>prev[id]?"flash-up":"flash-down";
     const tds=cols.map(c=>`<td class="${c.n?'n':c.c?'c':''}">${c.cell(r)}</td>`).join("");
     const detailId=`detail-${laneId}-${i}`;
-    const det=cfg.detail?`<tr class="exp" id="${detailId}" hidden><td colspan="${cols.length}">${cfg.detail(r)}</td></tr>`:"";
+    const det=cfg.detail?`<tr class="exp" id="${detailId}" hidden><td colspan="${cols.length}"><div class="exp-detail">${cfg.detail(r)}</div></td></tr>`:"";
     const interactive=cfg.detail?`tabindex="0" aria-expanded="false" aria-controls="${detailId}" aria-label="展开 ${esc(r.symbol||r.name||'该行')} 详情"`:'';
     return `<tr class="${fc}" data-row="${esc(id)}" data-i="${i}" ${interactive}>${tds}</tr>${det}`;
   }).join("");
