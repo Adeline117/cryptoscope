@@ -237,6 +237,205 @@ def test_claimed_status_rejects_incomplete_or_ambiguous_claim():
                      source_verifier=_verified_source) is None
 
 
+def test_claim_values_must_be_finite_nonnegative_numbers_not_booleans():
+    from src.pipeline.airdrop_radar import normalize
+
+    tx_hash = "0x" + "a" * 64
+    base_claim = {
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://etherscan.io/tx/" + tx_hash,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    }
+
+    def verified(_url, _chain):
+        return {
+            "tx_id": tx_hash, "onchain_success": True,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+        }
+
+    for field in ("reward_usd", "actual_cost_usd"):
+        for invalid in (
+            True, False, float("nan"), float("inf"), float("-inf"),
+            10 ** 10_000, -1,
+        ):
+            claim = {**base_claim, field: invalid}
+            assert normalize(
+                _campaign(status="claimed", claim=claim),
+                claim_verifier=verified, source_verifier=_verified_source,
+            ) is None
+
+
+def test_claim_chain_must_match_campaign_chain_even_with_a_valid_explorer_url():
+    from src.pipeline.airdrop_radar import normalize
+
+    tx_hash = "0x" + "a" * 64
+    claim = {
+        "chain": "base",
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://basescan.org/tx/" + tx_hash,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    }
+    calls = []
+
+    def should_not_run(*args):
+        calls.append(args)
+        return None
+
+    assert normalize(
+        _campaign(chain="ethereum", status="claimed", claim=claim),
+        claim_verifier=should_not_run, source_verifier=_verified_source,
+    ) is None
+    for invalid_chain in (False, 0, "", "   "):
+        assert normalize(
+            _campaign(
+                chain="ethereum", status="claimed",
+                claim={**claim, "chain": invalid_chain},
+            ),
+            claim_verifier=should_not_run, source_verifier=_verified_source,
+        ) is None
+    assert calls == []
+
+
+def test_claim_verifier_must_return_the_same_transaction_and_valid_chain_time():
+    from src.pipeline.airdrop_radar import normalize
+
+    tx_hash = "0x" + "a" * 64
+    claim = {
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://etherscan.io/tx/" + tx_hash,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    }
+    campaign = _campaign(status="claimed", claim=claim)
+
+    def result(**changes):
+        verification = {
+            "tx_id": tx_hash, "onchain_success": True,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+        }
+        verification.update(changes)
+        return lambda _url, _chain: verification
+
+    assert normalize(
+        campaign, claim_verifier=result(tx_id="0x" + "b" * 64),
+        source_verifier=_verified_source,
+    ) is None
+    assert normalize(
+        campaign, claim_verifier=result(confirmed_at="2026-07-13T12:01:00"),
+        source_verifier=_verified_source,
+    ) is None
+    assert normalize(
+        campaign, claim_verifier=result(confirmed_at="not-a-time"),
+        source_verifier=_verified_source,
+    ) is None
+    assert normalize(
+        campaign,
+        claim_verifier=result(confirmed_at="9999-12-31T23:59:59-23:59"),
+        source_verifier=_verified_source,
+    ) is None
+
+    def crashed(_url, _chain):
+        raise RuntimeError("verifier bug")
+
+    assert normalize(
+        campaign, claim_verifier=crashed, source_verifier=_verified_source,
+    ) is None
+
+
+def test_claim_verification_payload_must_be_strictly_json_serializable(tmp_path, monkeypatch):
+    from src.pipeline import airdrop_radar as ar
+    import src.pipeline.opportunity_ledger as ol
+
+    monkeypatch.setattr(ol, "DB", tmp_path / "ledger.db")
+    tx_hash = "0x" + "a" * 64
+    config = tmp_path / "airdrop.yaml"
+    config.write_text(f"""campaigns:
+  - id: unsafe-verifier-payload
+    project: Unsafe verifier payload
+    chain: ethereum
+    official_url: https://starknet.io/claim
+    source_evidence_url: https://starknet.io/evidence
+    source_markers: [Starknet]
+    status: claimed
+    claim:
+      claimed_at: 2026-07-13T12:00:00Z
+      tx_url: https://etherscan.io/tx/{tx_hash}
+      reward_usd: 100
+      actual_cost_usd: 5
+""")
+
+    def unsafe(_url, _chain):
+        return {
+            "tx_id": tx_hash, "onchain_success": True,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+            "not_json": {"set values are not JSON"},
+        }
+
+    got = ar.sync(
+        config, claim_verifier=unsafe, source_verifier=_verified_source,
+    )
+
+    assert got["configured"] == got["rejected"] == 1
+    assert got["accepted"] == got["inserted"] == 0
+
+
+def test_multi_chain_claim_requires_an_explicit_supported_chain():
+    from src.pipeline.airdrop_radar import normalize
+
+    tx_hash = "0x" + "a" * 64
+    claim = {
+        "chain": "base",
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://basescan.org/tx/" + tx_hash,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    }
+
+    def verified(_url, _chain):
+        return {
+            "tx_id": tx_hash.upper(), "onchain_success": True,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+        }
+
+    accepted = normalize(
+        _campaign(chain="multi", status="claimed", claim=claim),
+        claim_verifier=verified, source_verifier=_verified_source,
+    )
+    assert accepted["claim_outcome"]["chain"] == "base"
+
+    missing_chain = dict(claim)
+    missing_chain.pop("chain")
+    assert normalize(
+        _campaign(chain="multi", status="claimed", claim=missing_chain),
+        claim_verifier=verified, source_verifier=_verified_source,
+    ) is None
+
+
+def test_solana_claim_transaction_identity_remains_case_sensitive():
+    from src.pipeline.airdrop_radar import normalize
+
+    signature = "A" * 64
+    claim = {
+        "claimed_at": "2026-07-13T12:00:00Z",
+        "tx_url": "https://solscan.io/tx/" + signature,
+        "reward_usd": 100,
+        "actual_cost_usd": 5,
+    }
+
+    def wrong_identity(_url, _chain):
+        return {
+            "tx_id": "a" * 64, "onchain_success": True,
+            "confirmed_at": "2026-07-13T12:01:00+00:00",
+        }
+
+    assert normalize(
+        _campaign(chain="solana", status="claimed", claim=claim),
+        claim_verifier=wrong_identity, source_verifier=_verified_source,
+    ) is None
+
+
 def test_claim_transaction_url_must_match_chain_explorer_and_hash_shape():
     from src.pipeline.airdrop_radar import normalize
 

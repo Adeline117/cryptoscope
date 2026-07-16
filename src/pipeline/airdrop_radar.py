@@ -338,11 +338,11 @@ def _timestamp(value: object) -> str | None:
         return None
     try:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
+        if dt.tzinfo is None:
+            return None
+        return dt.astimezone(timezone.utc).isoformat()
+    except (ValueError, OverflowError):
         return None
-    if dt.tzinfo is None:
-        return None
-    return dt.astimezone(timezone.utc).isoformat()
 
 
 def _claim_outcome(campaign: dict, verifier=_verify_transaction) -> dict | None:
@@ -351,28 +351,69 @@ def _claim_outcome(campaign: dict, verifier=_verify_transaction) -> dict | None:
     if not isinstance(raw, dict):
         return None
     claimed_at = _timestamp(raw.get("claimed_at"))
-    chain = str(raw.get("chain") or campaign.get("chain") or "")
+    campaign_chain_value = campaign.get("chain")
+    if (not isinstance(campaign_chain_value, str)
+            or not campaign_chain_value.strip()):
+        return None
+    campaign_chain = campaign_chain_value.strip().lower()
+    raw_chain = raw.get("chain")
+    if raw_chain is None:
+        chain = campaign_chain
+    elif not isinstance(raw_chain, str) or not raw_chain.strip():
+        return None
+    else:
+        chain = raw_chain.strip().lower()
+    if (not campaign_chain or not chain
+            or (campaign_chain != "multi" and chain != campaign_chain)):
+        return None
     tx_url = _transaction_url(raw.get("tx_url"), chain)
     try:
-        reward_usd = float(raw["reward_usd"])
-        actual_cost_usd = float(raw["actual_cost_usd"])
-    except (KeyError, TypeError, ValueError):
+        reward_value = raw["reward_usd"]
+        cost_value = raw["actual_cost_usd"]
+        if isinstance(reward_value, bool) or isinstance(cost_value, bool):
+            return None
+        reward_usd = float(reward_value)
+        actual_cost_usd = float(cost_value)
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    if not claimed_at or not tx_url or reward_usd < 0 or actual_cost_usd < 0:
+    if (not claimed_at or not tx_url
+            or not math.isfinite(reward_usd)
+            or not math.isfinite(actual_cost_usd)
+            or reward_usd < 0 or actual_cost_usd < 0):
         return None
-    verification = verifier(tx_url, chain)
-    if not isinstance(verification, dict) or verification.get("onchain_success") is not True:
+    try:
+        verification = verifier(tx_url, chain)
+    except Exception:
+        return None
+    expected_tx_id = urlparse(tx_url).path.rstrip("/").rsplit("/", 1)[-1]
+    verified_tx_id = verification.get("tx_id") if isinstance(verification, dict) else None
+    verified_at = (_timestamp(verification.get("confirmed_at"))
+                   if isinstance(verification, dict) else None)
+    tx_identity_matches = (
+        isinstance(verified_tx_id, str)
+        and (verified_tx_id == expected_tx_id if chain == "solana"
+             else verified_tx_id.lower() == expected_tx_id.lower())
+    )
+    if (not isinstance(verification, dict)
+            or verification.get("onchain_success") is not True
+            or not tx_identity_matches or not verified_at):
+        return None
+    safe_verification = dict(verification)
+    safe_verification["confirmed_at"] = verified_at
+    try:
+        json.dumps(safe_verification, allow_nan=False)
+    except (TypeError, ValueError, RecursionError):
         return None
     return {
         "version": 2, "kind": "airdrop_claim",
-        "claimed_at": verification["confirmed_at"],
+        "claimed_at": verified_at,
         "reported_claimed_at": claimed_at,
         "tx_url": tx_url, "gross_reward_usd": reward_usd,
         "chain": chain,
         "actual_cost_usd": actual_cost_usd,
         "net_reward_usd": reward_usd - actual_cost_usd,
         "reward_is_claimed": True, "cost_is_actual": True,
-        "transaction_verification": verification,
+        "transaction_verification": safe_verification,
     }
 
 
