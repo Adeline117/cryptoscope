@@ -469,7 +469,7 @@ def test_hydration_rpc_failures_back_off_persistently(sol):
     hydration = sol.qualification_summary(now=base)["hydration"]
     assert hydration == {
         "state": "backlogged", "pending_total": 1,
-        "by_state": {"raw_only": 0, "rpc_unavailable": 1},
+        "by_state": {"raw_only": 0, "rpc_unavailable": 1, "incomplete": 0},
         "due": 0, "deferred": 1,
         "oldest_pending_at": (base - timedelta(minutes=1)).isoformat(),
         "oldest_pending_age_seconds": 60, "max_retry_count": 1,
@@ -499,6 +499,20 @@ def test_hydration_rpc_failures_back_off_persistently(sol):
     finally:
         c.close()
     assert reset == ("complete", 0, None)
+
+
+def test_incomplete_identity_is_visible_in_hydration_backlog(sol):
+    now = datetime(2026, 7, 15, 12, tzinfo=timezone.utc)
+    raw = sol.parse_message(_notification())
+    sol.persist(raw.payload, transaction={"meta": {"err": None}})
+
+    hydration = sol.qualification_summary(now=now)["hydration"]
+
+    assert hydration["state"] == "backlogged"
+    assert hydration["pending_total"] == 1
+    assert hydration["by_state"] == {
+        "raw_only": 0, "rpc_unavailable": 0, "incomplete": 1,
+    }
 
 
 def test_hydration_pressure_stops_batch_and_honors_retry_after(sol):

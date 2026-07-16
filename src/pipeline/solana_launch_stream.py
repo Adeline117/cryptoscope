@@ -455,7 +455,7 @@ def qualification_summary(
                           SUM(CASE WHEN hydration_next_retry_at>? THEN 1 ELSE 0 END),
                           MIN(detected_at),MAX(hydration_retry_count)
                    FROM raw_launches
-                   WHERE evidence_state IN ('raw_only','rpc_unavailable')""",
+                   WHERE evidence_state IN ('raw_only','rpc_unavailable','incomplete')""",
                 (now.isoformat(), now.isoformat()),
             ).fetchone()
     finally:
@@ -507,7 +507,7 @@ def qualification_summary(
             "pending_total": int(pending_total or 0),
             "by_state": {
                 state: int(evidence.get(state) or 0)
-                for state in ("raw_only", "rpc_unavailable")
+                for state in ("raw_only", "rpc_unavailable", "incomplete")
             },
             "due": int(due_pending or 0),
             "deferred": int(deferred_pending or 0),

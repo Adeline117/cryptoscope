@@ -214,8 +214,19 @@ def resolve_gap(gap_id: int, *, details: dict | None = None,
         remaining = c.execute(
             "SELECT COUNT(*) FROM gaps WHERE source=? AND stream=? AND status='open'", row
         ).fetchone()[0]
-        c.execute("UPDATE streams SET status=?,updated_at=? WHERE source=? AND stream=?",
-                  ("degraded" if remaining else "live", now, *row))
+        # Gap recovery only proves that one missing cursor range was repaired. It
+        # must never erase a later transport disconnect (or its diagnostic).
+        c.execute(
+            """UPDATE streams
+               SET status=CASE
+                     WHEN status='disconnected' THEN status
+                     WHEN ? THEN 'degraded'
+                     ELSE 'live'
+                   END,
+                   updated_at=?
+               WHERE source=? AND stream=?""",
+            (remaining, now, *row),
+        )
         c.commit()
         return True
     finally:

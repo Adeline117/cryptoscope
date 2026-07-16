@@ -54,6 +54,24 @@ def test_disconnect_is_not_reported_as_a_quiet_live_market(health):
     assert row["last_error"] == "websocket closed"
 
 
+def test_gap_resolution_cannot_erase_a_later_disconnect(health):
+    t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
+    health.observe("solana", "launches", cursor=1, received_at=t0,
+                   expect_contiguous=True)
+    health.observe("solana", "launches", cursor=3, received_at=t0,
+                   expect_contiguous=True)
+    gap_id = health.open_gaps("solana", "launches")[0]["id"]
+    health.mark_disconnected(
+        "solana", "launches", "websocket closed", at=t0 + timedelta(seconds=1),
+    )
+
+    assert health.resolve_gap(gap_id, at=t0 + timedelta(seconds=2)) is True
+    row = health.snapshot(now=t0 + timedelta(seconds=2), stale_after_seconds=60)[0]
+    assert row["status"] == "disconnected"
+    assert row["last_error"] == "websocket closed"
+    assert row["open_gaps"] == 0
+
+
 def test_worker_heartbeat_distinguishes_degraded_alive_from_stale(health):
     t0 = datetime(2026, 7, 14, 12, tzinfo=timezone.utc)
     health.report_worker(
