@@ -27,10 +27,11 @@ STATE_FILE = DATA_DIR / "hlp_state.json"
 # Only windows we can annualize honestly. "day" is too short to annualize and
 # the perp* windows double-count the spot book, so they are deliberately excluded.
 REPORTED_WINDOWS = ("week", "month", "allTime")
-DRAWDOWN_BASIS = "coarse_pnl_history_understates_intraday"
+DRAWDOWN_BASIS = "return_compounded_lower_bound_at_series_resolution"
 DISCLAIMER = (
-    "被动做市对手盘的历史表现,不是收益承诺;最大回撤在 API 粗粒度 pnl 上计算,"
-    "低估 JELLY 类日内事件;非投资建议。"
+    "被动做市对手盘的历史表现,不是收益承诺;最大回撤按每步收益复利计算,"
+    "但受该窗口采样分辨率限制——全周期是 ~14 天粗桶,只是真实日内回撤的下界"
+    "(JELLY 类分钟级事件被平滑);非投资建议。"
 )
 
 
@@ -75,24 +76,45 @@ def _window_metrics(window: dict) -> dict:
     span_days = (pnl[-1][0] - pnl[0][0]) / 86_400_000
     if span_days <= 0:
         raise HlpUnavailable("window spans no time")
+    if len(account) != len(pnl):
+        raise HlpUnavailable("account and pnl series lengths disagree")
     total_pnl = pnl[-1][1] - pnl[0][1]
     avg_tvl = sum(value for _, value in account) / len(account)
     if avg_tvl <= 0:
         raise HlpUnavailable("window average TVL is not positive")
-    # Peak-to-trough of cumulative PnL: the depositor's worst observed decline
-    # from a prior high, on the coarse series (disclosed as understating intraday).
-    peak = pnl[0][1]
-    max_drawdown = 0.0
-    for _, value in pnl:
-        peak = max(peak, value)
-        max_drawdown = min(max_drawdown, value - peak)
+    # Return-based max drawdown: each step's strategy return is its PnL change
+    # over the account value AT THAT TIME, then compounded — so an early loss on
+    # a small book counts at its real weight. Dividing the dollar drawdown by the
+    # window's AVERAGE TVL (the old method) understated early-period drawdowns
+    # ~3x. The dollar peak-to-trough is kept as the worst absolute loss. Both are
+    # still bounded by the series resolution (see resolution_hours): a coarse
+    # window is a LOWER BOUND on the true intraday drawdown, disclosed as such.
+    equity = 1.0
+    equity_peak = 1.0
+    return_drawdown = 0.0
+    dollar_peak = pnl[0][1]
+    dollar_drawdown = 0.0
+    for index in range(len(pnl) - 1):
+        base = account[index][1]
+        if base > 0:
+            equity *= 1 + (pnl[index + 1][1] - pnl[index][1]) / base
+            equity_peak = max(equity_peak, equity)
+            return_drawdown = min(return_drawdown, equity / equity_peak - 1)
+        value = pnl[index + 1][1]
+        dollar_peak = max(dollar_peak, value)
+        dollar_drawdown = min(dollar_drawdown, value - dollar_peak)
+    gaps = sorted(
+        (pnl[i + 1][0] - pnl[i][0]) / 3_600_000 for i in range(len(pnl) - 1)
+    )
+    resolution_hours = gaps[len(gaps) // 2] if gaps else 0.0
     return {
         "span_days": round(span_days, 2),
         "pnl_usd": round(total_pnl, 2),
         "avg_tvl_usd": round(avg_tvl, 2),
         "annualized_pct": round((total_pnl / avg_tvl) * (365 / span_days) * 100, 2),
-        "max_drawdown_usd": round(max_drawdown, 2),
-        "max_drawdown_pct_of_avg_tvl": round(max_drawdown / avg_tvl * 100, 2),
+        "max_drawdown_usd": round(dollar_drawdown, 2),
+        "max_drawdown_pct": round(return_drawdown * 100, 3),
+        "resolution_hours": round(resolution_hours, 2),
     }
 
 

@@ -1016,7 +1016,7 @@ async def _run_hlp_tracker():
             allt = state["windows"]["allTime"]
             logger.info("hlp_tracker_done", tvl=state["current_tvl_usd"],
                         annualized_pct=allt["annualized_pct"],
-                        max_drawdown_pct=allt["max_drawdown_pct_of_avg_tvl"])
+                        max_drawdown_pct=allt["max_drawdown_pct"])
         else:
             logger.warning("hlp_tracker_unavailable", reason=state.get("reason"))
     except Exception as e:

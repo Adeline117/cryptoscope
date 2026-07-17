@@ -892,11 +892,12 @@ function hlpUiState(meta=data?.meta){
   const w=raw.windows;
   if(!w||typeof w!=="object")return{available:false};
   const num=v=>typeof v==="number"&&Number.isFinite(v);
-  const win=name=>{const x=w[name];return x&&typeof x==="object"&&num(x.annualized_pct)&&num(x.max_drawdown_pct_of_avg_tvl)?x:null;};
-  const all=win("allTime"),mon=win("month");
-  if(!all||!mon||!num(raw.current_tvl_usd)||typeof raw.allow_deposits!=="boolean")return{available:false};
+  const win=name=>{const x=w[name];return x&&typeof x==="object"&&num(x.annualized_pct)&&num(x.max_drawdown_pct)&&num(x.resolution_hours)?x:null;};
+  const all=win("allTime"),mon=win("month"),wk=win("week");
+  if(!all||!mon||!wk||!num(raw.current_tvl_usd)||typeof raw.allow_deposits!=="boolean")return{available:false};
   return{available:true,tvl:raw.current_tvl_usd,allow:raw.allow_deposits,
-    annAll:all.annualized_pct,ddAll:all.max_drawdown_pct_of_avg_tvl,
+    annAll:all.annualized_pct,ddAll:all.max_drawdown_pct,ddResH:all.resolution_hours,
+    ddWeek:wk.max_drawdown_pct,ddWeekResH:wk.resolution_hours,
     annMonth:mon.annualized_pct,disclaimer:typeof raw.disclaimer==="string"?raw.disclaimer:""};
 }
 function hlpSectionHtml(state=hlpUiState()){
@@ -904,9 +905,10 @@ function hlpSectionHtml(state=hlpUiState()){
   if(!state.available)return `<div class="play-sec">${head}<div class="pnote dim">HLP 金库数据当前不可用或已过期(?);不臆测年化或回撤。</div></div>`;
   const usd=n=>"$"+Number(n).toLocaleString("en-US",{maximumFractionDigits:0});
   const monWarn=state.annMonth<1;
+  const resD=Math.round(state.ddResH/24);
   return `<div class="play-sec">${head}
-    <div class="prow"><span class="chip ${state.annAll>0?'b-good':'b-warn'}">历史年化·全周期 ${state.annAll>0?'+':''}${state.annAll.toFixed(1)}%</span> <span class="chip ${monWarn?'b-warn':''}">近一月年化 ${state.annMonth>0?'+':''}${state.annMonth.toFixed(1)}%${monWarn?' · edge压缩':''}</span> <span class="chip b-danger">最大回撤 ${state.ddAll.toFixed(1)}% TVL</span> <span class="chip">TVL ${usd(state.tvl)}</span> <span class="chip ${state.allow?'b-good':'b-warn'}">${state.allow?'允许存入':'暂不允许存入'}</span></div>
-    <div class="pnote dim">历史表现不是收益承诺;最大回撤在 API 粗粒度 pnl 上计算,低估 JELLY 类日内事件,真存钱前需用逐日数据重算;非投资建议。</div>
+    <div class="prow"><span class="chip ${state.annAll>0?'b-good':'b-warn'}">历史年化·全周期 ${state.annAll>0?'+':''}${state.annAll.toFixed(1)}%</span> <span class="chip ${monWarn?'b-warn':''}">近一月年化 ${state.annMonth>0?'+':''}${state.annMonth.toFixed(1)}%${monWarn?' · edge压缩':''}</span> <span class="chip b-danger">最大回撤·全周期下界 ${state.ddAll.toFixed(1)}%</span> <span class="chip">近7天回撤 ${state.ddWeek.toFixed(2)}%</span> <span class="chip">TVL ${usd(state.tvl)}</span> <span class="chip ${state.allow?'b-good':'b-warn'}">${state.allow?'允许存入':'暂不允许存入'}</span></div>
+    <div class="pnote dim">回撤按每步收益复利计算(不是除以平均TVL,那会低估早期小盘子回撤约3倍)。全周期数据是 ~${resD} 天粗桶,标出的是<b>下界</b>——JELLY 类分钟级事件被平滑,真实日内更深;近7天用 ${state.ddWeekResH.toFixed(1)}h 分辨率数据可信。历史表现不是收益承诺;非投资建议。</div>
   </div>`;
 }
 function runtimeSafetyBanner(runtime=runtimeSafetyUiState()){

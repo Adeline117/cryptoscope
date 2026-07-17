@@ -50,7 +50,7 @@ def test_valid_vault_projects_annualized_return_and_drawdown():
     assert state["allow_deposits"] is True
     # The noisy rolling apr is surfaced as a small percentage, never as the return.
     assert state["instant_apr_pct"] == pytest.approx(-0.003, abs=1e-6)
-    assert state["drawdown_basis"] == "coarse_pnl_history_understates_intraday"
+    assert state["drawdown_basis"] == "return_compounded_lower_bound_at_series_resolution"
     assert "非投资建议" in state["disclaimer"]
 
     window = state["windows"]["allTime"]
@@ -59,9 +59,12 @@ def test_valid_vault_projects_annualized_return_and_drawdown():
     assert window["avg_tvl_usd"] == 100.0
     # +10 on 100 avg TVL over 10 days => 10% * (365/10) = 365%.
     assert window["annualized_pct"] == pytest.approx(365.0)
-    # cumulative pnl peaked at +6 then fell to +2 => -4 peak-to-trough.
+    # cumulative pnl peaked at +6 then fell to +2 => -4 dollar peak-to-trough.
     assert window["max_drawdown_usd"] == -4.0
-    assert window["max_drawdown_pct_of_avg_tvl"] == -4.0
+    # Return-based: the -0.04 step falls straight off the compounded peak => -4%.
+    assert window["max_drawdown_pct"] == pytest.approx(-4.0)
+    # The fixture points are 1 day apart.
+    assert window["resolution_hours"] == 24.0
     assert set(state["windows"]) == {"week", "month", "allTime"}
 
 

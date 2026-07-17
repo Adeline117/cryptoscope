@@ -366,12 +366,17 @@ def test_hlp_section_is_exact_guarded_and_discloses_drawdown_caveat():
     # Fail-closed: a missing/unavailable projection renders "?" not a number.
     assert "raw.available!==true" in guard
     assert 'HLP 金库数据当前不可用或已过期' in section
-    # The passive-EV framing, the compression flag, and the honest drawdown
-    # caveat must all be present so the card never overstates the edge.
+    # The passive-EV framing and the compression flag are present.
     assert "被动正EV · HLP 做市金库" in section
     assert "edge压缩" in section
-    assert "最大回撤" in section
-    assert "低估 JELLY 类日内事件" in section
+    # The drawdown is framed as a resolution-bounded LOWER bound, with the
+    # return-compounding correction and the intraday caveat spelled out — the
+    # card must never present the coarse number as the true drawdown.
+    assert "最大回撤·全周期下界" in section
+    assert "每步收益复利" in section
+    assert "会低估早期小盘子回撤约3倍" in section
+    assert "JELLY 类分钟级事件被平滑" in section
+    assert "近7天" in section
     assert "非投资建议" in section
     # It is rendered on the overview.
     assert "h+=hlpSectionHtml();" in html

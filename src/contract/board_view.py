@@ -1506,7 +1506,7 @@ def _validate_hlp(value: Any, *, path: str) -> None:
         if not isinstance(value.get(numeric), (int, float)) or isinstance(
                 value.get(numeric), bool):
             raise BoardViewContractError(f"{path}.{numeric} must be numeric")
-    if value.get("drawdown_basis") != "coarse_pnl_history_understates_intraday":
+    if value.get("drawdown_basis") != "return_compounded_lower_bound_at_series_resolution":
         raise BoardViewContractError(
             f"{path}.drawdown_basis must disclose the coarse-history caveat"
         )
@@ -1522,7 +1522,7 @@ def _validate_hlp(value: Any, *, path: str) -> None:
             raise BoardViewContractError(f"{wpath} must be an object")
         _exact_keys(window, {
             "span_days", "pnl_usd", "avg_tvl_usd", "annualized_pct",
-            "max_drawdown_usd", "max_drawdown_pct_of_avg_tvl",
+            "max_drawdown_usd", "max_drawdown_pct", "resolution_hours",
         }, path=wpath)
         for key, number in window.items():
             if not isinstance(number, (int, float)) or isinstance(number, bool):

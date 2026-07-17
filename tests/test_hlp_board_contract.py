@@ -26,10 +26,10 @@ def _valid_state(generated_at=NOW):
             name: {
                 "span_days": 10.0, "pnl_usd": 10.0, "avg_tvl_usd": 100.0,
                 "annualized_pct": 365.0, "max_drawdown_usd": -4.0,
-                "max_drawdown_pct_of_avg_tvl": -4.0,
+                "max_drawdown_pct": -4.0, "resolution_hours": 24.0,
             } for name in ("week", "month", "allTime")
         },
-        "drawdown_basis": "coarse_pnl_history_understates_intraday",
+        "drawdown_basis": "return_compounded_lower_bound_at_series_resolution",
         "disclaimer": "非投资建议。",
     }
 
