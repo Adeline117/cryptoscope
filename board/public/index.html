@@ -71,6 +71,10 @@
   .tabs::-webkit-scrollbar{display:none}
   .grp{display:flex;gap:4px;align-items:center}
   .grp+.grp{margin-left:4px;padding-left:8px;border-left:1px solid var(--border)}
+  .grp.internal{margin-left:auto}
+  .grp.internal::before{content:"内部";font:600 9px/1 var(--mono);letter-spacing:.09em;color:var(--dim);padding:0 3px}
+  .grp.internal .tab{font-size:11px;padding:7px 9px;color:var(--dim);opacity:.72}
+  .grp.internal .tab.on,.grp.internal .tab:hover{opacity:1;color:var(--text)}
   .tab{appearance:none;background:transparent;border:1px solid transparent;cursor:pointer;padding:9px 12px;font-size:12.5px;font-weight:620;color:var(--muted);
     border-radius:9px;display:flex;align-items:center;gap:7px;white-space:nowrap;transition:.16s ease}
   .tab:hover{color:var(--text);background:var(--s3)} .tab.on{color:var(--text);background:var(--s3);border-color:var(--border2);box-shadow:0 3px 10px rgba(0,0,0,.08)}
@@ -379,7 +383,7 @@
   }
   @media(max-width:600px){
     body{font-size:14px}.wrap{padding:0 12px 44px}header{padding:12px 2px}.brand{gap:8px}.logo{width:36px;height:36px}.hr{gap:8px}
-    h1{font-size:15px;white-space:nowrap}h1 span{display:none}.live{font-size:10px;letter-spacing:0;white-space:nowrap}.tabs{margin-top:10px;border-radius:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;overflow:visible}.grp{display:contents}.grp+.grp{margin:0;padding:0;border:0}.tab{justify-content:center;padding:8px 5px;min-width:0}
+    h1{font-size:15px;white-space:nowrap}h1 span{display:none}.live{font-size:10px;letter-spacing:0;white-space:nowrap}.tabs{margin-top:10px;border-radius:12px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;overflow:visible}.grp{display:contents}.grp+.grp{margin:0;padding:0;border:0}.grp.internal::before{display:none}.tab{justify-content:center;padding:8px 5px;min-width:0}
     .lanehead{margin-top:12px;padding:18px 16px;border-radius:14px}.lanetitle{font-size:14px}.stat{display:grid;grid-template-columns:repeat(3,1fr);width:100%}
     .stat>div{min-width:0;padding:6px 10px;border-left:1px solid var(--border)}.stat>div:nth-child(3n+1){border-left:0;padding-left:0}
     .stat .v{font-size:18px}.stat .v small{font-size:9.5px}.play{gap:12px}.play-sec,.play-verdict{padding:17px 16px}
@@ -419,12 +423,10 @@
       <button class="tab" id="tab-perp" data-v="perp" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">Carry / 永续 <span class="ct" id="ct-perp"></span></button>
       <button class="tab" id="tab-structure" data-v="structure" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">结构事件 <span class="ct" id="ct-structure"></span></button>
       <button class="tab" id="tab-airdrop" data-v="airdrop" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">空投任务 <span class="ct" id="ct-airdrop"></span></button>
-    </div>
-    <div class="grp">
       <button class="tab" id="tab-watch" data-v="watch" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">🐋 钱包活动 <span class="ct" id="ct-watch"></span></button>
-      <button class="tab" id="tab-opp" data-v="opp" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">🔎 旧版线索 <span class="ct" id="ct-opp"></span></button>
     </div>
-    <div class="grp">
+    <div class="grp internal" aria-label="内部研究与防御工具">
+      <button class="tab" id="tab-opp" data-v="opp" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">🔎 旧版线索 <span class="ct" id="ct-opp"></span></button>
       <button class="tab" id="tab-avoid" data-v="avoid" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">风险过滤 <span class="ct" id="ct-avoid"></span></button>
       <button class="tab" id="tab-op" data-v="op" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">操盘防御 <span class="ct" id="ct-op"></span></button>
     </div>
