@@ -264,6 +264,7 @@
   .risk-line{display:flex;align-items:flex-start;justify-content:space-between;gap:9px;margin-top:11px;padding-top:9px;border-top:1px solid var(--border);font-size:10px;line-height:1.4;color:var(--dim)}
   .risk-line span:first-child{overflow-wrap:anywhere}.risk-line .jump{flex:none;padding:5px 8px;font-size:10px}
   .validation-overview{grid-column:1/-1;min-width:0;padding:18px 20px;border:1px solid var(--warn-b);border-left:5px solid var(--warn);border-radius:14px;background:color-mix(in srgb,var(--warn-bg) 27%,var(--s1));box-shadow:var(--shadow)}
+  .validation-card code{font:500 8.5px/1.2 var(--mono);color:var(--dim);background:color-mix(in srgb,var(--s2) 70%,transparent);border:1px solid var(--border);border-radius:4px;padding:1px 4px;vertical-align:middle}
   .validation-overview[data-state="unverifiable"]{border-color:var(--danger-b);border-left-color:var(--danger);background:color-mix(in srgb,var(--danger-bg) 30%,var(--s1))}
   .validation-overview-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
   .validation-overview-kicker{font-size:10px;font-weight:760;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
@@ -668,6 +669,23 @@ function carryEvidenceUiState(paper,evidence){
 }
 const VALIDATION_LANE_ORDER=Object.freeze(["launch","cascade","carry","airdrop","structure"]);
 const VALIDATION_LANE_LABELS=Object.freeze({launch:"Launch",cascade:"Cascade",carry:"Carry",airdrop:"Airdrop",structure:"Structure"});
+// Display-only dictionaries: the server contract keeps its snake_case tokens
+// verbatim; the default view translates them and keeps the raw token as a
+// <code> suffix so evidence stays auditable without a glossary.
+const VALIDATION_UNCERTAINTY_LABELS=Object.freeze({
+  wilson_95_positive_rate:"成本后为正比例的 95% 区间",
+  sequential_spa_upper_p:"序贯 SPA 检验上界 p 值",
+  not_applicable:"不适用",
+});
+const VALIDATION_TARGET_UNIT_LABELS=Object.freeze({
+  per_arm:"每臂样本",
+  valid_quote_proxy_closures:"有效报价代理关闭",
+  events:"事件",
+  fully_verified_claims_no_edge_denominator:"完整核验领取（缺优势分母）",
+  observed_events_not_directional_trials:"观测事件（非方向性试验）",
+});
+const uncertaintyLabel=kind=>VALIDATION_UNCERTAINTY_LABELS[kind]||kind;
+const targetUnitLabel=unit=>VALIDATION_TARGET_UNIT_LABELS[unit]||unit;
 const VALIDATION_CONTRACT=Object.freeze({
   launch:{verdicts:["blocked","collecting","inconclusive","no_edge_observed","paper_signal","unverifiable"],targetUnit:"per_arm",evidence:"append_only_frozen_cost_24h_paper_selector",benchmark:"contemporaneous_watch",uncertainty:"sequential_spa_upper_p",unit:"pct"},
   cascade:{verdicts:["collecting","descriptive_only","unverifiable"],targetUnit:"events",evidence:"estimated_cost_adjusted_24h_not_real_fill",benchmark:"missing_contemporaneous_control",uncertainty:"wilson_95_positive_rate",unit:"pct"},
@@ -779,9 +797,9 @@ function validationOverviewHtml(state=validationOverviewDisplayState()){
   const headline=state.available&&state.state==="no_execution_edge"?"尚无可执行优势":"优势状态不可验证｜按不可行动处理";
   const cards=state.rows.map(row=>{
     const sample=row.sample,arms=sample.launch_arms;
-    const armsHtml=arms?`<div class="validation-arms"><div class="validation-arm"><b>SMALL_PROBE</b><span>入组 ${esc(arms.probe.eligible_n)} · 结算 ${esc(arms.probe.resolved_n)}</span></div><div class="validation-arm"><b>WATCH</b><span>入组 ${esc(arms.control.eligible_n)} · 结算 ${esc(arms.control.resolved_n)}</span></div></div>`:"";
-    const targetNote=sample.target_n===null?esc(sample.target_unit):`${esc(sample.target_unit)} · 目标 ${esc(sample.target_n)}`;
-    return `<article class="validation-card" data-validation-lane="${esc(row.lane)}" data-verdict="${esc(row.verdict)}"><div class="validation-card-head"><span class="validation-card-title">${esc(VALIDATION_LANE_LABELS[row.lane])}</span><span class="validation-verdict">${esc(validationVerdictLabel(row.verdict))}</span></div><div class="validation-sample">${esc(validationSampleLabel(row))}<small>${targetNote}</small></div>${armsHtml}<div class="validation-field"><span class="vk">结果证据</span><span class="vv">${esc(row.result.summary)}</span></div><div class="validation-field"><span class="vk">基准 / 对照</span><span class="vv">${esc(row.benchmark.summary)}</span></div><div class="validation-field"><span class="vk">不确定性 · ${esc(row.uncertainty.kind)}</span><span class="vv">${esc(row.uncertainty.summary)}</span></div><div class="validation-field blocker"><span class="vk">阻断 / 失效</span><span class="vv">${esc(row.blocking_reason||"无当前阻断；仍不构成执行优势")}</span></div></article>`;
+    const armsHtml=arms?`<div class="validation-arms"><div class="validation-arm"><b>小额探针臂 <code>SMALL_PROBE</code></b><span>入组 ${esc(arms.probe.eligible_n)} · 结算 ${esc(arms.probe.resolved_n)}</span></div><div class="validation-arm"><b>对照观察臂 <code>WATCH</code></b><span>入组 ${esc(arms.control.eligible_n)} · 结算 ${esc(arms.control.resolved_n)}</span></div></div>`:"";
+    const targetNote=sample.target_n===null?esc(targetUnitLabel(sample.target_unit)):`${esc(targetUnitLabel(sample.target_unit))} · 目标 ${esc(sample.target_n)}`;
+    return `<article class="validation-card" data-validation-lane="${esc(row.lane)}" data-verdict="${esc(row.verdict)}"><div class="validation-card-head"><span class="validation-card-title">${esc(VALIDATION_LANE_LABELS[row.lane])}</span><span class="validation-verdict">${esc(validationVerdictLabel(row.verdict))}</span></div><div class="validation-sample">${esc(validationSampleLabel(row))}<small>${targetNote}</small></div>${armsHtml}<div class="validation-field"><span class="vk">结果证据</span><span class="vv">${esc(row.result.summary)}</span></div><div class="validation-field"><span class="vk">基准 / 对照</span><span class="vv">${esc(row.benchmark.summary)}</span></div><div class="validation-field"><span class="vk">不确定性 · ${esc(uncertaintyLabel(row.uncertainty.kind))} <code>${esc(row.uncertainty.kind)}</code></span><span class="vv">${esc(row.uncertainty.summary)}</span></div><div class="validation-field blocker"><span class="vk">阻断 / 失效</span><span class="vv">${esc(row.blocking_reason||"无当前阻断；仍不构成执行优势")}</span></div></article>`;
   }).join("");
   return `<section id="validation-overview" class="validation-overview" data-state="${esc(state.state)}" aria-label="优势验证总览"><div class="validation-overview-head"><div><div class="validation-overview-kicker">持续验证 · 同一 Stats 快照</div><h2 class="validation-overview-title">${headline}</h2><p class="validation-overview-copy">样本、结果、基准和不确定性只读取服务端预塑形合同；市场候选与生命周期不会被拼成优势判决。</p></div><span class="validation-auto-off">自动交易 OFF</span></div><div class="validation-overview-grid">${cards}</div></section>`;
 }
