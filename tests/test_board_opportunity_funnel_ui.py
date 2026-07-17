@@ -67,6 +67,23 @@ def test_unknown_or_incomplete_evidence_cannot_receive_a_green_pass():
     assert "不等于无风险" in html
 
 
+def test_launch_cards_state_max_loss_as_the_full_frozen_cap():
+    html = BOARD.read_text()
+    card = html.split("function launchOpportunityCard(r){", 1)[1].split(
+        "function launchOpportunityQueue", 1,
+    )[0]
+
+    # The honest max loss for an early token is the entire frozen cap: the
+    # invalidation price is a thesis marker, not a stop order, and nothing
+    # executes. Deriving a smaller figure from entry-invalidation distance
+    # would overstate protection the system does not provide.
+    assert "最大亏损 · 全额计" in card
+    assert "失效价是论文失效标记，非止损单" in card
+    assert "早期代币可归零，按冻结上限全额计" in card
+    assert card.count("${esc(capText)}") == 2
+    assert "entry-invalidation" not in card and "cap*(1-" not in card
+
+
 def test_opportunity_funnel_and_cards_collapse_for_mobile():
     html = BOARD.read_text()
 

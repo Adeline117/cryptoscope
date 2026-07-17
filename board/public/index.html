@@ -1752,6 +1752,7 @@ function launchOpportunityCard(r){
       <div class="opportunity-metric"><span class="mk">入场窗口 · 只读</span><span class="mv">${esc(entryText)} · ${esc(expiryText({expires_at:expiry?.value}))}</span><span class="ms">${esc(quoteClock)}；不是成交价</span></div>
       <div class="opportunity-metric"><span class="mk">失效 / 离场</span><span class="mv">论文失效 ${esc(invalidationText)}</span><span class="ms">系统无真实持仓，也不会自动离场</span></div>
       <div class="opportunity-metric"><span class="mk">仓位上限 · 首次冻结</span><span class="mv">${esc(capText)}</span><span class="ms">${esc(quoteNotionalText)}；未知时不得自行补值</span></div>
+      <div class="opportunity-metric"><span class="mk">最大亏损 · 全额计</span><span class="mv">${esc(capText)}</span><span class="ms">失效价是论文失效标记，非止损单，系统不会代为卖出；早期代币可归零，按冻结上限全额计</span></div>
     </div>
     <div class="gate-summary"><b>证据完整度 ${summary.passed}/${summary.gates.length} 明确通过</b><small>${summary.blocked} 阻断 · ${summary.unknown} 未知</small></div>
     <div class="gate-list">${summary.gates.map(g=>`<span class="gate-pill ${g.state}">${esc(g.name)} · ${g.state==="pass"?"通过":g.state==="block"?"阻断":"未知"}</span>`).join("")}</div>
