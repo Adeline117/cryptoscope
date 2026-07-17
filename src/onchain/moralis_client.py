@@ -1,5 +1,14 @@
 """Shared Moralis client with multi-key rotation.
 
+DISABLED BY DEFAULT. Moralis is off unless MORALIS_ENABLED is explicitly truthy,
+regardless of whether keys are configured. This is the kill switch: a paid plan
+bills per-request on monthly overage and does NOT return 401 (so the free-tier
+401-parking below never trips), and there was previously no way to stop the
+scheduler from calling Moralis short of deleting the keys. Every caller already
+fails closed when no key is usable (falls back to Covalent/Alchemy/Etherscan or
+marks the result "不可判"), so returning no keys cleanly halts all traffic.
+Re-enable deliberately with MORALIS_ENABLED=1.
+
 Moralis free tier has a DAILY quota per key. With several keys (MORALIS_API_KEY,
 MORALIS_API_KEY_2, ... or a MORALIS_API_KEYS csv) we rotate: a key that returns
 401 (quota consumed) or 429 (rate limited) is parked for the rest of the process
@@ -27,8 +36,21 @@ _BASE = "https://deep-index.moralis.io/api/v2.2/"
 _dead: set[str] = set()
 
 
+def enabled() -> bool:
+    """Moralis is opt-in. Off unless MORALIS_ENABLED is set to a truthy value."""
+    return os.environ.get("MORALIS_ENABLED", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
 def keys() -> list[str]:
-    """All configured Moralis keys: MORALIS_API_KEYS (csv) or MORALIS_API_KEY[_N]."""
+    """Configured Moralis keys — but ONLY when Moralis is explicitly enabled.
+
+    Disabled (the default) returns [] even with keys present, so available()/
+    usable() are False and get() never makes a request.
+    """
+    if not enabled():
+        return []
     csv = os.environ.get("MORALIS_API_KEYS", "")
     if csv.strip():
         return [k.strip() for k in csv.split(",") if k.strip()]
