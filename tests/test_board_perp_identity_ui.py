@@ -281,6 +281,7 @@ def test_research_policy_panel_is_first_scoped_and_responsive(width, height):
         )
 
         page.evaluate("setView('play',false)")
+        page.locator("#health-drawer > summary").click()
         cascade = page.locator(".market-coverage-card").filter(
             has_text="Cascade"
         ).first
@@ -384,6 +385,7 @@ def test_exact_26h_boundary_and_timer_repaint_are_fail_closed_and_scoped():
         assert boundary["at"]["cacheAgeSeconds"] == TTL_SECONDS
 
         page.evaluate("setView('play',false)")
+        page.locator("#health-drawer > summary").click()
         cascade = page.locator(".market-coverage-card").filter(
             has_text="Cascade",
         ).first
@@ -496,6 +498,7 @@ def test_verified_identity_does_not_claim_trade_actionability():
         assert page.evaluate("runtimeSafetyUiState().blocks") is False
 
         page.evaluate("setView('play',false)")
+        page.locator("#health-drawer > summary").click()
         cascade = page.locator(".market-coverage-card").filter(
             has_text="Cascade"
         ).first

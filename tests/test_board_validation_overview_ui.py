@@ -140,7 +140,7 @@ def test_play_validator_has_one_server_projection_truth_source():
     assert "validationSampleLabel(validationByLane.carry)" in render
 
 
-def test_play_overview_is_first_readable_decision_on_desktop_tablet_and_mobile():
+def test_play_overview_leads_with_decision_and_keeps_evidence_one_click_away():
     playwright = pytest.importorskip("playwright.sync_api")
     payloads, _, _ = _payloads()
     payloads["meta"]["runtime_safety"].update({
@@ -156,6 +156,28 @@ def test_play_overview_is_first_readable_decision_on_desktop_tablet_and_mobile()
         _route_page(page, payloads)
         page.goto("https://board.test/", wait_until="networkidle")
 
+        # The hero decision — not the statistics wall — is the first readable
+        # content: verdict, plain-language conclusion, always-visible auto-off.
+        command = page.locator(".command")
+        assert command.locator(".decision-title").inner_text() != ""
+        assert "今日结论" in command.locator(".decision-conclusion").inner_text()
+        assert command.locator(".hero-auto-off").inner_text() == "自动交易 OFF"
+        assert page.locator(".runtime-safety-banner").evaluate(
+            "node => node.compareDocumentPosition(document.querySelector('.command')) & Node.DOCUMENT_POSITION_FOLLOWING"
+        )
+        assert command.evaluate(
+            "node => node.compareDocumentPosition(document.querySelector('#validation-drawer')) & Node.DOCUMENT_POSITION_FOLLOWING"
+        )
+
+        # Evidence stays honest but collapsed: the headline is on the summary
+        # line; the five-lane snapshot is one click away and state survives
+        # the poll repaint.
+        drawer = page.locator("#validation-drawer")
+        assert drawer.evaluate("node => !node.open")
+        assert "尚无可执行优势" in drawer.locator("summary").inner_text()
+        drawer.locator("summary").click()
+        page.wait_for_timeout(50)
+
         overview = page.locator("#validation-overview")
         assert overview.locator(".validation-overview-title").inner_text() == "尚无可执行优势"
         assert overview.locator(".validation-auto-off").inner_text() == "自动交易 OFF"
@@ -163,12 +185,10 @@ def test_play_overview_is_first_readable_decision_on_desktop_tablet_and_mobile()
         assert overview.locator(".validation-card").evaluate_all(
             "nodes => nodes.map(node => node.dataset.validationLane)"
         ) == ["launch", "cascade", "carry", "airdrop", "structure"]
-        assert page.locator(".runtime-safety-banner").evaluate(
-            "node => node.compareDocumentPosition(document.querySelector('#validation-overview')) & Node.DOCUMENT_POSITION_FOLLOWING"
-        )
-        assert overview.evaluate(
-            "node => node.compareDocumentPosition(document.querySelector('.command')) & Node.DOCUMENT_POSITION_FOLLOWING"
-        )
+
+        page.evaluate("paint()")
+        page.wait_for_timeout(50)
+        assert page.locator("#validation-drawer").evaluate("node => node.open")
 
         for width, height, display, minimum_card_width in (
             (1440, 900, "grid", 150),
@@ -177,6 +197,8 @@ def test_play_overview_is_first_readable_decision_on_desktop_tablet_and_mobile()
         ):
             page.set_viewport_size({"width": width, "height": height})
             page.wait_for_timeout(50)
+            title_box = page.locator(".decision-title").bounding_box()
+            assert title_box is not None and title_box["y"] < height
             assert page.locator(".validation-overview-grid").evaluate(
                 "node => getComputedStyle(node).display"
             ) == display
@@ -187,8 +209,6 @@ def test_play_overview_is_first_readable_decision_on_desktop_tablet_and_mobile()
             assert page.evaluate(
                 "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
             )
-            title_box = overview.locator(".validation-overview-title").bounding_box()
-            assert title_box is not None and title_box["y"] < height
             if width <= 980:
                 assert page.locator(".validation-overview-grid").evaluate(
                     "node => node.scrollWidth > node.clientWidth"
@@ -208,6 +228,8 @@ def test_play_uses_stats_carry_16_of_20_and_rejects_faster_paper_20_snapshot():
         errors = _capture_browser_errors(page)
         _route_page(page, payloads)
         page.goto("https://board.test/", wait_until="networkidle")
+        page.locator("#validation-drawer > summary").click()
+        page.locator("#health-drawer > summary").click()
 
         carry = page.locator('[data-validation-lane="carry"]')
         assert carry.locator(".validation-sample").inner_text().splitlines()[0] == "16/20"
@@ -233,6 +255,7 @@ def test_malformed_or_old_overview_fails_closed_without_echoing_secret():
         errors = _capture_browser_errors(page)
         _route_page(page, payloads)
         page.goto("https://board.test/", wait_until="networkidle")
+        page.locator("#validation-drawer > summary").click()
 
         malformed = deepcopy(original_stats)
         malformed["validation_overview"]["rows"][2]["result"][
@@ -280,6 +303,12 @@ def test_new_launch_with_old_stats_isolates_only_launch_card_then_recovers():
         errors = _capture_browser_errors(page)
         _route_page(page, payloads)
         page.goto("https://board.test/", wait_until="networkidle")
+        # Evidence and the research queue live in collapsed drawers by design;
+        # open them so the cross-snapshot quarantine behavior stays observable.
+        page.evaluate(
+            "document.querySelectorAll('details.fold-drawer')"
+            ".forEach(node => { node.open = true })"
+        )
 
         launch_card = page.locator('[data-validation-lane="launch"]')
         assert marker in launch_card.inner_text()

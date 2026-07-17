@@ -354,6 +354,12 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
 
         page.route("**/*", route_request)
         page.goto("https://board.test/", wait_until="networkidle")
+        # Evidence lives in collapsed drawers by design; open them so the
+        # quarantine transition stays observable through inner_text().
+        page.evaluate(
+            "document.querySelectorAll('details.fold-drawer')"
+            ".forEach(node => { node.open = true })"
+        )
         body = page.locator("body")
         assert "OLD-LAUNCH-EDGE-MUST-DISAPPEAR" in body.inner_text()
         assert "CARRY-CONTRACT-UNAFFECTED" in body.inner_text()
@@ -415,6 +421,12 @@ def test_fast_poll_fail_closes_on_old_meta_then_recovers_with_new_certificate():
 
         page.route("**/*", route_request)
         page.goto("https://board.test/", wait_until="networkidle")
+        # Evidence lives in collapsed drawers by design; open them so the
+        # fail-close/recover cycle stays observable through inner_text().
+        page.evaluate(
+            "document.querySelectorAll('details.fold-drawer')"
+            ".forEach(node => { node.open = true })"
+        )
         body = page.locator("body")
         assert "EDGE-RETURNS-AFTER-META-JOIN" in body.inner_text()
 

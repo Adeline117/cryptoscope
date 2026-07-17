@@ -195,8 +195,18 @@
 
   /* 📋 打法 synthesis */
   .play{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px;max-width:none;border:0;background:transparent;box-shadow:none;overflow:visible}
-  .command{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:20px;padding:26px;
+  .command{grid-column:1/-1;display:grid;grid-template-columns:1fr;gap:20px;padding:26px;
     border:1px solid var(--border2);border-radius:16px;background:linear-gradient(130deg,var(--s1),color-mix(in srgb,var(--accent-bg) 58%,var(--s2)));box-shadow:var(--shadow)}
+  .decision-conclusion{margin:12px 0 0;max-width:860px;color:var(--text);font-size:14.5px;line-height:1.75}
+  .hero-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px}
+  .hero-auto-off{display:inline-flex;align-items:center;padding:4px 10px;border:1px solid var(--danger-b);border-radius:999px;background:var(--danger-bg);color:var(--danger);font:700 10.5px/1.2 var(--mono);letter-spacing:.05em}
+  .fold-drawer{grid-column:1/-1;min-width:0;border:1px solid var(--border);border-radius:13px;background:var(--s1);box-shadow:var(--shadow)}
+  .fold-drawer>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:13px 17px;font:650 12.5px/1.4 var(--sans);color:var(--muted)}
+  .fold-drawer>summary::-webkit-details-marker{display:none}
+  .fold-drawer>summary::before{content:"▸";flex:0 0 auto;color:var(--dim);transition:transform .15s ease}
+  .fold-drawer[open]>summary::before{transform:rotate(90deg)}
+  .fold-drawer>summary:hover{color:var(--text)}
+  .fold-drawer .drawer-body{padding:2px 15px 15px;display:grid;gap:12px;min-width:0}
   .runtime-safety-banner{grid-column:1/-1;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 17px;border:1px solid var(--warn-b);border-left:4px solid var(--warn);border-radius:12px;background:var(--warn-bg);color:var(--muted);box-shadow:var(--shadow)}
   .runtime-safety-banner[data-state="blocked"][data-blocks-actionability="true"],.runtime-safety-banner[data-state="unknown"][data-blocks-actionability="true"]{border-color:var(--danger-b);border-left-color:var(--danger);background:var(--danger-bg)}
   .runtime-safety-banner strong{display:block;color:var(--text);font-size:13px;line-height:1.4}.runtime-safety-banner span{display:block;margin-top:3px;font-size:11px;line-height:1.5;overflow-wrap:anywhere}.runtime-safety-banner .runtime-state{flex:0 0 auto;margin:0;font:700 10px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--warn)}
@@ -293,7 +303,7 @@
   .market-coverage-card .mcs{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
   .market-coverage-card .mcg{margin-top:9px;padding-top:8px;border-top:1px solid var(--border);font-size:10.5px;line-height:1.5;color:var(--dim);overflow-wrap:anywhere}
   .market-coverage-card .mcg b{color:var(--muted)}
-  .play>.play-sec{grid-column:span 6}.play>.play-sec:first-child{grid-column:span 8}.play>.play-sec:nth-child(2){grid-column:span 4}
+  .play>.play-sec{grid-column:1/-1}
   .play>.carry-health{grid-column:1/-1;margin-bottom:0}
   .play-sec{border:1px solid var(--border);border-radius:14px;padding:20px 22px;background:var(--s1);box-shadow:var(--shadow)}
   .play-sec .ph{font-size:15px;font-weight:730;color:var(--text);display:flex;align-items:baseline;gap:10px;margin-bottom:12px}
@@ -1739,6 +1749,17 @@ function launchOpportunityQueue(launches){
 
 // 📋 打法 — the synthesis: what to consider, what to avoid, what NOT to do. Turns the
 // board from a data dashboard into a clear, honest, ranked trading thesis.
+// Fold drawers: collapsed evidence/health sections whose open state must
+// survive the 10s repaint cycle, or a reader loses their place every poll.
+const openDrawers=new Set();
+document.addEventListener("toggle",event=>{
+  const node=event.target;
+  if(node instanceof HTMLDetailsElement&&node.dataset.drawer){
+    if(node.open)openDrawers.add(node.dataset.drawer);else openDrawers.delete(node.dataset.drawer);
+  }
+},true);
+const drawerAttr=key=>` class="fold-drawer" data-drawer="${esc(key)}" id="${esc(key)}"${openDrawers.has(key)?" open":""}`;
+
 function renderPlay(){
   const launches=data.launch?.events||[];
   const runtimeSafety=runtimeSafetyUiState();
@@ -1774,7 +1795,6 @@ function renderPlay(){
     :"不可验证";
   let h='<div class="scroll play">';
   h+=runtimeSafetyBanner(runtimeSafety);
-  h+=validationOverviewHtml(validationOverview);
   const verdict=runtimeSafety.blocks?'采集受阻 · 当前不可行动':!data.launch?'不可判 · Launch 视图缺失':!launchProtocol.open?'等待 · Launch 来源准入未开放':actionCount?`${actionCount} 个人工小额验证窗仍有效`:'等待 · 当前不入场';
   const verdictCopy=runtimeSafety.blocks
     ?'运行源健康证据缺失或已明确阻断，所有 A3 已强制降为 A1。先恢复采集与运行门禁，再重新验证报价、来源和证据；视图按时不代表上游完整。'
@@ -1787,11 +1807,38 @@ function renderPlay(){
     :carry.length
       ?'没有任何 Launch 候选同时通过安全、可卖性、实时价格和统计证据四道门。Carry 只有固定情景的部分模型代理为正，尚未证明真实成本后优势。'
       :'当前没有通过完整门禁的 Launch 或 Carry 候选；数据缺失时保持不可判，不把抓取失败说成没有机会。';
+  const conclusion=`今日结论:${carry.length?`有 <b>${carry.length}</b> 个部分模型代理为正的跨所 Carry 纸面候选`:'进攻端无跨所部分模型代理为正的候选'}，另有 ${singleVenueCarry.length} 个单所现货对冲观察项未进入双腿验证；<b>${validationOverview.available&&validationOverview.state==="no_execution_edge"?'服务端同快照结论仍是尚无可执行优势':'优势状态不可验证，按不可行动处理'}</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。`;
   h+=`<section class="command ${actionCount?'actionable':''}" aria-label="当前决策">
     <div><div class="decision-kicker">当前决策 · ${runtimeSafety.blocks?'运行源阻断':!data.launch?'数据缺失':!launchProtocol.open?'来源准入关闭':actionCount?'可人工验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
+      <p class="decision-conclusion">${conclusion}</p>
       <p class="decision-copy">${verdictCopy}</p>
-      <div class="command-actions"><button class="jump primary" data-jump="launch">查看来源与人工验证门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div>
-    <div class="funnel-panel" aria-label="机会漏斗">
+      <div class="hero-chips"><span class="hero-auto-off">自动交易 OFF</span><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span><span class="chip ${dep.length+avoid.length?'b-danger':''}">应避开 ${dep.length+avoid.length}</span></div>
+      <div class="command-actions"><button class="jump primary" data-jump="launch">查看来源与人工验证门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div></section>`;
+  // 1) What is worth looking at right now — research candidates, never orders.
+  h+='<div class="play-sec"><div class="ph">🎯 现在值得看的 <span class="pd">研究候选,非买入指令 · 最多 3 项 · 同快照判决见下方优势验证抽屉</span></div>';
+  if(carry.length){
+    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。优势样本与结果只认下方同一 Stats 快照：${esc(validationByLane.carry.result.summary)}。以下候选与生命周期来自市场观察，不组成优势判决，也不是实际结算或完整 PnL。</div>`;
+    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛资金费差 ${esc(c.gross_funding_diff_ann_pct)} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
+  } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
+  h+='</div>';
+  // 2) Launch queue: open when actionable, otherwise one status line + drawer.
+  if(actionCount){h+=launchOpportunityQueue(launches);}
+  else{
+    const queueStatus=!data.launch?'视图缺失·不可判':!launchProtocol.open?'来源准入关闭·全部只读':'无可行动候选·全部只读';
+    h+=`<details${drawerAttr("launch-queue-drawer")}><summary>Launch 研究队列 · ${esc(queueStatus)} · ${launches.length} 条已入账</summary><div class="drawer-body">`;
+    h+=launchOpportunityQueue(launches);
+    h+='</div></details>';
+  }
+  h+=`<details${drawerAttr("carry-life-drawer")}><summary>Carry 纸面生命周期 · 非实盘 · 缺失不平仓</summary><div class="drawer-body">`;
+  h+=carryLifecycleHtml(pp,3);
+  h+='</div></details>';
+  // 3) Evidence drawer: the five-lane validation snapshot, headline always visible.
+  h+=`<details${drawerAttr("validation-drawer")}><summary>优势验证 · ${esc(validationOverview.available&&validationOverview.state==="no_execution_edge"?"尚无可执行优势":"优势状态不可验证｜按不可行动处理")} · 五赛道证据</summary><div class="drawer-body">`;
+  h+=validationOverviewHtml(validationOverview);
+  h+='</div></details>';
+  // 4) Health drawer: funnel + coverage + carry source health, deduplicated here.
+  h+=`<details${drawerAttr("health-drawer")}><summary>数据健康与覆盖 · ${freshness.fresh}/${freshness.total} 关键视图按时${freshness.stale.length||freshness.missing.length?' · 有陈旧/缺失':''}</summary><div class="drawer-body">`;
+  h+=`<div class="funnel-panel" aria-label="机会漏斗">
       <div class="funnel-head"><div><span class="fh-title">发现 → 来源/证据准入 → 人工验证 → 跟踪验证</span><span class="fh-sub">只统计已加载记录；不是全市场机会总数</span></div><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span></div>
       <div class="funnel-steps">
         <div class="funnel-step"><span class="fi">01</span><span class="fk">已发现 / 入账</span><span class="fv">${esc(discoveredDisplay)}</span><span class="fs">${loadedLanes}/5 赛道已载入</span></div>
@@ -1801,18 +1848,10 @@ function renderPlay(){
       </div>
       <div class="funnel-status"><span class="chip b-warn">Launch 观察/纸面 ${data.launch?launchWatch:'?'}</span><span class="chip ${launchExpired?'b-danger':''}">失效 ${data.launch?launchExpired:'?'}</span><span class="chip ${launchBlocked?'b-danger':''}">阻断 ${data.launch?launchBlocked:'?'}</span><span class="chip b-danger">应避开 ${dep.length+avoid.length}</span></div>
       <div class="funnel-note">来源覆盖：${esc(sourceHeadline)}。${freshness.stale.length?`陈旧：${esc(freshness.stale.join('、'))}。`:''}${freshness.missing.length?`缺失：${esc(freshness.missing.join('、'))}。`:''}覆盖与视图按时只说明当前可判范围，不证明没有漏掉机会。</div>
-    </div></section>`;
-  h+=launchOpportunityQueue(launches);
+    </div>`;
   h+=renderMarketCoverageMatrix();
   h+=carryHealthHtml(carryHealth);
-  // 1) EDGE
-  h+='<div class="play-sec"><div class="ph">🧪 正在验证的结构候选 <span class="pd">同快照判决见上方 · 非执行</span></div>';
-  if(carry.length){
-    h+=`<div class="pnote">当前验证的是<b>跨所资金费差</b>：空 HL + 多 OKX 两永续。优势样本与结果只认上方同一 Stats 快照：${esc(validationByLane.carry.result.summary)}。以下候选与生命周期来自市场观察，不组成优势判决，也不是实际结算或完整 PnL。</div>`;
-    h+=carry.slice(0,3).map(c=>`<div class="prow"><span class="chip b-accent">${esc(c.trade)}</span> <b>${esc(c.symbol)}</b> <span class="tag ${c.is_major?'b-good':'b-warn'}">${esc(c.tier)}</span> 部分模型代理 <span class="num" style="color:var(--accent-t)">+${c.partial_model_proxy_ann_pct}%/年</span> <small class="dim">毛资金费差 ${esc(c.gross_funding_diff_ann_pct)} · ${c.model_hold_days_assumption}d固定情景 · 持有期未验证 · 非仓位建议</small></div>`).join('');
-  } else h+=`<div class="pnote dim">${carryHealth.state==="ok"?'本轮没有候选通过 Carry 入场门槛；不代表全市场没有机会。':'本轮 Carry 数据不完整，当前不可判。'}</div>`;
-  h+='</div>';
-  h+=carryLifecycleHtml(pp,3);
+  h+='</div></details>';
   // 2) DEFENSE
   h+='<div class="play-sec"><div class="ph">🛡️ 防守:别当接盘侠 <span class="pd">散户最持久的 edge 在这</span></div>';
   let any=false;
@@ -1820,10 +1859,8 @@ function renderPlay(){
   if(avoid.length){any=true;h+=`<div class="prow"><span class="chip b-warn">🟠 有雷/高接盘险</span> ${avoid.slice(0,8).map(x=>esc(x.symbol||(x.token||'').slice(0,6))).join("、")} —— 避开。</div>`;}
   if(!any) h+='<div class="pnote dim">此刻无明确派发/避雷项。</div>';
   h+='</div>';
-  // 3) DON'T
-  h+='<div class="play-sec"><div class="ph">🚫 别做:顶刊实证的散户负EV陷阱</div><div class="pnote">跟 🐋 聪明钱买入去接盘 · 追 💎 早期扫描的币做多 · 买 💰 庄吸筹跟庄 · 裸做空高资金费。这些标签是让你<b>看清结构、别当接盘侠</b>,不是让你照着买。跟买吸筹:pump 后 ~18 秒见顶、跟随者胜率 48%&lt;50%、非 insider 负回报。</div></div>';
-  // VERDICT
-  h+=`<div class="play-verdict">今日总判:${carry.length?`有 <b>${carry.length}</b> 个部分模型代理为正的跨所 Carry 纸面候选`:'进攻端无跨所部分模型代理为正的候选'}，另有 ${singleVenueCarry.length} 个单所现货对冲观察项未进入双腿验证；<b>${validationOverview.available&&validationOverview.state==="no_execution_edge"?'服务端同快照结论仍是尚无可执行优势':'优势状态不可验证，按不可行动处理'}</b>。这个看板最大的价值是减少误判和接盘风险，不是保证暴富；没有获证打法时，不做也是一种打法。</div>`;
+  // 3) DON'T — kept verbatim, one click away.
+  h+=`<details${drawerAttr("dont-drawer")}><summary>🚫 别做 · 顶刊实证的散户负EV陷阱</summary><div class="drawer-body"><div class="pnote">跟 🐋 聪明钱买入去接盘 · 追 💎 早期扫描的币做多 · 买 💰 庄吸筹跟庄 · 裸做空高资金费。这些标签是让你<b>看清结构、别当接盘侠</b>,不是让你照着买。跟买吸筹:pump 后 ~18 秒见顶、跟随者胜率 48%&lt;50%、非 insider 负回报。</div></div></details>`;
   return h+'</div>';
 }
 
