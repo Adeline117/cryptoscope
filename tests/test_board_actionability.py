@@ -354,6 +354,29 @@ def test_carry_ui_discloses_bounded_entry_quote_capacity():
     assert 'new_entry_candidates_deferred??"?"' in html
 
 
+def test_hlp_section_is_exact_guarded_and_discloses_drawdown_caveat():
+    html = BOARD.read_text()
+    guard = html.split("function hlpUiState", 1)[1].split(
+        "function hlpSectionHtml", 1,
+    )[0]
+    section = html.split("function hlpSectionHtml", 1)[1].split(
+        "function runtimeSafetyBanner", 1,
+    )[0]
+
+    # Fail-closed: a missing/unavailable projection renders "?" not a number.
+    assert "raw.available!==true" in guard
+    assert 'HLP 金库数据当前不可用或已过期' in section
+    # The passive-EV framing, the compression flag, and the honest drawdown
+    # caveat must all be present so the card never overstates the edge.
+    assert "被动正EV · HLP 做市金库" in section
+    assert "edge压缩" in section
+    assert "最大回撤" in section
+    assert "低估 JELLY 类日内事件" in section
+    assert "非投资建议" in section
+    # It is rendered on the overview.
+    assert "h+=hlpSectionHtml();" in html
+
+
 def test_risk_budget_guard_is_exact_and_fails_closed_to_unknown():
     html = BOARD.read_text()
     guard = html.split("function riskBudgetUiState", 1)[1].split(
