@@ -109,8 +109,81 @@ def test_run_fails_closed_when_fetch_raises(monkeypatch, tmp_path):
     assert (tmp_path / "hlp_state.json").exists()
 
 
+def _details_with_day(day_window, **overrides):
+    payload = _details(**overrides)
+    payload["portfolio"][0] = ["day", day_window]
+    return payload
+
+
+def test_fine_history_dedups_rebased_windows_and_accumulates(monkeypatch, tmp_path):
+    monkeypatch.setattr(hlp_tracker, "HISTORY_DB", tmp_path / "hlp_history.db")
+
+    # First fetch: window covering t0..t2 with absolute pnl [0, 3, 5].
+    first = _details_with_day(_window(0, [100, 100, 100], [0, 3, 5]))
+    got = hlp_tracker.record_fine_history(first, now=NOW)
+    assert got == {"recorded": True, "inserted": 2, "total": 2}
+
+    # Second fetch: window slid by one day and REBASED (same intervals now
+    # reported as [0, 2, 4] from t1). Steps are base-invariant: the t1..t2
+    # interval dedups; only the genuinely new t2..t3 step lands.
+    second = _details_with_day(_window(DAY, [100, 100, 100], [0, 2, 4]))
+    got = hlp_tracker.record_fine_history(second, now=NOW)
+    assert got == {"recorded": True, "inserted": 1, "total": 3}
+
+    summary = hlp_tracker.fine_history_summary()
+    assert summary["available"] is True
+    assert summary["n_steps"] == 3
+    assert summary["segments"] == 1
+    assert summary["coverage_pct"] == 100.0
+    # steps +3, +2, +2 on base 100 — monotonic climb, no drawdown.
+    assert summary["max_drawdown_pct"] == 0.0
+    assert summary["basis"] == "forward_accumulated_fine_steps_gap_segmented"
+
+
+def test_fine_history_never_compounds_across_gaps(monkeypatch, tmp_path):
+    monkeypatch.setattr(hlp_tracker, "HISTORY_DB", tmp_path / "hlp_history.db")
+
+    # Segment 1 ends at t2; segment 2 starts at t5 — a 3-day recording gap.
+    hlp_tracker.record_fine_history(
+        _details_with_day(_window(0, [100, 100, 100], [0, -4, -4])), now=NOW)
+    hlp_tracker.record_fine_history(
+        _details_with_day(_window(5 * DAY, [100, 100], [0, -2])), now=NOW)
+
+    summary = hlp_tracker.fine_history_summary()
+    assert summary["segments"] == 2
+    # Worst per-segment drawdown is segment 1's -4%; the gap does not let the
+    # -2% of segment 2 stack onto it (-6%) via silently-assumed zero returns.
+    assert summary["max_drawdown_pct"] == pytest.approx(-4.0)
+    assert summary["span_days"] == 6.0
+    assert summary["covered_days"] == 3.0
+    assert summary["coverage_pct"] == 50.0
+
+
+def test_fine_history_fails_closed_on_malformed_details(monkeypatch, tmp_path):
+    monkeypatch.setattr(hlp_tracker, "HISTORY_DB", tmp_path / "hlp_history.db")
+
+    for bad in (None, {}, _details(vaultAddress="0xdead"),
+                _details(portfolio=[["week", _window(0, [100, 100], [0, 1])]])):
+        got = hlp_tracker.record_fine_history(bad, now=NOW)
+        assert got["recorded"] is False and got["reason"]
+    assert hlp_tracker.fine_history_summary() == {
+        "available": False, "reason": "insufficient_history", "n_steps": 0}
+
+
+def test_run_records_fine_history_from_the_same_fetch(monkeypatch, tmp_path):
+    monkeypatch.setattr(hlp_tracker, "STATE_FILE", tmp_path / "hlp_state.json")
+    monkeypatch.setattr(hlp_tracker, "HISTORY_DB", tmp_path / "hlp_history.db")
+    monkeypatch.setattr(hlp_tracker, "fetch_details", lambda **_k: _details())
+
+    state = hlp_tracker.run(now=NOW)
+    assert state["available"] is True
+    # The day-window fixture has 2 points => 1 step recorded.
+    assert hlp_tracker.fine_history_summary()["n_steps"] >= 1
+
+
 def test_run_persists_projected_state(monkeypatch, tmp_path):
     monkeypatch.setattr(hlp_tracker, "STATE_FILE", tmp_path / "hlp_state.json")
+    monkeypatch.setattr(hlp_tracker, "HISTORY_DB", tmp_path / "hlp_history.db")
     monkeypatch.setattr(hlp_tracker, "fetch_details", lambda **_k: _details())
 
     state = hlp_tracker.run(now=NOW)

@@ -14,6 +14,7 @@ UNDERSTATES intraday events (e.g. the JELLY incident); this is disclosed, not hi
 from __future__ import annotations
 
 import json
+import sqlite3
 import urllib.request
 from datetime import datetime, timezone
 
@@ -178,6 +179,124 @@ def fetch_details(*, timeout: float = 20.0) -> dict:
         return json.loads(response.read())
 
 
+HISTORY_DB = DATA_DIR / "hlp_history.db"
+
+
+def _history_conn() -> sqlite3.Connection:
+    HISTORY_DB.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(HISTORY_DB), timeout=10)
+    conn.execute("""CREATE TABLE IF NOT EXISTS steps(
+        start_ms INTEGER NOT NULL, end_ms INTEGER NOT NULL,
+        pnl_usd REAL NOT NULL, account_value_usd REAL NOT NULL,
+        captured_at TEXT NOT NULL,
+        PRIMARY KEY(start_ms, end_ms))""")
+    return conn
+
+
+def record_fine_history(details: object, *, now: datetime | None = None) -> dict:
+    """Accumulate fine-resolution PnL steps from the 'day' window, forever.
+
+    The API keeps only ~0.4h resolution for the last day; older windows are
+    ~14-day buckets, so the TRUE long-run intraday drawdown can only be built
+    forward from now. The day window's absolute pnl is REBASED to 0 at every
+    window start, so absolute levels cannot be stored across fetches — but each
+    step (pnl[i+1]-pnl[i] over account_value[i]) is base-invariant (verified
+    live: 43/43 overlapping steps identical across a window slide). Steps are
+    keyed by (start_ms, end_ms); the first capture of an interval is frozen.
+    """
+    stamp = ((now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+             .isoformat())
+    try:
+        if not isinstance(details, dict):
+            raise HlpUnavailable("vaultDetails is not an object")
+        if str(details.get("vaultAddress", "")).lower() != HLP_VAULT_ADDRESS:
+            raise HlpUnavailable("vaultAddress is not the canonical HLP vault")
+        windows = {
+            entry[0]: entry[1]
+            for entry in details.get("portfolio") or []
+            if isinstance(entry, (list, tuple)) and len(entry) == 2
+        }
+        if "day" not in windows or not isinstance(windows["day"], dict):
+            raise HlpUnavailable("day window is missing")
+        account = _series(
+            windows["day"].get("accountValueHistory"),
+            field="accountValueHistory",
+        )
+        pnl = _series(windows["day"].get("pnlHistory"), field="pnlHistory")
+        if len(account) != len(pnl):
+            raise HlpUnavailable("account and pnl series lengths disagree")
+    except HlpUnavailable as exc:
+        return {"recorded": False, "reason": str(exc)}
+    rows = [
+        (pnl[i][0], pnl[i + 1][0],
+         pnl[i + 1][1] - pnl[i][1], account[i][1], stamp)
+        for i in range(len(pnl) - 1)
+        if pnl[i + 1][0] > pnl[i][0] and account[i][1] > 0
+    ]
+    conn = _history_conn()
+    try:
+        before = conn.execute("SELECT COUNT(*) FROM steps").fetchone()[0]
+        conn.executemany(
+            "INSERT OR IGNORE INTO steps VALUES (?,?,?,?,?)", rows,
+        )
+        conn.commit()
+        total = conn.execute("SELECT COUNT(*) FROM steps").fetchone()[0]
+    finally:
+        conn.close()
+    return {"recorded": True, "inserted": total - before, "total": total}
+
+
+def fine_history_summary() -> dict:
+    """True intraday drawdown over the ACCUMULATED fine steps, gap-honest.
+
+    Compounding across a recording gap would silently assume zero return while
+    the recorder was down, so contiguous runs are compounded separately and the
+    worst per-segment drawdown is reported alongside coverage (a reader can see
+    exactly how much wall-clock the evidence spans versus covers).
+    """
+    conn = _history_conn()
+    try:
+        rows = conn.execute(
+            "SELECT start_ms,end_ms,pnl_usd,account_value_usd FROM steps "
+            "ORDER BY start_ms",
+        ).fetchall()
+    finally:
+        conn.close()
+    if len(rows) < 2:
+        return {"available": False, "reason": "insufficient_history",
+                "n_steps": len(rows)}
+    segments = 1
+    covered_ms = 0
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+    previous_end = None
+    for start_ms, end_ms, step_pnl, base in rows:
+        if previous_end is not None and start_ms != previous_end:
+            segments += 1
+            equity = peak = 1.0  # never compound across a gap
+        covered_ms += end_ms - start_ms
+        equity *= 1 + step_pnl / base
+        peak = max(peak, equity)
+        max_drawdown = min(max_drawdown, equity / peak - 1)
+        previous_end = end_ms
+    span_ms = rows[-1][1] - rows[0][0]
+    return {
+        "available": True,
+        "n_steps": len(rows),
+        "segments": segments,
+        "first_at": datetime.fromtimestamp(
+            rows[0][0] / 1000, timezone.utc).isoformat(),
+        "last_at": datetime.fromtimestamp(
+            rows[-1][1] / 1000, timezone.utc).isoformat(),
+        "span_days": round(span_ms / 86_400_000, 2),
+        "covered_days": round(covered_ms / 86_400_000, 2),
+        "coverage_pct": round(covered_ms / span_ms * 100, 1) if span_ms else 0.0,
+        "max_drawdown_pct": round(max_drawdown * 100, 4),
+        "basis": "forward_accumulated_fine_steps_gap_segmented",
+    }
+
+
 def _save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_suffix(".tmp")
@@ -200,6 +319,12 @@ def run(*, now: datetime | None = None) -> dict:
         return state
     state = compute_hlp_state(details, now=generated_at)
     _save_state(state)
+    # Accumulate fine-resolution history from the same fetch (zero extra API
+    # calls). Recorder trouble must never break the published state.
+    try:
+        record_fine_history(details, now=generated_at)
+    except Exception:
+        pass
     return state
 
 
