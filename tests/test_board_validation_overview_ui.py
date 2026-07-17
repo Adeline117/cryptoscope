@@ -162,6 +162,22 @@ def test_play_overview_leads_with_decision_and_keeps_evidence_one_click_away():
         assert command.locator(".decision-title").inner_text() != ""
         assert "今日结论" in command.locator(".decision-conclusion").inner_text()
         assert command.locator(".hero-auto-off").inner_text() == "自动交易 OFF"
+        chips = command.locator(".hero-chips").inner_text()
+        assert "风险预算 · 单探针≤$500 · 并发≤3" in chips
+        assert "当前占用 $0/$1,500" in chips
+
+        # A forged budget must fail closed to "?" without echoing its numbers.
+        page.evaluate(
+            "data.meta.risk_budget.per_probe_cap_usd = 50000; paint()"
+        )
+        page.wait_for_timeout(50)
+        chips = command.locator(".hero-chips").inner_text()
+        assert "风险预算 ? · 合同缺失或无效" in chips
+        assert "50,000" not in chips and "50000" not in chips
+        page.evaluate(
+            "data.meta.risk_budget.per_probe_cap_usd = 500.0; paint()"
+        )
+        page.wait_for_timeout(50)
         assert page.locator(".runtime-safety-banner").evaluate(
             "node => node.compareDocumentPosition(document.querySelector('.command')) & Node.DOCUMENT_POSITION_FOLLOWING"
         )

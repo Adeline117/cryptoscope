@@ -171,6 +171,14 @@ def _meta(launch: dict, stats: dict, launch_admission: dict, stats_admission: di
     return {
         "schema_version": 1,
         "runtime_safety": _healthy_runtime(),
+        "risk_budget": {
+            "version": 1,
+            "auto_execution_allowed": False,
+            "per_probe_cap_usd": 500.0,
+            "max_concurrent_probes": 3,
+            "max_concurrent_notional_usd": 1500.0,
+            "basis": "manual_probe_frozen_caps_not_real_fills",
+        },
         "launch_protocol_join": {
             "version": 1, "state": "consistent", "cross_view_edge_usable": True,
             "reason_codes": [],

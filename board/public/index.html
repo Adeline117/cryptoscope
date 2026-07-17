@@ -857,6 +857,32 @@ function runtimeSafetyUiState(meta=data?.meta){
   return{available:true,state:raw.state,blocks:raw.blocks_actionability,storagePressure:raw.storage_pressure,
     reasonCodes:[...reasons],streams:{solana:{state:sol.state,live:sol.live,configured:sol.configured,maintenance:sol.maintenance},evm:{state:evm.state,live:evm.live,configured:evm.configured}},retention};
 }
+function riskBudgetUiState(meta=data?.meta){
+  // Strict exact-shape guard mirroring runtimeSafetyUiState: a missing or
+  // tampered budget contract renders as "?" rather than a fabricated limit.
+  const fallback={available:false};
+  const raw=meta?.risk_budget;
+  if(raw===null||typeof raw!=="object"||Array.isArray(raw))return fallback;
+  const keys=["version","auto_execution_allowed","per_probe_cap_usd",
+    "max_concurrent_probes","max_concurrent_notional_usd","basis"];
+  if(Object.keys(raw).length!==keys.length||!keys.every(key=>Object.hasOwn(raw,key)))return fallback;
+  if(raw.version!==1||raw.auto_execution_allowed!==false)return fallback;
+  const cap=raw.per_probe_cap_usd,concurrent=raw.max_concurrent_probes,total=raw.max_concurrent_notional_usd;
+  if(typeof cap!=="number"||!Number.isFinite(cap)||cap<=0)return fallback;
+  if(!Number.isSafeInteger(concurrent)||concurrent<1||concurrent>10)return fallback;
+  if(typeof total!=="number"||!Number.isFinite(total)||Math.abs(total-cap*concurrent)>1e-6)return fallback;
+  if(raw.basis!=="manual_probe_frozen_caps_not_real_fills")return fallback;
+  return{available:true,capUsd:cap,maxProbes:concurrent,totalUsd:total};
+}
+function riskBudgetChip(budget,committedUsd){
+  const disclosure="预算只约束人工纪律；金额是冻结上限而非真实成交，系统不下单，也不能替你止损";
+  if(!budget.available)return `<span class="chip b-warn" title="${esc(disclosure)}">风险预算 ? · 合同缺失或无效</span>`;
+  // Budget amounts must render exactly: fmtUsd rounds 1500 up to "2k",
+  // which would overstate the discipline ceiling.
+  const exact=n=>"$"+Number(n).toLocaleString("en-US",{maximumFractionDigits:0});
+  const over=committedUsd>budget.totalUsd+1e-6;
+  return `<span class="chip ${over?"b-danger":""}" title="${esc(disclosure)}">风险预算 · 单探针≤${esc(exact(budget.capUsd))} · 并发≤${budget.maxProbes} · 当前占用 ${esc(exact(committedUsd))}/${esc(exact(budget.totalUsd))}${over?" · 超出纪律上限":""}</span>`;
+}
 function runtimeSafetyBanner(runtime=runtimeSafetyUiState()){
   if(runtime.state==="healthy")return"";
   const blocked=runtime.blocks,title=blocked?"采集受阻 · 当前不可行动":"采集降级 · 当前仅作有限观察";
@@ -1804,7 +1830,13 @@ function renderPlay(){
   const discoveredTotal=launches.length+structureEvents.length+airdropEvents.length+cascadeEvents.length+crossCarry.length;
   const discoveredDisplay=loadedLanes===5?String(discoveredTotal):`≥${discoveredTotal}`;
   const launchStages=launches.reduce((acc,row)=>{const key=launchCardStage(row).key;acc[key]=(acc[key]||0)+1;return acc},{});
-  const actionCount=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE"&&launchCardStage(x).key==="actionable").length;
+  const actionableRows=launches.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE"&&launchCardStage(x).key==="actionable");
+  const actionCount=actionableRows.length;
+  // Committed budget = frozen caps of the exact rows counted as actionable,
+  // summed client-side where quote clocks are freshest. Unknown caps add 0
+  // to the sum but are disclosed rather than invented.
+  const committedUsd=actionableRows.reduce((sum,row)=>{const cap=Number(row?.max_notional_usd);return Number.isFinite(cap)&&cap>0?sum+cap:sum},0);
+  const riskBudget=riskBudgetUiState();
   const launchWatch=(launchStages.watch||0)+(launchStages.paper||0);
   const launchExpired=launchStages.expired||0;
   const launchBlocked=launchStages.blocked||0;
@@ -1833,7 +1865,7 @@ function renderPlay(){
     <div><div class="decision-kicker">当前决策 · ${runtimeSafety.blocks?'运行源阻断':!data.launch?'数据缺失':!launchProtocol.open?'来源准入关闭':actionCount?'可人工验证':'证据不足'}</div><h2 class="decision-title">${esc(verdict)}</h2>
       <p class="decision-conclusion">${conclusion}</p>
       <p class="decision-copy">${verdictCopy}</p>
-      <div class="hero-chips"><span class="hero-auto-off">自动交易 OFF</span><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span><span class="chip ${dep.length+avoid.length?'b-danger':''}">应避开 ${dep.length+avoid.length}</span></div>
+      <div class="hero-chips"><span class="hero-auto-off">自动交易 OFF</span><span class="chip ${freshnessClass}">${freshness.fresh}/${freshness.total} 关键视图按时</span>${riskBudgetChip(riskBudget,committedUsd)}<span class="chip ${dep.length+avoid.length?'b-danger':''}">应避开 ${dep.length+avoid.length}</span></div>
       <div class="command-actions"><button class="jump primary" data-jump="launch">查看来源与人工验证门禁</button><button class="jump" data-jump="perp">查看 Carry 生命周期</button><button class="jump" data-jump="avoid">查看风险过滤</button></div></div></section>`;
   // 1) What is worth looking at right now — research candidates, never orders.
   h+='<div class="play-sec"><div class="ph">🎯 现在值得看的 <span class="pd">研究候选,非买入指令 · 最多 3 项 · 同快照判决见下方优势验证抽屉</span></div>';

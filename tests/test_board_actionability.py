@@ -354,6 +354,30 @@ def test_carry_ui_discloses_bounded_entry_quote_capacity():
     assert 'new_entry_candidates_deferred??"?"' in html
 
 
+def test_risk_budget_guard_is_exact_and_fails_closed_to_unknown():
+    html = BOARD.read_text()
+    guard = html.split("function riskBudgetUiState", 1)[1].split(
+        "function runtimeSafetyBanner", 1,
+    )[0]
+
+    # Exact-shape guard: version, auto-off, cap x concurrency arithmetic, and
+    # the frozen-caps basis string must all verify or the chip shows "?".
+    assert "raw.version!==1||raw.auto_execution_allowed!==false" in guard
+    assert "Math.abs(total-cap*concurrent)>1e-6" in guard
+    assert 'raw.basis!=="manual_probe_frozen_caps_not_real_fills"' in guard
+    assert "风险预算 ? · 合同缺失或无效" in guard
+    assert "预算只约束人工纪律" in guard
+    assert "系统不下单，也不能替你止损" in guard
+    # Committed usage sums the frozen caps of the exact rows counted as
+    # actionable, in the client where quote clocks are freshest.
+    render = html.split("function renderPlay(){", 1)[1].split(
+        "function carryHealthHtml", 1,
+    )[0]
+    assert "const actionCount=actionableRows.length" in render
+    assert "actionableRows.reduce" in render
+    assert "riskBudgetChip(riskBudget,committedUsd)" in render
+
+
 def test_decision_overview_separates_actionable_windows_from_paper_candidates():
     html = BOARD.read_text()
 
