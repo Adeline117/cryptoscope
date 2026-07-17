@@ -14,6 +14,11 @@ ACTIONABLE_LAUNCH_CHAINS = frozenset({"solana"})
 MIN_PROBE_NOTIONAL_USD = 25.0
 MAX_PROBE_NOTIONAL_USD = 500.0
 MAX_POOL_LIQUIDITY_FRACTION = 0.003
+# Discipline ceiling on simultaneous manual probe windows. Nothing executes:
+# the budget bounds what the board may present as concurrently actionable,
+# it cannot bound what a human actually does.
+MAX_CONCURRENT_MANUAL_PROBES = 3
+RISK_BUDGET_BASIS = "manual_probe_frozen_caps_not_real_fills"
 # A quote may reach A3 only after its A2 payload has been fetched back from a unique
 # public HTTPS snapshot linked by the board. The stable overwritten launch.json is
 # only discovery, never delivery authority. A field supplied by the quote assessor

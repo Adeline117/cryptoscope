@@ -664,6 +664,31 @@ def _envelope(body: dict, *, view: str) -> dict:
             **body}
 
 
+def _risk_budget() -> dict:
+    """Publish the static manual-probe discipline budget, never live usage.
+
+    Committed/remaining amounts are computed client-side from the same
+    validated launch rows the browser already gates: a server-side count
+    would go stale between exports while quote clocks expire in the browser.
+    """
+    from src.contract.launch_probe import (
+        MAX_CONCURRENT_MANUAL_PROBES,
+        MAX_PROBE_NOTIONAL_USD,
+        RISK_BUDGET_BASIS,
+    )
+
+    return {
+        "version": 1,
+        "auto_execution_allowed": False,
+        "per_probe_cap_usd": MAX_PROBE_NOTIONAL_USD,
+        "max_concurrent_probes": MAX_CONCURRENT_MANUAL_PROBES,
+        "max_concurrent_notional_usd": (
+            MAX_PROBE_NOTIONAL_USD * MAX_CONCURRENT_MANUAL_PROBES
+        ),
+        "basis": RISK_BUDGET_BASIS,
+    }
+
+
 def _runtime_safety() -> dict:
     """Project only bounded runtime truth needed to gate manual actionability."""
     from collections.abc import Mapping
@@ -1088,6 +1113,7 @@ def write_views(**views: dict) -> list:
             "launch_protocol_join": protocol_join,
             "runtime_safety": _runtime_safety(),
             "perp_identity_policy": _perp_identity_policy(),
+            "risk_budget": _risk_budget(),
         }, view="meta")
         cadence_min, grace_min = VIEW_FRESHNESS["meta"]
         validate_board_view(

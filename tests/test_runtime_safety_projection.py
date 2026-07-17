@@ -83,6 +83,7 @@ def _meta(board_export, runtime):
             "independent_source_count": 0, "observed_path_count": 0,
             "cache_age_seconds": None, "cache_ttl_seconds": 26 * 60 * 60,
         },
+        "risk_budget": board_export._risk_budget(),
     }, view="meta")
 
 
@@ -116,6 +117,51 @@ def test_runtime_safety_healthy_projection_is_exact_and_secret_free(monkeypatch)
     rendered = json.dumps(got, sort_keys=True)
     assert "SECRET" not in rendered and "url" not in rendered and "path" not in rendered
     _validate_meta(board_export, _meta(board_export, got))
+
+
+def test_risk_budget_projection_matches_probe_discipline_and_rejects_tampering(
+        monkeypatch):
+    import pytest
+
+    from src.contract.board_view import BoardViewContractError
+    from src.contract.launch_probe import (
+        MAX_CONCURRENT_MANUAL_PROBES,
+        MAX_PROBE_NOTIONAL_USD,
+    )
+
+    board_export = _sources(monkeypatch)
+    budget = board_export._risk_budget()
+
+    assert budget == {
+        "version": 1,
+        "auto_execution_allowed": False,
+        "per_probe_cap_usd": MAX_PROBE_NOTIONAL_USD,
+        "max_concurrent_probes": MAX_CONCURRENT_MANUAL_PROBES,
+        "max_concurrent_notional_usd": (
+            MAX_PROBE_NOTIONAL_USD * MAX_CONCURRENT_MANUAL_PROBES
+        ),
+        "basis": "manual_probe_frozen_caps_not_real_fills",
+    }
+    _validate_meta(board_export, _meta(board_export, board_export._runtime_safety()))
+
+    tampering = (
+        ("per_probe_cap_usd", 5000.0),
+        ("max_concurrent_probes", 30),
+        ("max_concurrent_notional_usd", 999999.0),
+        ("auto_execution_allowed", True),
+        ("basis", "real_fills"),
+        ("version", 2),
+    )
+    for field, forged in tampering:
+        meta = _meta(board_export, board_export._runtime_safety())
+        meta["risk_budget"] = {**budget, field: forged}
+        with pytest.raises(BoardViewContractError):
+            _validate_meta(board_export, meta)
+
+    missing = _meta(board_export, board_export._runtime_safety())
+    del missing["risk_budget"]
+    with pytest.raises(BoardViewContractError):
+        _validate_meta(board_export, missing)
 
 
 def test_runtime_safety_critical_storage_blocks(monkeypatch):

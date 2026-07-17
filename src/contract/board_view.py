@@ -1432,6 +1432,49 @@ def _runtime_count(value: Any, *, path: str) -> int | None:
     return _exact_nonnegative_int(value, path=path)
 
 
+def _validate_risk_budget(value: Any, *, path: str) -> None:
+    """The published budget must equal the code-level probe discipline exactly."""
+    from src.contract.launch_probe import (
+        MAX_CONCURRENT_MANUAL_PROBES,
+        MAX_PROBE_NOTIONAL_USD,
+        RISK_BUDGET_BASIS,
+    )
+
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    _exact_keys(value, {
+        "version", "auto_execution_allowed", "per_probe_cap_usd",
+        "max_concurrent_probes", "max_concurrent_notional_usd", "basis",
+    }, path=path)
+    if value.get("version") != 1 or type(value.get("version")) is not int:
+        raise BoardViewContractError(f"{path}.version must be exactly 1")
+    if value.get("auto_execution_allowed") is not False:
+        raise BoardViewContractError(
+            f"{path}.auto_execution_allowed must be exactly false"
+        )
+    cap = value.get("per_probe_cap_usd")
+    if type(cap) is not float or cap != MAX_PROBE_NOTIONAL_USD:
+        raise BoardViewContractError(
+            f"{path}.per_probe_cap_usd must equal the frozen probe cap"
+        )
+    concurrent = value.get("max_concurrent_probes")
+    if (type(concurrent) is not int
+            or concurrent != MAX_CONCURRENT_MANUAL_PROBES):
+        raise BoardViewContractError(
+            f"{path}.max_concurrent_probes must equal the discipline constant"
+        )
+    total = value.get("max_concurrent_notional_usd")
+    if type(total) is not float or not math.isclose(
+            total, cap * concurrent, abs_tol=1e-9):
+        raise BoardViewContractError(
+            f"{path}.max_concurrent_notional_usd must equal cap x concurrency"
+        )
+    if value.get("basis") != RISK_BUDGET_BASIS:
+        raise BoardViewContractError(
+            f"{path}.basis must disclose frozen-caps-not-real-fills semantics"
+        )
+
+
 def _validate_runtime_safety(value: Any, *, path: str) -> None:
     """Validate the exact fail-closed projection used by the public meta view."""
     if not isinstance(value, Mapping):
@@ -1781,6 +1824,7 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
         _validate_perp_identity_policy(
             payload.get("perp_identity_policy"), path="meta.perp_identity_policy",
         )
+        _validate_risk_budget(payload.get("risk_budget"), path="meta.risk_budget")
     if name == "structure":
         if (payload.get("product_metadata_time_semantics")
                 != "current_inventory_metadata_not_event_time_evidence"):
