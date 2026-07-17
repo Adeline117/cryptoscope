@@ -84,6 +84,7 @@ def _meta(board_export, runtime):
             "cache_age_seconds": None, "cache_ttl_seconds": 26 * 60 * 60,
         },
         "risk_budget": board_export._risk_budget(),
+        "hlp": {"available": False, "reason": "test"},
     }, view="meta")
 
 

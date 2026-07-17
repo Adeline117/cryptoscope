@@ -171,6 +171,7 @@ def _meta(launch: dict, stats: dict, launch_admission: dict, stats_admission: di
     return {
         "schema_version": 1,
         "runtime_safety": _healthy_runtime(),
+        "hlp": {"available": False, "reason": "test"},
         "risk_budget": {
             "version": 1,
             "auto_execution_allowed": False,

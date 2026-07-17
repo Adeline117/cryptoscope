@@ -689,6 +689,36 @@ def _risk_budget() -> dict:
     }
 
 
+def _hlp(*, now: datetime | None = None, max_age_seconds: float = 3600.0) -> dict:
+    """Project the HLP vault money view from the scheduler-refreshed state file.
+
+    The tracker job writes data/hlp_state.json every 30 min; board export only
+    reads it (never fetches) so a slow API can never stall a render. Missing,
+    unreadable, malformed, or stale state fails closed to available=False.
+    """
+    from src.pipeline.hlp_tracker import STATE_FILE
+
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    try:
+        state = json.loads(STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"available": False, "reason": "hlp_state_unavailable"}
+    if not isinstance(state, dict) or not isinstance(state.get("available"), bool):
+        return {"available": False, "reason": "hlp_state_malformed"}
+    stamp = state.get("generated_at")
+    try:
+        generated = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        if generated.tzinfo is None:
+            raise ValueError("naive hlp clock")
+        age = (current - generated.astimezone(timezone.utc)).total_seconds()
+    except (TypeError, ValueError):
+        return {"available": False, "reason": "hlp_state_clock_invalid"}
+    if age < -5 or age > max_age_seconds:
+        return {"available": False, "reason": "hlp_state_stale",
+                "generated_at": str(stamp)}
+    return state
+
+
 def _runtime_safety() -> dict:
     """Project only bounded runtime truth needed to gate manual actionability."""
     from collections.abc import Mapping
@@ -1114,6 +1144,7 @@ def write_views(**views: dict) -> list:
             "runtime_safety": _runtime_safety(),
             "perp_identity_policy": _perp_identity_policy(),
             "risk_budget": _risk_budget(),
+            "hlp": _hlp(),
         }, view="meta")
         cadence_min, grace_min = VIEW_FRESHNESS["meta"]
         validate_board_view(

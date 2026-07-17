@@ -1475,6 +1475,60 @@ def _validate_risk_budget(value: Any, *, path: str) -> None:
         )
 
 
+def _validate_hlp(value: Any, *, path: str) -> None:
+    """HLP money view: fail-closed shape, or the exact tracker projection."""
+    if not isinstance(value, Mapping):
+        raise BoardViewContractError(f"{path} must be an object")
+    available = value.get("available")
+    if not isinstance(available, bool):
+        raise BoardViewContractError(f"{path}.available must be boolean")
+    if not available:
+        # Fail-closed states may only carry disclosure fields, never metrics,
+        # so a broken vault feed can never render a fabricated return.
+        for forbidden in ("windows", "current_tvl_usd", "annualized_pct"):
+            if forbidden in value:
+                raise BoardViewContractError(
+                    f"{path} unavailable state must not carry {forbidden}"
+                )
+        return
+    from src.pipeline.hlp_tracker import HLP_VAULT_ADDRESS
+
+    _exact_keys(value, {
+        "available", "generated_at", "vault", "vault_address",
+        "current_tvl_usd", "allow_deposits", "instant_apr_pct", "windows",
+        "drawdown_basis", "disclaimer",
+    }, path=path)
+    if value.get("vault_address") != HLP_VAULT_ADDRESS:
+        raise BoardViewContractError(f"{path}.vault_address is not the HLP vault")
+    if not isinstance(value.get("allow_deposits"), bool):
+        raise BoardViewContractError(f"{path}.allow_deposits must be boolean")
+    for numeric in ("current_tvl_usd", "instant_apr_pct"):
+        if not isinstance(value.get(numeric), (int, float)) or isinstance(
+                value.get(numeric), bool):
+            raise BoardViewContractError(f"{path}.{numeric} must be numeric")
+    if value.get("drawdown_basis") != "coarse_pnl_history_understates_intraday":
+        raise BoardViewContractError(
+            f"{path}.drawdown_basis must disclose the coarse-history caveat"
+        )
+    if not str(value.get("disclaimer") or "").strip():
+        raise BoardViewContractError(f"{path}.disclaimer must be present")
+    windows = value.get("windows")
+    if not isinstance(windows, Mapping):
+        raise BoardViewContractError(f"{path}.windows must be an object")
+    _exact_keys(windows, {"week", "month", "allTime"}, path=f"{path}.windows")
+    for name, window in windows.items():
+        wpath = f"{path}.windows.{name}"
+        if not isinstance(window, Mapping):
+            raise BoardViewContractError(f"{wpath} must be an object")
+        _exact_keys(window, {
+            "span_days", "pnl_usd", "avg_tvl_usd", "annualized_pct",
+            "max_drawdown_usd", "max_drawdown_pct_of_avg_tvl",
+        }, path=wpath)
+        for key, number in window.items():
+            if not isinstance(number, (int, float)) or isinstance(number, bool):
+                raise BoardViewContractError(f"{wpath}.{key} must be numeric")
+
+
 def _validate_runtime_safety(value: Any, *, path: str) -> None:
     """Validate the exact fail-closed projection used by the public meta view."""
     if not isinstance(value, Mapping):
@@ -1825,6 +1879,7 @@ def validate_board_view(name: str, payload: Any, *, cadence_min: float,
             payload.get("perp_identity_policy"), path="meta.perp_identity_policy",
         )
         _validate_risk_budget(payload.get("risk_budget"), path="meta.risk_budget")
+        _validate_hlp(payload.get("hlp"), path="meta.hlp")
     if name == "structure":
         if (payload.get("product_metadata_time_semantics")
                 != "current_inventory_metadata_not_event_time_evidence"):

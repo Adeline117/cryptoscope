@@ -140,6 +140,7 @@ def _meta(board_export, policy: dict) -> dict:
         "runtime_safety": _runtime(),
         "perp_identity_policy": policy,
         "risk_budget": board_export._risk_budget(),
+        "hlp": {"available": False, "reason": "test"},
     }, view="meta")
 
 
