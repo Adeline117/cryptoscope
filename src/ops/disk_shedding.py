@@ -17,29 +17,25 @@ from src.ops import health
 # soon as the workspace is healthy again.
 DISK_SHED_AT_WARN = frozenset({
     "anomaly_check",
-    "operator_export",
     "harvest_wallets",
-    "anomaly_screen",
-    "operator_hunt",
-    "operator_id_push",
-    "holder_snapshots",
-    "yaobi_finder",
     "cluster_coverage",
     "cex_label_refresh",
     "label_verify",
-    "holder_growth_screen",
     # HLP writes one tiny slow-moving JSON and is not part of the five core lanes,
     # so it is the first to shed under any disk pressure.
     "hlp_tracker",
 })
 
-# These are still useful detection jobs, so retain them at WARN and shed them only
-# when preserving the five core lanes and their evidence loop takes precedence.
-DISK_SHED_AT_CRITICAL = frozenset({
-    "accumulation_detection",
-    "operator_sentinel",
-    "funder_watch",
-})
+# These 庄家/operator detection jobs were paused in scheduler.create_scheduler
+# (_PAUSED_MORALIS_JOBS) because Moralis is over its paid limit and off, so they
+# are no longer active jobs and must not appear in a disk policy (the exact-match
+# validator would flag them as stale). Their classification is kept here,
+# commented, so resuming a lane means uncommenting its id too:
+#   WARN:     operator_export, anomaly_screen, operator_hunt, operator_id_push,
+#             holder_snapshots, yaobi_finder, holder_growth_screen
+#   CRITICAL: accumulation_detection, operator_sentinel, funder_watch
+#   PROTECTED: perp_cex_scan, perp_mobilization, early_accumulation, second_leg_assess
+DISK_SHED_AT_CRITICAL = frozenset()
 
 # Five-lane collection/publication, invalidation and exit monitoring, edge/outcome
 # accounting, and operational correctness are never shed for disk pressure.
@@ -57,10 +53,6 @@ DISK_PROTECTED_JOBS = frozenset({
     "launch_quote_refresh",
     "structure_radar",
     "perp_universe_refresh",
-    "perp_cex_scan",
-    "perp_mobilization",
-    "early_accumulation",
-    "second_leg_assess",
     "resolve_outcomes",
 })
 

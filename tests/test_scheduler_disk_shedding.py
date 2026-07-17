@@ -87,13 +87,13 @@ async def test_guard_logs_structured_skip_and_automatically_recovers(monkeypatch
         calls.append("ran")
         return "complete"
 
-    guarded = scheduler._disk_guarded_job("holder_snapshots", low_priority_job)
+    guarded = scheduler._disk_guarded_job("harvest_wallets", low_priority_job)
     skipped = await guarded()
     recovered = await guarded()
 
     assert skipped == {
         "status": "skipped",
-        "job_id": "holder_snapshots",
+        "job_id": "harvest_wallets",
         "reason": "workspace_disk_critical_non_core_shed",
         "disk_state": "critical",
     }
@@ -106,7 +106,7 @@ async def test_guard_logs_structured_skip_and_automatically_recovers(monkeypatch
         "info",
         "scheduled_job_disk_shed_recovered",
         {
-            "job_id": "holder_snapshots",
+            "job_id": "harvest_wallets",
             "previous_disk_state": "critical",
             "disk_state": "ok",
             "disk_policy": "shed_at_warn",
@@ -122,7 +122,7 @@ def test_unknown_or_failed_disk_measurement_fails_open(monkeypatch):
         "_disk_health",
         lambda: (_ for _ in ()).throw(OSError("volume unavailable")),
     )
-    decision = disk_shedding.disk_shedding_decision("holder_snapshots")
+    decision = disk_shedding.disk_shedding_decision("harvest_wallets")
     assert decision["disk_state"] == "unknown"
     assert not decision["skip"]
     assert "volume unavailable" in decision["health_error"]

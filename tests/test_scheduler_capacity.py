@@ -267,12 +267,28 @@ def test_perps_export_is_independent_from_wallet_watch():
     assert "*/5" in str(jobs["perps_export"].trigger)
 
 
-def test_operator_sentinel_interval_matches_observed_runtime():
+def test_moralis_detection_jobs_are_paused_but_code_is_kept():
+    # Moralis is over its paid limit and off, so the 庄家/operator/smart-money
+    # detection jobs it fed are paused (unscheduled) rather than deleted. None
+    # should be registered, but their _run_* functions must still exist so a lane
+    # can be resumed by clearing _PAUSED_MORALIS_JOBS.
+    from src.pipeline import scheduler as sched
     from src.pipeline.scheduler import create_scheduler
 
+    paused = {
+        "operator_sentinel", "accumulation_detection", "funder_watch",
+        "operator_export", "yaobi_finder", "anomaly_screen",
+        "early_accumulation", "perp_mobilization", "holder_growth_screen",
+        "second_leg_assess", "operator_hunt", "holder_snapshots",
+        "operator_id_push", "perp_cex_scan",
+    }
     scheduler = create_scheduler()
-    job = {item.id: item for item in scheduler.get_jobs()}["operator_sentinel"]
-    assert job.trigger.interval.total_seconds() == 15 * 60
+    registered = {item.id for item in scheduler.get_jobs()}
+    assert paused.isdisjoint(registered)
+    # The pipeline code is retained (reversible), not removed.
+    for fn in ("_run_operator_sentinel", "_run_operator_export",
+               "_run_holder_snapshots"):
+        assert callable(getattr(sched, fn))
 
 
 def test_transfer_sentinel_rotates_bounded_targets_across_slots():
@@ -644,13 +660,15 @@ async def test_regular_board_export_excludes_independent_scans(monkeypatch):
     }]
 
 
-def test_operator_export_has_an_independent_scheduler_job():
+def test_operator_export_is_paused_while_board_export_keeps_running():
+    # operator_export fed the Moralis operator forensics and is paused; the core
+    # board_export (structure/airdrop/stats, Moralis-free) keeps running.
     from src.pipeline.scheduler import create_scheduler
 
     scheduler = create_scheduler()
     jobs = {job.id: job for job in scheduler.get_jobs()}
-    assert "operator_export" in jobs and "board_export" in jobs
-    assert jobs["operator_export"].func is not jobs["board_export"].func
+    assert "operator_export" not in jobs
+    assert "board_export" in jobs
 
 
 def test_opportunity_export_has_an_independent_scheduler_job():
