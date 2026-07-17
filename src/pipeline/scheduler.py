@@ -323,6 +323,14 @@ def create_scheduler() -> AsyncIOScheduler:
         id="structure_radar",
         name="Structure Radar (公开上币事件账本)",
     )
+    # HLP is a slow-moving passive-EV source; a 30-min refresh of its historical
+    # return + drawdown is ample and stays well within the free HL API budget.
+    scheduler.add_job(
+        _run_hlp_tracker,
+        IntervalTrigger(minutes=30),
+        id="hlp_tracker",
+        name="HLP 金库 (被动做市对手盘 历史年化/回撤)",
+    )
     # Refresh the proven-wallet watchlist daily (the skilled set is stable day-to-day).
     scheduler.add_job(
         _run_harvest_wallets,
@@ -994,6 +1002,25 @@ async def _run_structure_radar():
                     active=len(res["events"]), pushed=pushed)
     except Exception as e:
         logger.error("structure_radar_failed", error=str(e)[:120])
+
+
+async def _run_hlp_tracker():
+    """Refresh the HLP vault money view (historical return + drawdown). Slow-moving."""
+    import asyncio
+
+    logger.info("scheduled_hlp_tracker")
+    try:
+        from src.pipeline import hlp_tracker
+        state = await asyncio.to_thread(hlp_tracker.run)
+        if state.get("available"):
+            allt = state["windows"]["allTime"]
+            logger.info("hlp_tracker_done", tvl=state["current_tvl_usd"],
+                        annualized_pct=allt["annualized_pct"],
+                        max_drawdown_pct=allt["max_drawdown_pct_of_avg_tvl"])
+        else:
+            logger.warning("hlp_tracker_unavailable", reason=state.get("reason"))
+    except Exception as e:
+        logger.error("hlp_tracker_failed", error=str(e)[:120])
 
 
 async def _run_board_export():

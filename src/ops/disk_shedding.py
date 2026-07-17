@@ -28,6 +28,9 @@ DISK_SHED_AT_WARN = frozenset({
     "cex_label_refresh",
     "label_verify",
     "holder_growth_screen",
+    # HLP writes one tiny slow-moving JSON and is not part of the five core lanes,
+    # so it is the first to shed under any disk pressure.
+    "hlp_tracker",
 })
 
 # These are still useful detection jobs, so retain them at WARN and shed them only
