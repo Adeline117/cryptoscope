@@ -55,6 +55,20 @@ def test_hlp_reads_fresh_state_and_fails_closed_when_stale_or_missing(
     assert "windows" not in stale
     _validate_hlp(stale, path="meta.hlp")
 
+    # A fresh file written by an OLDER tracker schema (e.g. the pre-return-based
+    # drawdown fields) must fail closed rather than pass a shape the meta
+    # validator would hard-reject and break the whole export.
+    legacy = _valid_state()
+    legacy["drawdown_basis"] = "coarse_pnl_history_understates_intraday"
+    for window in legacy["windows"].values():
+        window["max_drawdown_pct_of_avg_tvl"] = window.pop("max_drawdown_pct")
+        window.pop("resolution_hours")
+    state_file.write_text(json.dumps(legacy))
+    drifted = board_export._hlp(now=NOW + timedelta(minutes=10))
+    assert drifted["available"] is False
+    assert drifted["reason"] == "hlp_state_schema_mismatch"
+    _validate_hlp(drifted, path="meta.hlp")
+
 
 def test_validate_hlp_accepts_fail_closed_and_rejects_tampering():
     # Fail-closed shape is always acceptable.

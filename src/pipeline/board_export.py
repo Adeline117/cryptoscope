@@ -716,6 +716,15 @@ def _hlp(*, now: datetime | None = None, max_age_seconds: float = 3600.0) -> dic
     if age < -5 or age > max_age_seconds:
         return {"available": False, "reason": "hlp_state_stale",
                 "generated_at": str(stamp)}
+    # The file is written by a separate process that may run an older tracker
+    # schema; validate against the CURRENT contract and fail closed on any drift
+    # rather than passing a stale shape downstream where the meta validator
+    # would hard-fail the whole export.
+    from src.contract.board_view import BoardViewContractError, _validate_hlp
+    try:
+        _validate_hlp(state, path="meta.hlp")
+    except BoardViewContractError:
+        return {"available": False, "reason": "hlp_state_schema_mismatch"}
     return state
 
 
