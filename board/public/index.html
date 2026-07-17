@@ -906,7 +906,7 @@ function hlpSectionHtml(state=hlpUiState()){
   const monWarn=state.annMonth<1;
   return `<div class="play-sec">${head}
     <div class="prow"><span class="chip ${state.annAll>0?'b-good':'b-warn'}">历史年化·全周期 ${state.annAll>0?'+':''}${state.annAll.toFixed(1)}%</span> <span class="chip ${monWarn?'b-warn':''}">近一月年化 ${state.annMonth>0?'+':''}${state.annMonth.toFixed(1)}%${monWarn?' · edge压缩':''}</span> <span class="chip b-danger">最大回撤 ${state.ddAll.toFixed(1)}% TVL</span> <span class="chip">TVL ${usd(state.tvl)}</span> <span class="chip ${state.allow?'b-good':'b-warn'}">${state.allow?'允许存入':'暂不允许存入'}</span></div>
-    <div class="pnote dim">${esc(state.disclaimer||'')} 回撤在 API 粗粒度 pnl 上计算,低估 JELLY 类日内事件;真存钱前需用逐日数据重算。</div>
+    <div class="pnote dim">历史表现不是收益承诺;最大回撤在 API 粗粒度 pnl 上计算,低估 JELLY 类日内事件,真存钱前需用逐日数据重算;非投资建议。</div>
   </div>`;
 }
 function runtimeSafetyBanner(runtime=runtimeSafetyUiState()){
