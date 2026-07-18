@@ -89,7 +89,7 @@ def _route_page(page, payloads: dict) -> None:
         elif path == "/vendor/lightweight-charts-5.2.0.js":
             route.fulfill(status=200, content_type="text/javascript", body=CHARTS.read_bytes())
         elif path.startswith("/data/") and path.endswith(".json"):
-            route.fulfill(status=200, json=payloads[Path(path).stem])
+            route.fulfill(status=200, json={}) if Path(path).stem not in payloads else route.fulfill(status=200, json=payloads[Path(path).stem])
         else:
             route.abort("blockedbyclient")
 

@@ -486,7 +486,7 @@ def test_board_has_an_honest_nojs_fallback_and_narrow_live_status():
 def test_each_tab_labels_the_shared_panel_and_critical_controls_meet_contrast_tokens():
     html = BOARD.read_text()
 
-    for lane in ("play", "launch", "perp", "structure", "airdrop", "watch", "opp", "avoid", "op"):
+    for lane in ("play", "signals", "launch", "perp", "structure", "airdrop", "watch", "opp", "avoid", "op"):
         assert f'id="tab-{lane}" data-v="{lane}" role="tab" aria-controls="view"' in html
     assert '$("view").setAttribute("aria-labelledby",`tab-${view}`)' in html
     assert ".tab .ct{font-family:var(--mono);font-size:10.5px;color:var(--muted)" in html

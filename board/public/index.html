@@ -421,6 +421,7 @@
     <div class="grp">
       <button class="tab" id="tab-launch" data-v="launch" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">早期机会 <span class="ct" id="ct-launch"></span></button>
       <button class="tab" id="tab-perp" data-v="perp" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">Carry / 永续 <span class="ct" id="ct-perp"></span></button>
+      <button class="tab" id="tab-signals" data-v="signals" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">📡 信号台 <span class="ct" id="ct-signals"></span></button>
       <button class="tab" id="tab-structure" data-v="structure" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">结构事件 <span class="ct" id="ct-structure"></span></button>
       <button class="tab" id="tab-airdrop" data-v="airdrop" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">空投任务 <span class="ct" id="ct-airdrop"></span></button>
       <button class="tab" id="tab-watch" data-v="watch" role="tab" aria-controls="view" aria-selected="false" tabindex="-1">🐋 钱包活动 <span class="ct" id="ct-watch"></span></button>
@@ -1404,6 +1405,12 @@ const structureTypeChip=r=>structureListingVerified(r)?'<span class="chip b-good
 const structureSourceSchedules=r=>(r?.products||[]).filter(p=>p?.source_reported_schedule?.reported_open_at).map(p=>`${esc(p.market)}: ${utcClock(p.source_reported_schedule.reported_open_at)}（当前 instruments metadata，未由公告核验）`).join("<br>");
 
 const LANES={
+  signals:{
+    title:d=>{const s=data.signals;return `<b>信号台</b> · ${s?s.n_candidates:0} 个候选,按四个方向排序 · 不是买入指令,止损/仓位/择时自行判断`},
+    stat:d=>{const s=data.signals,dir=s?.directions||{};return [["打新",(dir["打新"]||[]).length,"早期发行"],["吸筹",(dir["吸筹"]||[]).length,"庄簇买入相"],["聪明钱",(dir["聪明钱"]||[]).length,"已证钱包收敛"],["派发做空",(dir["派发做空"]||[]).length,"庄簇离场·空/避"]]},
+    readme:"把四个已知的赚钱方向(打新/吸筹/聪明钱/派发做空)聚合成一个排序候选列表,附链上证据。这是给会看盘、会管风险的交易员的<b>缩短清单</b>——让你少看几张、看更好的图,不是自动买入。每 30 分钟刷新,同一份也推到 Telegram。",
+    custom:true,
+  },
   play:{
     title:d=>{const l=(data.launch?.events||[]).filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length;const cr=(data.perp?.carry||[]).filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0).length;return `<b>先看这里</b>:${l?`有 <b style="color:var(--good)">${l}</b> 个低流通 Launch 人工验证窗`:'此刻没有通过全部门禁的早期 Launch 人工验证窗'}${cr?`；另有 <b style="color:var(--good)">${cr}</b> 个跨所 Carry 部分模型候选(验证中)`:''}。`},
     stat:d=>{const c=data.perp?.carry||[];const l=data.launch?.events||[];const dep=(data.op?.operators||[]).filter(depNow).length;return [["Launch A3",l.filter(x=>actionLevel(x)==="A3_MANUAL_PROBE").length,"人工验证·永不自动交易"],["跨所 Carry",c.filter(x=>x.cross===true&&x.partial_model_proxy_ann_pct>0).length,"部分模型代理>0·非真实收益"],["该避开",dep+avoidRows(data.opp).length,"别接盘"]]},
@@ -1835,6 +1842,22 @@ document.addEventListener("toggle",event=>{
 },true);
 const drawerAttr=key=>` class="fold-drawer" data-drawer="${esc(key)}" id="${esc(key)}"${openDrawers.has(key)?" open":""}`;
 
+function renderSignals(){
+  const s=data.signals;
+  if(!s||s.schema_version!==1)return '<div class="scroll"><div class="play-sec"><div class="pnote dim">信号台数据未就绪(?);每 30 分钟由服务端聚合,稍候。</div></div></div>';
+  const meta={"打新":["🚀","早期发行 · 越新越靠前"],"吸筹":["🟢","庄簇买入相 · 按置信度"],"聪明钱":["🐋","已证盈利钱包收敛 · 按人数"],"派发做空":["🔴","庄簇离场 · 做空或避开"]};
+  const dir=s.directions||{};
+  let h='<div class="scroll">';
+  h+=`<div class="play-verdict" style="grid-column:1/-1">📡 ${esc(s.n_candidates)} 个候选 · ${esc((s.generated_at||"").slice(0,16).replace("T"," "))} UTC · <b>${esc(s.disclaimer||"链上信号,非买入指令")}</b></div>`;
+  for(const name of ["打新","吸筹","聪明钱","派发做空"]){
+    const rows=dir[name]||[];const m=meta[name]||["·",""];
+    h+=`<div class="play-sec" style="grid-column:1/-1"><div class="ph">${m[0]} ${esc(name)} <span class="pd">${esc(m[1])} · ${rows.length} 个</span></div>`;
+    if(!rows.length){h+='<div class="pnote dim">本轮此方向无候选。空白不代表没有机会,先看别的方向或等下一轮。</div>';}
+    else h+=rows.map(c=>`<div class="prow"><b>${esc(c.symbol)}</b> <span class="tag b-warn">${esc(c.chain)}</span> <small class="dim">${esc(c.why)}</small><span class="num" style="margin-left:auto;color:var(--dim)">${esc(c.token||"").slice(0,10)}…</span></div>`).join('');
+    h+='</div>';
+  }
+  return h+'</div>';
+}
 function renderPlay(){
   const launches=data.launch?.events||[];
   const runtimeSafety=runtimeSafetyUiState();
@@ -2105,7 +2128,7 @@ function paint(){
     } else if(ls.verdict==="不可判") {const ev=ls.edge_validation;if(view==="launch"&&ev){const target=ev.state==="awaiting_outcomes"?(ev.look_n_per_arm||100):(ev.next_look_n_per_arm||ev.look_n_per_arm||100),protocol=Number.isInteger(ev.cohort_version)?`v${ev.cohort_version}`:"当前协议";st.push(["前向优势","不可判",`${protocol} SMALL_PROBE ${ev.eligible_n?.SMALL_PROBE||0}/${target} · WATCH ${ev.eligible_n?.WATCH||0}/${target} · ${ev.reason||""}`])}else st.push(["24h结果","不可判",`积累${ls.n}/20 · ${ls.edge_note||""}`]);} }
   $("lanestat").innerHTML=st.map(([k,v,s])=>`<div><span class="k">${k}</span><span class="v">${v}<small> ${s||''}</small></span></div>`).join("");
   $("rd").innerHTML=L.readme;
-  $("view").innerHTML = view==="play"?renderPlay() : view==="perp"?renderPerp(d) : view==="launch"?renderLaunchCoverage(d)+renderTable(view,L.rows(d),L.cols,L) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
+  $("view").innerHTML = view==="play"?renderPlay() : view==="signals"?renderSignals() : view==="perp"?renderPerp(d) : view==="launch"?renderLaunchCoverage(d)+renderTable(view,L.rows(d),L.cols,L) : (L.custom?"":renderTable(view, L.rows(d), L.cols, L));
   // counts
   for(const [k,l] of Object.entries(LANES)){const dd=data[k==="avoid"?"opp":k];const n=dd?(l.rows?l.rows(dd).length:0):0;const el=$("ct-"+k);if(el)el.textContent=n||""}
   document.querySelectorAll(".tab").forEach(t=>{const on=t.dataset.v===view;t.classList.toggle("on",on);t.setAttribute("aria-selected",String(on));t.tabIndex=on?0:-1});
@@ -2175,8 +2198,9 @@ let pt=0; setInterval(()=>{pt=(pt+1)%60;$("prog").style.width=(pt/60*100)+"%"},1
 
 async function load(){
   const b="?t="+Math.floor(Date.now()/6e4);
-  const r=await Promise.allSettled(["launch","structure","airdrop","watch","perps","opportunities","operators","stats","meta"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
-  const [la,su,ad,wt,p,o,op,st,me]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  const r=await Promise.allSettled(["launch","structure","airdrop","watch","perps","opportunities","operators","stats","meta","signals"].map(v=>fetch("/data/"+v+".json"+b).then(x=>x.ok?x.json():null)));
+  const [la,su,ad,wt,p,o,op,st,me,sg]=r.map(x=>x.status==="fulfilled"?x.value:null);
+  if(sg&&sg.schema_version===1)data.signals=sg;
   if(la&&la.schema_version===1)data.launch=la;
   if(su&&su.schema_version===1)data.structure=su;
   if(ad&&ad.schema_version===1)data.airdrop=ad;

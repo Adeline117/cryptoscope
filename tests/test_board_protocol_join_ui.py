@@ -357,7 +357,7 @@ def test_browser_retains_failed_stats_but_hides_its_edge_after_new_launch():
                 if name == "stats" and phase["stats_fail"]:
                     route.abort("failed")
                 else:
-                    route.fulfill(status=200, json=payloads[name])
+                    route.fulfill(status=200, json={}) if name not in payloads else route.fulfill(status=200, json=payloads[name])
             else:
                 route.abort("blockedbyclient")
 
@@ -424,7 +424,7 @@ def test_fast_poll_fail_closes_on_old_meta_then_recovers_with_new_certificate():
                 name = Path(path).stem
                 if name in {"launch", "meta"} and parsed.query:
                     fast_requests.append((name, parsed.query))
-                route.fulfill(status=200, json=payloads[name])
+                route.fulfill(status=200, json={}) if name not in payloads else route.fulfill(status=200, json=payloads[name])
             else:
                 route.abort("blockedbyclient")
 
