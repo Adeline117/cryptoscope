@@ -88,6 +88,26 @@ def test_high_sell_ratio_counts_as_distribute_even_without_phase():
     assert "SILENT" in shorts and "BALANCED" not in shorts
 
 
+def test_smart_money_farm_filter_demotes_same_farm_convergence():
+    # DIVERSE (independent wallets) outranks FARM (a set that keeps converging
+    # together), even though FARM has more buyers, once the farm is flagged.
+    def farm_fn(buyers):
+        return 0.9 if "farm" in buyers[0] else 0.1
+    feed = sf.build_feed(
+        smart_buys=[
+            {"token": "0xFARM", "symbol": "FARM", "chain": "Base", "n_buyers": 4,
+             "buyers": ["farm1", "farm2", "farm3"], "usd_bought": 5000, "mins_ago": 4},
+            {"token": "0xDIV", "symbol": "DIV", "chain": "Base", "n_buyers": 3,
+             "buyers": ["z1", "z2", "z3"], "usd_bought": 5000, "mins_ago": 4},
+        ],
+        now=NOW, smart_farm_fn=farm_fn,
+    )
+    rows = {c["symbol"]: c for c in feed["directions"]["聪明钱"]}
+    assert "疑似同农场" in rows["FARM"]["why"]
+    assert "疑似同农场" not in rows["DIV"]["why"]
+    assert rows["DIV"]["score"] > rows["FARM"]["score"]   # diverse wins despite fewer buyers
+
+
 def test_empty_sources_produce_an_honest_empty_feed():
     feed = sf.build_feed(now=NOW)
     assert feed["n_candidates"] == 0

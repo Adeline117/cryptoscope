@@ -117,23 +117,46 @@ def _operator_candidates(operators, top_n):
     return accumulate[:top_n], distribute[:top_n]
 
 
-def _smart_money_candidates(smart_buys, top_n):
-    """聪明钱: proven wallets converging on a fresh token (>=2, ranked by count)."""
+FARM_LIKE_THRESHOLD = 0.6
+
+
+def _smart_money_candidates(smart_buys, top_n, *, farm_fn=None):
+    """聪明钱: proven wallets converging (>=2). Same-farm convergence is demoted."""
     out = []
     for b in smart_buys or []:
         if not isinstance(b, dict) or int(b.get("n_buyers") or 0) < 2:
             continue
         n = int(b["n_buyers"])
-        mins = b.get("mins_ago")
-        why = f"{n} 个已证钱包买入 · {b.get('usd_bought', 0):,} 美元 · {mins} 分钟前"
+        why = f"{n} 个已证钱包买入 · {b.get('usd_bought', 0):,} 美元 · {b.get('mins_ago')} 分钟前"
+        score = n * 20
+        # A convergence is only real if the wallets are independent. If this same
+        # set keeps appearing together across the convergence ledger, it is one
+        # farm churning, not conviction — flag and demote instead of trusting it.
+        buyers = [w for w in (b.get("buyers") or []) if isinstance(w, str)]
+        if farm_fn and buyers:
+            co = farm_fn(buyers)
+            if co >= FARM_LIKE_THRESHOLD:
+                why += f" · ⚠️ 疑似同农场(独立性存疑 {co:.0%})"
+                score *= 0.4
         out.append(_candidate("聪明钱", b.get("symbol"), b.get("chain"),
-                              b.get("token"), n * 20, why))
+                              b.get("token"), score, why))
     out.sort(key=lambda c: -c["score"])
     return out[:top_n]
 
 
+def _farm_score(buyers) -> float:
+    """How farm-like this wallet set is, from the convergence ledger's own history."""
+    from src.pipeline import convergence_ledger
+
+    conn = convergence_ledger._conn()
+    try:
+        return convergence_ledger.co_occurrence_score(buyers, conn)
+    finally:
+        conn.close()
+
+
 def build_feed(*, launch_events=None, operators=None, smart_buys=None,
-               now=None, top_n=TOP_N, launch_safety_fn=None) -> dict:
+               now=None, top_n=TOP_N, launch_safety_fn=None, smart_farm_fn=None) -> dict:
     """Pure aggregation: the four directions' latest candidates, ranked, with evidence."""
     stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
     accumulate, distribute = _operator_candidates(operators, top_n)
@@ -141,7 +164,7 @@ def build_feed(*, launch_events=None, operators=None, smart_buys=None,
         "打新": _launch_candidates(launch_events, top_n,
                                  safety_fn=launch_safety_fn, now=now),
         "吸筹": accumulate,
-        "聪明钱": _smart_money_candidates(smart_buys, top_n),
+        "聪明钱": _smart_money_candidates(smart_buys, top_n, farm_fn=smart_farm_fn),
         "派发做空": distribute,
     }
     total = sum(len(v) for v in directions.values())
@@ -190,8 +213,8 @@ def run(*, now=None, push_telegram=True, push_blob=True) -> dict:
         smart = smart_wallets.fresh_smart_buys_result().get("buys") or []
     except Exception:
         smart = []
-    feed = build_feed(launch_events=launch, operators=operators,
-                      smart_buys=smart, now=now, launch_safety_fn=_goplus_safety)
+    feed = build_feed(launch_events=launch, operators=operators, smart_buys=smart,
+                      now=now, launch_safety_fn=_goplus_safety, smart_farm_fn=_farm_score)
     _write_signals(feed)
     pushed = False
     if push_blob:
