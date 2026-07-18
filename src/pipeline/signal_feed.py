@@ -156,7 +156,8 @@ def _farm_score(buyers) -> float:
 
 
 def build_feed(*, launch_events=None, operators=None, smart_buys=None,
-               now=None, top_n=TOP_N, launch_safety_fn=None, smart_farm_fn=None) -> dict:
+               now=None, top_n=TOP_N, launch_safety_fn=None, smart_farm_fn=None,
+               coverage=None) -> dict:
     """Pure aggregation: the four directions' latest candidates, ranked, with evidence."""
     stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
     accumulate, distribute = _operator_candidates(operators, top_n)
@@ -170,14 +171,51 @@ def build_feed(*, launch_events=None, operators=None, smart_buys=None,
     total = sum(len(v) for v in directions.values())
     return {"schema_version": 1, "view": "signals", "generated_at": stamp,
             "n_candidates": total, "directions": directions,
+            "coverage": coverage or {},
             "disclaimer": "链上信号候选,不是买入指令;止损/仓位/择时自行判断。"}
+
+
+def _launch_coverage(*, now=None) -> dict:
+    """Honest launch-capture health: is a chain BLIND right now, or just backfilling?
+
+    An open gap in a stale/disconnected live stream means fresh launches are being
+    MISSED now — say so. Open gaps behind a live stream are historical backfill and
+    only caveat the completeness of the past record, not the fresh feed.
+    """
+    try:
+        from src.pipeline import stream_health
+        rows = stream_health.snapshot(now=now)
+    except Exception:
+        return {"note": "采集健康未知(不代表没有新盘)", "blind": None}
+    live_blind = []
+    backfilling = 0
+    for r in rows or []:
+        stream = str(r.get("stream") or "")
+        if "pump_fun_launches" in stream or "factory" in stream:
+            gaps = r.get("open_gaps") or 0
+            stale = bool(r.get("stale")) or r.get("status") in ("disconnected", "stale")
+            if stale:
+                live_blind.append(r.get("source"))
+            if isinstance(gaps, int):
+                backfilling += gaps
+    if live_blind:
+        note = f"⚠️ 实时采集异常({'/'.join(sorted(set(map(str, live_blind))))}),当前新盘可能漏采,别把空白当没有"
+    elif backfilling:
+        note = f"实时采集正常;{backfilling} 段历史缺口回补中(只影响旧记录完整性)"
+    else:
+        note = "实时采集正常,无缺口"
+    return {"note": note, "blind": bool(live_blind)}
 
 
 def format_text(feed: dict) -> str:
     """A Telegram-friendly digest grouped by direction."""
     icons = {"打新": "🚀", "吸筹": "🟢", "聪明钱": "🐋", "派发做空": "🔴"}
     lines = [f"📡 信号台 · {feed.get('n_candidates', 0)} 个候选",
-             feed.get("generated_at", "")[:16].replace("T", " ") + " UTC", ""]
+             feed.get("generated_at", "")[:16].replace("T", " ") + " UTC"]
+    note = (feed.get("coverage") or {}).get("note")
+    if note:
+        lines.append(f"覆盖:{note}")
+    lines.append("")
     for d in DIRECTIONS:
         rows = feed.get("directions", {}).get(d) or []
         if not rows:
@@ -214,7 +252,8 @@ def run(*, now=None, push_telegram=True, push_blob=True) -> dict:
     except Exception:
         smart = []
     feed = build_feed(launch_events=launch, operators=operators, smart_buys=smart,
-                      now=now, launch_safety_fn=_goplus_safety, smart_farm_fn=_farm_score)
+                      now=now, launch_safety_fn=_goplus_safety, smart_farm_fn=_farm_score,
+                      coverage=_launch_coverage(now=now))
     _write_signals(feed)
     pushed = False
     if push_blob:

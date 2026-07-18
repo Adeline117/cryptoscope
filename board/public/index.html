@@ -1848,7 +1848,8 @@ function renderSignals(){
   const meta={"打新":["🚀","早期发行 · 越新越靠前"],"吸筹":["🟢","庄簇买入相 · 按置信度"],"聪明钱":["🐋","已证盈利钱包收敛 · 按人数"],"派发做空":["🔴","庄簇离场 · 做空或避开"]};
   const dir=s.directions||{};
   let h='<div class="scroll">';
-  h+=`<div class="play-verdict" style="grid-column:1/-1">📡 ${esc(s.n_candidates)} 个候选 · ${esc((s.generated_at||"").slice(0,16).replace("T"," "))} UTC · <b>${esc(s.disclaimer||"链上信号,非买入指令")}</b></div>`;
+  const cov=(s.coverage||{}).note;
+  h+=`<div class="play-verdict" style="grid-column:1/-1">📡 ${esc(s.n_candidates)} 个候选 · ${esc((s.generated_at||"").slice(0,16).replace("T"," "))} UTC${cov?` · 覆盖:${esc(cov)}`:""} · <b>${esc(s.disclaimer||"链上信号,非买入指令")}</b></div>`;
   for(const name of ["打新","吸筹","聪明钱","派发做空"]){
     const rows=dir[name]||[];const m=meta[name]||["·",""];
     h+=`<div class="play-sec" style="grid-column:1/-1"><div class="ph">${m[0]} ${esc(name)} <span class="pd">${esc(m[1])} · ${rows.length} 个</span></div>`;

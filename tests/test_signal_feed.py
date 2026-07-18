@@ -114,6 +114,32 @@ def test_empty_sources_produce_an_honest_empty_feed():
     assert all(feed["directions"][d] == [] for d in sf.DIRECTIONS)
 
 
+def test_launch_coverage_distinguishes_blind_from_backfill(monkeypatch):
+    from src.pipeline import signal_feed, stream_health
+
+    # A stale live launch stream = currently blind → loud warning.
+    monkeypatch.setattr(stream_health, "snapshot", lambda now=None: [
+        {"source": "solana", "stream": "pump_fun_launches", "status": "disconnected",
+         "stale": True, "open_gaps": 2},
+    ])
+    cov = signal_feed._launch_coverage()
+    assert cov["blind"] is True and "当前新盘可能漏采" in cov["note"]
+
+    # A live stream with only historical gaps = backfilling, not blind.
+    monkeypatch.setattr(stream_health, "snapshot", lambda now=None: [
+        {"source": "solana", "stream": "pump_fun_launches", "status": "degraded",
+         "stale": False, "open_gaps": 2},
+    ])
+    cov = signal_feed._launch_coverage()
+    assert cov["blind"] is False and "历史缺口回补中" in cov["note"]
+
+
+def test_coverage_note_rides_the_feed_into_the_digest():
+    feed = sf.build_feed(launch_events=[_launch("A", 1)], now=NOW,
+                         coverage={"note": "⚠️ 实时采集异常", "blind": True})
+    assert "覆盖:⚠️ 实时采集异常" in sf.format_text(feed)
+
+
 def test_format_text_groups_by_direction_and_omits_empty():
     feed = sf.build_feed(
         launch_events=[_launch("NEW", 1)],
