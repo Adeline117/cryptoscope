@@ -295,6 +295,14 @@ def create_scheduler() -> AsyncIOScheduler:
         id="convergence_ledger",
         name="聪明钱收敛账本 (冻结事件 + 前向1h/24h/7d结果)",
     )
+    # One ranked signal feed over the four get-rich directions (打新/吸筹/聪明钱/
+    # 派发做空) → board signals.json + a Telegram digest every 30 min.
+    scheduler.add_job(
+        _run_signal_feed,
+        CronTrigger(minute="7,37"),
+        id="signal_feed",
+        name="信号台 (四方向排序候选 → 看板 + Telegram)",
+    )
     scheduler.add_job(
         _run_perps_export,
         CronTrigger(minute="*/5"),
@@ -774,6 +782,19 @@ async def _run_perps_export():
                     carry=len(perps.get("carry", [])), pushed=pushed)
     except Exception as e:
         logger.error("perps_export_failed", error=str(e)[:120])
+
+
+async def _run_signal_feed():
+    """Aggregate the four get-rich directions into one ranked feed → board + Telegram."""
+    import asyncio
+
+    logger.info("scheduled_signal_feed")
+    try:
+        from src.pipeline import signal_feed
+        res = await asyncio.to_thread(signal_feed.run)
+        logger.info("signal_feed_done", **res)
+    except Exception as e:
+        logger.error("signal_feed_failed", error=str(e)[:120])
 
 
 async def _run_convergence_ledger():

@@ -34,6 +34,8 @@ DISK_SHED_AT_WARN = frozenset({
     # The convergence ledger is a small free paper-validation of the offense line;
     # shed it early under disk pressure.
     "convergence_ledger",
+    # The signal feed just re-aggregates already-computed detector output.
+    "signal_feed",
 })
 
 # 庄家/operator detection jobs — resumed 2026-07 (user opted into the paid BSC/Base

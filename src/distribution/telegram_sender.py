@@ -335,3 +335,32 @@ def _esc(text: str) -> str:
     import html as _html
 
     return _html.unescape(str(text)).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+async def _send_plain_async(text: str) -> bool:
+    """Send one plain-text message (auto-split) to the review DM. Returns success."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = _get_chat_id()
+    if not bot_token or not chat_id:
+        logger.warning("telegram_plain_skipped", reason="no token or chat id")
+        return False
+    bot = None
+    try:
+        bot = await _open_bot(bot_token)
+        await _send_long_text(bot, chat_id, text)
+        return True
+    except Exception as exc:
+        logger.error("telegram_plain_failed", error=str(exc)[:160])
+        return False
+    finally:
+        await _close_bot(bot)
+
+
+def send_plain(text: str) -> bool:
+    """Blocking wrapper: push a plain-text digest to the Telegram review DM."""
+    try:
+        return asyncio.run(_send_plain_async(text))
+    except RuntimeError:
+        # Already inside an event loop (call the async form there instead).
+        logger.warning("telegram_plain_skipped", reason="event loop already running")
+        return False
