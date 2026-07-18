@@ -38,26 +38,57 @@ def _candidate(direction, symbol, chain, token, score, why):
             "score": round(float(score), 1), "why": why}
 
 
-def _launch_candidates(launch_events, top_n):
-    """打新: freshest recorded launches (newest = strongest)."""
+def _launch_candidates(launch_events, top_n, *, safety_fn=None, now=None):
+    """打新: freshest launches, honeypots dropped, code-risk flagged (GoPlus, free)."""
+    current = (now or datetime.now(timezone.utc)).timestamp()
     rows = []
     for e in launch_events or []:
         if not isinstance(e, dict) or not e.get("token"):
             continue
-        detected = e.get("detected_at")
         try:
-            ts = datetime.fromisoformat(str(detected).replace("Z", "+00:00")).timestamp()
+            ts = datetime.fromisoformat(
+                str(e.get("detected_at")).replace("Z", "+00:00")).timestamp()
         except (TypeError, ValueError):
             continue
         rows.append((ts, e))
     rows.sort(key=lambda x: -x[0])
     out = []
-    for ts, e in rows[:top_n]:
-        mins = (datetime.now(timezone.utc).timestamp() - ts) / 60
-        why = f"{round(mins)} 分钟前新发现 · {e.get('chain', '?')}"
-        out.append(_candidate("打新", e.get("symbol"), e.get("chain"),
-                              e.get("token"), max(0, 100 - mins / 3), why))
+    # Scan more than top_n so honeypots can be dropped without starving the list.
+    for ts, e in rows[:top_n * 3]:
+        if len(out) >= top_n:
+            break
+        mins = (current - ts) / 60
+        chain = e.get("chain", "?")
+        why = f"{round(mins)} 分钟前新发现 · {chain}"
+        score = max(0, 100 - mins / 3)
+        safe = safety_fn(e.get("token"), chain) if safety_fn else None
+        if safe and safe.get("available"):
+            if safe.get("honeypot"):
+                continue  # never surface a token you can't sell out of
+            facts = safe.get("facts") or []
+            if facts:
+                why += " · 🚨 " + "/".join(facts[:3])
+                score *= 0.4
+            else:
+                why += " · ✅ 安全已检"
+        else:
+            why += " · 安全未检"
+        out.append(_candidate("打新", e.get("symbol"), chain, e.get("token"), score, why))
+    out.sort(key=lambda c: -c["score"])
     return out
+
+
+def _goplus_safety(token: str, chain: str) -> dict:
+    """Free keyless GoPlus code-risk facts; honeypot flagged for dropping."""
+    from src.onchain import goplus_client
+
+    r = goplus_client.rug_risk(token, chain)
+    if not r.get("available"):
+        return {"available": False}
+    facts = r.get("facts") or []
+    return {"available": True,
+            "honeypot": any("蜜罐" in str(f) for f in facts),
+            "facts": facts}
 
 
 def _operator_candidates(operators, top_n):
@@ -102,12 +133,13 @@ def _smart_money_candidates(smart_buys, top_n):
 
 
 def build_feed(*, launch_events=None, operators=None, smart_buys=None,
-               now=None, top_n=TOP_N) -> dict:
+               now=None, top_n=TOP_N, launch_safety_fn=None) -> dict:
     """Pure aggregation: the four directions' latest candidates, ranked, with evidence."""
     stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
     accumulate, distribute = _operator_candidates(operators, top_n)
     directions = {
-        "打新": _launch_candidates(launch_events, top_n),
+        "打新": _launch_candidates(launch_events, top_n,
+                                 safety_fn=launch_safety_fn, now=now),
         "吸筹": accumulate,
         "聪明钱": _smart_money_candidates(smart_buys, top_n),
         "派发做空": distribute,
@@ -159,7 +191,7 @@ def run(*, now=None, push_telegram=True, push_blob=True) -> dict:
     except Exception:
         smart = []
     feed = build_feed(launch_events=launch, operators=operators,
-                      smart_buys=smart, now=now)
+                      smart_buys=smart, now=now, launch_safety_fn=_goplus_safety)
     _write_signals(feed)
     pushed = False
     if push_blob:

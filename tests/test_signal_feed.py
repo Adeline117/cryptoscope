@@ -49,6 +49,36 @@ def test_build_feed_sorts_each_direction_and_carries_evidence():
     assert "不是买入指令" in feed["disclaimer"]
 
 
+def test_launch_safety_gate_drops_honeypots_and_flags_risk():
+    events = [_launch("HONEY", 1), _launch("RISKY", 2),
+              _launch("CLEAN", 3), _launch("UNCHK", 4)]
+    verdicts = {
+        "0xHONEY": {"available": True, "honeypot": True, "facts": ["蜜罐:买得进卖不出"]},
+        "0xRISKY": {"available": True, "honeypot": False, "facts": ["可增发(owner 能凭空铸币稀释)"]},
+        "0xCLEAN": {"available": True, "honeypot": False, "facts": []},
+        "0xUNCHK": {"available": False},   # e.g. Solana / GoPlus miss
+    }
+    feed = sf.build_feed(launch_events=events, now=NOW,
+                         launch_safety_fn=lambda t, c: verdicts[t])
+    launch = feed["directions"]["打新"]
+    syms = [c["symbol"] for c in launch]
+    assert "HONEY" not in syms                       # honeypot dropped entirely
+    assert {"CLEAN", "RISKY", "UNCHK"} <= set(syms)
+    by = {c["symbol"]: c for c in launch}
+    assert "✅ 安全已检" in by["CLEAN"]["why"]
+    assert "🚨" in by["RISKY"]["why"] and "可增发" in by["RISKY"]["why"]
+    assert "安全未检" in by["UNCHK"]["why"]
+    # A flagged token is demoted below a clean one of similar age.
+    assert by["CLEAN"]["score"] > by["RISKY"]["score"]
+
+
+def test_launch_without_safety_fn_keeps_recency_only():
+    # No safety_fn (the default) preserves the original recency behavior.
+    feed = sf.build_feed(launch_events=[_launch("A", 1), _launch("B", 9)], now=NOW)
+    assert [c["symbol"] for c in feed["directions"]["打新"]] == ["A", "B"]
+    assert "安全未检" in feed["directions"]["打新"][0]["why"]
+
+
 def test_high_sell_ratio_counts_as_distribute_even_without_phase():
     feed = sf.build_feed(operators=[
         _op("SILENT", "", buys=100, sells=500),   # no phase, but heavy selling
