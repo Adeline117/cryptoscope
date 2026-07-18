@@ -88,7 +88,10 @@ def test_run_writes_signals_and_skips_telegram(monkeypatch, tmp_path):
         "src.onchain.smart_wallets.fresh_smart_buys_result",
         lambda *a, **k: {"buys": [_buy("C", 3)]})
 
-    out = sf.run(now=NOW, push_telegram=False)
+    # push_blob=False: never touch the real Vercel blob from a test — src.config
+    # auto-loads .env, so BLOB_READ_WRITE_TOKEN is present and an unguarded push
+    # would clobber the live signals.json with fixture data.
+    out = sf.run(now=NOW, push_telegram=False, push_blob=False)
     assert out["n_candidates"] == 2 and out["telegram_pushed"] is False
 
     import json

@@ -149,7 +149,7 @@ def _write_signals(feed: dict) -> None:
     tmp.replace(SIGNALS_FILE)
 
 
-def run(*, now=None, push_telegram=True) -> dict:
+def run(*, now=None, push_telegram=True, push_blob=True) -> dict:
     """Aggregate live sources, write signals.json, push to blob + Telegram DM."""
     launch = _read_json(EXPORT_DIR / "launch.json").get("events") or []
     operators = _read_json(EXPORT_DIR / "operators.json").get("operators") or []
@@ -162,12 +162,12 @@ def run(*, now=None, push_telegram=True) -> dict:
                       smart_buys=smart, now=now)
     _write_signals(feed)
     pushed = False
-    paths = [SIGNALS_FILE]
-    try:
-        from src.pipeline import board_export
-        board_export.push_to_blob(paths)
-    except Exception:
-        pass
+    if push_blob:
+        try:
+            from src.pipeline import board_export
+            board_export.push_to_blob([SIGNALS_FILE])
+        except Exception:
+            pass
     if push_telegram and feed["n_candidates"]:
         try:
             from src.distribution import telegram_sender
