@@ -53,10 +53,15 @@ def _launch_candidates(launch_events, top_n, *, safety_fn=None, now=None):
         rows.append((ts, e))
     rows.sort(key=lambda x: -x[0])
     out = []
+    seen_tokens = set()
     # Scan more than top_n so honeypots can be dropped without starving the list.
-    for ts, e in rows[:top_n * 3]:
+    for ts, e in rows[:top_n * 4]:
         if len(out) >= top_n:
             break
+        token_key = str(e.get("token") or "").lower()
+        if token_key in seen_tokens:   # same token from two sources (e.g. pump.fun + GeckoTerminal)
+            continue
+        seen_tokens.add(token_key)
         mins = (current - ts) / 60
         chain = e.get("chain", "?")
         why = f"{round(mins)} 分钟前新发现 · {chain}"
@@ -245,6 +250,13 @@ def _write_signals(feed: dict) -> None:
 def run(*, now=None, push_telegram=True, push_blob=True) -> dict:
     """Aggregate live sources, write signals.json, push to blob + Telegram DM."""
     launch = _read_json(EXPORT_DIR / "launch.json").get("events") or []
+    # Add Solana launches from every venue (Raydium/Meteora/Pumpswap/…), not just
+    # the pump.fun stream. Deduped by token in _launch_candidates.
+    try:
+        from src.pipeline import solana_new_pools
+        launch = list(launch) + solana_new_pools.recent(now=now)
+    except Exception:
+        pass
     operators = _read_json(EXPORT_DIR / "operators.json").get("operators") or []
     try:
         from src.onchain import smart_wallets

@@ -297,6 +297,14 @@ def create_scheduler() -> AsyncIOScheduler:
     )
     # One ranked signal feed over the four get-rich directions (打新/吸筹/聪明钱/
     # 派发做空) → board signals.json + a Telegram digest every 30 min.
+    # Poll Solana new pools across all venues (Raydium/Meteora/Pumpswap) every 3
+    # min so the signal feed covers more than just pump.fun.
+    scheduler.add_job(
+        _run_solana_new_pools,
+        CronTrigger(minute="*/3"),
+        id="solana_new_pools",
+        name="Solana 全场新池 (GeckoTerminal → 打新覆盖)",
+    )
     scheduler.add_job(
         _run_signal_feed,
         CronTrigger(minute="7,37"),
@@ -785,6 +793,19 @@ async def _run_perps_export():
                     carry=len(perps.get("carry", [])), pushed=pushed)
     except Exception as e:
         logger.error("perps_export_failed", error=str(e)[:120])
+
+
+async def _run_solana_new_pools():
+    """Poll GeckoTerminal for Solana new pools across ALL venues (free, keyless)."""
+    import asyncio
+
+    logger.info("scheduled_solana_new_pools")
+    try:
+        from src.pipeline import solana_new_pools
+        res = await asyncio.to_thread(solana_new_pools.run)
+        logger.info("solana_new_pools_done", **res)
+    except Exception as e:
+        logger.error("solana_new_pools_failed", error=str(e)[:120])
 
 
 async def _run_signal_feed():

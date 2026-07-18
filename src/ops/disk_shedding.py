@@ -36,6 +36,8 @@ DISK_SHED_AT_WARN = frozenset({
     "convergence_ledger",
     # The signal feed just re-aggregates already-computed detector output.
     "signal_feed",
+    # Solana new-pool coverage poller (free GeckoTerminal).
+    "solana_new_pools",
 })
 
 # 庄家/operator detection jobs — resumed 2026-07 (user opted into the paid BSC/Base
