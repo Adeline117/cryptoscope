@@ -287,6 +287,14 @@ def create_scheduler() -> AsyncIOScheduler:
         id="smart_wallet_watch",
         name="聪明钱实时监听 (watched wallets 刚买入 → Blob)",
     )
+    # Freeze smart-money convergence events + resolve their forward returns so the
+    # one accessible offense line proves (or falsifies) its own edge for free.
+    scheduler.add_job(
+        _run_convergence_ledger,
+        CronTrigger(minute="2-59/15"),
+        id="convergence_ledger",
+        name="聪明钱收敛账本 (冻结事件 + 前向1h/24h/7d结果)",
+    )
     scheduler.add_job(
         _run_perps_export,
         CronTrigger(minute="*/5"),
@@ -774,6 +782,25 @@ async def _run_perps_export():
                     carry=len(perps.get("carry", [])), pushed=pushed)
     except Exception as e:
         logger.error("perps_export_failed", error=str(e)[:120])
+
+
+async def _run_convergence_ledger():
+    """Freeze new smart-money convergence events + resolve due forward outcomes.
+
+    Free (GMGN via FlareSolverr + keyless DexScreener); no Moralis, no real orders.
+    """
+    import asyncio
+
+    logger.info("scheduled_convergence_ledger")
+    try:
+        from src.pipeline import convergence_ledger
+        res = await asyncio.to_thread(convergence_ledger.run)
+        logger.info("convergence_ledger_done",
+                    inserted=res["recorded"]["inserted"],
+                    resolved=res["resolved"]["resolved"],
+                    source_state=res.get("source_state"))
+    except Exception as e:
+        logger.error("convergence_ledger_failed", error=str(e)[:120])
 
 
 async def _run_harvest_wallets():

@@ -24,6 +24,9 @@ DISK_SHED_AT_WARN = frozenset({
     # HLP writes one tiny slow-moving JSON and is not part of the five core lanes,
     # so it is the first to shed under any disk pressure.
     "hlp_tracker",
+    # The convergence ledger is a small free paper-validation of the offense line;
+    # shed it early under disk pressure.
+    "convergence_ledger",
 })
 
 # These 庄家/operator detection jobs were paused in scheduler.create_scheduler
