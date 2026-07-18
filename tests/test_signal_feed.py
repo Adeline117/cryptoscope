@@ -163,6 +163,8 @@ def test_run_writes_signals_and_skips_telegram(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "src.onchain.smart_wallets.fresh_smart_buys_result",
         lambda *a, **k: {"buys": [_buy("C", 3)]})
+    # Isolate from the real Solana new-pool DB (run() merges it into 打新).
+    monkeypatch.setattr("src.pipeline.solana_new_pools.recent", lambda **k: [])
 
     # push_blob=False: never touch the real Vercel blob from a test — src.config
     # auto-loads .env, so BLOB_READ_WRITE_TOKEN is present and an unguarded push
