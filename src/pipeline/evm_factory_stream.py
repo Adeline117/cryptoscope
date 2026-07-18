@@ -38,6 +38,14 @@ PANCAKE_V2_BASE_FACTORY = "0x02a84c1b3bbd7401a5f7fa98a384ebc70bb5749e"
 PANCAKE_V2_ETH_FACTORY = "0x1097053fd2ea711dad45caccc45eff7548fcb362"
 PANCAKE_V3_FACTORY = "0x0bfbcf9fa4f9c56b0f40a671ad40e0805a091865"
 AERODROME_FACTORY = "0x420dd381b31aef6683db6b902084cb0ffece40da"
+# Uniswap forked into Pancake/Aerodrome, so its PairCreated/PoolCreated topics are
+# identical — only the factory addresses differ. Uniswap is the biggest launch venue
+# on Ethereum and Base, which pancakeswap-only coverage was blind to (verified live:
+# ETH V2 ~53/day, ETH V3 ~268/day, Base V2 active, Base V3 present).
+UNISWAP_V2_ETH_FACTORY = "0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f"
+UNISWAP_V3_ETH_FACTORY = "0x1f98431c8ad98523631ae4a59f267346ea31f984"
+UNISWAP_V2_BASE_FACTORY = "0x8909dc15e40173ff4699343b6eb8132c65e18ec6"
+UNISWAP_V3_BASE_FACTORY = "0x33128a8fc17869897dce68ed026d694621f6fdfd"
 PUBLIC_BSC_WS = ("wss://bsc-rpc.publicnode.com", "wss://bsc.drpc.org")
 PUBLIC_BSC_RPC = ("https://bsc.rpc.blxrbdn.com", "https://bsc.drpc.org",
                   "https://56.rpc.thirdweb.com")
@@ -354,9 +362,47 @@ def base_aerodrome_spec() -> FactorySpec:
     )
 
 
+def ethereum_uniswap_v2_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="ethereum", venue="uniswap_v2", address=UNISWAP_V2_ETH_FACTORY,
+        event_kind="pair_v2", topic=PAIR_CREATED_TOPIC,
+        ws_urls=_urls("ETH_FACTORY_WS_URLS", PUBLIC_ETH_WS),
+        rpc_urls=_urls("ETH_FACTORY_RPC_URLS", PUBLIC_ETH_RPC),
+    )
+
+
+def ethereum_uniswap_v3_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="ethereum", venue="uniswap_v3", address=UNISWAP_V3_ETH_FACTORY,
+        event_kind="pool_v3", topic=POOL_CREATED_TOPIC,
+        ws_urls=_urls("ETH_FACTORY_WS_URLS", PUBLIC_ETH_WS),
+        rpc_urls=_urls("ETH_FACTORY_RPC_URLS", PUBLIC_ETH_RPC),
+    )
+
+
+def base_uniswap_v2_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="base", venue="uniswap_v2", address=UNISWAP_V2_BASE_FACTORY,
+        event_kind="pair_v2", topic=PAIR_CREATED_TOPIC,
+        ws_urls=_urls("BASE_FACTORY_WS_URLS", PUBLIC_BASE_WS),
+        rpc_urls=_urls("BASE_FACTORY_RPC_URLS", PUBLIC_BASE_RPC),
+    )
+
+
+def base_uniswap_v3_spec() -> FactorySpec:
+    return FactorySpec(
+        chain="base", venue="uniswap_v3", address=UNISWAP_V3_BASE_FACTORY,
+        event_kind="pool_v3", topic=POOL_CREATED_TOPIC,
+        ws_urls=_urls("BASE_FACTORY_WS_URLS", PUBLIC_BASE_WS),
+        rpc_urls=_urls("BASE_FACTORY_RPC_URLS", PUBLIC_BASE_RPC),
+    )
+
+
 def configured_specs() -> tuple[FactorySpec, ...]:
     return (bsc_pancake_v2_spec(), bsc_pancake_v3_spec(), base_pancake_v2_spec(),
-            base_aerodrome_spec(), ethereum_pancake_v2_spec())
+            base_aerodrome_spec(), ethereum_pancake_v2_spec(),
+            ethereum_uniswap_v2_spec(), ethereum_uniswap_v3_spec(),
+            base_uniswap_v2_spec(), base_uniswap_v3_spec())
 
 
 def _coverage_epoch_columns(c: sqlite3.Connection) -> set[str]:

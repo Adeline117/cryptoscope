@@ -309,12 +309,23 @@ def test_configured_specs_cover_official_bsc_base_and_ethereum_factories(evm):
                           ("bsc", "pancakeswap_v3"),
                           ("base", "pancakeswap_v2"),
                           ("base", "aerodrome"),
-                          ("ethereum", "pancakeswap_v2")}
+                          ("ethereum", "pancakeswap_v2"),
+                          ("ethereum", "uniswap_v2"),
+                          ("ethereum", "uniswap_v3"),
+                          ("base", "uniswap_v2"),
+                          ("base", "uniswap_v3")}
     assert specs[("bsc", "pancakeswap_v2")].address == evm.PANCAKE_V2_FACTORY
     assert specs[("bsc", "pancakeswap_v3")].address == evm.PANCAKE_V3_FACTORY
     assert specs[("base", "pancakeswap_v2")].address == evm.PANCAKE_V2_BASE_FACTORY
     assert specs[("base", "aerodrome")].address == evm.AERODROME_FACTORY
     assert specs[("ethereum", "pancakeswap_v2")].address == evm.PANCAKE_V2_ETH_FACTORY
+    assert specs[("ethereum", "uniswap_v2")].address == evm.UNISWAP_V2_ETH_FACTORY
+    assert specs[("ethereum", "uniswap_v3")].address == evm.UNISWAP_V3_ETH_FACTORY
+    assert specs[("base", "uniswap_v2")].address == evm.UNISWAP_V2_BASE_FACTORY
+    assert specs[("base", "uniswap_v3")].address == evm.UNISWAP_V3_BASE_FACTORY
+    # v3 pools decode via the pool_v3 kind, v2 via pair_v2.
+    assert specs[("ethereum", "uniswap_v3")].event_kind == "pool_v3"
+    assert specs[("ethereum", "uniswap_v2")].event_kind == "pair_v2"
     assert all(spec.ws_urls and spec.rpc_urls for spec in specs.values())
 
 

@@ -65,12 +65,14 @@ def test_configured_health_includes_never_observed_streams(tmp_path, monkeypatch
     monkeypatch.setattr(stream_health, "DB", tmp_path / "health.db")
     monkeypatch.setattr(evm_factory_stream, "DB", tmp_path / "evm.db")
     rows = configured_stream_health()
-    assert len(rows) == 5
+    assert len(rows) == 9
     assert all(row["status"] == "missing" for row in rows)
     assert {(row["chain"], row["venue"]) for row in rows} == {
         ("bsc", "pancakeswap_v2"), ("bsc", "pancakeswap_v3"),
         ("base", "pancakeswap_v2"), ("base", "aerodrome"),
         ("ethereum", "pancakeswap_v2"),
+        ("ethereum", "uniswap_v2"), ("ethereum", "uniswap_v3"),
+        ("base", "uniswap_v2"), ("base", "uniswap_v3"),
     }
 
 
