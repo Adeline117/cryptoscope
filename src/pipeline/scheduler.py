@@ -625,21 +625,13 @@ def create_scheduler() -> AsyncIOScheduler:
         except Exception:
             pass
 
-    # Moralis is over its paid monthly limit and disabled by default (see
-    # moralis_client). These detection jobs exist ONLY to feed the on-chain
-    # 庄家/operator/smart-money forensics that Moralis fed; with it off they
-    # would either no-op or fall back to the OTHER paid keys (Covalent/Alchemy),
-    # and the repo's own research says those lanes are negative-EV followers, not
-    # the money (the board's five money lanes + HLP + carry + defense are all
-    # Moralis-free and untouched). Pause them here — every add_job registration
-    # and _run_* function is kept intact; clear this set to resume a lane.
-    _PAUSED_MORALIS_JOBS = {
-        "operator_sentinel", "accumulation_detection", "funder_watch",
-        "operator_export", "yaobi_finder", "anomaly_screen",
-        "early_accumulation", "perp_mobilization", "holder_growth_screen",
-        "second_leg_assess", "operator_hunt", "holder_snapshots",
-        "operator_id_push", "perp_cex_scan",
-    }
+    # 庄家/operator/smart-money detection jobs feed the on-chain signal feed.
+    # Resumed 2026-07 after the user opted into paid BSC/Base operator coverage
+    # (Moralis re-enabled via MORALIS_ENABLED). To pause a lane again for cost,
+    # add its id back here AND move it out of the disk_shedding classification.
+    # operator_sentinel at */15 (96/day) is the largest Moralis cost driver —
+    # the first knob to turn if the bill spikes.
+    _PAUSED_MORALIS_JOBS: set[str] = set()
     for _jid in _PAUSED_MORALIS_JOBS:
         try:
             scheduler.remove_job(_jid)
