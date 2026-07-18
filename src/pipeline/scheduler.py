@@ -219,7 +219,7 @@ def create_scheduler() -> AsyncIOScheduler:
     # Accumulation detection (二级妖币 Stage 0/1) — every 30 minutes
     scheduler.add_job(
         _run_accumulation,
-        CronTrigger(minute="*/30"),
+        CronTrigger(minute=15),  # throttled 30m→60m for Moralis cost (2026-07)
         id="accumulation_detection",
         name="二级妖币 Accumulation Detection (Stage 0/1)",
     )
@@ -369,7 +369,10 @@ def create_scheduler() -> AsyncIOScheduler:
     # A relative interval also avoids a permanent collision with :00/:30 accumulation.
     scheduler.add_job(
         _run_operator_sentinel,
-        IntervalTrigger(minutes=15),
+        # Throttled 15m→60m (2026-07): the biggest Moralis cost driver, and it
+        # only re-scans the ~12-token operator watchlist that feeds the weakest
+        # (派发做空) signal — 4x cheaper for little quality loss.
+        IntervalTrigger(minutes=60),
         id="operator_sentinel",
         name="操作者哨兵 (庄买/庄卖/砸盘/rug → Telegram)",
     )
@@ -484,7 +487,7 @@ def create_scheduler() -> AsyncIOScheduler:
     # 庄 seeding a fresh shell wallet, earlier than any concentration signal.
     scheduler.add_job(
         _run_funder_watch,
-        CronTrigger(minute="*/30"),
+        CronTrigger(minute=45),  # throttled 30m→60m for Moralis cost (2026-07)
         id="funder_watch",
         name="多币庄源头监控 (出资人给新地址转钱 → Telegram)",
     )
